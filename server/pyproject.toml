@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-export = ["torch==2.5.1", "torchaudio==2.5.1", "onnx==1.17.0"]  # export_onnx.py only: the server runs the models on onnxruntime
+export = ["torch==2.5.1", "torchaudio==2.5.1", "onnx==1.22.0"]  # export_onnx.py only: the server runs the models on onnxruntime
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
