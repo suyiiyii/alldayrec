@@ -85,16 +85,9 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 
 ### Model files
 
-Two models run on the server, on CPU: [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) (speech detection, Apache-2.0) and [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 (voiceprints, MIT). At the first start the server downloads the missing ones into `MODELS_DIR`, FireRedVAD from its upstream repository and ReDimNet2 from this repository's `models-v1` release, and checks each against the sha256 pinned in `server/infer.py`. A file that is already there is never downloaded again.
+Two models run on the server, on CPU: [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) (speech detection, Apache-2.0) and [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 (voiceprints, MIT). You don't need to do anything: at the first start the server downloads the missing files into `MODELS_DIR` (`data/models` in Docker), FireRedVAD from its upstream repository and ReDimNet2 from this repository's `models-v1` release (with `ENGINE=local` also the sherpa-onnx model tarball, at its first use), and accepts only the exact files whose sha256 is pinned in `server/infer.py` and `server/local_asr.py`. A file that is already there is never downloaded again.
 
-If a download fails, put the files into `MODELS_DIR` yourself (`data/models` in Docker), from the same places. `server/export_onnx.py` re-creates all three from the upstream weights (it installs torch for this step only):
-
-```bash
-cd server && uv run --group export python export_onnx.py /path/to/models                        # without Docker
-docker compose run --rm alldayrec uv run --group export python export_onnx.py                   # Docker: into ./data/models
-```
-
-The FireRedVAD files come out identical, but the ReDimNet2 export is not byte-for-byte reproducible across machines yet: its sha256 may differ from the pinned one, and then the server refuses it. The release file is the reliable way.
+If a download fails or a file is refused, delete it and restart, or put the same file from the same URL into `MODELS_DIR` yourself. `server/export_onnx.py` is the maintainer's way to make a new release file from the upstream weights, not a way to get these: its ReDimNet2 export differs byte for byte between machines, so the server refuses one you export yourself.
 
 Note on the voiceprint model: ReDimNet2's code and weights are MIT, but its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and decide whether that fits your use.
 
@@ -200,7 +193,7 @@ MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, Fir
 
 **快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；预构建镜像发布在 `ghcr.io/suyiiyii/alldayrec`（amd64/arm64），`docker compose up -d` 直接拉取；想在本机构建，把 `docker-compose.yml` 里的 `build: .` 取消注释，再 `docker compose up -d --build`。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置（`qwen-plus`）也用同一把；这把 key 不能在百炼控制台里限定可用模型，限定了的 key 调对话模型会返回 403。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
 
-**模型文件**：首次启动自动下载到 `MODELS_DIR` 并校验 sha256：FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载；已经有的文件不会重复下载。下载失败时，把文件自己放进 `MODELS_DIR`（Docker 里是 `data/models`）；`export_onnx.py` 也能从上游权重重新导出，但 ReDimNet2 的导出在不同机器上逐字节不一致，sha256 可能对不上钉住的值，服务会拒绝它，所以还是以 Release 里的文件为准。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+**模型文件**：不需要你做任何事：首次启动时服务会把缺的文件下载到 `MODELS_DIR`（Docker 里是 `data/models`），FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载（`ENGINE=local` 还会在第一次用到时下载 sherpa-onnx 的模型包），只接受 sha256 与 `server/infer.py`、`server/local_asr.py` 里钉住的值一致的文件；已经有的文件不会重复下载。下载失败或文件被拒时，删掉它重启，或者从同一个地址把同一个文件放进 `MODELS_DIR`。`export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的，不是获取模型的途径：ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 **配置**：全部是环境变量，见 [`.env.example`](.env.example)。大模型一律是外部服务，项目不打包、不运行大模型；想全在自己机器上跑，把 `LLM_BASE_URL` 指向你自己的 OpenAI 兼容服务即可，模型需要支持工具调用和 JSON 输出。
 
