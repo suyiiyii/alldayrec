@@ -295,7 +295,8 @@ def test_nothing_per_person_in_a_module():
     or a dict added there would be shared by every tenant."""
     allowed = {"server": {"TENANTS", "PROVIDERS", "state", "CHARGE", "NO_CACHE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
                "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS"},
-               "infer": {"MODELS", "@cache _vad"}}  # the model files' hashes; the VAD model, loaded once for everyone
+               "infer": {"MODELS", "@cache _vad"},  # the model files' hashes; the VAD model, loaded once for everyone
+               "local_asr": {"FILES"}}  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
     here = Path(server.__file__).parent
     mutable = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
     found = {}

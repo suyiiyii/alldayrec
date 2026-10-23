@@ -43,6 +43,7 @@ import firmware
 import hints
 import infer
 import live
+import local_asr
 import mcp_server
 import net
 import profiles
@@ -80,7 +81,7 @@ SLICE_FOREGROUND_S = int(os.environ.get("SLICE_FOREGROUND_S", "1"))   # the apps
 SLICE_BACKGROUND_S = int(os.environ.get("SLICE_BACKGROUND_S", "20"))  # ... in the background             (drafts ~8 s vs ~13 s at 5 s)
 SLICE_SCREEN_OFF_S = int(os.environ.get("SLICE_SCREEN_OFF_S", "60"))  # ... screen off (Android)
 LIVE_AUDIO_S = 120                         # a device whose audio came this recently is recording now: drafts and live analysis
-ENGINE = os.environ.get("ENGINE") or "qwen"  # final layer's ASR provider (PROVIDERS): volc | qwen | stepfun | stepfun-sse | stepfun-file
+ENGINE = os.environ.get("ENGINE") or "qwen"  # final layer's ASR provider (PROVIDERS): volc | qwen | stepfun | stepfun-sse | stepfun-file | local
 DRAFT_ENGINE = os.environ.get("DRAFT_ENGINE") or ENGINE  # draft layer's (stepfun-sse: fast, no speakers, drafts are replaced anyway;
                                                          # qwen-stream: one streaming session while a page watches, stream_loop)
 ENGINE_FALLBACK = os.environ.get("ENGINE_FALLBACK", "")  # a window the provider fails on (402, 451, 5xx, timeout) goes here; empty: none
@@ -280,8 +281,14 @@ async def qwen(x: np.ndarray, partial=None) -> list[dict]:
     return await qwen_asr.transcribe(x)
 
 
+async def local(x: np.ndarray, partial=None) -> list[dict]:
+    """sherpa-onnx X-ASR in this process (local_asr): text and token times, sentences as stepfun-sse's, no speakers
+    (the diarist's), no network, no partial answers."""
+    return await local_asr.transcribe(x)
+
+
 # provider(x: 16 kHz int16 PCM, partial=None) -> [{start_ms, end_ms, text, speaker?, words?}], times in x; async
-PROVIDERS = {"volc": volc, "qwen": qwen, "stepfun": stepfun, "stepfun-sse": stepfun_sse, "stepfun-file": stepfun_file}
+PROVIDERS = {"volc": volc, "qwen": qwen, "stepfun": stepfun, "stepfun-sse": stepfun_sse, "stepfun-file": stepfun_file, "local": local}
 
 
 async def upload(data: bytes, content_type: str) -> str:

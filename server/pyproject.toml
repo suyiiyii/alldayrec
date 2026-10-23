@@ -14,11 +14,12 @@ dependencies = [
     "scipy>=1.17.1",
     "httpx2>=2.13.1",
     "anyio>=4.15.1",
+    "sherpa-onnx>=2.0.0",  # local_asr.py (1.13.8 garbled some models' output), owner.py, replay_case.py
+    "sherpa-onnx-core>=2.0.0",
 ]
 
 [dependency-groups]
 export = ["torch==2.5.1", "torchaudio==2.5.1", "onnx==1.17.0"]  # export_onnx.py only: the server runs the models on onnxruntime
-tools = ["sherpa-onnx==1.13.8", "sherpa-onnx-core==1.13.8"]  # owner.py, replay_case.py's local candidates
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
