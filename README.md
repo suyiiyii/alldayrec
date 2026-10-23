@@ -6,6 +6,22 @@
 
 "LR" / "lr" is the project's internal codename, still used in the hardware and the code: recorder names like `LR-P3`, the firmware tool `lr.sh`, the CLI `lr.py`.
 
+## Screenshots
+
+The web UI on a phone, filled with made-up data (the UI is in Chinese for now).
+
+| ![Conversations](docs/img/conversations.png) | ![One conversation](docs/img/conversation.png) | ![Live page](docs/img/live.png) |
+|:--:|:--:|:--:|
+| Conversations: titles, summaries, tags, due to-dos | One conversation: summary, per-person points, to-dos, decisions, transcript with speakers | Live page: the live analysis of the conversation going on, drafts as words come in |
+| ![Ask AI](docs/img/ask.png) | ![Daily recap](docs/img/recap.png) | ![Progress](docs/img/progress.png) |
+| Ask AI: an answer with links to the conversations it came from | Daily recap: highlights, your to-dos, the people you talked to | Progress: each device's queue, recorder battery and card, the phone, today's ASR and LLM calls |
+
+Live captions while the page is open (the draft layer), and the conversations page on a desktop:
+
+![Live captions](docs/img/live-captions.gif)
+
+![Conversations on a desktop](docs/img/conversations-desktop.png)
+
 ## What it does
 
 - **Records all day.** The phone app uploads short Opus pieces; a BLE recorder writes everything to its SD card and streams it to the phone, which fills gaps after a disconnection. Nothing is lost while offline: pieces queue on the device and go up later.
@@ -165,6 +181,8 @@ MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, Fir
 **全天录（alldayrec）是一个自己部署的全天录音和个人记忆层。** 戴一个录音设备（或者只带手机）从早录到晚，自己的服务器在一分钟内把音频变成带说话人的转写、对话摘要、待办和每日回顾。它保留原始录音，每句话都能回放核对，以后有了更好的模型还能把过去重新转写一遍。它不挑设备（iPhone、安卓 App，或者几十块钱就能自己做的开源蓝牙录音硬件），支持 MCP，自己的 Agent 可以直接查你的每一天。可以把它当成自己托管的 lifelog：Limitless、Plaud、Bee、Omi 的开源替代，没有订阅，对话也不放在别人的云上。
 
 「LR」「lr」是项目的内部代号，硬件和代码里还在用：录音设备型号 `LR-P3`、固件工具 `lr.sh`、命令行 `lr.py`。
+
+网页截图见上面的 [Screenshots](#screenshots)（示例数据都是编的）。
 
 **能做什么**
 
