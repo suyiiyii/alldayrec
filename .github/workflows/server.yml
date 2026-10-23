@@ -26,3 +26,5 @@ jobs:
         env:
           UV_DEFAULT_INDEX: https://pypi.org/simple  # uv.lock's index: .54's mirror (its runner .env) would read as a lock out of date
       - run: uv run --with pytest pytest -q
+        env:
+          UV_DEFAULT_INDEX: https://pypi.org/simple  # the same: uv run re-resolves against the mirror otherwise, which lacks sherpa-onnx 2.0.0
