@@ -10,7 +10,7 @@ concurrency:  # a new push to a PR cancels its run still going
 # host checks of the firmware's logic only; the boards' builds (lr.sh build) are made and flashed where they are tested
 jobs:
   firmware-check:  # the record stream and its timing events (test/store_check.c), and lr_sync.py's decoding of them
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', vars.LR_RUNNER)) }}  # repo variable LR_RUNNER=lr-54: the self-hosted runner on .54
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     defaults:
       run:
@@ -28,8 +28,5 @@ jobs:
           cc -o $d/health_check test/health_check.c && $d/health_check  # the mic's HEALTH counts (src/mic_health.h)
           cc -o $d/mic_ring_check test/mic_ring_check.c && $d/mic_ring_check  # the mic's buffers left out are a gap in the frame numbers (src/mic_ring.h)
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)
-      - if: runner.environment == 'github-hosted'
-        run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
-      - if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"  # .54: uv in ci-runner's home
+      - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them

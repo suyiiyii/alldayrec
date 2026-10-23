@@ -32,7 +32,7 @@ concurrency:
 
 jobs:
   select:
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -45,11 +45,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reuse runner-owned uv
-        if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install pinned uv
-        if: runner.environment == 'github-hosted'
         run: pipx install uv==0.13.0
       - name: Check firmware selection boundaries
         run: uv run --no-project --python 3.11 python .github/scripts/test_firmware_select.py
@@ -66,11 +62,10 @@ jobs:
   build:
     needs: select
     if: needs.select.outputs.selected == 'true'
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      # Shared native toolchain cache and 3 GiB self-hosted memory: serialize models.
       max-parallel: 1
       matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     env:
@@ -82,11 +77,7 @@ jobs:
         with:
           fetch-depth: 0 # lr.sh uses commit history to generate firmware revision
           persist-credentials: false
-      - name: Reuse runner-owned uv
-        if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install pinned uv
-        if: runner.environment == 'github-hosted'
         run: pipx install uv==0.13.0
       - name: Require formal relay authentication material
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/firmware-') && matrix.family == 'blerelay'
@@ -121,7 +112,7 @@ jobs:
   prune:
     needs: [select, build]
     if: github.ref_type == 'branch'
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -141,7 +132,7 @@ jobs:
   release:
     needs: [select, build]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/firmware-')
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -150,11 +141,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reuse runner-owned uv
-        if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install pinned uv
-        if: runner.environment == 'github-hosted'
         run: pipx install uv==0.13.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

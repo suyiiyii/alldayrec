@@ -5,8 +5,7 @@
 """Read your alldayrec conversations: lr day | search | show | at | todos | names | days.
 
 Output is compact Markdown for agents; --json gives the raw API answer. The server and token come from
-LIVE_RECORD_URL / LIVE_RECORD_TOKEN, else from live-record.env next to this script, else from
-~/.personal-os/secrets/record-live.env.
+LIVE_RECORD_URL / LIVE_RECORD_TOKEN, else from live-record.env next to this script.
 """
 import argparse
 import datetime as dt
@@ -17,7 +16,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-ENVS = [Path(__file__).resolve().parent / "live-record.env", Path.home() / ".personal-os/secrets/record-live.env"]
+ENVS = [Path(__file__).resolve().parent / "live-record.env"]
 
 
 def conf(key: str) -> str:

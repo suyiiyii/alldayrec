@@ -9,30 +9,23 @@ concurrency:  # a new push to a PR cancels its run still going
 
 jobs:
   app:
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', vars.LR_RUNNER)) }}  # repo variable LR_RUNNER=lr-54: the self-hosted runner on .54
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # hosted Android SDK/Gradle downloads can make a cold run slower
     defaults:
       run:
         working-directory: app
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - if: runner.environment == 'github-hosted'
-        run: pipx install uv
-      - if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH" && echo "$HOME/sdk/swift/usr/bin" >> "$GITHUB_PATH"
+      - run: pipx install uv
       - name: Set up pinned JDK without sudo
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1, into the runner's own tool cache
         with:
           distribution: temurin
           java-version: '17.0.18+8'
       - name: Set up pinned Flutter and runner-owned Android SDK
-        run: |
-          if [[ "$RUNNER_ENVIRONMENT" == self-hosted ]]; then
-            export FLUTTER_ROOT="$HOME/sdk/flutter" ANDROID_HOME="$HOME/sdk/android"
-          fi
-          bash ../.github/scripts/apk-toolchain.sh
+        run: bash ../.github/scripts/apk-toolchain.sh
       - run: flutter analyze
-      - run: flutter test -j 4  # test/: the add-recorder list's order (mergeNearby); -j 4: .54 has 48 cores, a test runner each would not fit its memory
+      - run: flutter test -j 4  # test/: the add-recorder list's order (mergeNearby)
       # the iPhone's BLE record stream (Store.swift: mirror, 'T' dating, Ogg), event log (DeviceLog.swift), firmware update
       # checks (Dfu.swift) and listening (Listen.swift): Foundation only
       - run: swiftc -o "$RUNNER_TEMP/storecheck" ios/Runner/Store.swift ios/Runner/DeviceLog.swift ios/Runner/Dfu.swift ios/Runner/Listen.swift "$PWD/ios/StoreCheck/main.swift" && "$RUNNER_TEMP/storecheck"  # absolute main.swift lets #filePath locate the shared fixture; RUNNER_TEMP avoids shared /tmp
@@ -47,5 +40,5 @@ jobs:
             '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=128m' \
             -Dorg.gradle.vfs.watch=false -Pkotlin.compiler.execution.strategy=in-process
       - name: Remove hosted ephemeral Gradle cache
-        if: always() && runner.environment == 'github-hosted'
+        if: always()
         run: rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"

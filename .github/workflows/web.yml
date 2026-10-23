@@ -9,17 +9,14 @@ concurrency:  # a new push to a PR cancels its run still going
 
 jobs:
   web:
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', vars.LR_RUNNER)) }}  # repo variable LR_RUNNER=lr-54: the self-hosted runner on .54
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, the job's only action: a runner downloads every action its job names, skipped or not
-      - if: runner.environment == 'github-hosted'  # the image's Node is 22
-        run: npm install -g pnpm@12.8.1  # package.json's devEngines
-      - if: runner.environment == 'self-hosted'
-        run: echo "$HOME/sdk/node/bin" >> "$GITHUB_PATH"  # .54: Node 22 and pnpm in ci-runner's home (apt's Node 18 cannot strip types)
+      - run: npm install -g pnpm@12.8.1  # package.json's devEngines; the image's Node is 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vue-tsc -b  # types
       - run: pnpm exec vp build    # the pages server/static/dist serves

@@ -9,22 +9,14 @@ concurrency:  # a new push to a PR cancels its run still going
 
 jobs:
   server:
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', vars.LR_RUNNER)) }}  # repo variable LR_RUNNER=lr-54: the self-hosted runner on .54
+    runs-on: ubuntu-24.04
     timeout-minutes: 15  # ~4 min on a hosted runner; one slow run went past 10
     defaults:
       run:
         working-directory: server
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, the job's only action: a runner downloads every action its job names, skipped or not
-      - if: runner.environment == 'github-hosted'  # the tests encode Opus and AAC pieces; .54 has ffmpeg from apt
-        run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg
-      - if: runner.environment == 'github-hosted'
-        run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
-      - if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"  # .54: uv in ci-runner's home
+      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg  # the tests encode Opus and AAC pieces
+      - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv sync --locked  # uv.lock as it is, as deploy.sh installs it on the deploy host (uv sync --frozen)
-        env:
-          UV_DEFAULT_INDEX: https://pypi.org/simple  # uv.lock's index: .54's mirror (its runner .env) would read as a lock out of date
       - run: uv run --with pytest pytest -q
-        env:
-          UV_DEFAULT_INDEX: https://pypi.org/simple  # the same: uv run re-resolves against the mirror otherwise, which lacks sherpa-onnx 2.0.0
