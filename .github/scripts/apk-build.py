@@ -110,7 +110,7 @@ def build():
             shutil.rmtree(output)
         output.mkdir(parents=True, exist_ok=True)
         kind = "original-signed" if formal else "TEST-ONLY"
-        stem = f"live-record-android-v{version}+{code}-{kind}-{commit[:12]}"
+        stem = f"alldayrec-android-v{version}+{code}-{kind}-{commit[:12]}"
         packaged = output / f"{stem}.apk"
         shutil.copyfile(apk, packaged)
         flutter = json.loads(capture(["flutter", "--version", "--machine"], env=env))
