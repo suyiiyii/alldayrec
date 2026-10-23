@@ -131,7 +131,7 @@ def build():
         metadata_path = output / f"{stem}.json"
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
         notes = output / "release-notes.txt"
-        notes.write_text(f"APK {version}+{code}\nSource commit: {commit}\nModel: android-universal\nSigning: {kind}\nCertificate SHA256: {cert_sha256}\n\nBuilt and signed by GitHub Actions run {os.environ.get("GITHUB_RUN_ID", "")}.\n")
+        notes.write_text(f"APK {version}+{code}\nSource commit: {commit}\nModel: android-universal\nSigning: {kind}\nCertificate SHA256: {cert_sha256}\n\nBuilt and signed by GitHub Actions run {os.environ.get('GITHUB_RUN_ID', '')}.\n")
         checksums = []
         for path in (packaged, metadata_path, notes):
             with path.open("rb") as stream:
