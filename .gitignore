@@ -7,3 +7,4 @@ server/static/dist/
 dist/apk/
 firmware-artifacts/
 tenants.json
+cli/live-record.env
