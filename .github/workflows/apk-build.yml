@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     outputs:
       artifact_id: ${{ steps.artifact.outputs.artifact-id }}
@@ -33,11 +33,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reuse runner-owned uv
-        if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install pinned uv
-        if: runner.environment == 'github-hosted'
         run: pipx install uv==0.13.0
       - name: Check version, main ancestry and mandatory release secrets
         # Only the two steps that read them get the signing secrets, and only on an apk-v tag push (not a
@@ -49,19 +45,13 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/apk-v') && secrets.ANDROID_KEY_PASSWORD || '' }}
           ANDROID_SIGNING_CERT_SHA256: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/apk-v') && secrets.ANDROID_SIGNING_CERT_SHA256 || '' }}
         run: uv run --no-project --python 3.11 python .github/scripts/apk-build.py --check
-      - name: Set up pinned JDK without sudo
-        # into the runner's own tool cache (on .54 ci-runner's _work/_tool)
+      - name: Set up pinned JDK
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '17.0.18+8'
-      - name: Set up pinned Flutter and runner-owned Android SDK
-        run: |
-          if [[ "$RUNNER_ENVIRONMENT" == self-hosted ]]; then
-            # Do not inherit a root-owned system SDK from the runner service.
-            export FLUTTER_ROOT="$HOME/sdk/flutter" ANDROID_HOME="$HOME/sdk/android"
-          fi
-          bash .github/scripts/apk-toolchain.sh
+      - name: Set up pinned Flutter and Android SDK
+        run: bash .github/scripts/apk-toolchain.sh
       - name: Build and verify explicitly signed APK
         id: build
         env: *signing
@@ -74,19 +64,17 @@ jobs:
           path: dist/apk/*
           retention-days: 3
           if-no-files-found: error
-      - name: Remove private signing files and hosted ephemeral Gradle cache
+      - name: Remove private signing files and ephemeral Gradle cache
         if: always()
         shell: bash
         run: |
           rm -rf "$RUNNER_TEMP"/apk-signing-*
-          if [[ "$RUNNER_ENVIRONMENT" == github-hosted ]]; then
-            rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"
-          fi
+          rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"
 
   prune:
     needs: build
     if: github.ref_type == 'branch'
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -106,16 +94,12 @@ jobs:
   release:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/apk-v')
     needs: build
-    runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}","lr-build"]', vars.LR_RUNNER)) }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - name: Reuse runner-owned uv
-        if: runner.environment == 'self-hosted'
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install pinned uv
-        if: runner.environment == 'github-hosted'
         run: pipx install uv==0.13.0
       - name: Download this build's exact artifact by ID (no rebuild)
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -123,7 +107,7 @@ jobs:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           merge-multiple: true
           path: dist/apk
-      - name: Verify source binding and create a draft release
+      - name: Verify source binding and publish the release
         working-directory: dist/apk
         env:
           GH_TOKEN: ${{ github.token }}
@@ -153,4 +137,4 @@ jobs:
           if target['type'] != 'commit' or target['sha'] != os.environ['SOURCE_COMMIT']:
               raise SystemExit('Release tag moved or no longer matches the built source commit')
           PY
-          gh release create "$RELEASE_TAG" ./* --verify-tag --target "$SOURCE_COMMIT" --draft --title "$RELEASE_TAG" --notes-file release-notes.txt
+          gh release create "$RELEASE_TAG" ./* --verify-tag --target "$SOURCE_COMMIT" --title "$RELEASE_TAG" --notes-file release-notes.txt
