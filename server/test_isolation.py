@@ -145,6 +145,7 @@ SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",
     "/api/firmware/latest": "firmware", "/api/firmware/{model}/{version}.zip": "firmware",
     "/openapi.json": "FastAPI's", "/docs": "FastAPI's", "/docs/oauth2-redirect": "FastAPI's", "/redoc": "FastAPI's",
+    "/api/health": "the one route without a token: {ok: true}, no tenant (test_health)",
 }
 
 
@@ -217,6 +218,13 @@ def test_routes(two, monkeypatch):
     assert b.events[-1]["text"] == "MARKb" and len(b.events) == 1 and b.devices[DEV].conversation["note"] == "MARKb"
     assert a.chunks and b.chunks is None, "the upload is a's"
     assert b.summaries[1].statistics().current_buffer_used == 0 and a.summaries[1].statistics().current_buffer_used >= 1
+
+
+def test_health(two):
+    """GET /api/health answers without a token; every other route still wants one."""
+    c = TestClient(server.app)  # no `with`: the lifespan does not start
+    assert c.get("/api/health").json() == {"ok": True}
+    assert c.get("/api/status").status_code == 401
 
 
 def test_websocket(two):

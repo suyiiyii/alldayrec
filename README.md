@@ -30,7 +30,7 @@ Live captions while the page is open (the draft layer), and the conversations pa
 - **Takes any audio source.** Anything that can POST audio pieces can feed the server: `POST /api/chunks?device=<name>&start=<unix ms of its first sample>`, `Authorization: Bearer <token>`, the body one self-contained audio file (`Content-Type: audio/ogg` for Ogg Opus as the apps send, or `audio/webm`, `audio/aac`). See `chunk()` in `server/server.py`; `firmware/devkit/lr_sync.py` is a small Python client.
 - **Transcribes in two layers.** The final layer cuts the audio in pauses and sends pieces of up to 5 minutes to a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio); while a page is open, a draft layer shows words within seconds.
 - **Knows who spoke.** Speech detection (FireRedVAD) and voiceprints (ReDimNet2) run locally on onnxruntime, no GPU: it learns your own voice, keeps speakers apart within a conversation and remembers the names you give them.
-- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history.
+- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history. A conversation with under 60 s of speech gets its first sentence as the title and no summary or to-dos (`MIN_SPEECH_S` in `server/summary.py`).
 - **Opens up.** A web UI, a remote MCP endpoint (`POST /mcp`) for Claude Code, Codex, Cursor and other agents, a small CLI (`cli/lr.py`), and SQLite storage you can read yourself.
 - **Stays yours.** One server, your disk, several people per server if you like (one token each). Audio goes only to the ASR engine you pick, transcripts only to the LLM you pick.
 
@@ -54,6 +54,7 @@ BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) 
 ## Quickstart (Docker)
 
 You need Docker on an amd64 or arm64 machine and an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region. One key runs the ASR, and it can run the LLM too (`qwen-plus` in `.env.example`), as long as the key is not restricted to specific models in the Bailian console: a model-restricted key gets 403 on the chat models.
+No ASR key: `ENGINE=local` runs the speech-to-text in the server (sherpa-onnx), text only, with speakers from the built-in voiceprints and worse on far-field audio; the LLM key is still required.
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
@@ -63,11 +64,15 @@ docker compose up -d
 docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
 ```
 
+With `ENGINE=local` the server downloads another ~136 MB (the sherpa-onnx model tarball) when the first audio arrives, so the first transcript takes about a minute.
+
+The container runs in UTC unless `.env` sets `TZ` (`.env.example` has `TZ=Asia/Shanghai`): conversations are dated, and `RECAP_AT` fires, in that time zone.
+
 A prebuilt image is published to `ghcr.io/suyiiyii/alldayrec` (amd64/arm64), and `docker-compose.yml` uses it. To build it locally instead, uncomment `build: .` in `docker-compose.yml` and run `docker compose up -d --build`.
 
-Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
+Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`; on a remote machine: `ssh -L 8770:127.0.0.1:8770 host` first); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
 
-Phones need HTTPS: put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve). The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
+Phones need HTTPS: put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
 
 ## Quickstart (without Docker)
 
@@ -109,6 +114,7 @@ ASR engines:
 | `volc` | Volcengine Doubao Seed-ASR 2.0 | `VOLC_ASR_KEY` | local voiceprints |
 | `stepfun-sse` | StepFun streaming ASR | `STEPFUN_API_KEY` | local voiceprints |
 | `stepfun`, `stepfun-file` | StepFun file mode | `STEPFUN_API_KEY` plus your own upload bridge and file-mode ASR service (`ASR_*`) | from the engine, refined by local voiceprints |
+| `local` | sherpa-onnx X-ASR zh-en in the server process, text only; worse than `qwen` on far-field audio | nothing (the model, ~136 MB, is downloaded at its first use) | local voiceprints |
 
 `DRAFT_ENGINE=qwen-stream` streams the audio to Qwen while a page is open, so words show as they are said. `ENGINE_FALLBACK` takes the windows the main engine fails on.
 
@@ -188,12 +194,12 @@ MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, Fir
 - 全天录音：手机 App 上传 Opus 分片；蓝牙录音设备一直写 SD 卡，同时推给手机，断开期间的部分回来后补齐。
 - 两层转写：定稿层在停顿处切开，每段最长 5 分钟交给云端识别（默认阿里云百炼千问，约 ¥0.05/小时音频）；页面开着时，初稿层几秒内出字。
 - 认人：语音检测（FireRedVAD）和声纹（ReDimNet2）在本机 CPU 上跑（onnxruntime，不需要显卡），认得出你自己，分得清一段对话里的不同人，记得你起的名字。
-- 记忆：一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索、「问 AI」。
+- 记忆：一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索、「问 AI」。说话不到 60 秒的对话不调大模型，标题取第一句，没有摘要和待办。
 - 开放：网页、远程 MCP（`POST /mcp`）、命令行 `cli/lr.py`，数据就是 SQLite。
 
-**快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；预构建镜像发布在 `ghcr.io/suyiiyii/alldayrec`（amd64/arm64），`docker compose up -d` 直接拉取；想在本机构建，把 `docker-compose.yml` 里的 `build: .` 取消注释，再 `docker compose up -d --build`。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置（`qwen-plus`）也用同一把；这把 key 不能在百炼控制台里限定可用模型，限定了的 key 调对话模型会返回 403。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
+**快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；预构建镜像发布在 `ghcr.io/suyiiyii/alldayrec`（amd64/arm64），`docker compose up -d` 直接拉取；想在本机构建，把 `docker-compose.yml` 里的 `build: .` 取消注释，再 `docker compose up -d --build`。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置（`qwen-plus`）也用同一把；这把 key 不能在百炼控制台里限定可用模型，限定了的 key 调对话模型会返回 403。没有语音识别的 key 也可以用 `ENGINE=local`：在服务里跑 sherpa-onnx，只出文字，说话人靠内置声纹区分，远场录音比千问差；大模型的 key 仍然需要。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
 
-**模型文件**：不需要你做任何事：首次启动时服务会把缺的文件下载到 `MODELS_DIR`（Docker 里是 `data/models`），FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载（`ENGINE=local` 还会在第一次用到时下载 sherpa-onnx 的模型包），只接受 sha256 与 `server/infer.py`、`server/local_asr.py` 里钉住的值一致的文件；已经有的文件不会重复下载。下载失败或文件被拒时，删掉它重启，或者从同一个地址把同一个文件放进 `MODELS_DIR`。`export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的，不是获取模型的途径：ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+**模型文件**：不需要你做任何事：首次启动时服务会把缺的文件下载到 `MODELS_DIR`（Docker 里是 `data/models`），FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载（`ENGINE=local` 还会在第一段音频到达时下载 sherpa-onnx 的模型包，约 136 MB，第一条转写因此要等一分钟左右），只接受 sha256 与 `server/infer.py`、`server/local_asr.py` 里钉住的值一致的文件；已经有的文件不会重复下载。下载失败或文件被拒时，删掉它重启，或者从同一个地址把同一个文件放进 `MODELS_DIR`。`export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的，不是获取模型的途径：ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 **配置**：全部是环境变量，见 [`.env.example`](.env.example)。大模型一律是外部服务，项目不打包、不运行大模型；想全在自己机器上跑，把 `LLM_BASE_URL` 指向你自己的 OpenAI 兼容服务即可，模型需要支持工具调用和 JSON 输出。
 

@@ -1379,7 +1379,7 @@ class Tenants:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] not in ("http", "websocket"):  # lifespan
+        if scope["type"] not in ("http", "websocket") or scope["path"] == "/api/health":  # lifespan; health: no token
             return await self.app(scope, receive, send)
         c = HTTPConnection(scope)
         q = c.query_params.get("token")
@@ -1569,6 +1569,12 @@ async def live_ask(device: str):
     if why := ask():
         raise HTTPException(409, why)
     return {"analyzing": True}
+
+
+@app.get("/api/health")
+async def health():
+    """No token and no tenant (Tenants lets it through): for reverse proxies and docker-compose.yml's healthcheck."""
+    return {"ok": True}
 
 
 @app.get("/api/status")
@@ -2312,6 +2318,7 @@ def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
     infer.fetch()  # a first start: the missing model files, downloaded
     infer.check()  # every model file there and the pinned one, before anything starts
+    log.info("models ok: %d files in %s", len(infer.MODELS), infer.DIR)
     TENANTS[:] = tenant.load()
     for t in TENANTS:
         tenant.call(t, db.init)
@@ -2320,6 +2327,7 @@ def main():
     state["commit"] = commit.read_text().strip() if commit.exists() else \
         subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     log.info("tenants: %s", ", ".join(t.id for t in TENANTS))
+    log.info("ready on %s:%d", os.environ.get("HOST", "127.0.0.1"), args.port)
 
     import uvicorn
     # a page's WebSocket would hold a stop for good: 5 s, then the lifespan cancels every task (pipelines resume from
