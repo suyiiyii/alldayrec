@@ -16,7 +16,9 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, the job's only action: a runner downloads every action its job names, skipped or not
-      - run: sudo apt-get update -q && sudo apt-get install -yq --no-install-recommends ffmpeg  # the tests encode Opus and AAC pieces
+      - run: |  # the tests encode Opus and AAC pieces; the hosted mirror stalled twice for >10 min, so fail fast and retry
+          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
+          $APT update && $APT install -yq --no-install-recommends ffmpeg
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv sync --locked  # uv.lock as it is, as deploy.sh installs it on the deploy host (uv sync --frozen)
       - run: uv run --with pytest pytest -q
