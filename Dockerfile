@@ -1,6 +1,6 @@
 # The server image: the web pages (pnpm), the server (uv, Python 3.11) and ffmpeg; linux/amd64 and linux/arm64.
-#   docker compose up -d --build        (docker-compose.yml)
-#   docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/suyiiyii/alldayrec --push .
+#   .github/workflows/docker.yml pushes it to ghcr.io/suyiiyii/alldayrec (docker-compose.yml pulls that)
+#   docker build -t alldayrec .        (or docker compose up -d --build with build: . in docker-compose.yml)
 
 # the pages are plain JS: built once on the build machine's own platform, the same for every target
 FROM --platform=$BUILDPLATFORM node:22-slim AS web

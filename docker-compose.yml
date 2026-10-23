@@ -1,13 +1,13 @@
 # The server in Docker, on http://127.0.0.1:8770 of this machine.
 #   cp .env.example .env    # fill in: ENGINE=qwen needs DASHSCOPE_API_KEY and the LLM_* settings
 #   mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
-#   docker compose up -d --build && docker compose logs -f    # then open http://127.0.0.1:8770/?token=<the token>
+#   docker compose up -d && docker compose logs -f    # then open http://127.0.0.1:8770/?token=<the token>
 # ./data holds tenants.json, the model files (downloaded into data/models at the first start, sha256-checked) and each
 # tenant's store and recordings. .env: comments on their own lines (Compose reads "VAR=   # comment" as the value).
 services:
   alldayrec:
-    build: .
-    image: ghcr.io/suyiiyii/alldayrec  # linux/amd64 and linux/arm64; --build makes it here from this checkout
+    image: ghcr.io/suyiiyii/alldayrec:latest  # linux/amd64 and linux/arm64, from .github/workflows/docker.yml
+    # build: .  # to build it here from this checkout instead: uncomment, then docker compose up -d --build
     env_file: .env
     environment:  # inside the container, whatever .env says
       HOST: 0.0.0.0
