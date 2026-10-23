@@ -3,14 +3,9 @@ set -euo pipefail
 
 flutter_version=3.47.5
 flutter_commit=6a19cca56475dbfba1478ee68d7bd0c2ef891da1
-if [[ ${RUNNER_ENVIRONMENT:?} == self-hosted ]]; then
-  flutter_root="${FLUTTER_ROOT:-$HOME/sdk/flutter}"
-  sdk_root="${ANDROID_HOME:-$HOME/sdk/android}"
-else
-  flutter_root="$RUNNER_TEMP/apk-flutter"
-  sdk_root="$RUNNER_TEMP/apk-android"
-  git clone --quiet --depth 1 --branch "$flutter_version" https://github.com/flutter/flutter.git "$flutter_root"
-fi
+flutter_root="$RUNNER_TEMP/apk-flutter"
+sdk_root="$RUNNER_TEMP/apk-android"
+git clone --quiet --depth 1 --branch "$flutter_version" https://github.com/flutter/flutter.git "$flutter_root"
 [[ $(git -C "$flutter_root" rev-parse HEAD) == "$flutter_commit" ]] || {
   echo "Flutter must be the official $flutter_version commit $flutter_commit" >&2
   exit 1
@@ -69,11 +64,7 @@ set -o pipefail
 "$cmd_root/bin/sdkmanager" --sdk_root="$sdk_root" 'platforms;android-36' 'platforms;android-37.0' 'build-tools;36.0.0' "ndk;$ndk_version"
 flutter config --no-analytics --android-sdk "$sdk_root"
 flutter precache --android
-if [[ "$RUNNER_ENVIRONMENT" == self-hosted ]]; then
-  gradle_home="${GRADLE_USER_HOME:-$HOME/.cache/live-record-ci/apk-gradle}"
-else
-  gradle_home="$RUNNER_TEMP/apk-gradle-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
-fi
+gradle_home="$RUNNER_TEMP/apk-gradle-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 {
   echo "FLUTTER_ROOT=$flutter_root"
   echo "ANDROID_HOME=$sdk_root"

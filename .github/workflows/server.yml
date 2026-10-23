@@ -10,7 +10,7 @@ concurrency:  # a new push to a PR cancels its run still going
 jobs:
   server:
     runs-on: ${{ vars.LR_RUNNER == '' && 'ubuntu-24.04' || fromJSON(format('["self-hosted","{0}"]', vars.LR_RUNNER)) }}  # repo variable LR_RUNNER=lr-54: the self-hosted runner on .54
-    timeout-minutes: 10  # ~2.5 min, at most 6 so far
+    timeout-minutes: 15  # ~4 min on a hosted runner; one slow run went past 10
     defaults:
       run:
         working-directory: server

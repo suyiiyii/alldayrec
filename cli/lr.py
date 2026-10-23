@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Read the live-record conversations: lr day | search | show | at | todos | names | days.
+"""Read your alldayrec conversations: lr day | search | show | at | todos | names | days.
 
 Output is compact Markdown for agents; --json gives the raw API answer. The server and token come from
 LIVE_RECORD_URL / LIVE_RECORD_TOKEN, else from live-record.env next to this script, else from

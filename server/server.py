@@ -1435,7 +1435,7 @@ async def app_apk():
     p = TENANTS[0].data / "live-record.apk"  # every tenant's: the first one's
     if not p.exists():
         raise HTTPException(404, "no apk uploaded")
-    return FileResponse(p, media_type="application/vnd.android.package-archive", filename="live-record.apk")
+    return FileResponse(p, media_type="application/vnd.android.package-archive", filename="alldayrec.apk")
 
 
 @app.get("/api/app/latest")

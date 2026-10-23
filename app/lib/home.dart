@@ -179,7 +179,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 20, 16, 4),
-            child: Text('Live Record', style: Theme.of(context).textTheme.titleLarge),
+            child: Text('alldayrec', style: Theme.of(context).textTheme.titleLarge),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 0, 16, 16),

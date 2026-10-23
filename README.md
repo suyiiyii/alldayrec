@@ -6,6 +6,8 @@
 
 "LR" / "lr" is the project's internal codename, still used in the hardware and the code: recorder names like `LR-P3`, the firmware tool `lr.sh`, the CLI `lr.py`.
 
+The git history was rewritten before publishing to remove the author's private deployment details, so it is short on purpose, and references like `lr#123` in commit messages point at issues of the earlier private repository, not this one.
+
 ## Screenshots
 
 The web UI on a phone, filled with made-up data (the UI is in Chinese for now).
@@ -25,6 +27,7 @@ Live captions while the page is open (the draft layer), and the conversations pa
 ## What it does
 
 - **Records all day.** The phone app uploads short Opus pieces; a BLE recorder writes everything to its SD card and streams it to the phone, which fills gaps after a disconnection. Nothing is lost while offline: pieces queue on the device and go up later.
+- **Takes any audio source.** Anything that can POST audio pieces can feed the server: `POST /api/chunks?device=<name>&start=<unix ms of its first sample>`, `Authorization: Bearer <token>`, the body one self-contained audio file (`Content-Type: audio/ogg` for Ogg Opus as the apps send, or `audio/webm`, `audio/aac`). See `chunk()` in `server/server.py`; `firmware/devkit/lr_sync.py` is a small Python client.
 - **Transcribes in two layers.** The final layer cuts the audio in pauses and sends pieces of up to 5 minutes to a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio); while a page is open, a draft layer shows words within seconds.
 - **Knows who spoke.** Speech detection (FireRedVAD) and voiceprints (ReDimNet2) run locally on onnxruntime, no GPU: it learns your own voice, keeps speakers apart within a conversation and remembers the names you give them.
 - **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history.
@@ -50,16 +53,17 @@ BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) 
 
 ## Quickstart (Docker)
 
-You need Docker on an amd64 or arm64 machine and an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region. One key runs the ASR, and it can run the LLM too.
+You need Docker on an amd64 or arm64 machine and an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region. One key runs the ASR, and it can run the LLM too (`qwen-plus` in `.env.example`), as long as the key is not restricted to specific models in the Bailian console: a model-restricted key gets 403 on the chat models.
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
 cp .env.example .env    # fill in DASHSCOPE_API_KEY and LLM_API_KEY (the same key works with the example LLM settings)
 mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
-docker compose build    # the image is built here from this checkout, amd64 or arm64 (prebuilt image: TODO)
 docker compose up -d
 docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
 ```
+
+A prebuilt image is published to `ghcr.io/suyiiyii/alldayrec` (amd64/arm64), and `docker-compose.yml` uses it. To build it locally instead, uncomment `build: .` in `docker-compose.yml` and run `docker compose up -d --build`.
 
 Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
 
@@ -119,7 +123,7 @@ The LLM is always an external service: the project doesn't bundle or run one. To
 
 ## Phone app
 
-- **Android:** build it with `cd app && flutter build apk --release`, or install the APK from the Releases page when there is one. The server can also offer updates at `/app.apk`.
+- **Android:** build it with `cd app && flutter build apk --release`, or install the APK from the [Releases page](https://github.com/suyiiyii/alldayrec/releases) (`apk-v*` tags). The server can also offer updates at `/app.apk`.
 - **iOS:** there is no App Store build; you build and install it yourself from Xcode. Copy `app/ios/Flutter/Signing.local.xcconfig.example` to `Signing.local.xcconfig` and put in your Team ID (and a bundle id suffix of your own). With a free Apple ID, an app you install this way stops opening after 7 days and has to be installed again; a paid Apple Developer account removes that limit.
 
 Connect the app: in the web UI open **连接手机** (`/connect`) and scan its QR code from the app's settings (**扫码登录**), or type the server address and token by hand. The app's UI is in Chinese for now.
@@ -182,6 +186,8 @@ MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, Fir
 
 「LR」「lr」是项目的内部代号，硬件和代码里还在用：录音设备型号 `LR-P3`、固件工具 `lr.sh`、命令行 `lr.py`。
 
+仓库公开前改写过 git 历史，去掉了作者私人部署的细节，所以历史很短；提交说明里的 `lr#123` 指的是以前私有仓库的 issue，不是这个仓库的。
+
 网页截图见上面的 [Screenshots](#screenshots)（示例数据都是编的）。
 
 **能做什么**
@@ -192,13 +198,13 @@ MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, Fir
 - 记忆：一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索、「问 AI」。
 - 开放：网页、远程 MCP（`POST /mcp`）、命令行 `cli/lr.py`，数据就是 SQLite。
 
-**快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；Docker 镜像目前用 `docker compose build` 在本机构建（预构建镜像：TODO）。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置也用同一把。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
+**快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；预构建镜像发布在 `ghcr.io/suyiiyii/alldayrec`（amd64/arm64），`docker compose up -d` 直接拉取；想在本机构建，把 `docker-compose.yml` 里的 `build: .` 取消注释，再 `docker compose up -d --build`。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置（`qwen-plus`）也用同一把；这把 key 不能在百炼控制台里限定可用模型，限定了的 key 调对话模型会返回 403。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
 
 **模型文件**：首次启动自动下载到 `MODELS_DIR` 并校验 sha256：FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载；已经有的文件不会重复下载。下载失败时，把文件自己放进 `MODELS_DIR`（Docker 里是 `data/models`）；`export_onnx.py` 也能从上游权重重新导出，但 ReDimNet2 的导出在不同机器上逐字节不一致，sha256 可能对不上钉住的值，服务会拒绝它，所以还是以 Release 里的文件为准。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 **配置**：全部是环境变量，见 [`.env.example`](.env.example)。大模型一律是外部服务，项目不打包、不运行大模型；想全在自己机器上跑，把 `LLM_BASE_URL` 指向你自己的 OpenAI 兼容服务即可，模型需要支持工具调用和 JSON 输出。
 
-**手机 App**：安卓自己 `flutter build apk`，或者从 Release 下载 APK。iOS 不上架、不分发，需要自己用 Xcode 构建安装：把 `app/ios/Flutter/Signing.local.xcconfig.example` 复制成 `Signing.local.xcconfig`，填自己的 Team ID。用免费 Apple ID 装的应用 7 天后会打不开，要重新安装一次；付费开发者账号没有这个限制。网页的「连接手机」页面有二维码，App 设置里「扫码登录」即可。
+**手机 App**：安卓自己 `flutter build apk`，或者从 [Releases 页面](https://github.com/suyiiyii/alldayrec/releases)下载 APK。iOS 不上架、不分发，需要自己用 Xcode 构建安装：把 `app/ios/Flutter/Signing.local.xcconfig.example` 复制成 `Signing.local.xcconfig`，填自己的 Team ID。用免费 Apple ID 装的应用 7 天后会打不开，要重新安装一次；付费开发者账号没有这个限制。网页的「连接手机」页面有二维码，App 设置里「扫码登录」即可。
 
 **硬件（可选）**：只用手机也可以。全天佩戴可以用开源的蓝牙录音设备：nRF52840 板子 + PDM 麦克风 + microSD 卡 + 小电池，见 [`firmware/devkit/README.md`](firmware/devkit/README.md)。
 
