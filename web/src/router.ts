@@ -3,7 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", component: () => import("./pages/Live.vue"), meta: { title: "Record Live" } },
+    { path: "/", component: () => import("./pages/Live.vue"), meta: { title: "alldayrec" } },
     {
       path: "/conversations",
       component: () => import("./pages/Conversations.vue"),
@@ -45,7 +45,7 @@ export const router = createRouter({
     {
       path: "/record",
       component: () => import("./pages/Record.vue"),
-      meta: { title: "live-record 录音" },
+      meta: { title: "alldayrec 录音" },
     },
     {
       path: "/connect",
@@ -55,5 +55,5 @@ export const router = createRouter({
   ],
 });
 router.afterEach((to) => {
-  document.title = (to.meta.title as string | undefined) ?? "Record Live";
+  document.title = (to.meta.title as string | undefined) ?? "alldayrec";
 });

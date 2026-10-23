@@ -6,7 +6,7 @@ defineProps<{ inApp?: boolean }>();
 <template>
   <header :class="{ bare: !inApp }">
     <div class="bar">
-      <h1>Record Live</h1>
+      <h1>alldayrec</h1>
       <nav>
         <RouterLink to="/" exact-active-class="on">实时字幕</RouterLink>
         <RouterLink

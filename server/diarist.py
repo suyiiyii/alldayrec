@@ -198,10 +198,10 @@ if __name__ == "__main__":
     m = d.mark(); d.add(noisy(a), 2.0); d.rollback(m)
     assert d.mark() == m
     assert d.add(noisy(a), 0.4)[0] == tail[1], "a short sentence joins its speaker"
-    d = Diarist({"dji-mac": noisy(me)}, people={"李某": noisy(a)})
+    d = Diarist({"dji-mac": noisy(me)}, people={"李四": noisy(a)})
     named = [d.add(noisy(v), 2.0)[0] for v in seq]
-    assert set(l for l, v in zip(named[11:], seq[11:]) if v is a) == {"李某"}, named
-    assert "李某" not in {l for l, v in zip(named, seq) if v is b}, named
+    assert set(l for l, v in zip(named[11:], seq[11:]) if v is a) == {"李四"}, named
+    assert "李四" not in {l for l, v in zip(named, seq) if v is b}, named
     E = [noisy(v) for v in seq]  # the same conversation, labelled once at its close
     lab = relabel(E, [2.0] * len(E), {"dji-mac": noisy(me)})
     assert all(l == "我" for l, v in zip(lab, seq) if v is me), lab

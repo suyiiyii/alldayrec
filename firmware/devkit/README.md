@@ -31,10 +31,10 @@ nrfutil install sdk-manager && nrfutil sdk-manager install --ncs-version v2.7.0 
 
 ```bash
 # 1. 起草：列出这个型号上次发布以来改了固件的提交（不构建、不上传）
-LR_TOKEN=<服务器 AUTH_TOKEN> uv run --no-project python lr_release.py promicro-p3 --server https://lr.example.com
+LR_TOKEN=<服务器 AUTH_TOKEN> uv run --no-project python lr_release.py promicro-p3 --server https://live.example.com
 # 2. 把草稿改写成给用户看的说明，再发布
 LR_TOKEN=<服务器 AUTH_TOKEN> LR_FIRMWARE_TOKEN=<服务器 FIRMWARE_TOKEN> \
-  uv run --no-project python lr_release.py promicro-p3 --server https://lr.example.com --notes "$(cat notes.txt)"
+  uv run --no-project python lr_release.py promicro-p3 --server https://live.example.com --notes "$(cat notes.txt)"
 ```
 
 逐个变体构建、打包、上传；型号取自那次构建自己的 `.config`（`CONFIG_BT_DIS_MODEL`）：sdmod→LR-X1、promicro→LR-P1、

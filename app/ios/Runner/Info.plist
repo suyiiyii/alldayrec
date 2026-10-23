@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>live-record$(LR_TEST_NAME)</string>
+	<string>alldayrec$(LR_TEST_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -31,7 +31,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>连接录音设备，取回它录下的音频并上传</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>录音并上传到 live-record 服务端转写</string>
+	<string>录音并上传到 alldayrec 服务端转写</string>
 	<key>NSCameraUsageDescription</key>
 	<string>扫码登录需要使用摄像头</string>
 	<key>UIApplicationSceneManifest</key>

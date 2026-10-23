@@ -6,13 +6,13 @@ The lines carry the question and the answer: keep them local, report only the nu
 
     uv run python ask_eval.py <live.db> [Q1 Q3 ...]
 
-On the deploy host against the main instance, read only, nothing left there (the modules go to a temp dir, LLM_* come from
+On the server host against the main instance, read only, nothing left there (the modules go to a temp dir, LLM_* come from
 its .env):
     cd server; { echo 'set -e; d=$(mktemp -d); trap "rm -rf $d" EXIT; base64 -d <<"X" | tar -xzC $d'
       tar -cz ask.py ask_eval.py db.py speakers.py summary.py | base64; echo X
-      echo 'eval "$(grep -E "^LLM_(BASE_URL|API_KEY|MODEL)=" /opt/live-record/.env | sed "s/^/export /")"'
-      echo 'cd $d && /opt/live-record/server/.venv/bin/python ask_eval.py /opt/live-record/data/live.db "$@"'; } > eval.sh
-    ssh suyiiyii@203.0.113.10 'wsl -u root -e bash -s' < eval.sh > answers.jsonl
+      echo 'eval "$(grep -E "^LLM_(BASE_URL|API_KEY|MODEL)=" <install dir>/.env | sed "s/^/export /")"'
+      echo 'cd $d && <install dir>/server/.venv/bin/python ask_eval.py <install dir>/data/live.db "$@"'; } > eval.sh
+    ssh <user>@<host> 'bash -s' < eval.sh > answers.jsonl
 """
 import collections
 import datetime as dt

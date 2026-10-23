@@ -76,10 +76,10 @@ class RecorderService : Service() {
          *  recorder's battery only while connected: the last read stays in hw after the link is gone. */
         fun notice(s: Map<String, Any?>, now: Long = System.currentTimeMillis()): Pair<String, String> {
             val note = s["note"] as String?
-            if (s["running"] != true) return "live-record 正在上传 · 剩 ${s["pending"]} 块" to (note ?: "")
+            if (s["running"] != true) return "alldayrec 正在上传 · 剩 ${s["pending"]} 块" to (note ?: "")
             val total = s["syncTotal"] as Long? ?: 0L
             val title = when {
-                s["source"] != "ble" -> "live-record 正在录音"
+                s["source"] != "ble" -> "alldayrec 正在录音"
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
                 total > 0 -> if ((s["link"] as String?).orEmpty().startsWith("已连接"))
                     "实时上传 · 后台补传 %.1f / %.1f MB".format((s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)

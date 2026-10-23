@@ -38,7 +38,7 @@ class NoticeTest {
     }
 
     @Test fun micAndUpload() {
-        assertEquals("live-record 正在录音" to "", RecorderService.notice(mapOf("running" to true, "source" to "mic", "pending" to 0), now))
-        assertEquals("live-record 正在上传 · 剩 7 块" to "", RecorderService.notice(mapOf("running" to false, "pending" to 7), now))
+        assertEquals("alldayrec 正在录音" to "", RecorderService.notice(mapOf("running" to true, "source" to "mic", "pending" to 0), now))
+        assertEquals("alldayrec 正在上传 · 剩 7 块" to "", RecorderService.notice(mapOf("running" to false, "pending" to 7), now))
     }
 }

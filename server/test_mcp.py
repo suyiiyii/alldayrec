@@ -54,7 +54,7 @@ def tool(tool_name, **args):
 def test_protocol():
     fake()
     init = rpc("initialize", protocolVersion="2025-06-18")["result"]
-    assert init["protocolVersion"] == "2025-06-18" and init["serverInfo"]["name"] == "live-record" and "tools" in init["capabilities"]
+    assert init["protocolVersion"] == "2025-06-18" and init["serverInfo"]["name"] == "alldayrec" and "tools" in init["capabilities"]
     assert rpc("initialize", protocolVersion="1999-01-01")["result"]["protocolVersion"] == "2025-11-25"
     assert m.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}, {}) == (202, None)
     assert rpc("nope")["error"]["code"] == -32601 and rpc("ping")["result"] == {"resultType": "complete"}

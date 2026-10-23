@@ -1,7 +1,7 @@
 [project]
-name = "record-live"
+name = "alldayrec"
 version = "0.1.0"
-description = "Live transcript of the continuous recorder: stream VAD + StepFun streaming ASR + web page"
+description = "alldayrec server: a continuous audio stream in, conversations out — local VAD + cloud ASR + web page"
 requires-python = "==3.11.*"
 dependencies = [
     "fastapi>=0.115",

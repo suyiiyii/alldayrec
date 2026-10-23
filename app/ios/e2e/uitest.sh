@@ -1,7 +1,7 @@
 #!/bin/bash
 # The iPhone + recorder test, the hands taken over by XCUITest (../RunnerUITests): the taps in the app, iOS's
 # permission and pairing dialogs, Settings › Bluetooth (listed? forget it, Bluetooth off and on), home, quit. It runs a
-# test app next to the real one (com.suyiiyii.liverecord.uitest, "live-record测试": its own settings, binding and queue;
+# test app next to the real one (com.suyiiyii.liverecord.uitest, "alldayrec测试": its own settings, binding and queue;
 # the real app and its recorder are never opened or changed) against a throwaway server (server.py behind a cloudflared
 # quick tunnel). Each step is judged from what that server got (status reports, app events, audio) and from the
 # recorder's adverts as this Mac sees them (ble.py), into $W/<time>/summary.tsv, printed as a table at the end.

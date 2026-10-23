@@ -65,7 +65,7 @@ def config(v: str, key: str) -> str | None:
 def main():
     ap = argparse.ArgumentParser(description="build, pack and upload recorder firmware")
     ap.add_argument("variants", nargs="+", choices=MODELS)
-    ap.add_argument("--server", required=True, help="e.g. https://lr.example.com")
+    ap.add_argument("--server", required=True, help="e.g. https://live.example.com")
     ap.add_argument("--notes", help="what changed for the people with the recorder, shown in the app; left out: print "
                                     "each model's draft and stop")
     ap.add_argument("--version", help="a published version: replace its notes, nothing built")

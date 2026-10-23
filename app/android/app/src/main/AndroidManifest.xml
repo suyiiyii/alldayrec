@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
-        android:label="live-record"
+        android:label="alldayrec"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

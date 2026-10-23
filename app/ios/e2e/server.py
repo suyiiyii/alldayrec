@@ -43,7 +43,7 @@ def serve(host: str, port: int, token: str, out: Path):
             path = urlparse(self.path).path
             if not path.startswith("/api/"):  # the app's web pages (?token=): what is going on, not a token error
                 b = ("<meta name=viewport content='width=device-width'><p style='font:17px sans-serif;padding:24px'>"
-                     "live-record 正在做自动测试，几分钟后自动恢复正常设置。</p>").encode()
+                     "alldayrec 正在做自动测试，几分钟后自动恢复正常设置。</p>").encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(b)))

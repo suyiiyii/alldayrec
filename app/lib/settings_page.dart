@@ -76,7 +76,7 @@ class _SettingsPageState extends State<SettingsPage> {
           SwitchListTile(
             title: const Text('本地保留录音'),
             subtitle: Text(Platform.isIOS
-                ? '上传后存到「文件」App › 我的 iPhone › live-record › recordings › 日期'
+                ? '上传后存到「文件」App › 我的 iPhone › alldayrec › recordings › 日期'
                 : '上传后存到 Android/data/com.suyiiyii.live_record/files/recordings/日期/'),
             value: archive,
             onChanged: (v) => setState(() => archive = v),

@@ -22,19 +22,19 @@ onMounted(async () => {
 // 接入 AI: the agents that take a URL and a header (server mcp_server.py), with the same token as the app.
 // Shown with the token hidden; 复制 always copies the real one.
 const mcp = `${location.origin}/mcp`;
-const json = (server: object) => JSON.stringify({ mcpServers: { "live-record": server } }, null, 2);
+const json = (server: object) => JSON.stringify({ mcpServers: { "alldayrec": server } }, null, 2);
 const CLIENTS: { name: string; where: string; text: (t: string) => string }[] = [
   {
     name: "Claude Code",
     where: "在终端里运行一次",
     text: (t) =>
-      `claude mcp add --transport http live-record ${mcp} --header "Authorization: Bearer ${t}" --scope user`,
+      `claude mcp add --transport http alldayrec ${mcp} --header "Authorization: Bearer ${t}" --scope user`,
   },
   {
     name: "Codex",
     where: "加进 ~/.codex/config.toml",
     text: (t) =>
-      `[mcp_servers.live-record]\nurl = "${mcp}"\nhttp_headers = { "Authorization" = "Bearer ${t}" }`,
+      `[mcp_servers.alldayrec]\nurl = "${mcp}"\nhttp_headers = { "Authorization" = "Bearer ${t}" }`,
   },
   {
     name: "Cursor",

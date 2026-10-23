@@ -314,11 +314,11 @@ do {
   let under = NSError(domain: "kCFErrorDomainCFNetwork", code: -1000, userInfo: ["_NSURLErrorNWPathKey": path])
   let bad = NSError(domain: "NSURLErrorDomain", code: -1000, userInfo: [
     NSLocalizedDescriptionKey: "bad URL", NSUnderlyingErrorKey: under, "_kCFStreamErrorDomainKey": 1, "_kCFStreamErrorCodeKey": 22,
-    "NSErrorFailingURLStringKey": "https://lr.example.com/api/chunks?device=LR%2DP1%2DBDAE&start=1791246194000&token=secret"])
-  check(DeviceLog.why(bad, server: "https://lr.example.com"),
-        "bad URL（lr.example.com NSURLErrorDomain -1000，底层 kCFErrorDomainCFNetwork -1000，流 1/22，网络 \(path)）", "CFNetwork's bad URL")
+    "NSErrorFailingURLStringKey": "https://live.example.com/api/chunks?device=LR%2DP1%2DBDAE&start=1791246194000&token=secret"])
+  check(DeviceLog.why(bad, server: "https://live.example.com"),
+        "bad URL（live.example.com NSURLErrorDomain -1000，底层 kCFErrorDomainCFNetwork -1000，流 1/22，网络 \(path)）", "CFNetwork's bad URL")
   let own = NSError(domain: "NSURLErrorDomain", code: -1000, userInfo: [NSLocalizedDescriptionKey: "x"])
-  check(DeviceLog.why(own, server: "https://lr.example.com \n"), "x（\"https://lr.example.com \\n\" NSURLErrorDomain -1000）",
+  check(DeviceLog.why(own, server: "https://live.example.com \n"), "x（\"https://live.example.com \\n\" NSURLErrorDomain -1000）",
         "an address with a space and a newline, as typed")
   check(DeviceLog.why(own, server: ""), "x（\"\" NSURLErrorDomain -1000）", "no address")
 }

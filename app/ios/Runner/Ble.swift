@@ -253,7 +253,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       abort()
       peripheral = nil
       state = "蓝牙已关闭"
-    case .unauthorized: state = "没有蓝牙权限：在 设置 › live-record 里允许蓝牙"
+    case .unauthorized: state = "没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙"
     default: break
     }
   }
