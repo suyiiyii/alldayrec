@@ -96,7 +96,7 @@ class DfuLog(val device: String, from: String?, val to: String, bytes: Int, sha2
 
     init {
         note("start", "开始升级 ${from ?: "?"} → $to，${bytes / 1024} KB，sha ${sha256.take(8)}，电量 ${battery?.let { "$it%" } ?: "未知"}",
-             mapOf("from" to from, "to" to to, "bytes" to bytes, "sha" to sha256.take(8), "battery" to battery))
+             mapOf("ms" to 0L, "from" to from, "to" to to, "bytes" to bytes, "sha" to sha256.take(8), "battery" to battery))  // by definition, not the clock
     }
 
     /** "boot" (connected to the bootloader) or "send" (the image goes out). */
