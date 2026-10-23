@@ -2307,10 +2307,11 @@ def main():
     missing += [k for k in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL") if not os.environ.get(k)]
     if missing:
         raise SystemExit(f"not set: {', '.join(missing)} (see .env.example)")
-    infer.check()  # every model file there and the pinned one, before anything starts
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
+    infer.fetch()  # a first start: the missing model files, downloaded
+    infer.check()  # every model file there and the pinned one, before anything starts
     TENANTS[:] = tenant.load()
     for t in TENANTS:
         tenant.call(t, db.init)

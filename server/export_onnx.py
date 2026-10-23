@@ -5,11 +5,13 @@ sha256 infer.MODELS pins. Needs torch, only here: the export dependency group.
 
 - fireredvad-stream-vad.onnx, fireredvad-cmvn.ark: FireRedVAD's own ONNX of Stream-VAD (the FSMN caches as an input and
   an output) and its CMVN stats, from github.com/FireRedTeam/FireRedVAD at 71352f2 (pretrained_models/onnx_models;
-  the same weights and CMVN as the Stream-VAD checkpoint on HuggingFace that ran before), Apache-2.0. Downloaded.
+  the same weights and CMVN as the Stream-VAD checkpoint on HuggingFace that ran before), Apache-2.0. Downloaded
+  (infer.SOURCES; the server also fetches them itself at start).
 - redimnet2-b6.onnx: ReDimNet2 B6, VoxBlink2 + VoxCeleb2 + CN-Celeb, large-margin fine-tuned
   (b6-vb2+vox2+cnc2_v0-lm.pt of the v1.0.0 release of github.com/PalabraAI/redimnet2, code at c5bbe0b), MIT.
   Exported here (torch 2.5.1, opset 17, any length; the front end is already a conv1d STFT), then compared with the
-  torch model on noise of several lengths.
+  torch model on noise of several lengths. This export is also the models-v1 release file the server fetches when it
+  is missing (infer.SOURCES); its training data VoxBlink2 is CC BY-NC-SA 4.0 (THIRD_PARTY_NOTICES).
 """
 import hashlib
 import os
@@ -22,7 +24,6 @@ import numpy as np
 
 import infer
 
-FIRERED = "https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/71352f2c93c110410189e0ed98ab85ea24e8ad1c/pretrained_models/onnx_models/"
 REDIMNET = "PalabraAI/redimnet2:c5bbe0b76e37df698c403f8844e41304ceab6307"
 WEIGHTS = ("b6-vb2+vox2+cnc2_v0-lm.pt", "287365f6f485b19e65e5176554f8f7123bfa8d85185f3d2c040eab51acec9868")  # the release's digest
 
@@ -57,8 +58,8 @@ def redimnet(out: Path):
 def main():
     d = Path(sys.argv[1]) if sys.argv[1:] else infer.DIR
     d.mkdir(parents=True, exist_ok=True)
-    for name, src in ((infer.VAD, "fireredvad_stream_vad_with_cache.onnx"), (infer.CMVN, "cmvn.ark")):
-        urllib.request.urlretrieve(FIRERED + src, d / name)
+    for name in (infer.VAD, infer.CMVN):
+        urllib.request.urlretrieve(infer.SOURCES[name], d / name)
     redimnet(d / infer.EMB)
     for name, want in infer.MODELS.items():
         got = sha256(d / name)

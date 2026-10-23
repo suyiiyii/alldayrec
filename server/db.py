@@ -79,7 +79,9 @@ def open_db(path: Path, recordings: Path | None = None) -> tenant.Tenant:
 
 
 def init():
-    """The current tenant's store made or brought up to date (the server, for each tenant at the start)."""
+    """The current tenant's store made or brought up to date (the server, for each tenant at the start), its data dir
+    too (a first start: an empty volume)."""
+    tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
     conn().executescript(SCHEMA)
     if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
         conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")

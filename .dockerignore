@@ -1,0 +1,9 @@
+# only what the image is built from: never .env, tenants.json or data
+*
+!server/
+!web/
+server/.venv*
+server/static/dist
+**/__pycache__
+web/node_modules
+web/dist

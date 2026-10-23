@@ -135,3 +135,9 @@ def test_search_under_an_open_statement(history):
     rows = db.conn().execute("SELECT id FROM conversations")
     next(rows)
     assert [c["id"] for c in db.search(q="äpfel")] == ["0"]
+
+
+def test_init_makes_the_data_dir(tmp_path):
+    """A tenant's data dir need not exist yet: the start makes it (Docker's first start, an empty volume)."""
+    db.open_db(tmp_path / "main" / "live.db")
+    assert (tmp_path / "main" / "live.db").is_file()

@@ -242,7 +242,7 @@ def test_main_settings(monkeypatch):
 
     def started(d=None):
         raise Started
-    monkeypatch.setattr(infer, "check", started)  # past the settings
+    monkeypatch.setattr(infer, "fetch", started)  # past the settings, before any model download
     monkeypatch.setattr(sys, "argv", ["server.py"])
     for k in ("ASR_UPLOAD_BRIDGE_URL", "ASR_UPLOAD_BRIDGE_TOKEN", "ASR_SERVICE_URL", "ASR_SERVICE_BASIC_AUTH", "STEPFUN_API_KEY",
               "VOLC_ASR_KEY"):

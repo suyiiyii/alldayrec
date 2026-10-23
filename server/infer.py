@@ -1,12 +1,14 @@
 """Speech detection and voiceprints on onnxruntime, in this process, without torch: FireRedVAD Stream-VAD and
 ReDimNet2 B6, the same models as before (on the main instance's audio: the same utterances and squeezed seconds, cosine
->= 0.9999998, the same diarist labels). The files live in MODELS_DIR, each pinned by its sha256 below; check() stops
-the server at start when one is missing or different, there is no fallback. Where they come from and how to make
-them: export_onnx.py.
+>= 0.9999998, the same diarist labels). The files live in MODELS_DIR, each pinned by its sha256 below; at start fetch()
+downloads the missing ones (sha256-checked), then check() stops the server when one is missing or different,
+there is no fallback. Where they come from and how to make them: export_onnx.py.
 """
 import hashlib
+import logging
 import os
 import struct
+import urllib.request
 from functools import cache
 from pathlib import Path
 
@@ -31,6 +33,34 @@ MODELS = {  # file: sha256 (sources and licenses: export_onnx.py)
     CMVN: "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473",
     EMB: "0a17d6472e4e7a31ffe254858574f6f1203acd5a5fa9a153a12556f4aaa72d81",
 }
+FIRERED = "https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/71352f2c93c110410189e0ed98ab85ea24e8ad1c/pretrained_models/onnx_models/"
+SOURCES = {  # file: where fetch() downloads it from when it is missing
+    VAD: FIRERED + "fireredvad_stream_vad_with_cache.onnx",
+    CMVN: FIRERED + "cmvn.ark",
+    EMB: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx",  # export_onnx.py's export
+}
+MAKE = ("cd server && uv run --group export python export_onnx.py {d}; "
+        "in Docker: docker compose run --rm alldayrec uv run --group export python export_onnx.py")
+
+
+def fetch(d: Path = DIR):
+    """Download every model file missing in d, once: one that fails to come, or is not the pinned one, stops the
+    start (a file already there is left to check())."""
+    for name, url in SOURCES.items():
+        if (d / name).is_file():
+            continue
+        logging.getLogger(__name__).info("models: downloading %s from %s", name, url)
+        try:
+            with urllib.request.urlopen(url, timeout=120) as r:
+                data = r.read()
+            if (got := hashlib.sha256(data).hexdigest()) != MODELS[name]:
+                raise SystemExit(f"models: {url} has sha256 {got}, not the pinned {MODELS[name]}")
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{name}.part").write_bytes(data)
+            (d / f"{name}.part").replace(d / name)
+        except Exception as e:  # 401/404, no network, cut short, d not writable
+            raise SystemExit(f"models: downloading {name} from {url} failed: {e} (make it: {MAKE.format(d=d)}; "
+                             f"or put the file in {d})")
 
 
 def check(d: Path = DIR):
@@ -38,7 +68,7 @@ def check(d: Path = DIR):
     bad = [f"{d / n} {'is missing' if not (d / n).is_file() else 'has another sha256'}" for n, h in MODELS.items()
            if not (d / n).is_file() or hashlib.sha256((d / n).read_bytes()).hexdigest() != h]
     if bad:
-        raise SystemExit(f"models: {'; '.join(bad)} (make them: uv run --group export python export_onnx.py {d})")
+        raise SystemExit(f"models: {'; '.join(bad)} (make them: {MAKE.format(d=d)})")
 
 
 def session(name: str, threads: int) -> ort.InferenceSession:

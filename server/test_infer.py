@@ -15,3 +15,31 @@ def test_cmvn_and_check(tmp_path):
     with pytest.raises(SystemExit) as e:
         infer.check(tmp_path)
     assert all(n in str(e.value) for n in infer.MODELS) and "another sha256" in str(e.value) and "is missing" in str(e.value)
+
+
+def test_fetch(tmp_path, monkeypatch):
+    """fetch(): a missing file is downloaded and kept only with the pinned sha256; one already there is left to check();
+    a download that fails stops the start once, saying how to make the file."""
+    import hashlib
+    import io
+    import urllib.error
+    body = {"http://m/a": b"model a", "http://m/b": b"not b"}
+
+    def urlopen(url, timeout):
+        if url not in body:
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        return io.BytesIO(body[url])
+    monkeypatch.setattr(infer.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(infer, "MODELS", {"a": hashlib.sha256(b"model a").hexdigest(), "b": "0" * 64, "c": "1" * 64})
+    (tmp_path / "m").mkdir()
+    (tmp_path / "m/c").write_bytes(b"there")
+    monkeypatch.setattr(infer, "SOURCES", {"a": "http://m/a", "c": "http://m/c"})
+    infer.fetch(tmp_path / "m")
+    assert sorted(p.name for p in (tmp_path / "m").iterdir()) == ["a", "c"] and (tmp_path / "m/a").read_bytes() == b"model a"
+    monkeypatch.setattr(infer, "SOURCES", {"b": "http://m/b"})
+    with pytest.raises(SystemExit, match="http://m/b has sha256"):
+        infer.fetch(tmp_path / "m")
+    monkeypatch.setattr(infer, "SOURCES", {"d": "http://m/d"})
+    with pytest.raises(SystemExit, match=r"downloading d from http://m/d failed: HTTP Error 404.*export_onnx\.py.*or put the file in"):
+        infer.fetch(tmp_path / "m")
+    assert sorted(p.name for p in (tmp_path / "m").iterdir()) == ["a", "c"], "nothing kept of a bad or failed download"
