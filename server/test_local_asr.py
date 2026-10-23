@@ -1,6 +1,6 @@
 """local_asr without sherpa-onnx or its model (none in CI): a fake recognizer stands in. The pieces a window is cut
 into, token times into sentence times, sentences cut at punctuation and pauses, token text joined, nothing from
-silence, and fetch(): nothing when the pinned files are there, the files out of a tarball otherwise."""
+silence, and fetch(): nothing when the pinned files are there, the files out of the pinned tarball otherwise."""
 import hashlib
 import io
 import tarfile
@@ -8,6 +8,7 @@ import tarfile
 import numpy as np
 import pytest
 
+import infer
 import local_asr
 from local_asr import SR
 
@@ -70,8 +71,9 @@ def test_fetch(tmp_path, monkeypatch):
             i = tarfile.TarInfo(f"{local_asr.TAR}/{n}")
             i.size = len(b)
             t.addfile(i, io.BytesIO(b))
+    monkeypatch.setattr(local_asr, "TAR_SHA", hashlib.sha256(tar.getvalue()).hexdigest())
     calls = []
-    monkeypatch.setattr(local_asr.urllib.request, "urlopen", lambda url, timeout: (calls.append(url), io.BytesIO(tar.getvalue()))[1])
+    monkeypatch.setattr(infer.urllib.request, "urlopen", lambda url, timeout: (calls.append(url), io.BytesIO(tar.getvalue()))[1])
     d = tmp_path / local_asr.NAME
     local_asr.fetch(d)
     assert calls == [local_asr.URL] and {p.name: p.read_bytes() for p in d.iterdir()} == files
@@ -80,8 +82,8 @@ def test_fetch(tmp_path, monkeypatch):
     (d / "tokens.txt").write_bytes(b"other")
     local_asr.fetch(d)
     assert len(calls) == 2 and (d / "tokens.txt").read_bytes() == files["tokens.txt"], "another sha256: fetched again"
-    monkeypatch.setitem(local_asr.FILES, "tokens.txt", "0" * 64)  # the tarball's file is not the pinned one: refused, nothing left behind
+    monkeypatch.setattr(local_asr, "TAR_SHA", "0" * 64)  # the tarball is not the pinned one: refused, nothing left behind
     (d / "tokens.txt").unlink()
-    with pytest.raises(RuntimeError, match="not the pinned one"):
+    with pytest.raises(RuntimeError, match="not the pinned"):
         local_asr.fetch(d)
     assert sorted(p.name for p in d.iterdir()) == ["bpe.model"]

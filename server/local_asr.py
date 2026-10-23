@@ -1,23 +1,21 @@
 """The local ASR engine for engine_segs: sherpa-onnx X-ASR zh-en (zipformer transducer with punctuation, int8,
 2026-06-03, Apache-2.0) in this process, no network and no key. Text with per-token times, no speakers: the diarist
 labels the sentences, as for stepfun-sse. The 10-23 bench on 5 far-field recordings: in-sentence CER 19.7 (Bailian
-qwen-audio-3.1 13.5, StepFun SSE 18.2), RTF 0.024 at 4 threads on the 5950X (0.045 at 1), 330 MB after load; its
+qwen-audio-3.1 13.5, StepFun SSE 18.2), RTF 0.024 at 4 threads on a 16-core desktop (0.045 at 1), 330 MB after load; its
 rows span two speakers 11 % of the time cut at 。？！ alone, 4 % cut also at ， and pauses, so sentences() cuts at both.
 A window is decoded in pieces of at most PIECE_S cut where it is quietest (what the bench measured). One recognizer
-for the process, built at the first call with INFER_THREADS threads; its files live in MODELS_DIR/NAME, fetched then
-from the release tarball (LOCAL_ASR_URL: GitHub's, or a mirror's copy of the same tarball) when missing or not the
-pinned ones (sha256 below, of the 5950X's copy; the tarball's sha256 is what GitHub's release lists).
+for the process, built at the first call with INFER_THREADS threads; its files live in MODELS_DIR/NAME, taken then
+out of the release tarball (LOCAL_ASR_URL: GitHub's, or a mirror's copy of the same tarball; sha256-checked) when
+missing or not the pinned ones (FILES).
 
     uv run python local_asr.py file.wav     decode a 16 kHz mono wav and print its sentences (fetches the model)
 """
-import hashlib
 import logging
 import os
 import re
 import shutil
 import tarfile
 import threading
-import urllib.request
 from pathlib import Path
 
 import anyio.to_thread
@@ -30,9 +28,9 @@ SR = 16000
 TAR = "sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03"  # the release tarball and its top directory
 NAME = TAR.removeprefix("sherpa-onnx-")  # MODELS_DIR/NAME
 URL = os.environ.get("LOCAL_ASR_URL") or f"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/{TAR}.tar.bz2"
-# tarball sha256 5d02c36d7b44e886b7c8f0d8e051f8713acab96c264bb6ef9e718be39a6a2224 (GitHub's digest; ModelScope
-# adaada88/sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8 has the same one)
-FILES = {
+# GitHub's digest of the tarball; ModelScope adaada88/sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8 has the same
+TAR_SHA = "5d02c36d7b44e886b7c8f0d8e051f8713acab96c264bb6ef9e718be39a6a2224"
+FILES = {  # file in the tarball: sha256
     "encoder-epoch-99-avg-1.int8.onnx": "7f6aa62056efd8af9da13e0faa81cd3f284d2fb2e3b63de56fd2dfd3450910dc",
     "decoder-epoch-99-avg-1.onnx": "72f47405d3c1033bebccbef82f90071e7b4ba3e71b9c986f2b74244b25723aed",
     "joiner-epoch-99-avg-1.int8.onnx": "aedb7fa697b2ab43f20499826fff7c997eea7d67db77be97769aeeeb726e63b3",
@@ -50,32 +48,22 @@ _lock = threading.Lock()
 _rec = None
 
 
-def sha(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
-
-
 def fetch(d: Path):
-    """FILES into d when any is missing there or not the pinned one: the tarball to d/download.part, the files out of
-    it, each checked and renamed into place (ponytail: infer.fetch() once it lands, this is its one-model version)."""
-    need = [n for n, h in FILES.items() if not (d / n).is_file() or sha(d / n) != h]
+    """FILES into d when any is missing there or not the pinned one: the tarball (infer.download: the pinned one or a
+    RuntimeError) to d, the files out of it (one cut short is not the pinned one: taken out again next time)."""
+    need = [n for n, h in FILES.items() if not (d / n).is_file() or infer.sha(d / n) != h]
     if not need:
         return
-    d.mkdir(parents=True, exist_ok=True)
-    part = d / "download.part"
+    tar = d / f"{TAR}.tar.bz2"
     log.info("local asr: fetching %s for %s", URL, ", ".join(need))
     try:
-        with urllib.request.urlopen(URL, timeout=60) as r, open(part, "wb") as o:  # honours https_proxy
-            shutil.copyfileobj(r, o)
-        with tarfile.open(part, "r:bz2") as t:
+        infer.download(URL, tar, TAR_SHA)
+        with tarfile.open(tar, "r:bz2") as t:
             for n in need:
-                with t.extractfile(f"{TAR}/{n}") as f, open(d / f"{n}.part", "wb") as o:
+                with t.extractfile(f"{TAR}/{n}") as f, open(d / n, "wb") as o:
                     shutil.copyfileobj(f, o)
-                if (h := sha(d / f"{n}.part")) != FILES[n]:
-                    (d / f"{n}.part").unlink()
-                    raise RuntimeError(f"{URL}: {n} is not the pinned one (sha256 {h})")
-                os.replace(d / f"{n}.part", d / n)
     finally:
-        part.unlink(missing_ok=True)
+        tar.unlink(missing_ok=True)
 
 
 def recognizer():

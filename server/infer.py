@@ -2,11 +2,12 @@
 ReDimNet2 B6, the same models as before (on the main instance's audio: the same utterances and squeezed seconds, cosine
 >= 0.9999998, the same diarist labels). The files live in MODELS_DIR, each pinned by its sha256 below; at start fetch()
 downloads the missing ones (sha256-checked), then check() stops the server when one is missing or different,
-there is no fallback. Where they come from and how to make them: export_onnx.py.
+there is no fallback. Where they come from: SOURCES; how the maintainer makes them: export_onnx.py.
 """
 import hashlib
 import logging
 import os
+import shutil
 import struct
 import urllib.request
 from functools import cache
@@ -39,8 +40,29 @@ SOURCES = {  # file: where fetch() downloads it from when it is missing
     CMVN: FIRERED + "cmvn.ark",
     EMB: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx",  # export_onnx.py's export
 }
-MAKE = ("cd server && uv run --group export python export_onnx.py {d}; "
-        "in Docker: docker compose run --rm alldayrec uv run --group export python export_onnx.py")
+# export_onnx.py's ReDimNet2 differs byte for byte from machine to machine: only the release's file has the pinned sha256
+FIX = ("only the file at its URL is accepted: delete a wrong one and restart to download it again, or put it in {d} "
+       "yourself (export_onnx.py is how the maintainer makes a new release file, not a way to get this one)")
+
+
+def sha(p: Path) -> str:
+    with open(p, "rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def download(url: str, dest: Path, sha256: str):
+    """url to dest, kept only when its sha256 is the pinned one: through dest.part (removed on any failure), renamed
+    into place. RuntimeError when it is another file; honours https_proxy."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    try:
+        with urllib.request.urlopen(url, timeout=120) as r, open(part, "wb") as o:
+            shutil.copyfileobj(r, o)
+        if (got := sha(part)) != sha256:
+            raise RuntimeError(f"{url} has sha256 {got}, not the pinned {sha256}")
+        part.replace(dest)
+    finally:
+        part.unlink(missing_ok=True)
 
 
 def fetch(d: Path = DIR):
@@ -51,24 +73,17 @@ def fetch(d: Path = DIR):
             continue
         logging.getLogger(__name__).info("models: downloading %s from %s", name, url)
         try:
-            with urllib.request.urlopen(url, timeout=120) as r:
-                data = r.read()
-            if (got := hashlib.sha256(data).hexdigest()) != MODELS[name]:
-                raise SystemExit(f"models: {url} has sha256 {got}, not the pinned {MODELS[name]}")
-            d.mkdir(parents=True, exist_ok=True)
-            (d / f"{name}.part").write_bytes(data)
-            (d / f"{name}.part").replace(d / name)
-        except Exception as e:  # 401/404, no network, cut short, d not writable
-            raise SystemExit(f"models: downloading {name} from {url} failed: {e} (make it: {MAKE.format(d=d)}; "
-                             f"or put the file in {d})")
+            download(url, d / name, MODELS[name])
+        except Exception as e:  # 401/404, no network, cut short, d not writable, another file
+            raise SystemExit(f"models: downloading {name} from {url} failed: {e} ({FIX.format(d=d)})")
 
 
 def check(d: Path = DIR):
-    """SystemExit naming every model file that is missing in d or not the pinned one."""
-    bad = [f"{d / n} {'is missing' if not (d / n).is_file() else 'has another sha256'}" for n, h in MODELS.items()
-           if not (d / n).is_file() or hashlib.sha256((d / n).read_bytes()).hexdigest() != h]
+    """SystemExit naming every model file that is missing in d or not the pinned one, and its URL."""
+    bad = [f"{d / n} {'is missing' if not (d / n).is_file() else 'has another sha256'} (the pinned one: {SOURCES[n]})"
+           for n, h in MODELS.items() if not (d / n).is_file() or sha(d / n) != h]
     if bad:
-        raise SystemExit(f"models: {'; '.join(bad)} (make them: {MAKE.format(d=d)})")
+        raise SystemExit(f"models: {'; '.join(bad)}; {FIX.format(d=d)}")
 
 
 def session(name: str, threads: int) -> ort.InferenceSession:
