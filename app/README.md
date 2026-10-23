@@ -1,17 +1,12 @@
-# live_record
+# alldayrec app
 
-A new Flutter project.
+The iOS and Android app (Flutter): records the phone's mic or the BLE recorder, uploads the audio to your server, and
+shows its pages. Installing it and connecting it to a server: the Phone app section of the [main README](../README.md#phone-app).
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```bash
+PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get --enforce-lockfile   # the pub host recorded in pubspec.lock
+flutter build apk --release                                                   # Android
+flutter build ios --no-codesign                                               # iOS; to install on a phone, build from Xcode with
+                                                                              # ios/Flutter/Signing.local.xcconfig (see its .example)
+flutter analyze --no-pub && flutter test --no-pub -j 4
+```

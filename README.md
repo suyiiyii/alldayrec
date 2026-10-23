@@ -1,35 +1,129 @@
-# live-record
+# alldayrec（全天录）
 
-A continuous audio stream in, conversations out, within a minute.
+**alldayrec is a self-hosted, all-day recorder and personal memory layer: wear a recorder (or just carry your phone) from morning to night, and your own server turns the audio into speech-to-text transcripts with speaker diarization, conversation summaries, to-dos and a daily recap, within a minute.** It keeps the original audio, so every line can be played back and checked, and old days can be transcribed again by a better model later. It is device-agnostic (the iPhone and Android app, or an open-source BLE wearable you can build from a few parts), and it speaks MCP, so your own agent can search your days. Think of it as a lifelog you host yourself: an open-source alternative to Limitless, Plaud, Bee or Omi, without a subscription and without your conversations living on someone else's cloud.
 
-The phone app uploads Opus pieces; the server keeps them on disk as a queue and feeds them in time order, detects speech locally (FireRedVAD), and transcribes in two layers. The final layer always runs: pieces of up to 5 min, cut in pauses, go to the ASR engine once each; it decides locally who is the owner and keeps conversation-local speaker ids (ReDimNet2 voiceprints), closes a conversation after a silence and summarizes it. While a page shows today, the draft layer also sends each stretch at its pause, so text shows within seconds; drafts are kept (table `drafts`) and the page shows them only where final rows do not cover the time yet.
+[中文说明](#中文说明)
 
-Only speech detection and speaker identity run on this machine, both on onnxruntime (`server/infer.py`, no torch; the model files in `MODELS_DIR`, default `/opt/lr-models`, pinned by sha256: `uv run --group export python export_onnx.py` makes them); sentence splitting, diarization and transcription come from the cloud ASR engine `ENGINE` names (default `qwen`: one Alibaba Bailian / DashScope key).
+"LR" / "lr" is the project's internal codename, still used in the hardware and the code: recorder names like `LR-P3`, the firmware tool `lr.sh`, the CLI `lr.py`.
+
+## What it does
+
+- **Records all day.** The phone app uploads short Opus pieces; a BLE recorder writes everything to its SD card and streams it to the phone, which fills gaps after a disconnection. Nothing is lost while offline: pieces queue on the device and go up later.
+- **Transcribes in two layers.** The final layer cuts the audio in pauses and sends pieces of up to 5 minutes to a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio); while a page is open, a draft layer shows words within seconds.
+- **Knows who spoke.** Speech detection (FireRedVAD) and voiceprints (ReDimNet2) run locally on onnxruntime, no GPU: it learns your own voice, keeps speakers apart within a conversation and remembers the names you give them.
+- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history.
+- **Opens up.** A web UI, a remote MCP endpoint (`POST /mcp`) for Claude Code, Codex, Cursor and other agents, a small CLI (`cli/lr.py`), and SQLite storage you can read yourself.
+- **Stays yours.** One server, your disk, several people per server if you like (one token each). Audio goes only to the ASR engine you pick, transcripts only to the LLM you pick.
 
 ```
-cp .env.example .env   # fill in
-echo '[{"id": "main", "token": "", "data": "'$PWD/data'", "recordings": "'$PWD/recordings'"}]' > tenants.json && chmod 600 tenants.json
+BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) ──▶ web UI, MCP, CLI
+                      (or the phone's mic)    │ local: VAD, voiceprints (onnxruntime)
+                                              │ cloud: ASR engine, OpenAI-compatible LLM
+                                              ▼
+                                       SQLite + original audio
+```
+
+| Directory | What |
+|---|---|
+| `server/` | The server: upload queue, VAD and voiceprints, ASR engines, conversations, summaries, MCP (Python 3.11, uv) |
+| `web/` | The web UI: live transcript, conversations, speakers, calendar, device pages (Vue, pnpm) |
+| `app/` | The phone app for iOS and Android: records the mic or the BLE recorder, uploads, firmware updates (Flutter) |
+| `firmware/devkit/` | The BLE recorder firmware for nRF52840 boards (Zephyr / nRF Connect SDK), based on the Omi devkit |
+| `firmware/selftest/`, `firmware/blerelay/` | Board self-test firmware; an ESP32 BLE relay used for testing |
+| `cli/` | `lr.py`: read your conversations from a terminal or an agent |
+
+## Quickstart (Docker)
+
+You need Docker on an amd64 or arm64 machine and an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region. One key runs the ASR, and it can run the LLM too.
+
+```bash
+git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
+cp .env.example .env    # fill in DASHSCOPE_API_KEY and LLM_API_KEY (the same key works with the example LLM settings)
+mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
+docker compose build    # the image is built here from this checkout, amd64 or arm64 (prebuilt image: TODO)
+docker compose up -d
+docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
+```
+
+Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
+
+Phones need HTTPS: put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve). The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
+
+## Quickstart (without Docker)
+
+Python 3.11 with [uv](https://docs.astral.sh/uv/), ffmpeg, Node 22 with pnpm.
+
+```bash
+git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
+cp .env.example .env    # fill in the keys, and MODELS_DIR=<an absolute, writable directory>
+(cd web && pnpm install && pnpm build)    # -> server/static/dist
+echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/main'", "recordings": "'$PWD/data/main/recordings'"}]' > tenants.json && chmod 600 tenants.json
 cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 ```
 
-`tenants.json` (beside `.env`) is who the server serves: one tenant per person, each its own data and recordings dir and its own token; a lone tenant with an empty token runs without auth (`server/tenant.py`).
+`tenants.json` lists who the server serves: one entry per person, each with its own token and its own data and recordings directories (`server/tenant.py`). A single entry with an empty token runs without auth: keep such a server on 127.0.0.1.
 
-Page: http://127.0.0.1:8770/ . Data, per tenant: `<data>/live.db` (SQLite: sentences, drafts, conversations, summaries, voices, the upload queue, the recorders' event logs and status reports — page `/device/<name>`; schema in `server/db.py`), `<date>.passes.jsonl` (raw engine output per pass).
+### Model files
 
-Tests and tooling in `server/`: `test_live.py`, `replay_case.py` (replay a case through candidate pipelines), `score_case.py` (score against a case's `gt.jsonl`), `eval_all.sh`.
+Two models run on the server, on CPU: [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) (speech detection, Apache-2.0) and [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 (voiceprints, MIT). At the first start the server downloads the missing ones into `MODELS_DIR`, FireRedVAD from its upstream repository and ReDimNet2 from this repository's `models-v1` release, and checks each against the sha256 pinned in `server/infer.py`. A file that is already there is never downloaded again.
 
-### Code boundaries and regression checks
+If a download fails, put the files into `MODELS_DIR` yourself (`data/models` in Docker), from the same places. `server/export_onnx.py` re-creates all three from the upstream weights (it installs torch for this step only):
 
-- `server/pipeline_state.py` owns each device's typed in-memory state. Finalization and the independent draft reader keep separate cursors; persisted rows and public API payloads remain dictionaries. `server/volc_asr.py` shares the WebSocket session/packet lifecycle while keeping full-result and streaming-result accumulation separate.
-- `server/db.py` applies search bounds, membership filters and result limits in SQLite (JSON1 required), with transcript fallback in the same query. Metadata matching retains Python's Unicode case handling; only returned results decode full summary bodies. Name counts read participants without loading summaries.
-- `app/lib/main.dart` contains startup and the application root; `home.dart` owns navigation and the recording lifecycle. `settings.dart`, `recorder.dart`, and `recorder_status.dart` separate configuration, native-channel calls and status presentation; individual pages import their actual dependencies.
-  Disposing `Home` cancels status polling and unregisters its lifecycle observer; asynchronous settings/status completions do not act on a disposed page.
-- `fixtures/record-stream.json` is the common record-stream oracle for Web, Android, Swift and the Python recorder client. It covers fragmented/overlapping reads, clock anchors, gaps, truncated tails and supported boot-reuse behavior. Snapshot readers merge runs while live clients slice them; platform-specific differences are stated in the fixture rather than hidden by duplicate expectations.
-- Web mutations share busy/error handling through `web/src/lib/mutation.ts`; socket retries are owned by the mounted consumer and cancelled on teardown.
+```bash
+cd server && uv run --group export python export_onnx.py /path/to/models                        # without Docker
+docker compose run --rm alldayrec uv run --group export python export_onnx.py                   # Docker: into ./data/models
+```
 
-PR gates run the backend suite, Web type/build checks and `*.check.ts`, Flutter analysis/tests, Android JVM regressions, Swift protocol checks, and firmware host checks (including the microphone high-pass filter). Fixture changes trigger all three protocol-consumer gates. Android JVM tests bootstrap the pinned Flutter SDK's Gradle wrapper and need no signing credentials or APK release.
+The FireRedVAD files come out identical, but the ReDimNet2 export is not byte-for-byte reproducible across machines yet: its sha256 may differ from the pinned one, and then the server refuses it. The release file is the reliable way.
 
-Local checks (from the relevant directory, with the toolchains described below):
+Note on the voiceprint model: ReDimNet2's code and weights are MIT, but its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and decide whether that fits your use.
+
+## Configuration
+
+All settings are environment variables; [`.env.example`](.env.example) lists every one with a comment. The required ones:
+
+| Setting | What |
+|---|---|
+| `ENGINE` | The ASR engine of the final transcript. `qwen` (default) needs only `DASHSCOPE_API_KEY` |
+| `DASHSCOPE_API_KEY` | Alibaba Cloud Bailian key, Beijing region |
+| `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Any OpenAI-compatible `/chat/completions` endpoint with tool calls and JSON mode: summaries, to-dos, "ask AI", the recap |
+
+ASR engines:
+
+| `ENGINE` | Provider | Needs | Speakers |
+|---|---|---|---|
+| `qwen` | Alibaba Cloud Bailian, Qwen-Audio file transcription | `DASHSCOPE_API_KEY` | from the engine, refined by local voiceprints |
+| `volc` | Volcengine Doubao Seed-ASR 2.0 | `VOLC_ASR_KEY` | local voiceprints |
+| `stepfun-sse` | StepFun streaming ASR | `STEPFUN_API_KEY` | local voiceprints |
+| `stepfun`, `stepfun-file` | StepFun file mode | `STEPFUN_API_KEY` plus your own upload bridge and file-mode ASR service (`ASR_*`) | from the engine, refined by local voiceprints |
+
+`DRAFT_ENGINE=qwen-stream` streams the audio to Qwen while a page is open, so words show as they are said. `ENGINE_FALLBACK` takes the windows the main engine fails on.
+
+The LLM is always an external service: the project doesn't bundle or run one. To keep everything on your own hardware, point `LLM_BASE_URL` at a local OpenAI-compatible server yourself (vLLM, llama.cpp, Ollama); the model must handle tool calls and JSON output.
+
+## Phone app
+
+- **Android:** build it with `cd app && flutter build apk --release`, or install the APK from the Releases page when there is one. The server can also offer updates at `/app.apk`.
+- **iOS:** there is no App Store build; you build and install it yourself from Xcode. Copy `app/ios/Flutter/Signing.local.xcconfig.example` to `Signing.local.xcconfig` and put in your Team ID (and a bundle id suffix of your own). With a free Apple ID, an app you install this way stops opening after 7 days and has to be installed again; a paid Apple Developer account removes that limit.
+
+Connect the app: in the web UI open **连接手机** (`/connect`) and scan its QR code from the app's settings (**扫码登录**), or type the server address and token by hand. The app's UI is in Chinese for now.
+
+## Hardware (optional)
+
+The phone alone is enough. For all-day wear there is an open BLE recorder: an nRF52840 board, a PDM microphone, a microSD card and a small battery. It records to the card all the time and syncs to the phone whenever it's connected, so nothing is lost when the phone is away.
+
+| Model | Board |
+|---|---|
+| `LR-X1` | Seeed XIAO nRF52840 Sense (built-in mic) + SD module + battery |
+| `LR-P3` | ProMicro nRF52840 (nice!nano compatible) + PDM mic + SD module + switch, in a printed case |
+
+Firmware, wiring, build (nRF Connect SDK v2.7.0) and over-the-air updates: [`firmware/devkit/README.md`](firmware/devkit/README.md). New boards can be checked with [`firmware/selftest`](firmware/selftest). The firmware started from the [Omi](https://github.com/BasedHardware/omi) devkit.
+
+## Privacy and the law
+
+You are recording other people. Tell them, ask for consent where it is needed, and follow the law where you live; some places require every party's consent. All data stays on your server; the audio goes to the ASR provider you choose and transcripts go to the LLM you choose, under their terms.
+
+## Development
 
 ```bash
 # server/
@@ -40,90 +134,56 @@ for f in *.check.ts; do node --experimental-strip-types "$f" || exit 1; done
 # app/ (use the pub host recorded in pubspec.lock)
 PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get --enforce-lockfile
 flutter analyze --no-pub && flutter test --no-pub -j 4
-# Android JVM and Swift commands: .github/workflows/app.yml
-# Firmware host commands: .github/workflows/firmware-check.yml
+# Android JVM and Swift checks: .github/workflows/app.yml; firmware host checks: .github/workflows/firmware-check.yml
 ```
 
-The legacy `server/migrate.py` importer still refuses an existing `live.db` or pending first-layer transcripts, reads its JSON/audio inputs without changing them, and inserts audio pieces by explicit column names so added schema columns do not break the import. `test_migrate.py` exercises the real command with a temporary recording and verifies that a second invocation leaves the existing database untouched.
+Code boundaries, the CI workflows, release builds and their secrets: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Android app releases: raise `version` in `app/pubspec.yaml` (the build number after `+` must go up), build in a clean checkout of main (`cd app && ANDROID_HOME=~/Library/Android/sdk flutter build apk --release`, signed with `~/.android/live-record-debug.keystore` like every build before), then `server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk`. It puts the APK at the test instance's `/app.apk` (production: `LR_INSTANCES=/opt/lr-prod:lr-prod`, as `server/deploy.sh`) by a rename (a download under way keeps the old file), keeps the one it replaces as `data/live-record.apk.prev-<version>`, refuses one that is not newer, and checks `/api/app/latest`. That route reads the version from the APK itself (`server/apk.py`); Android phones ask for it at start and, back in front, once a day, and offer the update at the top of the home page.
+## Deploying with deploy.sh (maintainers)
 
-## GitHub Actions 构建与归档
-
-APK 和硬件固件使用独立构建流程；构建不等于生产发布，不会上传 `/app.apk`、调用固件发布 API 或刷写板子。现有 PR 检查继续保留。
-
-| 入口 | 构建内容 | 保存位置 |
-| --- | --- | --- |
-| `main` 上相关路径变更 | APK，或自上次成功构建以来有改动的固件系列（被新推送取消、失败的那次改动会补建；查不到上次成功就全部构建）的测试产物 | Actions Artifacts，保留 3 天 |
-| Actions → Run workflow | 手动选择构建目标及录音器型号 | Actions Artifacts，保留 3 天 |
-| `apk-v<versionName>` tag | 使用原签名的正式 APK，tag 版本须匹配 `app/pubspec.yaml` | Artifacts + Draft GitHub Release |
-| `firmware-*` tag | 正式录音器型号、自检和 ESP32 中继固件 | Artifacts + Draft GitHub Release |
-
-成功的分支构建会清理同一 workflow、同一分支的旧成功构建产物，仅保留最新一批；固件手动选型也会替换该分支之前的成功产物批次。失败或取消的构建不会触发清理。标签构建不参与清理；正式 Release 附件长期保留，上传中转 Artifacts 保留 3 天。清理任务单独授予 `actions: write`，构建任务仍为只读权限。
-
-免费额度按账号共享，3 天保留不保证不超额。建议在账号 Billing 的 Budgets and alerts 中为 Actions 设置零超额预算并启用停止使用；此账号设置不由 workflow 管理。
-
-正式 tag 必须指向 `main` 历史上的提交。APK 和固件分别版本化；固件内部版本继续使用 `lr.sh` 的提交时间和 hash，不改为 APK 版本号。Release 使用构建 job 上传的同一批文件，不重新编译；审阅 Draft Release 后再决定是否发布。仓库是私有的，下载需要仓库读取权限；手机和录音器继续使用现有服务端更新入口，不直接读取 GitHub。
-
-手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit）。即使手动选择 tag，仍构建测试包，不获得正式签名或中继密钥、不创建 Release。
+Besides Docker, the server can run as systemd units on a Linux host, deployed over ssh from a clean checkout of `origin/main`. `server/deploy.sh` builds the web app, copies the release, backs up each instance's code and every tenant's `live.db`, installs it (`uv sync`), checks that the model files are there, restarts each instance and checks it; `server/deploy.sh check` only reads what runs, `server/deploy.sh rollback` puts back what the last deploy replaced.
 
 ```bash
-gh workflow run apk-build.yml --ref main
-gh workflow run firmware-build.yml --ref main -f target=devkit -f variant=promicro-p3
-# 正式 APK：先将 pubspec.yaml 的版本更新合入 main，再打与 versionName 匹配的 tag。
-git fetch origin main
-v=$(git show origin/main:app/pubspec.yaml | sed -n 's/^version: *\([0-9.]*\)+.*/\1/p')  # versionName
-git tag "apk-v$v" origin/main
-git push origin "apk-v$v"
-# 固件归档 tag 独立命名；其设备版本仍由源码提交确定。
-git tag firmware-20261014 origin/main
-git push origin firmware-20261014
+export LR_DEPLOY_HOST=user@host                  # required: the ssh / scp target (your ssh config and agent)
+export LR_DEPLOY_SHELL='sudo bash -s'            # default `bash -s`: the remote shell the script is piped into, as root
+export LR_INSTANCES='/opt/alldayrec:alldayrec'   # the default: <dir>:<systemd unit> pairs, space separated, test first
+server/deploy.sh                                 # or: server/deploy.sh check | rollback
+server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk   # the APK phones are offered at /app.apk
+server/tenants.sh add <id>                       # a new tenant (its own token and dirs) of the last instance
 ```
 
-同一个正式 tag 的 Release 不覆盖重写；重跑前先检查是否已有 Draft，避免把既有版本误当作新构建。重建归档时选择新的归档 tag；正式 APK tag 仍必须匹配源码 versionName。
+Each instance is a directory with its `.env` and `tenants.json`, run by its systemd unit. scp puts the release and the APK in the login's home on the host; when the remote shell's `$HOME` is another one, `LR_TGZ` and `LR_APK` give their paths there. The details are in the comments at the top of each script.
 
-### Runner 与工具链
+## License
 
-沿用仓库变量 `LR_RUNNER`：`lr-54` 选择带该标签的自建 runner，空值选择 GitHub-hosted Ubuntu。PR 检查可以落在任何一台带 `lr-54` 标签的 runner 上；APK 和固件归档构建还要求 `lr-build` 标签（只有装了 Nordic 和 ESP-IDF 工具链、磁盘够大的那台有），小 runner 只跑 PR 检查。自建 runner 离线时任务会排队，不会自动切换到云端；切换前确认目标机器有完整工具链。self-hosted 执行不消耗 GitHub-hosted 构建分钟，但上传 Artifacts 仍占 GitHub 的产物存储额度。
+MIT, see [LICENSE](LICENSE). Bundled third-party code (the Omi devkit, Opus, FireRedVAD's post-processor and others) keeps its own license: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-工具链固定为 Flutter 3.47.5（Dart 3.13.4）、Android API 37.0、Nordic NCS v2.7.0 和 ESP-IDF v5.5.5。工具及依赖缓存在 runner 用户可写目录，不需要给 CI 用户 sudo 或 Docker 权限。限制构建并发和 Gradle 内存；runner 当前 3 GiB 内存限制须以实际构建结果为准，不能沿用项目本地 Gradle 的 8 GiB 堆设置。
+---
 
-自建 runner 需预装 `bash/git/curl/unzip/tar/xz/sha256sum`、原生 C 编译器、`cmake/ninja/make`、`gh`，以及 `~/.local/bin/uv` 和 `~/sdk/flutter`。工作流自行安装固定 JDK（Temurin 17.0.18+8）、用户目录 Android SDK、Nordic 和 ESP-IDF 工具链；Nordic 工具链自带 dtc/gperf，无需系统安装。Android 默认保存在 `~/sdk/android`；Nordic/ESP-IDF 与 self-hosted Gradle 依赖保存在 `~/.cache/live-record-ci/`，无需每次重新下载。固件缓存路径可通过 `LR_FIRMWARE_CACHE` 覆盖。首次安装需要访问 GitHub、Nordic、Espressif、Google Android、Flutter/pub 和 Maven/Gradle 下载源；缓存不能替代网络可达性。
+## 中文说明
 
-`ci-runner` 的 Gradle 从阿里云镜像取 Maven Central 和 Gradle Plugin Portal：.54 经局域网透明代理访问这两处时，约 3%–10% 的 TLS 握手会被断开，Gradle 遇到握手失败不重试，直接在本次构建里停用该仓库，构建随即失败（2026-10-15）。runner 上的 `/home/ci-runner/.cache/live-record-ci/apk-gradle/init.d/lr-mirrors.gradle`（self-hosted 的 `GRADLE_USER_HOME/init.d`，每次 Gradle 构建自动加载）就是 [`.github/runner/lr-mirrors.gradle`](.github/runner/lr-mirrors.gradle)；Google Maven（dl.google.com 解析到国内 CDN）不改。每周的 `ci-runner-gc` 不清这个目录；重建 runner 或删掉这个 Gradle 缓存目录后要把它放回（以 ci-runner 身份）。GitHub-hosted runner 和本机构建不加载它。
+**全天录（alldayrec）是一个自己部署的全天录音和个人记忆层。** 戴一个录音设备（或者只带手机）从早录到晚，自己的服务器在一分钟内把音频变成带说话人的转写、对话摘要、待办和每日回顾。它保留原始录音，每句话都能回放核对，以后有了更好的模型还能把过去重新转写一遍。它不挑设备（iPhone、安卓 App，或者几十块钱就能自己做的开源蓝牙录音硬件），支持 MCP，自己的 Agent 可以直接查你的每一天。可以把它当成自己托管的 lifelog：Limitless、Plaud、Bee、Omi 的开源替代，没有订阅，对话也不放在别人的云上。
 
-本机命令行也可调用 `.github/scripts/firmware-setup-ncs.sh` 或 `firmware-setup-idf.sh`，再按脚本打印的 env 路径执行 `firmware-build.sh`。这是原生构建，不使用容器；多型号固件矩阵串行执行，每次编译并发限制为 2。
+「LR」「lr」是项目的内部代号，硬件和代码里还在用：录音设备型号 `LR-P3`、固件工具 `lr.sh`、命令行 `lr.py`。
 
-### 正式构建凭据
+**能做什么**
 
-在仓库 Settings → Secrets and variables → Actions 配置：
+- 全天录音：手机 App 上传 Opus 分片；蓝牙录音设备一直写 SD 卡，同时推给手机，断开期间的部分回来后补齐。
+- 两层转写：定稿层在停顿处切开，每段最长 5 分钟交给云端识别（默认阿里云百炼千问，约 ¥0.05/小时音频）；页面开着时，初稿层几秒内出字。
+- 认人：语音检测（FireRedVAD）和声纹（ReDimNet2）在本机 CPU 上跑（onnxruntime，不需要显卡），认得出你自己，分得清一段对话里的不同人，记得你起的名字。
+- 记忆：一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索、「问 AI」。
+- 开放：网页、远程 MCP（`POST /mcp`）、命令行 `cli/lr.py`，数据就是 SQLite。
 
-| Secret | 用途 |
-| --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | 原 `live-record-debug.keystore` 的 Base64；不能新生成密钥替代 |
-| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
-| `ANDROID_KEY_ALIAS` | 原签名密钥 alias |
-| `ANDROID_KEY_PASSWORD` | 原签名密钥密码 |
-| `ANDROID_SIGNING_CERT_SHA256` | 原签名证书 SHA256 指纹，防止错用另一把密钥 |
-| `RELAY_KEY_HEX` | 现有 ESP32 中继的 64 位十六进制认证 key |
+**快速开始**：命令见上面的 [Quickstart (Docker)](#quickstart-docker) 和 [Quickstart (without Docker)](#quickstart-without-docker)；Docker 镜像目前用 `docker compose build` 在本机构建（预构建镜像：TODO）。最少只要一把阿里云百炼（DashScope）北京区的 key：`ENGINE=qwen` 的语音识别用它，`.env.example` 里示例的大模型设置也用同一把。手机连服务器需要 HTTPS，请在 8770 端口前面放一个带 TLS 的反向代理。
 
-在持有原 keystore 的机器上，可以通过 stdin 设置文件 Secret，避免把内容打印或放进命令参数：
+**模型文件**：首次启动自动下载到 `MODELS_DIR` 并校验 sha256：FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载；已经有的文件不会重复下载。下载失败时，把文件自己放进 `MODELS_DIR`（Docker 里是 `data/models`）；`export_onnx.py` 也能从上游权重重新导出，但 ReDimNet2 的导出在不同机器上逐字节不一致，sha256 可能对不上钉住的值，服务会拒绝它，所以还是以 Release 里的文件为准。注意：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0），是否适合你的用途请自己判断，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-```bash
-base64 < ~/.android/live-record-debug.keystore | gh secret set ANDROID_KEYSTORE_BASE64 --repo suyiiyii/live-record
-```
+**配置**：全部是环境变量，见 [`.env.example`](.env.example)。大模型一律是外部服务，项目不打包、不运行大模型；想全在自己机器上跑，把 `LLM_BASE_URL` 指向你自己的 OpenAI 兼容服务即可，模型需要支持工具调用和 JSON 输出。
 
-密码、alias 和 relay key 使用 GitHub 的 Secret 输入框或 `gh secret set` 的交互输入，不写入 shell 历史。证书指纹应从原 keystore 或已安装正式 APK 的签名证书核实，不从新生成的测试包复制。
+**手机 App**：安卓自己 `flutter build apk`，或者从 Release 下载 APK。iOS 不上架、不分发，需要自己用 Xcode 构建安装：把 `app/ios/Flutter/Signing.local.xcconfig.example` 复制成 `Signing.local.xcconfig`，填自己的 Team ID。用免费 Apple ID 装的应用 7 天后会打不开，要重新安装一次；付费开发者账号没有这个限制。网页的「连接手机」页面有二维码，App 设置里「扫码登录」即可。
 
-正式 APK 缺签名凭据或证书不匹配时失败；正式 ESP32 构建缺 relay key 时失败。测试 APK 由 CI 每次随机生成的测试密钥签名，包名与正式版相同，不能覆盖原签名安装：要装测试包必须先卸载正式 App，卸载会丢掉手机上还没上传的录音分片；测试 ESP32 中继使用公开测试 key，不能当作生产认证配置。产物名称和元数据区分测试与正式用途。
+**硬件（可选）**：只用手机也可以。全天佩戴可以用开源的蓝牙录音设备：nRF52840 板子 + PDM 麦克风 + microSD 卡 + 小电池，见 [`firmware/devkit/README.md`](firmware/devkit/README.md)。
 
-ESP32 二进制包含认证 key，正式固件只能在受信任的私有仓库访问范围内分享。不要把签名文件、认证 key 或密码放入产物、缓存日志和 Git。普通构建权限为 `contents: read`，只有创建 Draft Release 的 job 使用 `contents: write`。
+**隐私和法律**：录音会录到别人。请告知对方，需要时取得同意，遵守当地法律。数据都在你自己的服务器上；音频会发给你选择的语音识别服务，转写会发给你选择的大模型。
 
-### 下载与安装
-
-- 在 Actions 对应运行页面下载 Artifacts；正式归档在 Releases 的 Draft 中。过期 Artifacts 不是长期版本库。
-- 录音器正式型号为 `sdmod`（LR-X1）、`promicro`（LR-P1）、`promicro-p2`（LR-P2）、`promicro-p3`（LR-P3）；`expansion` 仅用于手动测试。
-- 录音器产物提供 USB 刷写用 UF2 和蓝牙升级用 DFU ZIP；自检固件单独标识，不与录音器固件混装。
-- ESP32 产物保存刷写参数和原相对路径下的所有必需二进制，不只保存应用 `.bin`。
-- 每组产物包含源码提交、版本、型号、工具链和 SHA256。正式 APK 更新时仍需递增 `app/pubspec.yaml` 中 `+` 后的 build number。
-- 构建成功只证明编译和打包；USB/蓝牙刷写、录音、SD 卡及硬件行为仍须在实物上验收。生产发布仍按现有 APK 和固件发布流程明确执行。
+**许可**：MIT，见 [LICENSE](LICENSE)；第三方代码保留各自的许可，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
