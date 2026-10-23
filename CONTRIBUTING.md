@@ -61,17 +61,9 @@ git push origin firmware-20261014
 
 同一个正式 tag 的 Release 不覆盖重写；重跑前先检查是否已有 Draft，避免把既有版本误当作新构建。重建归档时选择新的归档 tag；正式 APK tag 仍必须匹配源码 versionName。
 
-### Runner 与工具链
+### Runner
 
-沿用仓库变量 `LR_RUNNER`：`lr-54` 选择带该标签的自建 runner，空值选择 GitHub-hosted Ubuntu。PR 检查可以落在任何一台带 `lr-54` 标签的 runner 上；APK 和固件归档构建还要求 `lr-build` 标签（只有装了 Nordic 和 ESP-IDF 工具链、磁盘够大的那台有），小 runner 只跑 PR 检查。自建 runner 离线时任务会排队，不会自动切换到云端；切换前确认目标机器有完整工具链。self-hosted 执行不消耗 GitHub-hosted 构建分钟，但上传 Artifacts 仍占 GitHub 的产物存储额度。
-
-工具链固定为 Flutter 3.47.5（Dart 3.13.4）、Android API 37.0、Nordic NCS v2.7.0 和 ESP-IDF v5.5.5。工具及依赖缓存在 runner 用户可写目录，不需要给 CI 用户 sudo 或 Docker 权限。限制构建并发和 Gradle 内存；runner 当前 3 GiB 内存限制须以实际构建结果为准，不能沿用项目本地 Gradle 的 8 GiB 堆设置。
-
-自建 runner 需预装 `bash/git/curl/unzip/tar/xz/sha256sum`、原生 C 编译器、`cmake/ninja/make`、`gh`，以及 `~/.local/bin/uv` 和 `~/sdk/flutter`。工作流自行安装固定 JDK（Temurin 17.0.18+8）、用户目录 Android SDK、Nordic 和 ESP-IDF 工具链；Nordic 工具链自带 dtc/gperf，无需系统安装。Android 默认保存在 `~/sdk/android`；Nordic/ESP-IDF 与 self-hosted Gradle 依赖保存在 `~/.cache/live-record-ci/`，无需每次重新下载。固件缓存路径可通过 `LR_FIRMWARE_CACHE` 覆盖。首次安装需要访问 GitHub、Nordic、Espressif、Google Android、Flutter/pub 和 Maven/Gradle 下载源；缓存不能替代网络可达性。
-
-`ubuntu-54-lr` 的 Gradle 从阿里云镜像取 Maven Central 和 Gradle Plugin Portal：.54 经局域网透明代理访问这两处时，约 3%–10% 的 TLS 握手会被断开，Gradle 遇到握手失败不重试，直接在本次构建里停用该仓库，构建随即失败（2026-10-15）。runner 上的 `/home/lr-runner/.cache/live-record-ci/apk-gradle/init.d/lr-mirrors.gradle`（self-hosted 的 `GRADLE_USER_HOME/init.d`，每次 Gradle 构建自动加载）就是 [`.github/runner/lr-mirrors.gradle`](.github/runner/lr-mirrors.gradle)；Google Maven（dl.google.com 解析到国内 CDN）不改。每周的 `lr-runner-gc` 不清这个目录；重建 runner 或删掉这个 Gradle 缓存目录后要把它放回（以 lr-runner 身份）。GitHub-hosted runner 和本机构建不加载它。
-
-本机命令行也可调用 `.github/scripts/firmware-setup-ncs.sh` 或 `firmware-setup-idf.sh`，再按脚本打印的 env 路径执行 `firmware-build.sh`。这是原生构建，不使用容器；多型号固件矩阵串行执行，每次编译并发限制为 2。
+CI runs on GitHub-hosted runners (`runs-on: ubuntu-24.04`). The workflows install their own toolchains: Flutter 3.47.5 (Dart 3.13.4), Android API 37.0, Temurin JDK 17.0.18+8, Nordic NCS v2.7.0 and ESP-IDF v5.5.5. Do not register self-hosted runners on this public repository: any pull request could run code on them.
 
 ### 正式构建凭据
 
@@ -106,3 +98,13 @@ ESP32 二进制包含认证 key，正式固件只能在受信任的私有仓库�
 - ESP32 产物保存刷写参数和原相对路径下的所有必需二进制，不只保存应用 `.bin`。
 - 每组产物包含源码提交、版本、型号、工具链和 SHA256。正式 APK 更新时仍需递增 `app/pubspec.yaml` 中 `+` 后的 build number。
 - 构建成功只证明编译和打包；USB/蓝牙刷写、录音、SD 卡及硬件行为仍须在实物上验收。生产发布仍按现有 APK 和固件发布流程明确执行。
+
+## Commit messages
+
+Keep the existing form `[type][Area] subject`, in English, imperative, subject at most 72 characters; details go in the body.
+
+- type: `feat`, `fix`, `chore`, `ci`, `perf`, `doc`, `test`
+- Area: `Server`, `App`, `Firmware`, `Web`, `CI`, … (several may stack: `[fix][Server][Web]`)
+- example: `[fix][Server] Skip StepFun env checks unless the engine is stepfun`
+
+No `Co-authored-by` trailers.
