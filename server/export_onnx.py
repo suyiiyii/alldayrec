@@ -10,8 +10,8 @@ sha256 infer.MODELS pins. Needs torch, only here: the export dependency group.
 - redimnet2-b6.onnx: ReDimNet2 B6, VoxBlink2 + VoxCeleb2 + CN-Celeb, large-margin fine-tuned
   (b6-vb2+vox2+cnc2_v0-lm.pt of the v1.0.0 release of github.com/PalabraAI/redimnet2, code at c5bbe0b), MIT.
   Exported here (the TorchScript exporter, opset 17, any length; the front end is already a conv1d STFT), then compared
-  with the torch model on noise of several lengths. This export (made with torch 2.5.1) is also the models-v1 release
-  file the server fetches when it is missing (infer.SOURCES); its training data VoxBlink2 is CC BY-NC-SA 4.0
+  with the torch model on noise of several lengths. The models-v1 release file the server fetches when it is missing
+  (infer.SOURCES) is this export, made with torch 2.5.1; its training data VoxBlink2 is CC BY-NC-SA 4.0
   (THIRD_PARTY_NOTICES).
 """
 import hashlib
