@@ -119,6 +119,8 @@ ASR engines:
 
 `DRAFT_ENGINE=qwen-stream` streams the audio to Qwen while a page is open, so words show as they are said. `ENGINE_FALLBACK` takes the windows the main engine fails on.
 
+The comparison of the local engine with the cloud engines is in [docs/asr-benchmark.md](docs/asr-benchmark.md).
+
 The LLM is always an external service: the project doesn't bundle or run one. To keep everything on your own hardware, point `LLM_BASE_URL` at a local OpenAI-compatible server yourself (vLLM, llama.cpp, Ollama); the model must handle tool calls and JSON output.
 
 ## Phone app

@@ -118,6 +118,8 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 
 `DRAFT_ENGINE=qwen-stream` 会在页面开着时把音频流式推给千问，边说边出字。`ENGINE_FALLBACK` 接手主引擎失败的窗口。
 
+本地引擎与云端引擎的对比数据见 [docs/asr-benchmark.md](docs/asr-benchmark.md)。
+
 大模型一律是外部服务，项目不打包、不运行大模型；想全在自己机器上跑，把 `LLM_BASE_URL` 指向你自己的 OpenAI 兼容服务（vLLM、llama.cpp、Ollama）即可，模型需要支持工具调用和 JSON 输出。
 
 ## 手机 App
