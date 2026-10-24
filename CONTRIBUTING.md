@@ -1,7 +1,7 @@
 # Contributing
 
 How the server works inside, the code boundaries, the checks every PR runs, and how CI builds and archives the APK and
-the firmware. Setting up and running a server: [README.md](README.md); the local check commands are in its
+the firmware. Setting up and running a server: [README.en.md](README.en.md); the local check commands are in its
 Development section.
 
 ## How the server works
