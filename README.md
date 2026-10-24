@@ -94,7 +94,7 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-bina
   "https://<你的服务器>/api/chunks?device=import&start=$(date -d '2026-10-20 09:30' +%s)000"
 ```
 
-导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。接口细节见 `server/server.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
+导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。接口细节见 `server/routes_upload.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
 
 ## 快速开始（Docker）
 

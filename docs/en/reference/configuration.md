@@ -103,18 +103,18 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 
 | Variable | When unset | Description | Source |
 |---|---|---|---|
-| `SLICE_FOREGROUND_S`, `SLICE_BACKGROUND_S`, `SLICE_SCREEN_OFF_S` | `1`, `20`, `60` | Seconds of audio per piece while the app is in the foreground, in the background, or with the screen off (Android); the app reads them from `/api/client-config` | `server.py` |
-| `REFINE_WINDOW_S` | `240` | The most seconds of audio the draft layer handles at once | `server.py` |
-| `LIVE_EVERY_S` | `120` | The live analysis is redone each time an ongoing conversation gains this many seconds of speech | `server.py` |
-| `SQUEEZE_KEEP_S` | `3` | Before audio goes to the engine, silences longer than this many seconds are cut to this length; 0 sends the audio whole | `server.py` |
-| `SQUEEZE_VAD` | `0.3` | The VAD threshold that finds those silences | `server.py` |
-| `SUMMARY_WORKERS` | `4` | How many summaries are written at once | `server.py` |
+| `SLICE_FOREGROUND_S`, `SLICE_BACKGROUND_S`, `SLICE_SCREEN_OFF_S` | `1`, `20`, `60` | Seconds of audio per piece while the app is in the foreground, in the background, or with the screen off (Android); the app reads them from `/api/client-config` | `routes_upload.py` |
+| `REFINE_WINDOW_S` | `240` | The most seconds of audio the draft layer handles at once | `device_pipeline.py` |
+| `LIVE_EVERY_S` | `120` | The live analysis is redone each time an ongoing conversation gains this many seconds of speech | `device_pipeline.py` |
+| `SQUEEZE_KEEP_S` | `3` | Before audio goes to the engine, silences longer than this many seconds are cut to this length; 0 sends the audio whole | `asr.py` |
+| `SQUEEZE_VAD` | `0.3` | The VAD threshold that finds those silences | `segmenter.py` |
+| `SUMMARY_WORKERS` | `4` | How many summaries are written at once | `summaries.py` |
 | `QWEN_ASR_MODEL` | `qwen-audio-3.1-asr-flash-filetrans` | The Bailian model the `qwen` engine uses | `qwen_asr.py` |
 | `ASR_CALLS`, `INFER_CALLS`, `DB_CALLS`, `MEDIA_CALLS` | `1`, `2`, `8`, `16` | How many local ASR runs, voiceprint computations, whole-database queries and audio encodes or decodes run at once | `threads.py` |
 | `INFER_THREADS` | `4` | onnxruntime threads per voiceprint computation | `infer.py` |
 | `VAD_GAIN_MAX_DB` | `16` | The most dB the VAD's features are raised (this affects only speech detection, not the audio sent to the engine or played back); 0 turns it off | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | The most dB the audio sent to the engine is raised; 0 sends it as is | `squeeze.py` |
 | `DEHUM` | `1` | Removes the recorder's 10 ms periodic hum when its audio is read; 0 turns it off | `audio.py` |
-| `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `server.py` |
+| `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `routes_speakers.py` |
 | `DIAR_TH`, `DIAR_JOIN`, `DIAR_GUARD`, `PEOPLE_MIN` | `0.5`, `0.35`, `0.6`, `0.7` | Thresholds for telling speakers apart within a conversation | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你的声音」 (Which one is your voice) card pops up by itself | `selfvoice.py` |

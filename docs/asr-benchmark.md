@@ -49,7 +49,7 @@ slightly penalised everywhere. On home alone: SenseVoice 16.5, Paraformer 19.0, 
 qwen 11.6 and Volcengine 7.3.
 
 **What the model sees.** Each case is cut in pauses into blocks of at most 5 min, the same blocks as an earlier cloud
-comparison. Inside a block the server's own loose VAD (`server.Segmenter`, `SQUEEZE_VAD` 0.3) finds the speech, padded
+comparison. Inside a block the server's own loose VAD (`segmenter.Segmenter`, `SQUEEZE_VAD` 0.3) finds the speech, padded
 0.2 s, merged across gaps under 0.5 s and cut to at most 20 s at the quietest 100 ms. One decode per segment; that is
 what `ENGINE=local` does inside a window.
 

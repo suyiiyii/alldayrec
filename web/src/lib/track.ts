@@ -1,6 +1,6 @@
 // The conversation player's arithmetic (lib/audio.ts plays it). No Vue here: track.check.ts runs it under plain
 // node. Times are unix ms; the API's are local wall-clock strings without a zone, parsed with Date.parse
-export const WINDOW = 110_000; // one /api/audio request: the server cuts at most 120 s (server.py cut())
+export const WINDOW = 110_000; // one /api/audio request: the server cuts at most 120 s (routes_audio.py cut())
 // The windows from where play starts: a short first one so sound comes within a second (a 110 s WAV is 3.5 MB,
 // seconds on 4G), a middle one that can arrive while it plays, then full ones
 const FIRST = [10_000, 30_000];

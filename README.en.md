@@ -94,7 +94,7 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-bina
   "https://<your server>/api/chunks?device=import&start=$(date -d '2026-10-20 09:30' +%s)000"
 ```
 
-Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. The endpoint is `chunk()` in `server/server.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
+Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. The endpoint is `chunk()` in `server/routes_upload.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
 
 ## Quickstart (Docker)
 

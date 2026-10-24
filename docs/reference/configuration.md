@@ -103,18 +103,18 @@ type: reference
 
 | 变量 | 不设时 | 说明 | 源码 |
 |---|---|---|---|
-| `SLICE_FOREGROUND_S`、`SLICE_BACKGROUND_S`、`SLICE_SCREEN_OFF_S` | `1`、`20`、`60` | App 在前台、后台、熄屏（安卓）时每块音频的秒数，App 通过 `/api/client-config` 读取 | `server.py` |
-| `REFINE_WINDOW_S` | `240` | 初稿层一次最多处理的音频秒数 | `server.py` |
-| `LIVE_EVERY_S` | `120` | 进行中的对话新增这么多秒语音后，重做实时分析 | `server.py` |
-| `SQUEEZE_KEEP_S` | `3` | 送给引擎前，长于这个秒数的静音剪到这么长；0 表示整段送 | `server.py` |
-| `SQUEEZE_VAD` | `0.3` | 判断上面那些静音用的 VAD 阈值 | `server.py` |
-| `SUMMARY_WORKERS` | `4` | 同时写摘要的数量 | `server.py` |
+| `SLICE_FOREGROUND_S`、`SLICE_BACKGROUND_S`、`SLICE_SCREEN_OFF_S` | `1`、`20`、`60` | App 在前台、后台、熄屏（安卓）时每块音频的秒数，App 通过 `/api/client-config` 读取 | `routes_upload.py` |
+| `REFINE_WINDOW_S` | `240` | 初稿层一次最多处理的音频秒数 | `device_pipeline.py` |
+| `LIVE_EVERY_S` | `120` | 进行中的对话新增这么多秒语音后，重做实时分析 | `device_pipeline.py` |
+| `SQUEEZE_KEEP_S` | `3` | 送给引擎前，长于这个秒数的静音剪到这么长；0 表示整段送 | `asr.py` |
+| `SQUEEZE_VAD` | `0.3` | 判断上面那些静音用的 VAD 阈值 | `segmenter.py` |
+| `SUMMARY_WORKERS` | `4` | 同时写摘要的数量 | `summaries.py` |
 | `QWEN_ASR_MODEL` | `qwen-audio-3.1-asr-flash-filetrans` | `qwen` 引擎用的百炼模型 | `qwen_asr.py` |
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
-| `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `server.py` |
+| `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `DIAR_TH`、`DIAR_JOIN`、`DIAR_GUARD`、`PEOPLE_MIN` | `0.5`、`0.35`、`0.6`、`0.7` | 一段对话内区分说话人的阈值 | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | 「哪个是你的声音」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |

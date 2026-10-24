@@ -27,7 +27,7 @@ Releases 里最新的安卓 APK 是 `apk-v1.5.0`（1.5.0+25）。它只能连 `h
 
 - 服务器上放了 APK 时，用手机浏览器打开 `https://<你的服务器>/app.apk` 下载。网页的 **连接手机** 页也会给出这个下载按钮。
 
-服务器提供的 APK 是第一个租户数据目录里的 `live-record.apk` 文件（`server/server.py`）。按快速开始部署的 Docker 里，就是 `data/main/live-record.apk`。App 会对比这个文件的版本号，提示更新。
+服务器提供的 APK 是第一个租户数据目录里的 `live-record.apk` 文件（`server/routes_pages.py`）。按快速开始部署的 Docker 里，就是 `data/main/live-record.apk`。App 会对比这个文件的版本号，提示更新。
 
 ### iOS
 
