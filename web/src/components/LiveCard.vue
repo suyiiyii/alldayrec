@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 import LivePanel from "./LivePanel.vue";
@@ -29,6 +29,31 @@ const line = computed(() => {
   return newest(Object.values(partials.value)) ?? newest(rows.value);
 });
 const isNow = (r: Row) => Object.values(partials.value).includes(r);
+// its key: a row over the line's own time is the same sentence and stays in place (a partial growing, the draft row it
+// ends as, that row's final, which can be cut a little differently); a later sentence rolls in
+const key = ref("");
+watch(
+  line,
+  (r, was) => {
+    const same =
+      was &&
+      r &&
+      was.source === r.source &&
+      (r.start === was.start || (r.start < was.end && was.start < r.end));
+    if (r && !same) key.value = r.source + r.start;
+  },
+  { immediate: true },
+);
+// a partial longer than the line shows its newest words, the start cut and faded (cut: it does not fit, measured as
+// the text changes)
+let textEl: HTMLElement | null = null;
+const setText = (e: unknown) => e && (textEl = e as HTMLElement); // not the leaving line's unmount (null)
+const cut = ref(false);
+watch(
+  () => line.value?.text,
+  () => (cut.value = !!textEl && textEl.offsetWidth > textEl.parentElement!.clientWidth),
+  { flush: "post" },
+);
 </script>
 
 <template>
@@ -39,12 +64,11 @@ const isNow = (r: Row) => Object.values(partials.value).includes(r);
         >{{ t("liveCard.full") }}<Icon name="chevron-right" :size="16"
       /></RouterLink>
     </div>
-    <!-- keyed by its start: a partial growing, and the draft row it ends as, stay one line; the next sentence rolls in -->
     <RouterLink class="cap" to="/live" :aria-label="t('liveCard.captions')">
       <Transition name="roll">
         <p
           v-if="line"
-          :key="line.source + line.start"
+          :key="key"
           class="line"
           :class="{ draft: line.state === 'draft', now: isNow(line) }"
           :title="line.state === 'draft' ? t('liveCard.draft') : undefined"
@@ -52,7 +76,9 @@ const isNow = (r: Row) => Object.values(partials.value).includes(r);
           <Avatar v-if="line.speaker" :name="line.speaker" :size="20" /><span v-else class="who"
             ><span class="pulse"
           /></span>
-          <span class="text">{{ line.text }}</span>
+          <span class="text" :class="{ tail: isNow(line), cut }"
+            ><span :ref="setText">{{ line.text }}</span></span
+          >
         </p>
         <p v-else class="line muted">{{ t("liveCard.soon") }}</p>
       </Transition>
@@ -109,6 +135,17 @@ const isNow = (r: Row) => Object.values(partials.value).includes(r);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* a partial: its end in sight, the start cut off (a layout, so also with reduced motion) */
+.tail {
+  display: flex;
+  justify-content: flex-end;
+}
+.tail > span {
+  flex: 1 0 auto; /* the line's width when it fits (the text starts on the left), its own when it does not */
+}
+.tail.cut {
+  mask-image: linear-gradient(to right, transparent, #000 2em);
 }
 .draft .text {
   color: var(--fg-2);
