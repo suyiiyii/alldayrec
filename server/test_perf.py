@@ -20,7 +20,8 @@ from alldayrec.tenant import T
 def test_requests(tmp_path, monkeypatch):
     t = db.open_db(tmp_path / "live.db")  # one tenant without a token: no auth
     monkeypatch.setattr(core, "TENANTS", [t])
-    monkeypatch.setattr(routes_api, "status", lambda: (time.sleep(perf.SLOW_MS / 1000 + 0.01), {"x": 1})[1])
+    monkeypatch.setattr(perf, "SLOW_MS", 300)  # far from what a fast route takes on a slow runner
+    monkeypatch.setattr(routes_api, "status", lambda: (time.sleep(0.35), {"x": 1})[1])
     c = TestClient(server.app)  # no `with`: the lifespan does not start
     for _ in range(3):
         assert c.get("/api/lang").status_code == 200
