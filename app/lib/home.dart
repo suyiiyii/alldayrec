@@ -98,7 +98,25 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   bool get running => status['running'] == true;
 
-  WebViewController _web() {
+  /// The tab a web path belongs to: 今天 (and the pages under it: 日历, 进度, 设备...), 对话 (the list and one
+  /// conversation), 人物 (the list and one person), 我的 (the web /me). null: none in particular (stay where it is)
+  static int? _tabOf(String path) => path == '/' ? 0
+      : path == '/conversations' || path.startsWith('/c/') ? 1
+      : path == '/speakers' || path.startsWith('/p/') ? 2
+      : path == '/me' ? 3 : null;
+
+  /// A tab's WebView went to another tab's page (今天's 待办 opens a conversation): that tab shows it, and this one
+  /// steps back to where it was. A page is a tab, not a place inside one.
+  void _follow(int tab, String url) {
+    final to = _tabOf(Uri.parse(url).path);
+    if (to == null || to == tab) return;
+    if (to < webs.length) (webs[to] ??= _web(tab: to)).loadRequest(_url(Uri.parse(url).path));
+    setState(() => page = to);
+    final c = webs[tab]!;
+    c.canGoBack().then((b) => b ? c.goBack() : c.loadRequest(_url(paths[tab])));
+  }
+
+  WebViewController _web({int? tab}) {
     // the web pages play audio from script (the conversation player's next window, a seek): no tap needed for that
     final c = WebViewController.fromPlatformCreationParams(WebViewPlatform.instance is WebKitWebViewPlatform
         ? WebKitWebViewControllerCreationParams(allowsInlineMediaPlayback: true, mediaTypesRequiringUserAction: const {})
@@ -111,7 +129,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ..clearCache()  // the page changes with server deploys
       // the web page hides its own navigation in the app: Android's WebView says so in its user agent, iOS's does not
       ..setNavigationDelegate(NavigationDelegate(
-          onPageFinished: (_) => c.runJavaScript("document.documentElement.classList.add('in-app')").ignore()));
+          onPageFinished: (_) => c.runJavaScript("document.documentElement.classList.add('in-app')").ignore(),
+          onUrlChange: tab == null ? null : (u) => u.url != null ? _follow(tab, u.url!) : null));
   }
 
   Uri _url(String path) => Uri.parse('${settings!.server}$path?token=${settings!.token}');  // ?token= sets the cookie
@@ -119,7 +138,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   void _loadWeb() {
     if (settings!.token.isEmpty) return;
     for (var i = 0; i < webs.length; i++) {
-      (webs[i] ??= _web()).loadRequest(_url(paths[i]));
+      (webs[i] ??= _web(tab: i)).loadRequest(_url(paths[i]));
     }
   }
 
