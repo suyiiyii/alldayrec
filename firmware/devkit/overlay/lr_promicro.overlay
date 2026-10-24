@@ -1,10 +1,9 @@
 /* ProMicro nRF52840 (nice!nano v2 clone) + a PDM mic breakout (pins 3V GND SEL CLK DAT), built on the XIAO board
  * definition: same chip, different pins.
  *
- * The mic plugs into the breadboard row by row beside the ProMicro's left header, turned so its pins read
- * DAT CLK SEL GND 3V from the USB end: DAT-P0.06, CLK-P0.08, SEL-GND, GND-GND, 3V-P0.17 (the mic, ~1 mA, is powered
- * from a GPIO like the XIAO's own). All three are full-speed pins (not "low frequency I/O", nRF52840 PS table 145):
- * the PDM clock is 1.28 MHz. SEL to GND: the left channel. */
+ * LR-P3 (hardware/lr-p3/README.md has the pin table): DAT-P0.06, CLK-P0.08, SEL-3V, GND-GND, 3V-P0.17 (the mic,
+ * ~1 mA, is powered from a GPIO like the XIAO's own). All three are full-speed pins (not "low frequency I/O", nRF52840
+ * PS table 145): the PDM clock is 1.28 MHz. The breadboard prototype had SEL on GND; mic.c samples in mono either way. */
 / {
 	zephyr,user {
 		pdm-din-gpios = <&gpio0 6 0>;
