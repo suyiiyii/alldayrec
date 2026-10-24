@@ -1,6 +1,6 @@
 import { reactive } from "vue";
 import type { Row } from "./api";
-import { WINDOW, windowAsk } from "./track";
+import { windowAsk, windowLen, windowStart } from "./track";
 
 // one sound at a time, on every page: a clip (play) stops the conversation player (track), and it a clip
 export const player = reactive({ playing: "", failed: new Set<string>() });
@@ -49,6 +49,7 @@ const SILENT =
   "data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 let el: HTMLAudioElement | null = null,
   unlocked = false,
+  base = 0, // the anchor: where play last started, the windows count from it
   k = -1, // the window in el
   gen = 0, // the latest seek: a window fetched for an older one is dropped
   miss = 0; // windows in a row without a recording
@@ -58,9 +59,9 @@ function element() {
   if (el) return el;
   const a = (el = new Audio());
   a.ontimeupdate = () => {
-    if (k >= 0) track.at = Math.min(track.to, track.from + k * WINDOW + a.currentTime * 1000);
+    if (k >= 0) track.at = Math.min(track.to, base + windowStart(k) + a.currentTime * 1000);
   };
-  a.onended = () => k >= 0 && void load(k + 1, 0, gen);
+  a.onended = () => k >= 0 && void load(k + 1, gen);
   // paused or played from outside (the lock screen, a call, headphones out); not the pause at a window's end, nor
   // one while the next window is on its way (k -1) or loading
   a.onpause = () => {
@@ -73,7 +74,7 @@ function element() {
 function fetchWindow(w: number) {
   let p = got.get(w);
   if (!p) {
-    const ask = windowAsk(track.from, track.to, w);
+    const ask = windowAsk(base, track.to, w);
     const q = ask && { start: ask[0], end: ask[1], ...(track.device && { device: track.device }) };
     p = !q
       ? Promise.resolve(null)
@@ -94,10 +95,10 @@ function drop(keep: (w: number) => boolean) {
     }
 }
 
-async function load(w: number, offset: number, my: number) {
+async function load(w: number, my: number) {
   const a = element();
   drop((j) => j === w || j === w + 1);
-  if (!windowAsk(track.from, track.to, w)) {
+  if (!windowAsk(base, track.to, w)) {
     // the end
     track.playing = false;
     track.at = track.to;
@@ -107,7 +108,7 @@ async function load(w: number, offset: number, my: number) {
   if (my !== gen) return;
   if (!u) {
     // no recording covers this window (404) or it did not come: on to the next, three such in a row is the end
-    if (++miss < 3) return load(w + 1, 0, my);
+    if (++miss < 3) return load(w + 1, my);
     miss = 0;
     track.playing = false;
     track.failed = true;
@@ -117,8 +118,6 @@ async function load(w: number, offset: number, my: number) {
   track.failed = false;
   k = w;
   a.src = u;
-  // set once it knows its length: Safari ignores a position set before
-  if (offset) a.addEventListener("loadedmetadata", () => my === gen && (a.currentTime = offset / 1000), { once: true });
   a.playbackRate = a.defaultPlaybackRate = track.rate; // a new src resets the rate to the default
   if (track.playing) await a.play().catch(() => (track.playing = false));
   void fetchWindow(w + 1);
@@ -150,7 +149,9 @@ export function trackPause() {
   el?.pause();
 }
 
-// To ms, and play from there (or only stand there, paused). Called in a tap: that is where iOS lets it start
+// To ms, and play from there (or only stand there, paused). Called in a tap: that is where iOS lets it start.
+// Inside the window the element holds it is a currentTime; anywhere else the windows start over from ms (a short
+// first one, so the sound comes fast)
 export function trackSeek(ms: number, start: boolean) {
   ms = Math.max(track.from, Math.min(ms, track.to - 500));
   audio?.pause();
@@ -158,18 +159,17 @@ export function trackSeek(ms: number, start: boolean) {
   track.at = ms;
   track.follow = true;
   const a = element(),
-    w = Math.floor((ms - track.from) / WINDOW),
-    offset = ms - track.from - w * WINDOW;
+    inside = k >= 0 && ms >= base + windowStart(k) && ms < base + windowStart(k) + windowLen(k);
   if (!start) {
     trackPause();
     gen++; // a window on its way plays nothing
-    if (w === k) a.currentTime = offset / 1000;
+    if (inside) a.currentTime = (ms - base - windowStart(k)) / 1000;
     else k = -1;
     return;
   }
   track.playing = true;
-  if (w === k) {
-    a.currentTime = offset / 1000;
+  if (inside) {
+    a.currentTime = (ms - base - windowStart(k)) / 1000;
     void a.play().catch(() => (track.playing = false));
     return;
   }
@@ -180,7 +180,9 @@ export function trackSeek(ms: number, start: boolean) {
     a.src = SILENT;
     void a.play().catch(() => {});
   }
-  void load(w, offset, ++gen);
+  base = ms;
+  drop(() => false);
+  void load(0, ++gen);
 }
 
 export function trackToggle() {

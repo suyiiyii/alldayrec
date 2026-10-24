@@ -1,18 +1,22 @@
 // node --experimental-strip-types track.check.ts: the conversation player's windows and lookups (src/lib/track.ts)
 import assert from "node:assert/strict";
-import { clock, isoLocal, rowAt, talkShare, WINDOW, windowAsk } from "./src/lib/track.ts";
+import { clock, isoLocal, rowAt, talkShare, WINDOW, windowAsk, windowLen, windowStart } from "./src/lib/track.ts";
 
 const from = Date.parse("2026-10-24T09:30:00");
 assert.equal(isoLocal(from), "2026-10-24T09:30:00.000");
 assert.equal(isoLocal(Date.parse("2026-10-24T23:59:59.250")), "2026-10-24T23:59:59.250");
 
-// 250 s: two whole windows and a 30 s tail, each asked 0.2 s inside its ends, none over the server's 120 s
-const to = from + 250_000;
-assert.deepEqual(windowAsk(from, to, 0), ["2026-10-24T09:30:00.200", "2026-10-24T09:31:49.800"]);
-assert.deepEqual(windowAsk(from, to, 1), ["2026-10-24T09:31:50.200", "2026-10-24T09:33:39.800"]);
-assert.deepEqual(windowAsk(from, to, 2), ["2026-10-24T09:33:40.200", "2026-10-24T09:34:09.800"]);
-assert.equal(windowAsk(from, to, 3), null);
-assert.equal(windowAsk(from, from + 2 * WINDOW + 300, 2), null); // a 0.3 s tail is not asked for
+// windows from the anchor: 10 s, 30 s, then 110 s each, back to back
+assert.deepEqual([0, 1, 2, 3].map(windowStart), [0, 10_000, 40_000, 150_000]);
+assert.deepEqual([0, 1, 2, 3].map(windowLen), [10_000, 30_000, WINDOW, WINDOW]);
+// 180 s: 10 + 30 + 110 and a 30 s tail, each asked 0.2 s inside its ends, none over the server's 120 s
+const to = from + 180_000;
+assert.deepEqual(windowAsk(from, to, 0), ["2026-10-24T09:30:00.200", "2026-10-24T09:30:09.800"]);
+assert.deepEqual(windowAsk(from, to, 1), ["2026-10-24T09:30:10.200", "2026-10-24T09:30:39.800"]);
+assert.deepEqual(windowAsk(from, to, 2), ["2026-10-24T09:30:40.200", "2026-10-24T09:32:29.800"]);
+assert.deepEqual(windowAsk(from, to, 3), ["2026-10-24T09:32:30.200", "2026-10-24T09:32:59.800"]);
+assert.equal(windowAsk(from, to, 4), null);
+assert.equal(windowAsk(from, from + 40_000 + 300, 2), null); // a 0.3 s tail is not asked for
 assert.ok(WINDOW - 400 <= 120_000);
 
 const starts = [10, 20, 30];
