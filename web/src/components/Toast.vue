@@ -25,6 +25,7 @@ function undo() {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  width: max-content; /* centred by left 50%: without it the box shrinks to half the screen */
   max-width: calc(100vw - 2 * var(--space-4));
   padding: var(--space-2) var(--space-4);
   border-radius: var(--radius);
