@@ -20,7 +20,7 @@ import {
 } from "../lib/api";
 import { t } from "../i18n";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
-import { useHideOnScroll } from "../lib/hideOnScroll";
+import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { speakerLabel } from "../lib/speakers";
 
@@ -152,28 +152,35 @@ watch(timeline, async () => {
 
 // the header's height: the summary card sticks right under it
 const headH = ref(0);
-// the day picker goes away on scroll where it has the header's line to itself (a phone, the app: nothing beside it);
-// a tap on what is left of the header brings it back (kept while the captions follow), and only that (its status line
-// is a link)
-const head = useTemplateRef<HTMLElement>("head");
-const { lift, show } = useHideOnScroll(
-  head,
-  () =>
-    matchMedia("(max-width: 600px)").matches ||
-    document.documentElement.classList.contains("in-app"),
-);
+// the day picker follows the finger (useHeaderFollow) where it has the header's line to itself (a phone, the app:
+// nothing beside it); the header and the summary card under it go up by --lift, and stay put in the first rows of the
+// page. A tap on what is left of the header brings it back (kept while the captions follow), and only that (its status
+// line is a link)
+const head = useTemplateRef<HTMLElement>("head"),
+  aside = useTemplateRef<HTMLElement>("aside");
+const phone = matchMedia("(max-width: 600px)");
+let header: HTMLElement | null = null;
+const pickerH = () => {
+  const row = head.value?.firstElementChild as HTMLElement | null | undefined; // offsetTop: in the header
+  return row && (phone.matches || document.documentElement.classList.contains("in-app"))
+    ? row.offsetTop + row.offsetHeight
+    : 0;
+};
+const { show, repaint } = useHeaderFollow(pickerH, pickerH, (h) => {
+  for (const el of [header, aside.value]) el?.style.setProperty("--lift", h + "px");
+});
+watch(aside, repaint, { flush: "post" }); // a conversation starting, the picker out of sight
 function reveal(e: Event) {
-  if (!lift.value) return;
+  if (!show()) return;
   e.preventDefault();
   e.stopPropagation();
-  show();
 }
 let sizer: ResizeObserver | undefined;
 onMounted(() => {
   window.addEventListener("scroll", onScroll);
   loadCalendar();
   follow.value = live.value;
-  const h = document.querySelector("header");
+  const h = (header = document.querySelector("header"));
   if (h) (sizer = new ResizeObserver(() => (headH.value = h.offsetHeight))).observe(h);
 });
 onUnmounted(() => {
@@ -195,7 +202,7 @@ function jump(start: string) {
 </script>
 
 <template>
-  <AppHeader in-app :lift="lift">
+  <AppHeader in-app>
     <div ref="head" class="head" @click.capture="reveal">
       <DayPicker :day="day" @pick="go">
         <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
@@ -217,8 +224,8 @@ function jump(start: string) {
     </div>
   </AppHeader>
   <!-- today: the summary card on top (a phone) or on the right (a wide screen), the captions large -->
-  <main :class="{ cols: side }" :style="{ '--head': headH - lift + 'px' }">
-    <aside v-if="side" class="side">
+  <main :class="{ cols: side }" :style="{ '--head': headH + 'px' }">
+    <aside v-if="side" ref="aside" class="side">
       <LivePanel :status="status" :lives="lives" :done-to="doneTo" @jump="jump" />
     </aside>
     <div class="caps">
@@ -337,18 +344,15 @@ function jump(start: string) {
   color: var(--surface);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
 }
-/* a phone: the summary card sticks under the header, the captions scroll under it */
+/* a phone: the summary card sticks under the header, the captions scroll under it; up with the header by --lift */
 .side {
   position: sticky;
   top: var(--head);
   z-index: 1;
   background: var(--bg);
   padding: var(--space-2) 0;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .side {
-    transition: top 0.15s; /* with the header, when the day picker goes or comes */
-  }
+  transform: translateY(calc(-1 * var(--lift, 0px)));
+  will-change: transform;
 }
 /* nothing going on: a line of what to do, the recorders, the last conversation, how to start */
 .idle {
@@ -426,7 +430,7 @@ function jump(start: string) {
     padding: var(--space-3) 0;
   }
   .side > * {
-    max-height: calc(100dvh - var(--head) - var(--space-5));
+    max-height: calc(100dvh - var(--head) + var(--lift, 0px) - var(--space-5));
   }
 }
 </style>

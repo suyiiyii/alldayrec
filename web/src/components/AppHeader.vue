@@ -4,9 +4,8 @@ import { useRoute, useRouter } from "vue-router";
 import { t } from "../i18n";
 import Icon, { type IconName } from "./Icon.vue";
 
-// inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden). lift: how far
-// it goes up over the top edge, taking its first row (the page's day picker, useHideOnScroll) out of sight
-defineProps<{ inApp?: boolean; lift?: number }>();
+// inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
+defineProps<{ inApp?: boolean }>();
 
 // four places, each owning the pages under it (a conversation, the calendar and the todos are 时间线's; devices,
 // progress, connect are 我的); a phone shows 我的 as the fourth tab, a wide screen too. label: the page title's key
@@ -31,7 +30,7 @@ const back = () => (history.state?.back ? router.back() : router.push(under.valu
 </script>
 
 <template>
-  <header :class="{ bare: !inApp }" :style="lift ? { top: -lift + 'px' } : undefined">
+  <header :class="{ bare: !inApp }">
     <div class="bar">
       <h1>alldayrec</h1>
       <!-- a wide screen: 时间线 / 实时 / 人物 next to the name, 我的 apart on the right -->
@@ -97,11 +96,9 @@ header {
   box-shadow: var(--shadow);
   border-bottom: 1px solid var(--line);
   z-index: 2;
-}
-@media (prefers-reduced-motion: no-preference) {
-  header {
-    transition: top 0.15s;
-  }
+  /* --lift: how far it goes up over the top edge, the live page's day picker out of sight (useHeaderFollow) */
+  transform: translateY(calc(-1 * var(--lift, 0px)));
+  will-change: transform;
 }
 .bar {
   max-width: 860px;

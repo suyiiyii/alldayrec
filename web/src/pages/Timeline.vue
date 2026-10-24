@@ -22,7 +22,7 @@ import {
   type Status,
 } from "../lib/api";
 import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calendar";
-import { useHideOnScroll } from "../lib/hideOnScroll";
+import { useHeaderFollow } from "../lib/headerFollow";
 import { useSocket, useWatch } from "../lib/socket";
 
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
@@ -37,7 +37,9 @@ const q = ref(String(route.query.q ?? "")),
   day = ref(String(route.query.day ?? ""));
 // the day of the topmost card on screen, shown by the picker
 const seen = ref(""),
-  find = useTemplateRef<HTMLElement>("find");
+  find = useTemplateRef<HTMLElement>("find"),
+  pull = useTemplateRef<HTMLElement>("pull"),
+  mark = useTemplateRef<HTMLElement>("mark");
 const tags = ref<[string, number][]>([]),
   items = ref<Conversation[]>([]),
   status = ref<Status | null>(null),
@@ -217,13 +219,36 @@ watch([tag, day], restart);
 watch(day, () => window.scrollTo(0, 0));
 const pick = (d: string) => (day.value = d === today() ? "" : d);
 
-// the day picker goes away on scroll while the bar is pinned (a wide screen; a phone's scrolls away with the page)
-const { lift } = useHideOnScroll(find, () => getComputedStyle(find.value!).position === "sticky");
+// The day picker follows the finger (useHeaderFollow). A wide screen: the pinned search bar goes up by --lift under
+// the header, its picker out of sight, once it has been pinned that far. A phone (the bar scrolls away with the page):
+// a second picker, fixed over the top, comes down as the page is pulled back anywhere below where the page's own one
+// sits, and goes as soon as it would be no lower than that one, where both look the same: no two pickers, no jump.
+// A second one, not the page's moved there, so the page under it keeps its height.
+const pinned = () => getComputedStyle(find.value!).position === "sticky";
+function pickerH() {
+  if (!find.value) return 0;
+  const row = find.value.firstElementChild as HTMLElement; // offsetTop: in the pinned bar
+  return pinned() ? row.offsetTop + row.offsetHeight : (pull.value?.offsetHeight ?? 0);
+}
+// a pinned bar's own place is where it pins (45 px under the header): the mark, an empty line, is where it would be
+const hideFrom = () =>
+  mark.value
+    ? mark.value.getBoundingClientRect().top + scrollY + (pinned() ? pickerH() - 45 : 0)
+    : Infinity;
+useHeaderFollow(pickerH, hideFrom, (h, past) => {
+  for (const el of [find.value, pull.value]) el?.style.setProperty("--lift", h + "px");
+  if (pull.value) pull.value.style.visibility = h < past ? "visible" : "hidden";
+});
 
 function spy() {
-  // the last day header above the bottom of the search bar (the top of the screen once it scrolled away) is the
-  // day being read
-  const edge = Math.max(0, find.value?.getBoundingClientRect().bottom ?? 0) + 8;
+  // the last day header above the bottom of the search bar (the top of the screen once it scrolled away, or the bottom
+  // of the picker come down over it) is the day being read
+  const edge =
+    Math.max(
+      0,
+      find.value?.getBoundingClientRect().bottom ?? 0,
+      pull.value?.getBoundingClientRect().bottom ?? 0,
+    ) + 8;
   let d = items.value[0]?.start.slice(0, 10) ?? day.value;
   for (const el of document.querySelectorAll<HTMLElement>("[data-day]"))
     if (el.getBoundingClientRect().top < edge) d = el.dataset.day!;
@@ -289,7 +314,8 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         <LiveCard v-if="going" />
         <DueTodos :due="due" />
       </template>
-      <div ref="find" class="find" :style="{ '--lift': lift + 'px' }" @click.capture="lift = 0">
+      <div ref="mark" />
+      <div ref="find" class="find">
         <DayPicker :day="seen || day || today()" @pick="pick">
           <RouterLink class="cal" to="/calendar">{{ t("title.calendar") }}</RouterLink>
         </DayPicker>
@@ -314,6 +340,12 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             {{ tg }} <span class="n">{{ n }}</span>
           </button>
         </div>
+      </div>
+      <!-- a phone: the picker again, over the top, as the page is pulled back (above) -->
+      <div ref="pull" class="pull">
+        <DayPicker :day="seen || day || today()" @pick="pick">
+          <RouterLink class="cal" to="/calendar">{{ t("title.calendar") }}</RouterLink>
+        </DayPicker>
       </div>
       <div v-if="asking || reply || askErr" ref="askCard" class="card ask">
         <div class="meta">
@@ -424,21 +456,34 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 </template>
 
 <style scoped>
-/* sticky under the header on a wide screen (AppHeader: 45 px), a hairline under it so cards pass under an edge; lift:
-   the day picker gone under the header */
+/* sticky under the header on a wide screen (AppHeader: 45 px), a hairline under it so cards pass under an edge; --lift:
+   up under the header, the day picker out of sight */
 .find {
   position: sticky;
-  top: calc(45px - var(--lift, 0px));
+  top: 45px;
   background: var(--bg);
   padding: var(--space-3) 0;
   box-shadow: 0 1px 0 var(--line);
   margin-bottom: var(--space-3);
   z-index: 1;
+  transform: translateY(calc(-1 * var(--lift, 0px)));
+  will-change: transform;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .find {
-    transition: top 0.15s;
-  }
+/* the picker over the top on a phone: its picker exactly where the page's is in .find (12 px down, the search box 8 px
+   under it), so the two swap unseen; up by --lift, out of sight */
+.pull {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  padding: var(--space-3) max(var(--space-4), 50% - 430px + var(--space-4)) var(--space-2);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  visibility: hidden;
+  transform: translateY(calc(-1 * var(--lift, 0px)));
+  will-change: transform;
 }
 .cal {
   margin-left: auto;
@@ -664,6 +709,12 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
     position: static;
     box-shadow: none;
     margin-bottom: 0;
+    transform: none;
+    will-change: auto;
+  }
+  .pull {
+    display: block;
+    padding-inline: var(--space-3);
   }
   .q button {
     display: none;
@@ -682,6 +733,11 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   position: static;
   box-shadow: none;
   margin-bottom: 0;
+  transform: none;
+  will-change: auto;
+}
+html.in-app .pull {
+  display: block;
 }
 html.in-app .q button {
   display: none;

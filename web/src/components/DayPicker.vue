@@ -12,13 +12,14 @@ const open = ref(false),
   month = ref(props.day.slice(0, 7)),
   root = useTemplateRef<HTMLElement>("root"),
   at = ref({ left: "0px", top: "0px" });
-// fixed under the picker, kept inside the screen wherever the picker sits
+// under the picker, kept inside the screen wherever the picker sits; placed in the picker, not fixed to the screen: the
+// bar it is in moves with a transform (useHeaderFollow), and fixed would be placed in that bar anyway
 function toggle() {
   const r = root.value!.getBoundingClientRect(),
     w = Math.min(340, window.innerWidth - 24);
   at.value = {
-    left: Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) + "px",
-    top: r.bottom + 6 + "px",
+    left: Math.max(12, Math.min(r.left, window.innerWidth - w - 12)) - r.left + "px",
+    top: r.height + 6 + "px",
   };
   open.value = !open.value;
 }
@@ -114,7 +115,7 @@ function pick(d: string) {
   margin-left: 4px;
 }
 .pop {
-  position: fixed;
+  position: absolute;
   z-index: 5;
   width: min(340px, calc(100vw - 24px));
   background: var(--surface);
