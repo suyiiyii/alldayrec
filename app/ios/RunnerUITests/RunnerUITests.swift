@@ -41,7 +41,7 @@ final class Flow: XCTestCase {
     sleep(2)  // its state from the scan response
     let force = button(["强制绑定"]), bind = button(["绑定"])
     if force.exists { force.tap(); tap(button(["强制绑定"])); say("bound force") } else { tap(bind); say("bound plain") }
-    page("今天")
+    page("时间线")
     var advised = false
     XCTAssert(until(waitS) {
       self.dialogs(0)
@@ -72,7 +72,7 @@ final class Flow: XCTestCase {
   func testOpen() {
     app.activate()
     dialogs(3)
-    page("今天")
+    page("时间线")
     XCTAssert(until(waitS) { self.dialogs(0); return self.following() }, "not following live within \(waitS) s")
     say("connected")
   }
@@ -195,7 +195,7 @@ final class Flow: XCTestCase {
     app.activate()
     let back = button(["Back", "返回"])  // one of 我的's pages is open: back to the tabs
     for _ in 0..<3 where back.exists { back.tap(); sleep(1) }
-    let tabs = ["今天", "对话", "人物", "我的"]
+    let tabs = ["时间线", "实时", "人物", "我的"]
     // "我的\nTab 4 of 4"
     tap(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'Tab '",
                                                              tabs.contains(title) ? title : "我的")).firstMatch)

@@ -30,14 +30,14 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Map status = {};
   String note = '';
   bool stopping = false;
-  int page = 0;  // the bottom bar's: 0 今天, 1 对话, 2 人物 (web pages), 3 我的 (its entries open over it)
+  int page = 0;  // the bottom bar's: 0 时间线, 1 实时, 2 人物 (web pages), 3 我的 (its entries open over it)
   final webs = <WebViewController?>[null, null, null];  // one per web page: each keeps its scroll while another is shown
   Timer? ticker;
   int ticks = 0;
   String version = '';
 
-  static const titles = ['今天', '对话', '人物', '我的'];
-  static const paths = ['/', '/conversations', '/speakers'];
+  static const titles = ['时间线', '实时', '人物', '我的'];
+  static const paths = ['/', '/live', '/speakers'];
 
   @override
   void initState() {
@@ -109,14 +109,16 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     rev.value++;
   }
 
-  /// The tab a web path belongs to: 今天 (and the pages under it: 日历, 进度, 设备...), 对话 (the list and one
-  /// conversation), 人物 (the list and one person), 我的 (the web /me). null: none in particular (stay where it is)
-  static int? _tabOf(String path) => path == '/' ? 0
-      : path == '/conversations' || path.startsWith('/c/') ? 1
+  /// The tab a web path belongs to: 时间线 (the feed, one conversation, the calendar, the todos), 实时 (the live
+  /// captions), 人物 (the list and one person), 我的 (the web /me). null: none in particular (stay where it is: 进度,
+  /// 设备...)
+  static int? _tabOf(String path) =>
+      path == '/' || path == '/conversations' || path.startsWith('/c/') || path == '/calendar' || path == '/todos' ? 0
+      : path == '/live' ? 1
       : path == '/speakers' || path.startsWith('/p/') ? 2
       : path == '/me' ? 3 : null;
 
-  /// A tab's WebView went to another tab's page (今天's 待办 opens a conversation): that tab shows it, and this one
+  /// A tab's WebView went to another tab's page (实时's last conversation opens in 时间线): that tab shows it, and this one
   /// steps back to where it was. A page is a tab, not a place inside one.
   void _follow(int tab, String url) {
     final to = _tabOf(Uri.parse(url).path);
@@ -158,7 +160,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   void _open(String title, Widget body) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: body)));
 
-  /// A web page (实时字幕: /live, 设备状态与更多: /me) in a WebView of its own, there while open;
+  /// A web page (设备状态与更多: /me) in a WebView of its own, there while open;
   /// back (the key or the app bar's arrow) goes through its history first, as in the tabs' WebViews.
   void _openWeb(String title, String path) {
     final c = _web()..loadRequest(_url(path));
@@ -200,7 +202,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     setState(() => page = to);
   }
 
-  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 今天, then leave
+  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 时间线, then leave
     final w = page < webs.length ? webs[page] : null;
     if (w != null && await w.canGoBack()) return w.goBack();
     if (page != 0) return _show(0);
@@ -251,8 +253,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         selectedIndex: page,
         onDestinationSelected: _show,
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '今天'),
-          NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '对话'),
+          NavigationDestination(icon: Icon(Icons.view_agenda_outlined), selectedIcon: Icon(Icons.view_agenda), label: '时间线'),
+          NavigationDestination(icon: Icon(Icons.subtitles_outlined), selectedIcon: Icon(Icons.subtitles), label: '实时'),
           NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '人物'),
           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '我的'),
         ],
@@ -277,7 +279,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ),
       const Divider(),
       entry(Icons.bluetooth_outlined, '录音设备', _openRecorder),
-      entry(Icons.subtitles_outlined, '实时字幕', s.token.isEmpty ? _openSettings : () => _openWeb('实时字幕', '/live')),
       entry(Icons.devices_outlined, '设备状态与更多', s.token.isEmpty ? _openSettings : () => _openWeb('设备状态与更多', '/me'),
           '电量、存储卡、处理进度、接入 AI'),
       entry(Icons.cloud_upload_outlined, '上传', () => _open('上传', UploadPage(settings: s))),
@@ -309,8 +310,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     );
   }
 
-  /// Everything about the recording: live captions first (the first thing people use, two taps from any tab), what
-  /// the chip sums up with start/stop or pause, and the recorder page.
+  /// Everything about the recording: what the chip sums up with start/stop or pause, and the recorder page (the live
+  /// captions are a tab).
   void _statusSheet() => showModalBottomSheet(
         context: context,
         showDragHandle: true,
@@ -318,15 +319,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           listenable: rev,
           builder: (_, _) => SafeArea(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                leading: const Icon(Icons.subtitles_outlined),
-                title: const Text('实时字幕'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  settings!.token.isEmpty ? _openSettings() : _openWeb('实时字幕', '/live');
-                },
-              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 16, 8),
                 child: ble ? _bleBody(Theme.of(sheet).colorScheme) : _micBody(Theme.of(sheet).colorScheme),

@@ -29,7 +29,7 @@ void main() {
     await tester.tap(find.widgetWithText(ActionChip, '未在录音'));
     await tester.pumpAndSettle();
     expect(find.text('开始录音'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('实时字幕')).dy, lessThan(tester.getTopLeft(find.text('开始录音')).dy));  // first
+    expect(find.text('实时字幕'), findsNothing);  // a tab now, not in the sheet
     await tester.pump(const Duration(seconds: 2));  // a poll while the sheet is open
     await tester.pump();
     final n = pending;
@@ -41,7 +41,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('开始录音'), findsNothing);
     expect(tester.widgetList<NavigationDestination>(find.byType(NavigationDestination)).map((d) => d.label),
-        ['今天', '对话', '人物', '我的']);
+        ['时间线', '实时', '人物', '我的']);
     await tester.tap(find.widgetWithText(NavigationDestination, '我的'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ActionChip, '未在录音'), findsOneWidget);  // the status is on every tab
