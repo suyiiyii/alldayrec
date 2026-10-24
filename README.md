@@ -12,17 +12,17 @@
 
 网页在手机上的样子，示例数据都是编的（界面目前只有中文）。
 
-| ![Conversations](docs/img/conversations.png) | ![One conversation](docs/img/conversation.png) | ![Live page](docs/img/live.png) |
+| ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation.png) | ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live.png) |
 |:--:|:--:|:--:|
 | 对话列表：标题、摘要、标签、到期的待办 | 一段对话：摘要、每个人的要点、待办、决定、带说话人的转写 | 实时页：正在进行的对话的实时分析，边说边出初稿 |
-| ![Ask AI](docs/img/ask.png) | ![Daily recap](docs/img/recap.png) | ![Progress](docs/img/progress.png) |
+| ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap.png) | ![Progress](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/progress.png) |
 | 问 AI：回答里附带出处对话的链接 | 每日回顾：要点、你的待办、和你说过话的人 | 进度：每台设备的队列、录音设备的电量和存储卡、手机、今天的语音识别和大模型调用 |
 
 页面开着时的实时字幕（初稿层），以及电脑上的对话列表页：
 
-![Live captions](docs/img/live-captions.gif)
+![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions.gif)
 
-![Conversations on a desktop](docs/img/conversations-desktop.png)
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop.png)
 
 ## 能做什么
 

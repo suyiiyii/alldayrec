@@ -13,17 +13,17 @@ The git history was rewritten before publishing to remove the author's private d
 
 The web UI on a phone, filled with made-up data (the UI is in Chinese for now).
 
-| ![Conversations](docs/img/conversations.png) | ![One conversation](docs/img/conversation.png) | ![Live page](docs/img/live.png) |
+| ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation.png) | ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live.png) |
 |:--:|:--:|:--:|
 | Conversations: titles, summaries, tags, due to-dos | One conversation: summary, per-person points, to-dos, decisions, transcript with speakers | Live page: the live analysis of the conversation going on, drafts as words come in |
-| ![Ask AI](docs/img/ask.png) | ![Daily recap](docs/img/recap.png) | ![Progress](docs/img/progress.png) |
+| ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap.png) | ![Progress](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/progress.png) |
 | Ask AI: an answer with links to the conversations it came from | Daily recap: highlights, your to-dos, the people you talked to | Progress: each device's queue, recorder battery and card, the phone, today's ASR and LLM calls |
 
 Live captions while the page is open (the draft layer), and the conversations page on a desktop:
 
-![Live captions](docs/img/live-captions.gif)
+![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions.gif)
 
-![Conversations on a desktop](docs/img/conversations-desktop.png)
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop.png)
 
 ## What it does
 

@@ -108,3 +108,5 @@ Keep the existing form `[type][Area] subject`, in English, imperative, subject a
 - example: `[fix][Server] Skip StepFun env checks unless the engine is stepfun`
 
 No `Co-authored-by` trailers.
+
+Screenshots and other binary files never go on `main`: push them to the `assets` branch first (add only, named `img/<name>-<yyyymmdd>.ext`), then link them from the PR or README as `https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/<file>`.
