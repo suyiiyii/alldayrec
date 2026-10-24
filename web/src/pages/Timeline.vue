@@ -237,7 +237,8 @@ const hideFrom = () =>
     : Infinity;
 useHeaderFollow(pickerH, hideFrom, (h, past) => {
   for (const el of [find.value, pull.value]) el?.style.setProperty("--lift", h + "px");
-  if (pull.value) pull.value.style.visibility = h < past ? "visible" : "hidden";
+  const p = pull.value; // hidden: while it would be no lower than the page's own, and all the way up
+  if (p) p.style.visibility = h < past && h < p.offsetHeight ? "visible" : "hidden";
 });
 
 function spy() {
