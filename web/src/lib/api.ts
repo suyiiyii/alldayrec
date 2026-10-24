@@ -10,6 +10,7 @@ export interface Row {
   state?: string;
   error?: string;
   dictation?: string;
+  music?: number; // 1: the server heard music here (a song played aloud): no voiceprint, speaker S?
   source?: string; // the device that recorded it
 }
 

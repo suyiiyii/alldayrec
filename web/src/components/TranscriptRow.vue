@@ -66,7 +66,14 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
     </div>
     <div v-if="row.error" class="text err" :title="row.error">{{ t("transcriptRow.noText") }}</div>
     <div v-else class="text">
-      <span v-if="row.dictation" class="dict">{{
+      <span
+        v-if="row.music"
+        class="mus"
+        role="img"
+        :title="t('transcriptRow.music')"
+        :aria-label="t('transcriptRow.music')"
+        ><Icon name="music" :size="14" /></span
+      ><span v-if="row.dictation" class="dict">{{
         t("transcriptRow.dictation", { to: row.dictation })
       }}</span
       >{{ row.text || (now ? "" : t("transcriptRow.empty")) }}<span v-if="now" class="pulse" /><span
@@ -153,6 +160,10 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
 .text {
   word-break: break-word;
   padding-top: 1px;
+}
+.mus {
+  color: var(--muted);
+  margin-right: 4px;
 }
 .err {
   color: var(--err);

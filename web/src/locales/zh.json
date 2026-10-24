@@ -864,6 +864,7 @@
     "speaking": "正在说",
     "noText": "这一句没能识别出文字",
     "dictation": "口述→{to}",
+    "music": "听着像在放音乐：不取声纹",
     "empty": "（空）",
     "starred": "已收藏"
   },

@@ -864,6 +864,7 @@
     "speaking": "Speaking",
     "noText": "No text recognized in this sentence",
     "dictation": "Dictation → {to}",
+    "music": "Sounds like music playing: no voiceprint taken",
     "empty": "(empty)",
     "starred": "Starred"
   },
