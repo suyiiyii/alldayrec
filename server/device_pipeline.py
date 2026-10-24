@@ -368,7 +368,7 @@ async def pipeline(device: str):
         while True:
             while await final_piece():
                 maybe_live()
-            closed = []
+            closed, was = [], grouper.open
             end_at = db.kv(f"end_at:{device}")
             final_all = not seg.anchors or (st.done_to and (seg.time_at(seg.samples) - st.done_to).total_seconds() < 0.5)
             if end_at and not audio.queued(device) and final_all:
@@ -378,7 +378,7 @@ async def pipeline(device: str):
             if idle:
                 ws.note(f"{device}：20 分钟没有任何事件，按兜底规则关闭对话", "warn")
             closed += idle
-            if closed:
+            if grouper.open is not was:  # closed, or dropped as too short (nothing closed): the store and pages too
                 await commit(closed)
             maybe_live()
             await anyio.sleep(2)

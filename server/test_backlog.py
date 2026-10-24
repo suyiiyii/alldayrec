@@ -25,6 +25,7 @@ import infer
 import live
 import monitor
 import pipeline_state
+import routes_api
 import routes_upload
 import squeeze
 import summary
@@ -325,6 +326,31 @@ def test_hold_release(tmp_path, monkeypatch):
     anyio.run(routes_upload.hold_release, DEVICE)
     d = monitor.device_status(DEVICE, st)
     assert d["hold"] is None and d["hold_seen"] is None and audio.held(DEVICE) is None
+
+
+def test_stop_drops_a_too_short_conversation(tmp_path, monkeypatch):
+    """The recorder stops after less than MIN_S of speech (an imported file of a sentence or two): the conversation is
+    dropped as too short, and with it goes the open one the pages show and the store keeps (10-24: still 进行中 after
+    /api/chunks/end, for good, and a restart went on with it)."""
+    rig(tmp_path, monkeypatch, hear)
+    t0 = dt.datetime.fromtimestamp(round(time.time()) - 900)
+    save(t0, flac(np.concatenate([tone(0, 3), np.zeros(2 * SR, np.int16)])))
+    db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=5)))
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
+            for _ in range(30):
+                if db.kv(f"end_at:{DEVICE}") is None and not st().conversation:
+                    break
+                await anyio.sleep(0.5)
+            assert [r["text"] for r in db.sentences(core.iso(t0), core.iso(t0 + dt.timedelta(seconds=5)), source=DEVICE)] == ["0"]
+            assert db.kv(f"end_at:{DEVICE}") is None, "the stop was taken"
+            assert await routes_api.conversations(t0.date().isoformat()) == [], st().conversation
+            assert db.kv(f"open_conversation:{DEVICE}") is None
+            tg.cancel_scope.cancel()
+
+    anyio.run(run)
 
 
 def test_pipeline_cursors_and_pause_notifications_are_independent():
