@@ -13,17 +13,17 @@ The git history was rewritten before publishing to remove the author's private d
 
 The web UI on a phone, filled with made-up data (the UI is in Chinese for now).
 
-| ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation.png) | ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live.png) |
-|:--:|:--:|:--:|
-| Conversations: titles, summaries, tags, due to-dos | One conversation: summary, per-person points, to-dos, decisions, transcript with speakers | Live page: the live analysis of the conversation going on, drafts as words come in |
-| ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap.png) | ![Progress](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/progress.png) |
-| Ask AI: an answer with links to the conversations it came from | Daily recap: highlights, your to-dos, the people you talked to | Progress: each device's queue, recorder battery and card, the phone, today's ASR and LLM calls |
+| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) | ![Transcript](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/transcript-20261024.png) |
+|:--:|:--:|:--:|:--:|
+| Today: due to-dos, yesterday's recap, the live analysis of the conversation going on, today's conversations, and a box to ask about today | Conversations: titles, summaries, tags, due to-dos | One conversation's summary: to-dos, decisions, per-person points | Transcript with speakers: tap a line to play from there; the line playing is highlighted |
+| ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-20261024.png) | ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask-20261024.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap-20261024.png) | ![Me](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/me-20261024.png) |
+| Live page: the live analysis of the conversation going on, drafts as words come in | Ask AI: an answer with links to the conversations it came from | Daily recap: highlights, your to-dos, the people you talked to | Me: each recorder's battery, free card space and lag, plus links to connect a phone, see progress and hook up AI agents |
 
 Live captions while the page is open (the draft layer), and the conversations page on a desktop:
 
-![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions.gif)
+![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
 
-![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop.png)
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop-20261024.png)
 
 ## What it does
 

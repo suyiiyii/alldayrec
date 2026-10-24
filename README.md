@@ -12,17 +12,17 @@
 
 网页在手机上的样子，示例数据都是编的（界面目前只有中文）。
 
-| ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation.png) | ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live.png) |
-|:--:|:--:|:--:|
-| 对话列表：标题、摘要、标签、到期的待办 | 一段对话：摘要、每个人的要点、待办、决定、带说话人的转写 | 实时页：正在进行的对话的实时分析，边说边出初稿 |
-| ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap.png) | ![Progress](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/progress.png) |
-| 问 AI：回答里附带出处对话的链接 | 每日回顾：要点、你的待办、和你说过话的人 | 进度：每台设备的队列、录音设备的电量和存储卡、手机、今天的语音识别和大模型调用 |
+| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) | ![Transcript](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/transcript-20261024.png) |
+|:--:|:--:|:--:|:--:|
+| 今天：到期的待办、昨天的回顾、进行中的对话的实时分析、今天的对话，底部可以直接问今天的事 | 对话列表：标题、摘要、标签、到期的待办 | 一段对话的摘要：待办、决定、每个人的要点 | 原文：带说话人的转写，点一句就从那里播放，正在播的那句高亮 |
+| ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-20261024.png) | ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask-20261024.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap-20261024.png) | ![Me](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/me-20261024.png) |
+| 实时页：正在进行的对话的实时分析，边说边出初稿 | 问 AI：回答里附带出处对话的链接 | 每日回顾：要点、你的待办、和你说过话的人 | 我的：每台录音设备的电量、存储卡剩余和延迟，以及连接手机、处理进度、接入 AI 的入口 |
 
 页面开着时的实时字幕（初稿层），以及电脑上的对话列表页：
 
-![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions.gif)
+![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
 
-![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop.png)
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop-20261024.png)
 
 ## 能做什么
 
