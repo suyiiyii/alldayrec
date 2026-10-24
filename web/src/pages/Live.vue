@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
@@ -20,6 +20,7 @@ import {
 } from "../lib/api";
 import { t } from "../i18n";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
+import { useHideOnScroll } from "../lib/hideOnScroll";
 import { useLive } from "../lib/live";
 import { speakerLabel } from "../lib/speakers";
 
@@ -151,6 +152,22 @@ watch(timeline, async () => {
 
 // the header's height: the summary card sticks right under it
 const headH = ref(0);
+// the day picker goes away on scroll where it has the header's line to itself (a phone, the app: nothing beside it);
+// a tap on what is left of the header brings it back (kept while the captions follow), and only that (its status line
+// is a link)
+const head = useTemplateRef<HTMLElement>("head");
+const { lift, show } = useHideOnScroll(
+  head,
+  () =>
+    matchMedia("(max-width: 600px)").matches ||
+    document.documentElement.classList.contains("in-app"),
+);
+function reveal(e: Event) {
+  if (!lift.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  show();
+}
 let sizer: ResizeObserver | undefined;
 onMounted(() => {
   window.addEventListener("scroll", onScroll);
@@ -178,8 +195,8 @@ function jump(start: string) {
 </script>
 
 <template>
-  <AppHeader in-app>
-    <div class="head">
+  <AppHeader in-app :lift="lift">
+    <div ref="head" class="head" @click.capture="reveal">
       <DayPicker :day="day" @pick="go">
         <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
       </DayPicker>
@@ -200,7 +217,7 @@ function jump(start: string) {
     </div>
   </AppHeader>
   <!-- today: the summary card on top (a phone) or on the right (a wide screen), the captions large -->
-  <main :class="{ cols: side }" :style="{ '--head': headH + 'px' }">
+  <main :class="{ cols: side }" :style="{ '--head': headH - lift + 'px' }">
     <aside v-if="side" class="side">
       <LivePanel :status="status" :lives="lives" :done-to="doneTo" @jump="jump" />
     </aside>
@@ -327,6 +344,11 @@ function jump(start: string) {
   z-index: 1;
   background: var(--bg);
   padding: var(--space-2) 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side {
+    transition: top 0.15s; /* with the header, when the day picker goes or comes */
+  }
 }
 /* nothing going on: a line of what to do, the recorders, the last conversation, how to start */
 .idle {

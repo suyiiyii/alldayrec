@@ -22,6 +22,7 @@ import {
   type Status,
 } from "../lib/api";
 import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calendar";
+import { useHideOnScroll } from "../lib/hideOnScroll";
 import { useSocket, useWatch } from "../lib/socket";
 
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
@@ -216,6 +217,9 @@ watch([tag, day], restart);
 watch(day, () => window.scrollTo(0, 0));
 const pick = (d: string) => (day.value = d === today() ? "" : d);
 
+// the day picker goes away on scroll while the bar is pinned (a wide screen; a phone's scrolls away with the page)
+const { lift } = useHideOnScroll(find, () => getComputedStyle(find.value!).position === "sticky");
+
 function spy() {
   // the last day header above the bottom of the search bar (the top of the screen once it scrolled away) is the
   // day being read
@@ -285,7 +289,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         <LiveCard v-if="going" />
         <DueTodos :due="due" />
       </template>
-      <div ref="find" class="find">
+      <div ref="find" class="find" :style="{ '--lift': lift + 'px' }" @click.capture="lift = 0">
         <DayPicker :day="seen || day || today()" @pick="pick">
           <RouterLink class="cal" to="/calendar">{{ t("title.calendar") }}</RouterLink>
         </DayPicker>
@@ -420,15 +424,21 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 </template>
 
 <style scoped>
-/* sticky under the header on a wide screen (AppHeader: 45 px), a hairline under it so cards pass under an edge */
+/* sticky under the header on a wide screen (AppHeader: 45 px), a hairline under it so cards pass under an edge; lift:
+   the day picker gone under the header */
 .find {
   position: sticky;
-  top: 45px;
+  top: calc(45px - var(--lift, 0px));
   background: var(--bg);
   padding: var(--space-3) 0;
   box-shadow: 0 1px 0 var(--line);
   margin-bottom: var(--space-3);
   z-index: 1;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .find {
+    transition: top 0.15s;
+  }
 }
 .cal {
   margin-left: auto;
