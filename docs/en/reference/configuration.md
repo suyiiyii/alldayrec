@@ -26,7 +26,8 @@ A JSON array with one entry per person (tenant). Its permissions must be 600.
 | `recordings` | The recordings directory |
 | `lang` | Optional. The language the LLM writes this person's content in (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. Without it, `UI_LANG` applies, and without `UI_LANG`, `zh`. Once the language is switched on the web page 「我的」 (Me) (`PUT /api/lang`), that choice wins: it is kept in this person's database and survives a restart |
 
-- Location: the directory above `server/`. In the Docker image it links to `/data/tenants.json`, which is `data/tenants.json` on the host.
+- Location: `DATA_DIR/tenants.json` (see `DATA_DIR` below). In the Docker image `DATA_DIR` is `/data`, which makes it `data/tenants.json` on the host.
+- When the file is missing, the server's first start makes one: one tenant `main` with a random token and the directories `DATA_DIR/main` and `DATA_DIR/main/recordings`, and logs the link that signs you in, `http://127.0.0.1:<PORT>/connect?token=<token>`.
 - `id`, `token`, `data` and `recordings` must each be unique across tenants.
 - With a single tenant the token can be empty. The server then skips authentication and must stay on `127.0.0.1`. With several tenants, each one needs a token.
 - The server reads this file only at startup.
@@ -58,7 +59,8 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 
 | Variable | Example value | When unset | Description |
 |---|---|---|---|
-| `MODELS_DIR` | `/opt/alldayrec/models` | `/opt/alldayrec/models` | The model files directory, an absolute, writable path; missing files are downloaded here at startup. Docker Compose fixes it at `/data/models` |
+| `DATA_DIR` | empty | the user data directory: `~/.local/share/alldayrec` on Linux (`alldayrec` under `XDG_DATA_HOME` when that is set), `~/Library/Application Support/alldayrec` on macOS | The directory `tenants.json` is in; without `MODELS_DIR` the model files go in its `models`, and the tenant a first start makes in its `main`. Fixed at `/data` in Docker |
+| `MODELS_DIR` | empty | `DATA_DIR/models` | The model files directory, an absolute, writable path; missing files are downloaded here at startup. Fixed at `/data/models` in Docker |
 | `PORT` | `8770` | `8770` | The port to listen on. Docker Compose fixes it at `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | The address to listen on; set `0.0.0.0` when the reverse proxy runs on another machine. Docker Compose fixes it at `0.0.0.0` |
 | `DRAFT_ENGINE` | empty | same as `ENGINE` | The engine of the draft layer (while a page is open); it can also be `qwen-stream`: while a page is open, the audio streams to Qwen (Bailian qwen-audio-3.1-asr-flash-streaming, with `DASHSCOPE_API_KEY`), so words show as they are said |

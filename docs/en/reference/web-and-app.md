@@ -8,7 +8,7 @@ The web pages come in Chinese and English: pick one under **语言 · Language**
 
 ## Web pages
 
-The server serves the web pages (`web/` builds into `server/static/dist`). The table lists the pages in `web/src/router.ts` on the main branch. v0.1.0 doesn't have 「今天」 (Today), 「我的」 (Me), 「待办」 (To-dos) or `/live` yet, and there `/` is the live captions page. To use these pages, see the `main` image tag in [Deploy with Docker](../how-to/deploy-docker.md#pin-an-image-version).
+The server serves the web pages (`web/` builds into `server/alldayrec/static/dist`). The table lists the pages in `web/src/router.ts` on the main branch. v0.1.0 doesn't have 「今天」 (Today), 「我的」 (Me), 「待办」 (To-dos) or `/live` yet, and there `/` is the live captions page. To use these pages, see the `main` image tag in [Deploy with Docker](../how-to/deploy-docker.md#pin-an-image-version).
 
 | Address | Page | Content |
 |---|---|---|

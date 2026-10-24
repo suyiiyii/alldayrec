@@ -4,7 +4,7 @@ type: how-to
 
 # How to back up and restore
 
-Everything you need to back up is in one place: `./data` for a Docker deployment; without Docker, `tenants.json` plus each tenant's `data` and `recordings` directories. What they hold is in [Data layout](../reference/data.md).
+Everything you need to back up is in one place: `./data` for a Docker deployment; without Docker, the `tenants.json` in `DATA_DIR` plus each tenant's `data` and `recordings` directories (the tenant `main` a first start makes is in `DATA_DIR` too). What they hold is in [Data layout](../reference/data.md).
 
 You can skip the model files (`data/models`): the server downloads missing ones again at startup.
 

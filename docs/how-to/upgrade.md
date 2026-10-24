@@ -33,7 +33,14 @@ docker compose up -d
 
 数据有问题时，按[如何备份与恢复](./backup.md#恢复)换回升级前的备份。
 
-## 不用 Docker
+## uvx 或 pip
+
+```bash
+uvx --python 3.11 --env-file .env alldayrec@latest    # uvx：用 PyPI 上的最新版启动
+pip install -U alldayrec                              # pip：升级后重启 alldayrec
+```
+
+## 从源码运行
 
 ```bash
 git pull

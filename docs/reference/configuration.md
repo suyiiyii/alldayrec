@@ -26,7 +26,8 @@ type: reference
 | `recordings` | 录音目录 |
 | `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。在网页「我的」页切换语言（`PUT /api/lang`）之后，以切换的结果为准，记在这个人的数据库里，重启后也保留 |
 
-- 位置：`server/` 的上一级目录。Docker 镜像里它链接到 `/data/tenants.json`，也就是宿主机的 `data/tenants.json`。
+- 位置：`DATA_DIR/tenants.json`（见下面的 `DATA_DIR`）。Docker 镜像里 `DATA_DIR` 是 `/data`，也就是宿主机的 `data/tenants.json`。
+- 文件不存在时，服务器第一次启动会生成一个：一个租户 `main`，随机 token，目录是 `DATA_DIR/main` 和 `DATA_DIR/main/recordings`，并在日志里写出登录链接 `http://127.0.0.1:<PORT>/connect?token=<token>`。
 - `id`、`token`、`data`、`recordings` 在租户之间都不能重复。
 - 只有一个租户时 token 可以为空，这时不做认证，服务器只能放在 `127.0.0.1` 上。有多个租户时每个都必须有 token。
 - 服务器只在启动时读这个文件。
@@ -58,7 +59,8 @@ type: reference
 
 | 变量 | 示例值 | 不设时 | 说明 |
 |---|---|---|---|
-| `MODELS_DIR` | `/opt/alldayrec/models` | `/opt/alldayrec/models` | 模型文件目录，绝对路径、可写；缺的文件启动时下载到这里。Docker Compose 里固定为 `/data/models` |
+| `DATA_DIR` | 空 | 用户数据目录：Linux 是 `~/.local/share/alldayrec`（设了 `XDG_DATA_HOME` 时是它下面的 `alldayrec`），macOS 是 `~/Library/Application Support/alldayrec` | `tenants.json` 所在的目录；`MODELS_DIR` 不设时模型文件在它下面的 `models`，第一次启动生成的租户在它下面的 `main`。Docker 里固定为 `/data` |
+| `MODELS_DIR` | 空 | `DATA_DIR/models` | 模型文件目录，绝对路径、可写；缺的文件启动时下载到这里。Docker 里固定为 `/data/models` |
 | `PORT` | `8770` | `8770` | 监听端口。Docker Compose 里固定为 `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | 监听地址；反向代理在另一台机器上时设 `0.0.0.0`。Docker Compose 里固定为 `0.0.0.0` |
 | `DRAFT_ENGINE` | 空 | 同 `ENGINE` | 初稿层（页面开着时）的引擎；另可设 `qwen-stream`：页面开着时把音频流式推给千问（百炼 qwen-audio-3.1-asr-flash-streaming，用 `DASHSCOPE_API_KEY`），边说边出字 |

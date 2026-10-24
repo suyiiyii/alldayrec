@@ -27,7 +27,7 @@ Pick one way:
 
 - When the server hosts an APK, open `https://<your-server>/app.apk` in the phone's browser to download it. The **连接手机** (Connect phone) page of the web UI also shows this download button.
 
-The APK the server offers is the file `live-record.apk` in the first tenant's data directory (`server/routes_pages.py`). In a Docker setup that follows the quickstart, that is `data/main/live-record.apk`. The app compares this file's version number with its own and offers the update.
+The APK the server offers is the file `live-record.apk` in the first tenant's data directory (`server/alldayrec/routes_pages.py`). In a Docker setup that follows the quickstart, that is `data/main/live-record.apk`. The app compares this file's version number with its own and offers the update.
 
 ### iOS
 

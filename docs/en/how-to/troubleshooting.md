@@ -10,8 +10,9 @@ Start with the log: with Docker, run `docker compose logs -f`. The web page **å¤
 
 - The log says `not set: ...`: these variables are missing from `.env`. See [Configuration](../reference/configuration.md).
 - The log says `ENGINE, DRAFT_ENGINE, ENGINE_FALLBACK must be one of ...`: one of these three has a wrong value, and the log lists the allowed values. If your value is in [Change the ASR engine](./change-asr-engine.md) but not in the log, the image on your machine is older than the docs: run `docker compose pull` first.
-- The log says `no tenants file`: there is no `tenants.json`. With Docker it is `data/tenants.json`.
-- The log says `others can read it, and it holds every token: chmod 600`: run `chmod 600 data/tenants.json`.
+- The log says `ffmpeg is not on PATH`: install ffmpeg (macOS: `brew install ffmpeg`; Debian, Ubuntu: `sudo apt install ffmpeg`). The Docker image has it.
+- The log says `ENGINE=local needs sherpa-onnx`: install it with the `local` extra: `pip install 'alldayrec[local]'`, uvx with `--from 'alldayrec[local]'`, from source `uv sync --extra local`. The Docker image has it.
+- The log says `others can read it, and it holds every token: chmod 600`: run `chmod 600` on the `tenants.json` in `DATA_DIR` (with Docker, `chmod 600 data/tenants.json`).
 - The log says a model file failed to download, `is missing` or `has another sha256`: delete that file and restart, or download it from the same address the log gives and put it in `MODELS_DIR` (`data/models` with Docker). A ReDimNet2 file you export yourself with `export_onnx.py` differs byte for byte from the released one, and the server refuses it.
 
 ## The web page shows only `token required`
@@ -25,7 +26,7 @@ This browser isn't signed in yet. Open `http(s)://<your-server>/?token=<your tok
 
 ## Some conversations have no summary
 
-A conversation with under 60 seconds of speech doesn't go to the LLM: its title is its first sentence, and it has no summary or to-dos (`MIN_SPEECH_S` in `server/summary.py`).
+A conversation with under 60 seconds of speech doesn't go to the LLM: its title is its first sentence, and it has no summary or to-dos (`MIN_SPEECH_S` in `server/alldayrec/summary.py`).
 
 ## The first transcript is slow with `ENGINE=local`
 

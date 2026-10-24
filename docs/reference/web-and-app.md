@@ -8,7 +8,7 @@ type: reference
 
 ## 网页
 
-网页由服务器提供（`web/` 构建到 `server/static/dist`）。下表是 main 分支 `web/src/router.ts` 里的页面。v0.1.0 还没有「今天」「我的」「待办」和 `/live`，那时 `/` 是实时字幕页；要用这些页面，见[如何用 Docker 部署](../how-to/deploy-docker.md#固定镜像版本)里的 `main` 镜像标签。
+网页由服务器提供（`web/` 构建到 `server/alldayrec/static/dist`）。下表是 main 分支 `web/src/router.ts` 里的页面。v0.1.0 还没有「今天」「我的」「待办」和 `/live`，那时 `/` 是实时字幕页；要用这些页面，见[如何用 Docker 部署](../how-to/deploy-docker.md#固定镜像版本)里的 `main` 镜像标签。
 
 | 地址 | 页面 | 内容 |
 |---|---|---|

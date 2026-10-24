@@ -4,7 +4,7 @@ type: how-to
 
 # 如何备份与恢复
 
-需要备份的东西都在一个目录里：Docker 部署是 `./data`，不用 Docker 时是 `tenants.json` 加上每个租户的 `data` 和 `recordings` 目录。里面有什么见[数据目录](../reference/data.md)。
+需要备份的东西都在一个目录里：Docker 部署是 `./data`，不用 Docker 时是 `DATA_DIR` 里的 `tenants.json` 加上每个租户的 `data` 和 `recordings` 目录（第一次启动生成的租户 `main` 也在 `DATA_DIR` 里）。里面有什么见[数据目录](../reference/data.md)。
 
 模型文件（`data/models`）可以不备份，缺了服务器启动时会重新下载。
 

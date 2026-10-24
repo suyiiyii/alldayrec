@@ -6,10 +6,12 @@ type: reference
 
 Each tenant has two directories, both set in `tenants.json`: `data` (the database and derived data) and `recordings` (the original audio). With Docker deployed as in the quickstart, they are `data/main` and `data/main/recordings` on the host.
 
-## Docker's `./data`
+## DATA_DIR
+
+`DATA_DIR` is `./data` on the host with Docker; with uvx, pip or from source it is your user data directory by default (see [Configuration](./configuration.md)). The tenant `main` that a first start makes lives under it:
 
 ```text
-data/
+<DATA_DIR>/
 ├── tenants.json
 ├── models/                         model files (MODELS_DIR)
 └── main/                           data directory of tenant main
@@ -23,7 +25,7 @@ data/
 
 | Path | Content |
 |---|---|
-| `live.db` | The SQLite database, see the table below; its schema is defined in [`server/db.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/db.py) |
+| `live.db` | The SQLite database, see the table below; its schema is defined in [`server/alldayrec/db.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/db.py) |
 | `<date>.passes.jsonl` | The engine's raw output from each transcription pass |
 | `owner-redimnet2.npz` | The voiceprint of 「我」 (me) |
 | `voices/clips/` | Voice clips of the speakers |

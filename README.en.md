@@ -14,7 +14,7 @@ Wear it all day: what you say becomes transcripts, summaries and to-dos, with th
 
 [中文](README.md) | **English**
 
-[Quickstart](#quickstart-docker) · [How it compares](#how-it-compares) · [Import recordings](#importing-recordings-you-already-have) · [Hardware](hardware/lr-p3/README.md) · [Roadmap](#roadmap)
+[Quickstart](#quickstart) · [How it compares](#how-it-compares) · [Import recordings](#importing-recordings-you-already-have) · [Hardware](hardware/lr-p3/README.md) · [Roadmap](#roadmap)
 
 **Docs:** [suyiiyii.github.io/alldayrec](https://suyiiyii.github.io/alldayrec/en/) · Let an AI agent deploy it for you: [SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
 
@@ -72,7 +72,7 @@ The conversations page on a desktop:
 - **Takes any audio source.** Anything that can POST audio can feed the server (`POST /api/chunks`), recordings you already have too: see [importing](#importing-recordings-you-already-have).
 - **Transcribes in two layers.** The final layer cuts the audio in pauses and sends pieces of up to 5 minutes to a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio); while a page is open, a draft layer shows words within seconds. Without an ASR key, `ENGINE=local` transcribes on your machine ([compared with the cloud engines](docs/asr-benchmark.md)).
 - **Knows who spoke.** Speech detection (FireRedVAD) and voiceprints (ReDimNet2) run locally on onnxruntime, no GPU: it learns your own voice, keeps speakers apart within a conversation and remembers the names you give them.
-- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history, with links to the conversations an answer came from. A conversation with under 60 s of speech gets its first sentence as the title and no summary or to-dos (`MIN_SPEECH_S` in `server/summary.py`).
+- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history, with links to the conversations an answer came from. A conversation with under 60 s of speech gets its first sentence as the title and no summary or to-dos (`MIN_SPEECH_S` in `server/alldayrec/summary.py`).
 - **Opens up.** A web UI, a remote MCP endpoint (`POST /mcp`) for Claude Code, Codex, Cursor and other agents, a small CLI (`cli/lr.py`), and SQLite storage you can read yourself.
 - **Stays yours.** One server, your disk, several people per server if you like (one token each).
 
@@ -96,11 +96,34 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-bina
 curl -X POST -H "Authorization: Bearer $TOKEN" "https://<your server>/api/chunks/end?device=import&t=<end time>"
 ```
 
-Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. After a batch, call `/api/chunks/end` once; otherwise its last stretch keeps waiting for more audio and never gets a final transcript. The full steps (with the macOS `date` form too) are in [How to import recordings you already have](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) on the docs site. The endpoint is `chunk()` in `server/routes_upload.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
+Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. After a batch, call `/api/chunks/end` once; otherwise its last stretch keeps waiting for more audio and never gets a final transcript. The full steps (with the macOS `date` form too) are in [How to import recordings you already have](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) on the docs site. The endpoint is `chunk()` in `server/alldayrec/routes_upload.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
 
-## Quickstart (Docker)
+## Quickstart
 
-You need Docker on an amd64 or arm64 machine and an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region; one key can run both the ASR and the LLM.
+You need an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region; one key can run both the ASR and the LLM. Pick one of three ways to run it: uvx is the quickest, Docker suits a server that runs for good, and [running from source](#running-from-source) suits changing the code.
+
+### With uvx
+
+You need [uv](https://docs.astral.sh/uv/) and ffmpeg (macOS: `brew install ffmpeg`; Debian, Ubuntu: `sudo apt install ffmpeg`). In an empty directory, make a `.env` with these four lines (every setting is in [`.env.example`](.env.example)):
+
+```ini
+DASHSCOPE_API_KEY=<your Bailian key>
+LLM_API_KEY=<the same Bailian key>
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen-plus
+```
+
+```bash
+uvx --python 3.11 --env-file .env alldayrec    # the first start downloads the model files (about 55 MB) and makes tenants.json
+```
+
+The log has a line `first start: ... open http://127.0.0.1:8770/connect?token=...`: open that link on this computer and you are signed in. `tenants.json`, the model files and the databases live in your user data directory (`~/.local/share/alldayrec` on Linux, `~/Library/Application Support/alldayrec` on macOS); set `DATA_DIR` in `.env` to put them elsewhere. The server only lets this machine in by default; for phones to connect directly, add `HOST=0.0.0.0` to `.env`.
+
+`pip install alldayrec` (Python 3.11) and then `alldayrec` works the same way, with the settings from the environment. For `ENGINE=local`, install it with the `local` extra: `uvx --python 3.11 --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
+
+### With Docker
+
+You need Docker on an amd64 or arm64 machine.
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
@@ -118,7 +141,7 @@ The port is published on all interfaces, and the token keeps others out; the ser
 
 - [Docs site](https://suyiiyii.github.io/alldayrec/en/): tutorial, how-to guides, configuration and API reference, in English and Chinese
 - [Docker details](#docker-details): key restrictions, `ENGINE=local`, time zone, the image, an HTTPS reverse proxy for public access
-- [Without Docker](#quickstart-without-docker)
+- [Running from source](#running-from-source)
 - [Configuration](#configuration): every environment variable and the ASR engines
 - [Model files](#model-files)
 - [Phone app](#phone-app)
@@ -160,25 +183,24 @@ Open `http://<server IP>:8770/?token=<your token>` (the token is in `data/tenant
 
 The app accepts plain `http://` servers (since 1.5.1): inside Tailscale or a LAN, use the IP and port directly. To reach the server over the public internet, put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes port 8770 on all interfaces, and the token is the only lock; with an empty token the server refuses to start unless HOST is 127.0.0.1. To keep it on this machine only, change that line to `127.0.0.1:8770:8770`.
 
-### Quickstart (without Docker)
+### Running from source
 
-Python 3.11 with [uv](https://docs.astral.sh/uv/), ffmpeg, Node 22 with pnpm.
+[uv](https://docs.astral.sh/uv/), ffmpeg, Node 22 with pnpm.
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
-cp .env.example .env    # fill in the keys, and MODELS_DIR=<an absolute, writable directory>
-(cd web && pnpm install && pnpm build)    # -> server/static/dist
-echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/main'", "recordings": "'$PWD/data/main/recordings'"}]' > tenants.json && chmod 600 tenants.json
-cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
+cp .env.example .env    # fill in the keys
+(cd web && pnpm install && pnpm build)    # -> server/alldayrec/static/dist; without it the server starts, the pages don't open
+cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
 ```
 
-`tenants.json` lists who the server serves: one entry per person, each with its own token and its own data and recordings directories (`server/tenant.py`). A single entry with an empty token runs without auth, and then HOST must be 127.0.0.1, or the server refuses to start. For phones to connect directly, set `HOST=0.0.0.0` in `.env` (with a token).
+As with uvx, the first start makes `tenants.json` in `DATA_DIR` (by default your user data directory) and logs the link that signs you in. `tenants.json` lists who the server serves: one entry per person, each with its own token and its own data and recordings directories (`server/alldayrec/tenant.py`). A single entry with an empty token runs without auth, and then HOST must be 127.0.0.1, or the server refuses to start. For phones to connect directly, set `HOST=0.0.0.0` in `.env` (with a token).
 
 ### Model files
 
-Two models run on the server, on CPU: [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) (speech detection, Apache-2.0) and [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 (voiceprints, MIT). You don't need to do anything: at the first start the server downloads the missing files into `MODELS_DIR` (`data/models` in Docker), FireRedVAD from its upstream repository and ReDimNet2 from this repository's `models-v1` release (with `ENGINE=local` also the sherpa-onnx model tarball, at its first use), and accepts only the exact files whose sha256 is pinned in `server/infer.py` and `server/local_asr.py`. A file that is already there is never downloaded again.
+Two models run on the server, on CPU: [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) (speech detection, Apache-2.0) and [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 (voiceprints, MIT). You don't need to do anything: at the first start the server downloads the missing files into `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker), FireRedVAD from its upstream repository and ReDimNet2 from this repository's `models-v1` release (with `ENGINE=local` also the sherpa-onnx model tarball, at its first use), and accepts only the exact files whose sha256 is pinned in `server/alldayrec/infer.py` and `server/alldayrec/local_asr.py`. A file that is already there is never downloaded again.
 
-If a download fails or a file is refused, delete it and restart, or put the same file from the same URL into `MODELS_DIR` yourself. `server/export_onnx.py` is the maintainer's way to make a new release file from the upstream weights, not a way to get these: its ReDimNet2 export differs byte for byte between machines, so the server refuses one you export yourself.
+If a download fails or a file is refused, delete it and restart, or put the same file from the same URL into `MODELS_DIR` yourself. `server/alldayrec/export_onnx.py` is the maintainer's way to make a new release file from the upstream weights, not a way to get these: its ReDimNet2 export differs byte for byte between machines, so the server refuses one you export yourself.
 
 Note on the voiceprint model: ReDimNet2's code and weights are MIT, but its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and decide whether that fits your use.
 
@@ -277,7 +299,7 @@ server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk   # the 
 server/tenants.sh add <id>                       # a new tenant (its own token and dirs) of the last instance
 ```
 
-Each instance is a directory with its `.env` and `tenants.json`, run by its systemd unit. scp puts the release and the APK in the login's home on the host; when the remote shell's `$HOME` is another one, `LR_TGZ` and `LR_APK` give their paths there. The details are in the comments at the top of each script.
+Each instance is a directory with its `.env` (with `DATA_DIR=<that directory>`) and `tenants.json`; its systemd unit runs `.venv/bin/python -m alldayrec` in `<dir>/server`. scp puts the release and the APK in the login's home on the host; when the remote shell's `$HOME` is another one, `LR_TGZ` and `LR_APK` give their paths there. The details are in the comments at the top of each script.
 
 ## About the project
 

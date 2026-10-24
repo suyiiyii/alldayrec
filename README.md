@@ -14,7 +14,7 @@
 
 **中文** | [English](README.en.md)
 
-[快速开始](#快速开始docker) · [和市面产品比](#和市面产品比) · [导入已有录音](#已有录音怎么导入) · [硬件](hardware/lr-p3/README.md) · [路线图](#路线图)
+[快速开始](#快速开始) · [和市面产品比](#和市面产品比) · [导入已有录音](#已有录音怎么导入) · [硬件](hardware/lr-p3/README.md) · [路线图](#路线图)
 
 **文档：** [suyiiyii.github.io/alldayrec](https://suyiiyii.github.io/alldayrec/) · 让 AI Agent 帮你部署：[SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
 
@@ -72,7 +72,7 @@
 - **什么音源都能接。** 能 POST 音频的东西都能给服务器送数据（`POST /api/chunks`），已有的录音文件也可以，见下面的[导入](#已有录音怎么导入)。
 - **两层转写。** 定稿层在停顿处切开，每段最长 5 分钟交给云端语音识别引擎（默认阿里云百炼千问，约 ¥0.05/小时音频）；页面开着时，初稿层几秒内出字。没有语音识别的 key，可以用 `ENGINE=local` 在本机转写（[和云端的对比](docs/asr-benchmark.md)）。
 - **认人。** 语音检测（FireRedVAD）和声纹（ReDimNet2）在本机 CPU 上跑（onnxruntime，不需要显卡），认得出你自己，分得清一段对话里的不同人，记得你起的名字。
-- **记忆。** 一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索，以及对历史记录「问 AI」，回答带出处对话的链接。说话不到 60 秒的对话不调大模型，标题取第一句，没有摘要和待办（`server/summary.py` 里的 `MIN_SPEECH_S`）。
+- **记忆。** 一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索，以及对历史记录「问 AI」，回答带出处对话的链接。说话不到 60 秒的对话不调大模型，标题取第一句，没有摘要和待办（`server/alldayrec/summary.py` 里的 `MIN_SPEECH_S`）。
 - **开放。** 网页、给 Claude Code、Codex、Cursor 等 Agent 用的远程 MCP 端点（`POST /mcp`）、一个小命令行（`cli/lr.py`），数据就是 SQLite，自己就能读。
 - **数据归你。** 一台服务器、你自己的硬盘，愿意的话一台服务器可以给好几个人用（每人一个 token）。
 
@@ -96,11 +96,34 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-bina
 curl -X POST -H "Authorization: Bearer $TOKEN" "https://<你的服务器>/api/chunks/end?device=import&t=<结束时刻>"
 ```
 
-导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。传完一批后调用一次 `/api/chunks/end`，不然最后一段一直等后面的音频，不会定稿。完整步骤（包括 macOS 的 `date` 写法）见文档站的[如何导入已有录音](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。接口细节见 `server/routes_upload.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
+导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。传完一批后调用一次 `/api/chunks/end`，不然最后一段一直等后面的音频，不会定稿。完整步骤（包括 macOS 的 `date` 写法）见文档站的[如何导入已有录音](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。接口细节见 `server/alldayrec/routes_upload.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
 
-## 快速开始（Docker）
+## 快速开始
 
-需要一台装了 Docker 的 amd64 或 arm64 机器，以及一把[阿里云百炼（DashScope）](https://bailian.console.aliyun.com/)北京区的 API key，语音识别和大模型可以共用这一把。
+需要一把[阿里云百炼（DashScope）](https://bailian.console.aliyun.com/)北京区的 API key，语音识别和大模型可以共用这一把。三种跑法任选一种：uvx 最省事，Docker 适合长期跑在一台服务器上，[从源码运行](#从源码运行)适合改代码。
+
+### 用 uvx
+
+需要 [uv](https://docs.astral.sh/uv/) 和 ffmpeg（macOS：`brew install ffmpeg`；Debian、Ubuntu：`sudo apt install ffmpeg`）。在一个空目录里建 `.env`，写上这四行（全部设置项见 [`.env.example`](.env.example)）：
+
+```ini
+DASHSCOPE_API_KEY=<你的百炼 key>
+LLM_API_KEY=<同一把百炼 key>
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen-plus
+```
+
+```bash
+uvx --python 3.11 --env-file .env alldayrec    # 首次启动下载模型文件（约 55 MB），生成 tenants.json
+```
+
+日志里有一行 `first start: ... open http://127.0.0.1:8770/connect?token=...`，在这台电脑上打开那个链接就登录了。`tenants.json`、模型文件和数据库都在用户数据目录里（Linux 是 `~/.local/share/alldayrec`，macOS 是 `~/Library/Application Support/alldayrec`），在 `.env` 里设 `DATA_DIR` 可以换地方。服务默认只让本机访问；要让手机直连，在 `.env` 里加 `HOST=0.0.0.0`。
+
+也可以 `pip install alldayrec`（Python 3.11）后运行 `alldayrec`，设置同样从环境变量读。用 `ENGINE=local` 时装带 `local` 的版本：`uvx --python 3.11 --env-file .env --from 'alldayrec[local]' alldayrec`，或 `pip install 'alldayrec[local]'`。
+
+### 用 Docker
+
+需要一台装了 Docker 的 amd64 或 arm64 机器。
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
@@ -118,7 +141,7 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 
 - [文档站](https://suyiiyii.github.io/alldayrec/)：教程、操作指南、配置和 API 参考，有中英文
 - [Docker 部署细节](#docker-部署细节)：key 的限制、`ENGINE=local`、时区、镜像、公网访问的 HTTPS 反向代理
-- [不用 Docker](#快速开始不用-docker)
+- [从源码运行](#从源码运行)
 - [配置](#配置)：所有环境变量和语音识别引擎
 - [模型文件](#模型文件)
 - [手机 App](#手机-app)
@@ -160,25 +183,24 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 
 App 连 `http://` 的服务器也可以（1.5.1 起），在 Tailscale 或局域网里直接用 IP 和端口就行；要从公网访问，在 8770 端口前面放一个带 TLS 的反向代理（Caddy、nginx、Cloudflare Tunnel、Tailscale Serve）；`GET /api/health` 不需要 token 就返回 `{"ok": true}`，可以给代理做健康检查。compose 文件把 8770 端口发布在所有网卡上，挡住别人的只有 token；token 为空时，除非 HOST 是 127.0.0.1，服务不会启动。只想本机访问，把那一行改成 `127.0.0.1:8770:8770`。
 
-### 快速开始（不用 Docker）
+### 从源码运行
 
-需要 Python 3.11 和 [uv](https://docs.astral.sh/uv/)、ffmpeg、Node 22 和 pnpm。
+需要 [uv](https://docs.astral.sh/uv/)、ffmpeg、Node 22 和 pnpm。
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
-cp .env.example .env    # 填 key，以及 MODELS_DIR=<一个可写目录的绝对路径>
-(cd web && pnpm install && pnpm build)    # 网页构建到 server/static/dist
-echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/main'", "recordings": "'$PWD/data/main/recordings'"}]' > tenants.json && chmod 600 tenants.json
-cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
+cp .env.example .env    # 填 key
+(cd web && pnpm install && pnpm build)    # 网页构建到 server/alldayrec/static/dist；不构建也能启动，只是网页打不开
+cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
 ```
 
-`tenants.json` 列出服务为哪些人服务：每人一条，各有自己的 token、数据目录和录音目录（`server/tenant.py`）。只有一条且 token 为空时不做认证，这时 HOST 必须是 127.0.0.1，否则服务不会启动。手机要直连，在 `.env` 里设 `HOST=0.0.0.0`（要有 token）。
+和 uvx 一样，首次启动在 `DATA_DIR`（默认是用户数据目录）里生成 `tenants.json`，并在日志里给出登录链接。`tenants.json` 列出服务为哪些人服务：每人一条，各有自己的 token、数据目录和录音目录（`server/alldayrec/tenant.py`）。只有一条且 token 为空时不做认证，这时 HOST 必须是 127.0.0.1，否则服务不会启动。手机要直连，在 `.env` 里设 `HOST=0.0.0.0`（要有 token）。
 
 ### 模型文件
 
-服务器上跑两个模型，都用 CPU：[FireRedVAD](https://github.com/FireRedTeam/FireRedVAD)（语音检测，Apache-2.0）和 [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6（声纹，MIT）。不需要你做任何事：首次启动时服务会把缺的文件下载到 `MODELS_DIR`（Docker 里是 `data/models`），FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载（`ENGINE=local` 还会在第一次用到时下载 sherpa-onnx 的模型包），只接受 sha256 与 `server/infer.py`、`server/local_asr.py` 里钉住的值一致的文件。已经有的文件不会重复下载。
+服务器上跑两个模型，都用 CPU：[FireRedVAD](https://github.com/FireRedTeam/FireRedVAD)（语音检测，Apache-2.0）和 [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6（声纹，MIT）。不需要你做任何事：首次启动时服务会把缺的文件下载到 `MODELS_DIR`（默认是 `DATA_DIR/models`，Docker 里是 `data/models`），FireRedVAD 从上游仓库下载，ReDimNet2 从本仓库的 `models-v1` Release 下载（`ENGINE=local` 还会在第一次用到时下载 sherpa-onnx 的模型包），只接受 sha256 与 `server/alldayrec/infer.py`、`server/alldayrec/local_asr.py` 里钉住的值一致的文件。已经有的文件不会重复下载。
 
-下载失败或文件被拒时，删掉它重启，或者从同一个地址把同一个文件放进 `MODELS_DIR`。`server/export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的，不是获取模型的途径：ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。
+下载失败或文件被拒时，删掉它重启，或者从同一个地址把同一个文件放进 `MODELS_DIR`。`server/alldayrec/export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的，不是获取模型的途径：ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。
 
 关于声纹模型：ReDimNet2 的代码和权重是 MIT，但训练数据包含 VoxBlink2（CC BY-NC-SA 4.0）。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，是否适合你的用途请自己判断。
 
@@ -277,7 +299,7 @@ server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk   # 发�
 server/tenants.sh add <id>                       # 给最后一个实例加一个新租户（自己的 token 和目录）
 ```
 
-每个实例是一个目录，里面有它的 `.env` 和 `tenants.json`，由对应的 systemd 单元运行。scp 会把发布包和 APK 放到主机上登录用户的 home 目录；如果远程 shell 的 `$HOME` 是另一个目录，用 `LR_TGZ` 和 `LR_APK` 指定它们在那里的路径。细节见每个脚本开头的注释。
+每个实例是一个目录，里面有它的 `.env`（设 `DATA_DIR=<这个目录>`）和 `tenants.json`，由对应的 systemd 单元在 `<目录>/server` 里运行 `.venv/bin/python -m alldayrec`。scp 会把发布包和 APK 放到主机上登录用户的 home 目录；如果远程 shell 的 `$HOME` 是另一个目录，用 `LR_TGZ` 和 `LR_APK` 指定它们在那里的路径。细节见每个脚本开头的注释。
 
 ## 关于项目
 

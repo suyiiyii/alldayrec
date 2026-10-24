@@ -4,7 +4,7 @@ type: reference
 
 # 模型文件
 
-服务器在本机 CPU 上跑两个模型（onnxruntime，不需要显卡），文件放在 `MODELS_DIR`（Docker 里是 `data/models`）。
+服务器在本机 CPU 上跑两个模型（onnxruntime，不需要显卡），文件放在 `MODELS_DIR`（默认是 `DATA_DIR/models`，Docker 里是 `data/models`）。
 
 | 文件 | 模型 | 用途 | 许可 | 下载自 |
 |---|---|---|---|---|
@@ -16,9 +16,9 @@ type: reference
 ## 下载和校验
 
 - 服务器启动时下载缺的文件，第一次启动约 55 MB。
-- 每个文件的 sha256 钉在 [`server/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/infer.py) 和 [`server/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/local_asr.py) 里，只接受一致的文件；不一致或缺文件时服务器拒绝启动。
+- 每个文件的 sha256 钉在 [`server/alldayrec/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/infer.py) 和 [`server/alldayrec/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/local_asr.py) 里，只接受一致的文件；不一致或缺文件时服务器拒绝启动。
 - 已经有的文件不会重复下载。
-- `server/export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的。ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。
+- `server/alldayrec/export_onnx.py` 是维护者从上游权重制作新的 Release 文件用的。ReDimNet2 的导出在不同机器上逐字节不一致，自己导出的文件会被拒绝。
 
 ## 声纹模型的训练数据
 

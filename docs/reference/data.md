@@ -6,10 +6,12 @@ type: reference
 
 每个租户有两个目录，都在 `tenants.json` 里指定：`data`（数据库和派生数据）和 `recordings`（原始录音）。按快速开始部署的 Docker 里，它们是宿主机上的 `data/main` 和 `data/main/recordings`。
 
-## Docker 的 `./data`
+## DATA_DIR
+
+`DATA_DIR` 在 Docker 里是宿主机的 `./data`；用 uvx、pip 或从源码运行时默认是用户数据目录（见[配置项](./configuration.md)）。第一次启动生成的租户 `main` 在它下面：
 
 ```text
-data/
+<DATA_DIR>/
 ├── tenants.json
 ├── models/                         模型文件（MODELS_DIR）
 └── main/                           租户 main 的 data 目录
@@ -23,7 +25,7 @@ data/
 
 | 路径 | 内容 |
 |---|---|
-| `live.db` | SQLite 数据库，见下表；结构定义在 [`server/db.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/db.py) |
+| `live.db` | SQLite 数据库，见下表；结构定义在 [`server/alldayrec/db.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/db.py) |
 | `<日期>.passes.jsonl` | 每一遍转写时引擎的原始输出 |
 | `owner-redimnet2.npz` | 「我」的声纹 |
 | `voices/clips/` | 说话人的声音片段 |

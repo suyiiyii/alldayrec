@@ -10,8 +10,9 @@ type: how-to
 
 - 日志写 `not set: ...`：`.env` 里缺这些变量。见[配置项](../reference/configuration.md)。
 - 日志写 `ENGINE, DRAFT_ENGINE, ENGINE_FALLBACK must be one of ...`：这三项里有一个值写错了，日志里列出了可选的值。如果你写的值在[如何更换语音识别引擎](./change-asr-engine.md)里有、日志里却没有，说明本机的镜像比文档旧，先运行 `docker compose pull`。
-- 日志写 `no tenants file`：没有 `tenants.json`。Docker 里它在 `data/tenants.json`。
-- 日志写 `others can read it, and it holds every token: chmod 600`：运行 `chmod 600 data/tenants.json`。
+- 日志写 `ffmpeg is not on PATH`：装上 ffmpeg（macOS：`brew install ffmpeg`；Debian、Ubuntu：`sudo apt install ffmpeg`）。Docker 镜像里已经有。
+- 日志写 `ENGINE=local needs sherpa-onnx`：装带 `local` 的版本：`pip install 'alldayrec[local]'`，uvx 加 `--from 'alldayrec[local]'`，从源码运行时 `uv sync --extra local`。Docker 镜像里已经有。
+- 日志写 `others can read it, and it holds every token: chmod 600`：对 `DATA_DIR` 里的 `tenants.json` 运行 `chmod 600`（Docker 里是 `chmod 600 data/tenants.json`）。
 - 日志里说某个模型文件下载失败、`is missing` 或 `has another sha256`：删掉那个文件再重启，或者从日志里给出的同一个地址下载这个文件，放进 `MODELS_DIR`（Docker 里是 `data/models`）。自己用 `export_onnx.py` 导出的 ReDimNet2 文件和发布的文件逐字节不同，会被拒绝。
 
 ## 打开网页只看到 `token required`
@@ -25,7 +26,7 @@ type: how-to
 
 ## 有的对话没有摘要
 
-说话不到 60 秒的对话不调大模型：标题取第一句，没有摘要和待办（`server/summary.py` 里的 `MIN_SPEECH_S`）。
+说话不到 60 秒的对话不调大模型：标题取第一句，没有摘要和待办（`server/alldayrec/summary.py` 里的 `MIN_SPEECH_S`）。
 
 ## 用 `ENGINE=local` 时第一条转写很慢
 

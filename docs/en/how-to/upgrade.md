@@ -33,7 +33,14 @@ To stay on one version, change the tag of `image:` as in [Pin an image version](
 
 If the data has problems, put back the backup from before the upgrade, as in [Back up and restore](./backup.md#restore).
 
-## Without Docker
+## uvx or pip
+
+```bash
+uvx --python 3.11 --env-file .env alldayrec@latest    # uvx: start the newest version on PyPI
+pip install -U alldayrec                              # pip: then restart alldayrec
+```
+
+## From source
 
 ```bash
 git pull

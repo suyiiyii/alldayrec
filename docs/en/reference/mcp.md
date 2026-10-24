@@ -4,7 +4,7 @@ type: reference
 
 # MCP tools
 
-The server offers remote MCP at `POST /mcp` (Streamable HTTP, stateless, JSON responses only), implemented in [`server/mcp_server.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/mcp_server.py). To connect an agent, see [Connect an AI agent over MCP](../how-to/connect-mcp.md).
+The server offers remote MCP at `POST /mcp` (Streamable HTTP, stateless, JSON responses only), implemented in [`server/alldayrec/mcp_server.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/mcp_server.py). To connect an agent, see [Connect an AI agent over MCP](../how-to/connect-mcp.md).
 
 ## Endpoint
 

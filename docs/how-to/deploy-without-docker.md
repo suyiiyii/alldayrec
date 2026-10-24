@@ -2,13 +2,13 @@
 type: how-to
 ---
 
-# 如何不用 Docker 部署
+# 如何从源码运行
 
-这篇讲直接在一台机器上从源码运行服务器。要用 systemd 长期运行并从别的机器部署，见[如何用 deploy.sh 部署](./deploy-sh.md)。
+这篇讲克隆代码、直接在一台机器上运行服务器，适合要改代码的人。只想跑起来，[用 uvx 或 pip](./run-uvx.md) 更省事。要用 systemd 长期运行并从别的机器部署，见[如何用 deploy.sh 部署](./deploy-sh.md)。
 
 ## 前提
 
-- Python 3.11 和 [uv](https://docs.astral.sh/uv/)
+- [uv](https://docs.astral.sh/uv/)（它会自己准备 Python 3.11）
 - ffmpeg
 - Node 22 和 pnpm（构建网页用）
 
@@ -21,30 +21,27 @@ type: how-to
    cp .env.example .env
    ```
 
-2. 编辑 `.env`：填 key（见[配置项](../reference/configuration.md)），并把 `MODELS_DIR` 设成一个可写目录的绝对路径。默认的 `/opt/alldayrec/models` 一般需要 root 才能写。
+2. 编辑 `.env`，填 key（见[配置项](../reference/configuration.md)）。
 
-3. 构建网页，输出到 `server/static/dist`：
+3. 构建网页，输出到 `server/alldayrec/static/dist`：
 
    ```bash
    (cd web && pnpm install && pnpm build)
    ```
 
-4. 在仓库根目录生成 `tenants.json`：
+   不构建也能启动，API 照常工作，网页地址只回一句「the web app is not built」。
+
+4. 安装依赖，读入 `.env`，启动：
 
    ```bash
-   echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/main'", "recordings": "'$PWD/data/main/recordings'"}]' > tenants.json && chmod 600 tenants.json
+   cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
    ```
 
-5. 安装依赖，读入 `.env`，启动：
-
-   ```bash
-   cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
-   ```
-
-   日志出现 `ready on 127.0.0.1:8770` 后，打开 `http://127.0.0.1:8770/?token=<你的 token>`。
+   第一次启动时，日志里有一行 `first start: ... open http://127.0.0.1:8770/connect?token=<token>`。日志出现 `ready on 127.0.0.1:8770` 后，在这台电脑上打开那个链接。
 
 ## 说明
 
-- 服务器从 `server/` 的上一级目录读 `tenants.json`（`server/tenant.py`）。格式见[配置项](../reference/configuration.md#tenants-json)。
+- 服务器从 `DATA_DIR/tenants.json` 读租户（`server/alldayrec/tenant.py`）。`DATA_DIR` 默认是用户数据目录，文件不存在时第一次启动会生成一个；格式见[配置项](../reference/configuration.md#tenants-json)。
+- `uv run alldayrec` 和 `uv run python -m alldayrec` 是一回事。用 `ENGINE=local` 时把 `uv sync` 换成 `uv sync --extra local`。
 - `HOST` 默认是 `127.0.0.1`，只有这台机器能访问。反向代理在另一台机器上时，设 `HOST=0.0.0.0`。
 - `tenants.json` 里只有一条、且 token 为空时，服务器不做认证。这样的服务只能放在 `127.0.0.1` 上。

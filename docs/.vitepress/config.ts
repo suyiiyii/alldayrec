@@ -23,8 +23,9 @@ const SECTIONS: [zh: string, en: string, pages: [string, string, string][]][] = 
     "操作指南",
     "How-to guides",
     [
+      ["如何用 uvx 或 pip 运行", "How to run with uvx or pip", "how-to/run-uvx"],
       ["如何用 Docker 部署", "How to deploy with Docker", "how-to/deploy-docker"],
-      ["如何不用 Docker 部署", "How to deploy without Docker", "how-to/deploy-without-docker"],
+      ["如何从源码运行", "How to run from source", "how-to/deploy-without-docker"],
       ["如何让手机连上服务器", "How to reach the server from a phone", "how-to/remote-access"],
       ["如何安装并连接手机 App", "How to install and connect the phone app", "how-to/install-app"],
       ["如何绑定录音设备", "How to bind a recorder", "how-to/bind-recorder"],

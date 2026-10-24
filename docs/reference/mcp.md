@@ -4,7 +4,7 @@ type: reference
 
 # MCP 工具
 
-服务器在 `POST /mcp` 提供远程 MCP（Streamable HTTP，无状态，只返回 JSON），实现在 [`server/mcp_server.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/mcp_server.py)。接入方法见[如何把 AI 助手接入 MCP](../how-to/connect-mcp.md)。
+服务器在 `POST /mcp` 提供远程 MCP（Streamable HTTP，无状态，只返回 JSON），实现在 [`server/alldayrec/mcp_server.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/mcp_server.py)。接入方法见[如何把 AI 助手接入 MCP](../how-to/connect-mcp.md)。
 
 ## 端点
 

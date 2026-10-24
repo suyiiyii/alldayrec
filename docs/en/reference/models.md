@@ -4,7 +4,7 @@ type: reference
 
 # Model files
 
-The server runs two models on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (`data/models` in Docker).
+The server runs two models on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
 
 | File | Model | Use | License | Downloaded from |
 |---|---|---|---|---|
@@ -16,9 +16,9 @@ With `ENGINE=local` there is a third one: sherpa-onnx's X-ASR zh-en model (`x-as
 ## Download and verification
 
 - At startup the server downloads the missing files, about 55 MB at the first start.
-- The sha256 of each file is pinned in [`server/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/infer.py) and [`server/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/local_asr.py), and the server accepts only matching files. When a file doesn't match or is missing, the server refuses to start.
+- The sha256 of each file is pinned in [`server/alldayrec/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/infer.py) and [`server/alldayrec/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/local_asr.py), and the server accepts only matching files. When a file doesn't match or is missing, the server refuses to start.
 - A file that is already there is never downloaded again.
-- `server/export_onnx.py` is how maintainers make new release files from the upstream weights. ReDimNet2's export differs byte for byte between machines, so the server refuses a file you export yourself.
+- `server/alldayrec/export_onnx.py` is how maintainers make new release files from the upstream weights. ReDimNet2's export differs byte for byte between machines, so the server refuses a file you export yourself.
 
 ## The voiceprint model's training data
 
