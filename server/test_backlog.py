@@ -310,7 +310,8 @@ def test_final_goes_on_after_a_recording_of_odd_length(tmp_path, monkeypatch):
     going on at the newest audio: the final layer takes the next recording from where the last one ended, not a sample
     or a few short of it, in the same pipeline and in one started after it (10-24: the finalized time came back from a
     restart cut to the millisecond; the 11 samples after it went to the engine alone, and the local engine, which fails
-    on less than 0.1 s, was asked again every 10 s for good)."""
+    on less than 0.1 s, was asked again every 10 s for good). A store finalized to the millisecond before the fix goes
+    on too."""
     short = []
 
     async def engine(x, partial=None):
@@ -350,6 +351,12 @@ def test_final_goes_on_after_a_recording_of_odd_length(tmp_path, monkeypatch):
         async with anyio.create_task_group() as tg:  # restarted
             tg.start_soon(device_pipeline.pipeline, DEVICE)
             await record(2)
+            tg.cancel_scope.cancel()
+        key = f"finalized_to:{DEVICE}"  # as a store written before the fix keeps it
+        db.put_kv(key, core.iso(dt.datetime.fromisoformat(db.kv(key))))
+        async with anyio.create_task_group() as tg:  # restarted on it
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
+            await record(3)
             tg.cancel_scope.cancel()
         assert not short, short
 

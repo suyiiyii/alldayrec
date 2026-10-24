@@ -319,7 +319,9 @@ async def pipeline(device: str):
         x = seg.audio[a0 - seg.audio_base:b0 - seg.audio_base]
         at = lambda s: seg.time_at(a0 + round(s * SR))  # the piece may span a session boundary, where the clock jumps
         hi = at(len(x) / SR)
-        if not any(rel(u[0]) < cut for u in known) and not seg.speaking():  # no speech: nothing to send, the clock still advances
+        # no speech: nothing to send, the clock still advances. Nor in less than a VAD frame (25 ms), whatever the VAD is
+        # in at the newest audio: a store finalized to the ms before this fix left the last samples of a recording here
+        if len(x) < SR // 40 or (not any(rel(u[0]) < cut for u in known) and not seg.speaking()):
             await commit(grouper.advance(hi), [], iso(base), hi)  # no rows: pages still drop their drafts of this time
             return True
         t_run = time.perf_counter()
