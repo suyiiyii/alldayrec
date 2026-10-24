@@ -4,7 +4,7 @@ import { today } from "./calendar";
 import { useSocket, useWatch } from "./socket";
 
 // One day's sentences as the server pushes them (final rows replacing drafts, the sentence being said as a partial),
-// its closed conversations, the live analyses and the status. The live page and Today's live card both use it; a
+// its closed conversations, the live analyses and the status. The live page and 时间线's live card both use it; a
 // day other than today is loaded once and gets no pushes.
 export function useLive(day: Ref<string>) {
   const now = today(); // as the page opened: one left open past midnight keeps following the stream
@@ -15,7 +15,7 @@ export function useLive(day: Ref<string>) {
     status = ref<Status | null>(null),
     lives = ref<LiveState[]>([]),
     ready = ref(false);
-  // a conversation going on somewhere: what Today shows the live card for, and the live page captions for
+  // a conversation going on somewhere: what 时间线 shows the live card for, and the live page captions for
   const going = computed(() => !!status.value?.devices?.some((d) => d.recording && d.conversation));
 
   // per device, up to where final rows cover the time: its drafts before that are no longer shown (they stay on the server)

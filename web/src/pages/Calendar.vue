@@ -29,7 +29,7 @@ const months = computed(() => {
   }
   return Object.entries(by).sort((a, b) => (a[0] < b[0] ? 1 : -1));
 });
-const open = (day: string) => router.push({ path: "/conversations", query: { day } });
+const open = (day: string) => router.push({ path: "/", query: { day } });
 </script>
 
 <template>

@@ -262,7 +262,7 @@ async function alias(name: string, of: string) {
   <AppHeader />
   <main :class="{ playing: tab === 'transcript' || track.playing }">
     <div class="top">
-      <RouterLink class="back" to="/conversations"><Icon name="chevron-left" :size="18" />全部对话</RouterLink>
+      <RouterLink class="back" to="/"><Icon name="chevron-left" :size="18" />全部对话</RouterLink>
       <div v-if="c" class="more">
         <button
           class="btn-ghost"
@@ -294,7 +294,7 @@ async function alias(name: string, of: string) {
     </div>
     <div v-if="missing" class="empty">
       <Icon name="message-circle" :size="48" />找不到这段对话
-      <RouterLink class="btn btn-primary" to="/conversations">看全部对话</RouterLink>
+      <RouterLink class="btn btn-primary" to="/">看全部对话</RouterLink>
     </div>
     <template v-else-if="c">
       <h1>{{ s?.status === "done" ? s.title || "（无标题）" : "对话 " + hhmm(c.start) }}</h1>
@@ -316,7 +316,7 @@ async function alias(name: string, of: string) {
           v-for="t in s.tags"
           :key="t"
           class="chip"
-          :to="{ path: '/conversations', query: { tag: t } }"
+          :to="{ path: '/', query: { tag: t } }"
           >{{ t }}</RouterLink
         >
       </div>

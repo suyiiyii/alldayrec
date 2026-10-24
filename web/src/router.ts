@@ -3,15 +3,17 @@ import { createRouter, createWebHistory } from "vue-router";
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", component: () => import("./pages/Today.vue"), meta: { title: "今天" } },
-    { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "实时字幕" } },
+    // the old /conversations shows it too (an alias, not a redirect: the 1.5.0 app's 对话 tab loads that path, and a
+    // redirect would move its WebView to 时间线's path, which that app answers by reloading both tabs, again and again)
+    {
+      path: "/",
+      alias: "/conversations",
+      component: () => import("./pages/Timeline.vue"),
+      meta: { title: "时间线" },
+    },
+    { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "实时" } },
     { path: "/me", component: () => import("./pages/Me.vue"), meta: { title: "我的" } },
     { path: "/todos", component: () => import("./pages/Todos.vue"), meta: { title: "待办" } },
-    {
-      path: "/conversations",
-      component: () => import("./pages/Conversations.vue"),
-      meta: { title: "对话" },
-    },
     {
       path: "/c/:id",
       component: () => import("./pages/Conversation.vue"),

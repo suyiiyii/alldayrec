@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// The due card: today's todos and the 3 latest past due that are not stale (a 待会儿 from last week is not today's
-// business); the rest behind one line to /todos, where they can be cleared. A marked todo leaves at once
+// The due card (时间线's): 3 at most, today's first, then the latest past due that are not stale (a 待会儿 from last
+// week is not today's business); the rest behind one line to /todos, where they can be cleared. A marked todo leaves
+// at once
 import { computed } from "vue";
 import { type Due } from "../lib/api";
 import { open } from "../lib/todos";
@@ -9,13 +10,14 @@ import TodoItem from "./TodoItem.vue";
 
 const props = defineProps<{ due: Due[] }>();
 const left = computed(() => open(props.due));
-const shown = computed(() => [
-  ...left.value.filter((t) => !t.age_days),
-  ...left.value
-    .filter((t) => t.age_days && !t.stale)
-    .sort((a, b) => b.due_date.localeCompare(a.due_date))
-    .slice(0, 3),
-]);
+const shown = computed(() =>
+  [
+    ...left.value.filter((t) => !t.age_days),
+    ...left.value
+      .filter((t) => t.age_days && !t.stale)
+      .sort((a, b) => b.due_date.localeCompare(a.due_date)),
+  ].slice(0, 3),
+);
 </script>
 
 <template>

@@ -7,10 +7,10 @@ import type { Row } from "../lib/api";
 import { today } from "../lib/calendar";
 import { useLive } from "../lib/live";
 
-// Today's first card while a conversation goes on (Today shows it only then): its newest captions as they are said,
+// 时间线's first card while a conversation goes on (shown only then): its newest captions as they are said,
 // from the live page's data, the live analysis's headline, and 全屏 to the live page
 const LINES = 3;
-const { rows, partials, convs, status, lives } = useLive(ref(today()));
+const { rows, partials, status, lives } = useLive(ref(today()));
 // the newest sentences of the conversations going on (a device's from its conversation's start), the one being said last
 const lines = computed(() => {
   const from = new Map(
@@ -51,7 +51,7 @@ const isNow = (r: Row) => Object.values(partials.value).includes(r);
       </p>
       <p v-if="!lines.length" class="line muted">字幕马上出来…</p>
     </RouterLink>
-    <LivePanel class="foot" mini :status="status" :lives="lives" :convs="convs" />
+    <LivePanel class="foot" mini :status="status" :lives="lives" />
   </section>
 </template>
 

@@ -5,15 +5,16 @@ import Icon, { type IconName } from "./Icon.vue";
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
 defineProps<{ inApp?: boolean }>();
 
-// four places, each owning the pages under it (the live and todos pages are today's; devices, progress, connect are 我的)
+// four places, each owning the pages under it (a conversation, the calendar and the todos are 时间线's; devices,
+// progress, connect are 我的); a phone shows 我的 as the fourth tab, a wide screen too
 const TABS: { to: string; label: string; icon: IconName; under: RegExp }[] = [
-  { to: "/", label: "今天", icon: "home", under: /^\/(live|todos)?$/ },
   {
-    to: "/conversations",
-    label: "对话",
-    icon: "message-circle",
-    under: /^\/(conversations|c\/|calendar)/,
+    to: "/",
+    label: "时间线",
+    icon: "list",
+    under: /^\/($|conversations|c\/|calendar|todos)/,
   },
+  { to: "/live", label: "实时", icon: "captions", under: /^\/live/ },
   { to: "/speakers", label: "人物", icon: "users", under: /^\/(speakers|p\/)/ },
   { to: "/me", label: "我的", icon: "user", under: /^\/(me|connect|progress|device\/|record)/ },
 ];
@@ -24,9 +25,10 @@ const route = useRoute();
   <header :class="{ bare: !inApp }">
     <div class="bar">
       <h1>alldayrec</h1>
+      <!-- a wide screen: 时间线 / 实时 / 人物 next to the name, 我的 apart on the right -->
       <nav class="nav-top">
         <RouterLink
-          v-for="t in TABS"
+          v-for="t in TABS.slice(0, 3)"
           :key="t.to"
           :to="t.to"
           :class="{ on: t.under.test(route.path) }"
@@ -34,6 +36,11 @@ const route = useRoute();
         >
       </nav>
       <slot />
+      <nav class="nav-top me">
+        <RouterLink :to="TABS[3].to" :class="{ on: TABS[3].under.test(route.path) }"
+          ><Icon :name="TABS[3].icon" :size="18" />{{ TABS[3].label }}</RouterLink
+        >
+      </nav>
     </div>
   </header>
   <!-- a phone: the same four as tabs at the bottom -->
@@ -84,6 +91,9 @@ nav a.on {
 /* each link is as tall as a finger: 44 px */
 .nav-top {
   font-size: var(--fs-sm);
+}
+.nav-top.me {
+  margin-left: auto;
 }
 .nav-top a {
   gap: 6px;

@@ -3,26 +3,22 @@ import { computed, nextTick, ref, watch } from "vue";
 import Icon from "./Icon.vue";
 import Timeline from "./Timeline.vue";
 import {
-  convLink,
   errorTitle,
   hhmm,
   hhmmss,
   post,
-  type Conversation,
   type DeviceStatus,
   type LiveState,
   type Status,
 } from "../lib/api";
 
 // The live analysis of the conversation going on, as a card: the newest topic is the headline (always in sight), the
-// topics under it (a tap on the head folds them away on a phone; a wide screen always shows them). With none going on,
-// the last conversation today and its summary. mini: the headline line alone (Today's live card). The page owns the
-// data: the status, the analyses, today's closed conversations.
+// topics under it (a tap on the head folds them away on a phone; a wide screen always shows them); shown only while one
+// goes on. mini: the headline line alone (时间线's live card). The page owns the data: the status, the analyses.
 // doneTo: up to where a device's rows are final (the live page knows it from final messages; else the status's)
 const props = defineProps<{
   status: Status | null;
   lives: LiveState[];
-  convs: Conversation[];
   doneTo?: (device: string) => string;
   mini?: boolean;
 }>();
@@ -55,12 +51,6 @@ const current = computed(() => {
     null
   );
 });
-// with none going on, its last conversation today: its summary stays until the next one starts
-const last = computed(() =>
-  props.convs
-    .filter((c) => !c.device || c.device === barDev.value?.device)
-    .reduce<Conversation | null>((a, c) => (a && a.end > c.end ? a : c), null),
-);
 const said = (s: number) => (s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`);
 // the head: what it is (label), the newest topic or how long the conversation has gone before there is one (headline)
 const sub = computed(() =>
@@ -68,11 +58,7 @@ const sub = computed(() =>
     .filter(Boolean)
     .join(" · "),
 );
-const label = computed(() => {
-  const p = last.value;
-  if (!talk.value && p) return `上一段对话 · ${hhmm(p.start)}–${hhmm(p.end)}`;
-  return "AI 实时摘要" + (sub.value && " · " + sub.value);
-});
+const label = computed(() => "AI 实时摘要" + (sub.value && " · " + sub.value));
 const headline = computed(() => {
   const c = talk.value,
     l = current.value;
@@ -82,10 +68,8 @@ const headline = computed(() => {
       `对话进行中 · 已说 ${said(c.speech_s)}` +
       (c.speech_s < MIN_SPEECH_S ? `，满 ${MIN_SPEECH_S / 60} 分钟自动总结` : "")
     );
-  if (last.value) return convLink(last.value);
   return "对话开始后，AI 会边听边总结要点";
 });
-const body = computed(() => (current.value ? "live" : !talk.value && last.value ? "last" : ""));
 // 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
 const asking = ref(false),
   askErr = ref(""),
@@ -155,8 +139,8 @@ watch(
     <div class="head">
       <button
         class="fold"
-        :disabled="!body"
-        :aria-expanded="body ? paneOpen : undefined"
+        :disabled="!current"
+        :aria-expanded="current ? paneOpen : undefined"
         @click="toggle"
       >
         <span class="label"><Icon name="sparkles" :size="14" />{{ label }}</span>
@@ -173,34 +157,26 @@ watch(
         {{ current ? "立即更新" : "立即总结" }}
       </button>
       <Icon
-        v-if="body"
+        v-if="current"
         class="caret"
         :name="paneOpen ? 'chevron-down' : 'chevron-right'"
         :size="18"
         @click="toggle"
       />
     </div>
-    <div v-if="body" ref="paneBox" class="body">
-      <template v-if="current">
-        <div class="meta">
-          {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
-          {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
-          {{ current.sentences }} 句
-        </div>
-        <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
-      </template>
-      <template v-else-if="last">
-        <p v-if="last.summary?.status !== 'done'" class="muted">还在整理这段对话</p>
-        <p v-else-if="last.summary.summary">{{ last.summary.summary }}</p>
-        <p v-else class="muted">这段太短，没有生成摘要</p>
-        <RouterLink :to="'/c/' + last.id">查看这段对话</RouterLink>
-      </template>
+    <div v-if="current" ref="paneBox" class="body">
+      <div class="meta">
+        {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
+        {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
+        {{ current.sentences }} 句
+      </div>
+      <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
     </div>
   </section>
 </template>
 
 <style scoped>
-/* Today's card: the headline on one line, its time under it, the button on the right */
+/* 时间线's live card: the headline on one line, its time under it, the button on the right */
 .mini {
   display: flex;
   align-items: center;
@@ -281,10 +257,6 @@ watch(
   max-height: 28vh;
   margin-top: var(--space-2);
   border-top: 1px solid var(--line);
-}
-.body p {
-  margin: var(--space-2) 0;
-  font-size: var(--fs-sm);
 }
 .meta {
   font-size: var(--fs-xs);

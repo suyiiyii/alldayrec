@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
+import DeviceCard from "../components/DeviceCard.vue";
 import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
@@ -31,8 +32,13 @@ const day = computed(() => (route.query.day as string | undefined) || today);
 const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } =
   useLive(day);
 const said = computed(() => new Set(Object.values(partials.value))); // the sentences being said now
-// the summary card: the conversation going on, or with none the last one today (a new instance has neither)
-const side = computed(() => live.value && (going.value || convs.value.length > 0));
+// the summary card while a conversation goes on; with none, the idle card under the captions says what the
+// recorders are doing, the last conversation today and how to start one
+const side = computed(() => live.value && going.value);
+const idle = computed(() => live.value && ready.value && !going.value && !said.value.size);
+const last = computed(() =>
+  convs.value.reduce<Conversation | null>((a, c) => (a && a.end > c.end ? a : c), null),
+);
 const hit = ref("");
 const follow = ref(true);
 
@@ -183,7 +189,7 @@ function jump(start: string) {
   <!-- today: the summary card on top (a phone) or on the right (a wide screen), the captions large -->
   <main :class="{ cols: side }" :style="{ '--head': headH + 'px' }">
     <aside v-if="side" class="side">
-      <LivePanel :status="status" :lives="lives" :convs="convs" :done-to="doneTo" @jump="jump" />
+      <LivePanel :status="status" :lives="lives" :done-to="doneTo" @jump="jump" />
     </aside>
     <div class="caps">
       <template v-for="it in timeline" :key="it.key">
@@ -207,17 +213,37 @@ function jump(start: string) {
         <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
       </template>
       <!-- nothing being said: where the next words will come up, under today's earlier ones -->
-      <div v-if="live && ready && !going && !said.size" class="empty">
-        <Icon name="mic" :size="48" />
-        <b class="none">现在没有进行中的对话</b>
-        <template v-if="status?.devices?.length"
-          >戴上录音设备开口说话，或在 App 里点「录音」，字幕会实时出现在这里</template
+      <section v-if="idle" class="idle">
+        <div class="none">
+          <Icon name="mic" :size="28" />
+          <div>
+            <b>现在没有进行中的对话</b>
+            <div class="muted">
+              {{
+                status?.devices?.length
+                  ? "戴上录音设备开口说话，字幕会实时出现在这里"
+                  : "连上手机和录音设备，说的话会实时出现在这里"
+              }}
+            </div>
+          </div>
+        </div>
+        <DeviceCard v-for="d in status?.devices ?? []" :key="d.device" :d="d" />
+        <RouterLink v-if="last" class="card last" :to="'/c/' + last.id">
+          <span class="muted">上一段对话 结束于 {{ hhmm(last.end) }} ·</span>
+          <b>{{ convLink(last) }}</b>
+          <Icon name="chevron-right" :size="18" />
+        </RouterLink>
+        <!-- the app records from its own top bar: no page recorder inside it -->
+        <RouterLink class="btn btn-primary rec" to="/record"
+          ><Icon name="mic" :size="18" />用手机开始录音</RouterLink
         >
-        <template v-else>连上手机和录音设备，说的话会实时出现在这里</template>
-        <RouterLink v-if="!status?.devices?.length" class="btn btn-primary" to="/connect"
-          >连接手机</RouterLink
-        >
-      </div>
+        <p class="in-app-hint muted">点顶栏的录音状态开始录音</p>
+        <RouterLink v-if="!status?.devices?.length" class="card last" to="/connect">
+          <Icon name="smartphone" :size="20" />
+          <b>连接录音设备</b>
+          <Icon name="chevron-right" :size="18" />
+        </RouterLink>
+      </section>
       <div v-else-if="ready && !rows.length && !live" class="empty">
         <Icon name="calendar" :size="48" />这一天没有转写内容
       </div>
@@ -285,8 +311,62 @@ function jump(start: string) {
   background: var(--bg);
   padding: var(--space-2) 0;
 }
-.none {
+/* nothing going on: a line of what to do, the recorders, the last conversation, how to start */
+.idle {
+  padding: var(--space-5) 0 var(--space-4);
+}
+.idle .none {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  color: var(--muted);
+}
+.idle .none b {
   color: var(--fg);
+}
+.idle .none .muted {
+  font-size: var(--fs-sm);
+}
+.last {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--fg);
+}
+.last b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.last .muted {
+  flex: none;
+  font-size: var(--fs-sm);
+}
+.last > .icon {
+  flex: none;
+  color: var(--muted);
+}
+.rec {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  margin-bottom: var(--space-3);
+}
+.in-app-hint {
+  display: none;
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+:global(html.in-app .idle .rec) {
+  display: none;
+}
+:global(html.in-app .idle .in-app-hint) {
+  display: block;
 }
 /* a wide screen: captions on the left, the summary on the right, as tall as the screen */
 @media (min-width: 900px) {

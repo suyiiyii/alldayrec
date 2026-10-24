@@ -128,7 +128,7 @@ const link = (id: string, at: string | null) =>
             v-for="t in p.tags"
             :key="t"
             class="tag"
-            :to="{ path: '/conversations', query: { tag: t } }"
+            :to="{ path: '/', query: { tag: t } }"
             >{{ t }}</RouterLink
           >
         </div>
