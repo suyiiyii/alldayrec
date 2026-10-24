@@ -30,7 +30,7 @@ final class Flow: XCTestCase {
   }
 
   /// Adding the recorder: the add list, 强制绑定 (or 绑定), iOS's pairing dialog; when iOS still has keys the recorder
-  /// forgot, the app's advice to forget it in Settings, done there; until the home bar says it follows live.
+  /// forgot, the app's advice to forget it in Settings, done there; until the status sheet says it follows live.
   func testAdd() {
     page("录音设备")
     tap(button(["添加录音设备", "重新添加"]))
@@ -51,7 +51,7 @@ final class Flow: XCTestCase {
         self.forget()
         self.app.activate()
       }
-      return self.text("已连接 · 实时上传").exists
+      return self.following()
     }, "not following \(recorder) live within \(waitS) s")
     say("connected advice=\(advised)")
   }
@@ -73,7 +73,7 @@ final class Flow: XCTestCase {
     app.activate()
     dialogs(3)
     page("今天")
-    XCTAssert(until(waitS) { self.dialogs(0); return self.text("已连接 · 实时上传").exists }, "not following live within \(waitS) s")
+    XCTAssert(until(waitS) { self.dialogs(0); return self.following() }, "not following live within \(waitS) s")
     say("connected")
   }
 
@@ -176,6 +176,18 @@ final class Flow: XCTestCase {
   func tap(_ e: XCUIElement, timeout: Double = 15) {
     if !e.waitForExistence(timeout: timeout) { testDump(); XCTFail("no \(e)") }
     e.tap()
+  }
+
+  /// The top bar's chip says the recorder is connected, and its status sheet that the app follows live (the sheet is
+  /// closed again).
+  func following() -> Bool {
+    let chip = app.buttons.matching(NSPredicate(format: "label BEGINSWITH '已连接'")).firstMatch
+    guard chip.exists else { return false }
+    chip.tap()
+    let live = text("已连接 · 实时上传").waitForExistence(timeout: 5)
+    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()  // the scrim above the sheet
+    sleep(1)
+    return live
   }
 
   /// One of the app's pages: a tab of its bottom bar, or one of 我的's entries (录音设备, 上传, 设置).

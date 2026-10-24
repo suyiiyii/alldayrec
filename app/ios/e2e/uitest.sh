@@ -146,7 +146,7 @@ step_add() {  # the add list, force-binding, iOS's pairing dialog, following liv
   if [ -n "$FAKE" ]; then  # a Mac advertises no full name (28 bytes: the service UUID and an 8-character name at most)
     fake_bind || { verdict add FAIL "the app did not take the fake"; return; }
   else
-    ui Add LR_WAIT_S=300 || { verdict add FAIL "no 已连接 · 实时上传 on the app (ui log)"; return; }
+    ui Add LR_WAIT_S=300 || { verdict add FAIL "no 已连接 · 实时上传 in the app's status sheet (ui log)"; return; }
     grep -q "^LRUI bound force" "$R/run.log" || log "it was not bound to another phone: 绑定, not 强制绑定"
   fi
   ev wait-status "$NAME" "$t" 120 && verdict add PASS "bound, $NAME reports through the iPhone" || verdict add FAIL "no status report from $NAME"

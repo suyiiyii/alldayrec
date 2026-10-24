@@ -72,7 +72,7 @@ class RecorderService : Service() {
 
         const val BACKLOG_MS = 120_000L  // a piece waiting longer (the longest slice is 60 s, then its upload) is a backlog
 
-        /** The notification for a status(): title and text, as the app's bar puts it (main.dart _bleBar). The BLE
+        /** The notification for a status(): title and text, as the app's status sheet puts it (home.dart _bleBody). The BLE
          *  recorder's battery only while connected: the last read stays in hw after the link is gone. */
         fun notice(s: Map<String, Any?>, now: Long = System.currentTimeMillis()): Pair<String, String> {
             val note = s["note"] as String?
