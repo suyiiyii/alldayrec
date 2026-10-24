@@ -24,7 +24,7 @@ A JSON array with one entry per person (tenant). Its permissions must be 600.
 | `token` | The token the app and the web pages send (`Authorization: Bearer` or a cookie) |
 | `data` | The data directory: `live.db` and more, see [Data layout](./data.md) |
 | `recordings` | The recordings directory |
-| `lang` | Optional. The language the LLM writes this person's content in (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. Without it, `UI_LANG` applies, and without `UI_LANG`, `zh`. While the server runs, `PUT /api/lang` changes it until the next restart, which restores the value here |
+| `lang` | Optional. The language the LLM writes this person's content in (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. Without it, `UI_LANG` applies, and without `UI_LANG`, `zh`. Once the language is switched on the web page 「我的」 (Me) (`PUT /api/lang`), that choice wins: it is kept in this person's database and survives a restart |
 
 - Location: the directory above `server/`. In the Docker image it links to `/data/tenants.json`, which is `data/tenants.json` on the host.
 - `id`, `token`, `data` and `recordings` must each be unique across tenants.
@@ -67,7 +67,7 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `STEPFUN_API_KEY` | empty | — | StepFun key, used by `stepfun` and `stepfun-sse` |
 | `STEPFUN_SSE_URL` | empty | `https://api.stepfun.com/v1/audio/asr/sse` | The StepFun SSE endpoint; the default is the pay-as-you-go address; for Step Plan use `.../step_plan/v1/audio/asr/sse` |
 | `LOCAL_ASR_URL` | empty | the k2-fsa/sherpa-onnx GitHub Release | Where `local` downloads its model tarball (about 136 MB) from; the same tarball on a mirror works too (sha256-checked) |
-| `UI_LANG` | `zh` | `zh` | The language of what the LLM writes (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. A `lang` in `tenants.json` wins. The UI of the web pages and the app doesn't change |
+| `UI_LANG` | `zh` | `zh` | The language of what the LLM writes (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. A `lang` in `tenants.json` wins. The web pages use it too in a browser that hasn't picked a language; the app's UI doesn't change |
 | `RECAP_AT` | `10:00` | `10:00` | The time of day the server writes yesterday's recap; set it empty for no recap |
 | `TZ` | `Asia/Shanghai` | the system time zone | The time zone for conversation dates and `RECAP_AT`. A Docker container's system time zone is UTC; an empty `TZ=` means UTC too |
 | `REFINE_EVERY_S` | `20` | `30` | Draft layer: run once after this many seconds without a pause |

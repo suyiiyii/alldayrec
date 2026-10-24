@@ -67,9 +67,18 @@ def test_prompts(monkeypatch):
 
 
 def test_api():
-    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    path = Path(tempfile.mkdtemp()) / "t.db"
+    db.open_db(path)
     assert anyio.run(routes_api.lang_get) == {"lang": "zh"}
     assert anyio.run(routes_api.lang_put, {"lang": "en"}) == {"lang": "en"} and T().lang == "en"
     with pytest.raises(HTTPException) as e:
         anyio.run(routes_api.lang_put, {"lang": "fr"})
     assert e.value.status_code == 400 and T().lang == "en"
+    assert db.open_db(path).lang == "en", "a restart keeps the PUT's, over the tenants file's zh"
+
+
+def test_tenants_file_without_put():
+    path = Path(tempfile.mkdtemp()) / "t.db"
+    tenant.enter(tenant.Tenant("x", "", path.parent, path.parent, "en", db=path))
+    db.init()
+    assert T().lang == "en", "no PUT yet: the tenants file's lang stays"

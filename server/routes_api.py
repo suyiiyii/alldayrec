@@ -66,10 +66,11 @@ async def lang_get():
 
 @router.put("/api/lang")
 async def lang_put(body: dict):
-    """The language from the next model call on; existing summaries keep theirs (重新生成 rewrites one). Until a restart
-    only: then tenants.json's lang (or UI_LANG) again."""
+    """The language from the next model call on; existing summaries keep theirs (重新生成 rewrites one). Kept in the
+    tenant's store: it outlasts a restart, over tenants.json's lang (or UI_LANG)."""
     if body.get("lang") not in tenant.LANGS:
         raise HTTPException(400, "lang is zh or en")
+    db.put_kv("lang", body["lang"])
     T().lang = body["lang"]
     return {"lang": T().lang}
 

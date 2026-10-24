@@ -108,6 +108,8 @@ def init():
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")
+    if (lang := kv("lang")) in tenant.LANGS:  # PUT /api/lang's, over tenants.json's
+        tenant.T().lang = lang
 
 
 def conn() -> sqlite3.Connection:

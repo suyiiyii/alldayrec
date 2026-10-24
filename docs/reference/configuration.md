@@ -24,7 +24,7 @@ type: reference
 | `token` | App 和网页发来的 token（`Authorization: Bearer` 或 cookie） |
 | `data` | 数据目录：`live.db` 等，见[数据目录](./data.md) |
 | `recordings` | 录音目录 |
-| `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。服务器运行中可以用 `PUT /api/lang` 临时改，重启后恢复成这里的值 |
+| `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。在网页「我的」页切换语言（`PUT /api/lang`）之后，以切换的结果为准，记在这个人的数据库里，重启后也保留 |
 
 - 位置：`server/` 的上一级目录。Docker 镜像里它链接到 `/data/tenants.json`，也就是宿主机的 `data/tenants.json`。
 - `id`、`token`、`data`、`recordings` 在租户之间都不能重复。
@@ -67,7 +67,7 @@ type: reference
 | `STEPFUN_API_KEY` | 空 | — | 阶跃星辰的 key，`stepfun`、`stepfun-sse` 用 |
 | `STEPFUN_SSE_URL` | 空 | `https://api.stepfun.com/v1/audio/asr/sse` | 阶跃 SSE 接口；默认是按量付费的地址，Step Plan 用 `.../step_plan/v1/audio/asr/sse` |
 | `LOCAL_ASR_URL` | 空 | k2-fsa/sherpa-onnx 的 GitHub Release | `local` 的模型包（约 136 MB）从哪里下载；镜像站上同一个模型包也行（按 sha256 校验） |
-| `UI_LANG` | `zh` | `zh` | 大模型写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。`tenants.json` 里的 `lang` 优先。网页和 App 的界面不受影响 |
+| `UI_LANG` | `zh` | `zh` | 大模型写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。`tenants.json` 里的 `lang` 优先。没选过语言的浏览器打开网页时也用它；App 的界面不受影响 |
 | `RECAP_AT` | `10:00` | `10:00` | 每天这个时刻写昨天的回顾；设为空就不写 |
 | `TZ` | `Asia/Shanghai` | 系统的时区 | 对话日期和 `RECAP_AT` 用的时区。Docker 容器的系统时区是 UTC；`TZ=` 设为空也是 UTC |
 | `REFINE_EVERY_S` | `20` | `30` | 初稿层：这么久没有停顿就做一次 |

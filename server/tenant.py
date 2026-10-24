@@ -10,7 +10,7 @@ holds every token, and nothing else does (server/tenants.sh made it from each in
     [{"id": "main", "token": "...", "data": "/opt/alldayrec/data", "recordings": "/opt/alldayrec/recordings"}, ...]
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
-en; without it UI_LANG, else zh.
+en; without it UI_LANG, else zh. One set by PUT /api/lang (the 我的 page's switch) is kept in the store and wins.
 """
 import contextvars
 import hmac
@@ -37,7 +37,7 @@ class Tenant:
     token: str  # what its apps and pages send (Bearer or cookie); empty: no auth, loopback only, the only tenant
     data: Path  # live.db, the passes trace, owner-redimnet2.npz, voice clips
     recordings: Path
-    lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang changes it until a restart
+    lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang's, kept in the store, wins (db.init)
     db: Path = None  # data / live.db unless given (a test's own file)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
