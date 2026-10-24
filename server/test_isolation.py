@@ -152,6 +152,10 @@ REQUESTS = {
     ("POST", "/api/self"): ("POST", "/api/self", dict(json={"answer": "later"})),
     ("GET", "/api/audio"): ("GET", "/api/audio", dict(params={"start": AT, "end": f"{TODAY}T10:00:06.000", "device": DEV})),
     ("GET", "/api/listen"): ("GET", "/api/listen", dict(params={"device": DEV})),
+    ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"conv": CID})),
+    ("GET", "/api/stars"): ("GET", "/api/stars", {}),
+    ("DELETE", "/api/sentences/{sid}/star"): ("DELETE", "/api/sentences/f1/star", {}),
+    ("POST", "/api/sentences/{sid}/speaker"): ("POST", "/api/sentences/f1/speaker", dict(json={"conv": CID, "to": "我"})),
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/speakers": "page",

@@ -40,6 +40,7 @@ from alldayrec import local_asr
 from alldayrec import routes_api
 from alldayrec import routes_audio
 from alldayrec import routes_pages
+from alldayrec import routes_sentences
 from alldayrec import routes_speakers
 from alldayrec import routes_upload
 from alldayrec import tenant
@@ -148,6 +149,7 @@ app.include_router(routes_upload.router)
 app.include_router(routes_api.router)
 app.include_router(routes_speakers.router)
 app.include_router(routes_audio.router)
+app.include_router(routes_sentences.router)
 app.include_router(ws.router)
 
 

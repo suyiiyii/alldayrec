@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT N
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
 CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_ids), at: when; a row dropped is the undo
     id TEXT PRIMARY KEY, conv TEXT NOT NULL, mark TEXT NOT NULL CHECK (mark IN ('done', 'wrong')), at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS stars (id TEXT PRIMARY KEY, conv TEXT NOT NULL, at TEXT NOT NULL);  -- 收藏: a sentence (its id in conv's device's rows), when
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);  -- per device: finalized_to:<d>, draft_to:<d>, open_conversation:<d>, end_at:<d>, live:<d>
 CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as its phone uploads it. src 'rec': the recorder's
     device TEXT NOT NULL, src TEXT NOT NULL,  -- own event log (firmware lr_log.h), seq that log's, data its record (boot t
