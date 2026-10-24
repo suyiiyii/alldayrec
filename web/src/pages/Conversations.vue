@@ -33,7 +33,6 @@ const q = ref(ask || String(route.query.q ?? "")),
   kind = ref(String(route.query.kind ?? "对话")),
   day = ref(String(route.query.day ?? ""));
 // the day of the topmost card on screen, shown by the picker
-const folded = ref(false);
 const seen = ref(""),
   find = useTemplateRef<HTMLElement>("find");
 const tags = ref<[string, number][]>([]),
@@ -153,14 +152,10 @@ watch([tag, kind, day], restart);
 watch(day, () => window.scrollTo(0, 0));
 const pick = (d: string) => (day.value = d === today() ? "" : d);
 
-let lastY = 0;
 function spy() {
-  // scrolling down folds the search bar away (not while typing in it), scrolling up brings it back
-  const y = window.scrollY;
-  folded.value = y > lastY && y > 80 && !find.value?.contains(document.activeElement);
-  lastY = y;
-  // the last day header above the bottom of the sticky search bar is the day being read
-  const edge = (find.value?.getBoundingClientRect().bottom ?? 0) + 8;
+  // the last day header above the bottom of the search bar (the top of the screen once it scrolled away) is the
+  // day being read
+  const edge = Math.max(0, find.value?.getBoundingClientRect().bottom ?? 0) + 8;
   let d = items.value[0]?.start.slice(0, 10) ?? day.value;
   for (const el of document.querySelectorAll<HTMLElement>("[data-day]"))
     if (el.getBoundingClientRect().top < edge) d = el.dataset.day!;
@@ -204,7 +199,7 @@ useSocket((m) => {
 <template>
   <AppHeader />
   <main>
-    <div ref="find" class="find" :class="{ folded }">
+    <div ref="find" class="find">
       <DayPicker :day="seen || day || today()" @pick="pick">
         <RouterLink class="cal" to="/calendar">日历</RouterLink>
       </DayPicker>
@@ -302,14 +297,6 @@ useSocket((m) => {
   background: var(--bg);
   padding: 10px 0 6px;
   z-index: 1;
-  transition:
-    transform 0.2s,
-    opacity 0.2s;
-}
-.find.folded {
-  transform: translateY(-110%);
-  opacity: 0;
-  pointer-events: none;
 }
 .cal {
   margin-left: auto;
@@ -393,13 +380,13 @@ useSocket((m) => {
   display: block;
   margin: 16px auto;
 }
-/* a phone and inside the app: no header to stay under */
+/* a phone and inside the app: the bar scrolls away with the page, the screen is for reading */
 @media (max-width: 600px) {
   .find {
-    top: 0;
+    position: static;
   }
 }
 :global(.in-app .find) {
-  top: 0;
+  position: static;
 }
 </style>
