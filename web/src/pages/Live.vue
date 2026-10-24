@@ -3,10 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
+import Icon from "../components/Icon.vue";
 import MediaFold from "../components/MediaFold.vue";
 import Timeline from "../components/Timeline.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
+  errorTitle,
   fold,
   get,
   inSpans,
@@ -23,6 +25,7 @@ import {
 } from "../lib/api";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useSocket } from "../lib/socket";
+import { speakerLabel } from "../lib/speakers";
 
 // One day at a time (?day=YYYY-MM-DD; none: today, which follows the live stream)
 const GAP_MS = 5 * 60 * 1000; // a quiet stretch this long gets a mark, so conversations separate
@@ -81,29 +84,11 @@ const catchups = computed(() =>
         ? mins
         : holdLeft(d) // the phone went away: what it said of the card's backlog then is out of date
           ? `；等录音设备卡里更早的录音，${holdLeft(d)}，之后先定稿已有的录音`
-          : `；${kb ? `录音设备卡里还有 ${(kb / 1024).toFixed(kb >= 10240 ? 0 : 1)} MB 录音` : "手机还"}在后台补传${mins}，补完后定稿接上，实时初稿和分析照常`,
+          : `；${kb ? `录音设备卡里还有 ${(kb / 1024).toFixed(kb >= 10240 ? 0 : 1)} MB 录音` : "手机还"}在后台补传${mins}，补完后定稿接上，实时字幕和分析照常`,
     };
     return [{ s: from, it }];
   }),
 );
-// The status line: what the recording device is doing; with none recording (no audio for 2 min), when the last one
-// did instead of a "behind" that only counts the time since (10-07: 落后 13408 秒 at 01:06, nothing recording). The
-// queue by device and why: 261 pieces of LR-P3-116C held for its card's backlog read as the recording device's
-const when = (iso?: string | null) =>
-  !iso ? "—" : iso.slice(0, 10) === todayOf() ? hhmm(iso) : `${iso.slice(5, 10)} ${hhmm(iso)}`;
-const topQueued = computed(
-  () =>
-    status.value?.devices?.find((d) => d.device === status.value?.device)?.queued ??
-    status.value?.queued ??
-    0,
-);
-const queues = computed(() =>
-  (status.value?.devices ?? []).filter(
-    (d) => d.queued && (status.value?.recording === false || d.device !== status.value?.device),
-  ),
-);
-const queueText = (d: DeviceStatus) =>
-  `${d.device} 排队 ${d.queued} 块${d.hold ? `，等卡里 ${d.done_to ? hhmm(d.done_to) + " 后" : "更早"}的旧录音` : "，定稿中"}`;
 const timeline = computed(() => {
   const ev = [
     ...rows.value.map((r) => ({ s: r.start, it: { k: "row", key: "s" + r.id, r } as Item })),
@@ -307,9 +292,10 @@ const barText = computed(() => {
   const d = barDev.value,
     c = talk.value,
     l = current.value;
-  const prev = last.value ? ` · 上一段 ${hhmm(last.value.start)}《${convLink(last.value)}》` : "";
-  if (!status.value?.recording) return "未在录音" + prev;
-  if (!c) return "暂无进行中的对话" + prev;
+  // not recording: the status line above says so already
+  const prev = last.value ? `上一段 ${hhmm(last.value.start)}《${convLink(last.value)}》` : "";
+  if (!status.value?.recording) return prev;
+  if (!c) return "暂无进行中的对话" + (prev && " · " + prev);
   if (l) return `实时分析 · 更新于 ${hhmm(l.at)}` + (d?.analyzing ? " · 分析中…" : "");
   if (d?.analyzing) return "分析中…";
   return (
@@ -320,7 +306,8 @@ const barText = computed(() => {
 const body = computed(() => (current.value ? "live" : !talk.value && last.value ? "last" : ""));
 // 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
 const asking = ref(false),
-  askErr = ref("");
+  askErr = ref(""),
+  askErrTitle = ref("");
 const fresh = computed(() => (talk.value?.speech_s ?? 0) > (current.value?.speech_s ?? 0));
 async function askNow() {
   const d = barDev.value;
@@ -335,6 +322,7 @@ async function askNow() {
     );
   } catch (e) {
     askErr.value = (e as Error).message;
+    askErrTitle.value = errorTitle(e);
     setTimeout(() => (askErr.value = ""), 5000);
   }
 }
@@ -414,53 +402,19 @@ const convLink = (c: Conversation) =>
       <DayPicker :day="day" @pick="go">
         <button v-if="!live" class="back" @click="go(today)">回到今天</button>
       </DayPicker>
+      <!-- recording or not, and how far behind the words come up; the rest is on the progress page -->
       <RouterLink class="status" to="/progress" title="处理进度">
         <template v-if="!connected">连接断开，重连中…</template>
         <template v-else-if="status">
-          <span v-if="status.recording === false"
-            >未在录音 · 最后录音 {{ when(status.last_audio) }}</span
+          <span v-if="status.recording === false">未在录音</span>
+          <span v-else :class="{ bad: (status.latency_s ?? 0) > 60 }"
+            >录音中{{ status.latency_s == null ? "" : ` · 延迟 ${status.latency_s} 秒` }}</span
           >
-          <template v-else>
-            <span>{{ status.device || "等待录音" }}</span>
-            <span :class="{ bad: (status.behind_s ?? 0) > 30 }"
-              >落后 {{ status.behind_s == null ? "—" : status.behind_s + " 秒" }}</span
-            >
-            <span :class="{ bad: topQueued }">排队 {{ topQueued }} 块</span>
-            <span :class="{ bad: (status.latency_s ?? 0) > 60 }"
-              >上屏 {{ status.latency_s ?? "—" }} 秒</span
-            >
-          </template>
-          <span v-for="d in queues" :key="'q' + d.device" :class="{ bad: !d.hold }">{{
-            queueText(d)
-          }}</span>
-          <span :class="{ bad: status.refine?.error }">
-            分离
-            {{
-              status.refine
-                ? status.refine.error
-                  ? "失败"
-                  : status.refine.at.slice(11) + " " + (status.refine.ms / 1000).toFixed(0) + "s"
-                : "等待"
-            }}
-          </span>
-          <span
-            >状态机
-            {{
-              status.conversation
-                ? "对话打开 " +
-                  hhmmss(status.conversation.start) +
-                  " · " +
-                  status.conversation.sentences +
-                  " 句"
-                : "空闲，无打开的对话"
-            }}</span
-          >
-          <span>{{ status.engine }} {{ status.commit }}</span>
         </template>
         <template v-else>连接中…</template>
       </RouterLink>
     </div>
-    <div v-if="live && status" class="pane">
+    <div v-if="live && status && barText" class="pane">
       <div class="pane-line">
         <button
           class="fold"
@@ -468,9 +422,13 @@ const convLink = (c: Conversation) =>
           :aria-expanded="body ? paneOpen : undefined"
           @click="toggle"
         >
-          <span v-if="body" class="caret">{{ paneOpen ? "▾" : "▸" }}</span
-          >{{ barText }}
-          <span v-if="askErr" class="bad"> · {{ askErr }}</span>
+          <Icon
+            v-if="body"
+            class="caret"
+            :name="paneOpen ? 'chevron-down' : 'chevron-right'"
+            :size="14"
+          />{{ barText }}
+          <span v-if="askErr" class="bad" :title="askErrTitle"> · {{ askErr }}</span>
         </button>
         <button
           v-if="talk"
@@ -490,7 +448,7 @@ const convLink = (c: Conversation) =>
       >
         <template v-if="current">
           <div class="pane-meta">
-            {{ current.start > doneTo(current.device) ? "基于最新初稿 · " : "" }}对话
+            {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
             {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
             {{ current.sentences }} 句
           </div>
@@ -531,7 +489,7 @@ const convLink = (c: Conversation) =>
       <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" />
       <div v-else-if="it.k === 'conv'" class="conv">
         对话 {{ hhmmss(it.c.start) }}–{{ hhmmss(it.c.end) }} 结束 · 参与
-        {{ it.c.participants.join("、") || "—" }} · {{ it.c.sentences }} 句 ·
+        {{ it.c.participants.map(speakerLabel).join("、") || "—" }} · {{ it.c.sentences }} 句 ·
         <RouterLink :to="'/c/' + it.c.id">{{ convLink(it.c) }}</RouterLink>
       </div>
       <div v-else-if="it.k === 'catchup'" class="gap">
@@ -539,8 +497,13 @@ const convLink = (c: Conversation) =>
       </div>
       <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
     </template>
-    <div v-if="ready && !rows.length" class="empty">
-      {{ live ? "今天还没有转写内容" : "这一天没有转写内容" }}
+    <div v-if="ready && !rows.length && live" class="empty">
+      <Icon name="mic" :size="48" />
+      <div>今天还没有转写内容。连上手机和录音设备，说的话会实时出现在这里</div>
+      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+    </div>
+    <div v-else-if="ready && !rows.length" class="empty">
+      <Icon name="calendar" :size="48" />这一天没有转写内容
     </div>
   </main>
   <button v-show="live && !follow" class="jump" @click="toBottom">回到最新</button>
@@ -550,7 +513,7 @@ const convLink = (c: Conversation) =>
     @toggle="logOpen = ($event.target as HTMLDetailsElement).open"
   >
     <summary>
-      系统日志 <span>{{ lastEvent }}</span>
+      <Icon class="caret" name="chevron-right" :size="14" /> 系统日志 <span>{{ lastEvent }}</span>
     </summary>
     <div ref="logBox" class="events">
       <div v-for="(e, i) in events" :key="i" :class="e.kind">{{ hhmmss(e.at) }} {{ e.text }}</div>
@@ -591,8 +554,7 @@ const convLink = (c: Conversation) =>
   background: none;
 }
 .caret {
-  display: inline-block;
-  width: 14px;
+  margin-right: 2px;
   color: var(--accent);
 }
 .ask {
@@ -717,11 +679,8 @@ const convLink = (c: Conversation) =>
   cursor: pointer;
   list-style: none;
 }
-.syslog summary::before {
-  content: "▸ ";
-}
-.syslog[open] summary::before {
-  content: "▾ ";
+.syslog[open] summary .caret {
+  transform: rotate(90deg);
 }
 .events {
   max-width: 860px;
@@ -747,13 +706,6 @@ const convLink = (c: Conversation) =>
   color: var(--err);
 }
 @media (max-width: 600px) {
-  .status {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    white-space: nowrap;
-    gap: 12px;
-    scrollbar-width: none;
-  }
   .live {
     padding: 4px 12px 110px;
   }

@@ -288,22 +288,50 @@ export interface LogEvent {
   kind: string;
 }
 
-export async function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
-  const q = new URLSearchParams(params).toString();
-  const r = await fetch(path + (q ? "?" + q : ""));
-  if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-  return r.json();
+// A failed request in words for the page (401, 5xx and no network said plainly; another refusal says the server's
+// own detail when that is Chinese, many are English for scripts); what actually came back is in `detail`, for a title
+export class ApiError extends Error {
+  detail: string;
+  constructor(message: string, detail: string) {
+    super(message);
+    this.detail = detail;
+  }
+}
+export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
+
+async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  let r: Response;
+  try {
+    r = await fetch(path, init);
+  } catch (e) {
+    throw new ApiError("连不上服务器", `${path}: ${e}`);
+  }
+  const j = await r.json().catch(() => ({}));
+  if (r.ok) return j;
+  const said = typeof j.detail === "string" ? j.detail : "";
+  throw new ApiError(
+    r.status === 401
+      ? "登录已失效，请重新扫码"
+      : r.status >= 500
+        ? "服务器出错了，稍后再试"
+        : /\p{Script=Han}/u.test(said)
+          ? said
+          : `请求没有成功（${r.status}）`,
+    `${path}: HTTP ${r.status}${said && " " + said}`,
+  );
 }
 
-export async function post<T>(path: string, body?: unknown): Promise<T> {
-  const r = await fetch(path, {
+export function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  const q = new URLSearchParams(params).toString();
+  return call<T>(path + (q ? "?" + q : ""));
+}
+
+export function post<T>(path: string, body?: unknown): Promise<T> {
+  return call<T>(path, {
     method: "POST",
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.detail ?? `HTTP ${r.status}`);
-  return j;
 }
 
 export const hhmm = (iso: string) => iso.slice(11, 16);

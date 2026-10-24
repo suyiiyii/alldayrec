@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import Icon from "./Icon.vue";
+
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
 defineProps<{ inApp?: boolean }>();
 </script>
@@ -8,16 +10,26 @@ defineProps<{ inApp?: boolean }>();
     <div class="bar">
       <h1>alldayrec</h1>
       <nav>
-        <RouterLink to="/" exact-active-class="on">实时字幕</RouterLink>
+        <RouterLink to="/" exact-active-class="on"
+          ><Icon name="mic" :size="18" />实时字幕</RouterLink
+        >
         <RouterLink
           to="/conversations"
           :class="{ on: $route.path === '/conversations' || $route.path.startsWith('/c/') }"
-          >对话</RouterLink
+          ><Icon name="message-circle" :size="18" />对话</RouterLink
         >
-        <RouterLink to="/calendar" exact-active-class="on">日历</RouterLink>
-        <RouterLink to="/speakers" exact-active-class="on">说话人</RouterLink>
-        <RouterLink to="/progress" exact-active-class="on">进度</RouterLink>
-        <RouterLink to="/connect" exact-active-class="on">连接手机</RouterLink>
+        <RouterLink to="/calendar" exact-active-class="on"
+          ><Icon name="calendar" :size="18" />日历</RouterLink
+        >
+        <RouterLink to="/speakers" exact-active-class="on"
+          ><Icon name="users" :size="18" />说话人</RouterLink
+        >
+        <RouterLink to="/progress" exact-active-class="on"
+          ><Icon name="activity" :size="18" />进度</RouterLink
+        >
+        <RouterLink to="/connect" exact-active-class="on"
+          ><Icon name="smartphone" :size="18" />连接手机</RouterLink
+        >
       </nav>
       <slot />
     </div>
@@ -57,6 +69,7 @@ nav {
 nav a {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 44px;
   padding: 0 var(--space-2);
   color: var(--muted);
@@ -83,11 +96,19 @@ nav a.on {
   .bar {
     padding: 0 var(--space-3);
   }
+  /* the icon above the word, the six spread over the width */
   nav {
-    margin-left: -6px;
+    flex: 1;
+    justify-content: space-between;
+    font-size: var(--fs-xs);
   }
   nav a {
-    padding: 0 6px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0;
+    min-height: 48px;
+    padding: 0 var(--space-1);
+    line-height: 1.3;
   }
 }
 </style>

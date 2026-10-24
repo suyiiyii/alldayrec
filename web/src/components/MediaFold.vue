@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { hhmmss, type Row } from "../lib/api";
+import Icon from "./Icon.vue";
 import TranscriptRow from "./TranscriptRow.vue";
 
 // A run of media rows as one grey line; opens to the rows, still greyed
@@ -10,8 +11,8 @@ const open = ref(false);
 
 <template>
   <button class="fold" @click="open = !open">
-    {{ open ? "▾" : "▸" }} 媒体 {{ hhmmss(rows[0].start) }}–{{ hhmmss(rows.at(-1)!.end) }} ·
-    {{ rows.length }} 句
+    <Icon :name="open ? 'chevron-down' : 'chevron-right'" :size="16" /> 媒体
+    {{ hhmmss(rows[0].start) }}–{{ hhmmss(rows.at(-1)!.end) }} · {{ rows.length }} 句
   </button>
   <template v-if="open">
     <TranscriptRow v-for="r in rows" :key="r.id" :row="r" media :hit="hit === r.start" />

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
-import { get, post, type Speaker, type Voice } from "../lib/api";
+import Icon from "../components/Icon.vue";
+import Skeleton from "../components/Skeleton.vue";
+import { errorTitle, get, post, type Speaker, type Voice } from "../lib/api";
 import { play, player } from "../lib/audio";
 import { useMutation } from "../lib/mutation";
+import { likeness, speakerLabel } from "../lib/speakers";
 
 const groups = ref<Speaker[]>([]),
   names = ref<string[]>([]),
@@ -15,14 +18,20 @@ const groups = ref<Speaker[]>([]),
   editing = ref(""),
   newName = ref(""),
   flash = ref(""),
-  errorAt = ref(""); // the card whose name box the error is about; "" puts it at the top
-const { busy, error, run } = useMutation();
+  errorAt = ref(""), // the card whose name box the error is about; "" puts it at the top
+  failed = ref<{ msg: string; title: string } | null>(null); // the list itself did not load
+const { busy, error, detail, run } = useMutation();
 
 async function load() {
-  [groups.value, names.value] = await Promise.all([
-    get<Speaker[]>("/api/speakers"),
-    get<string[]>("/api/names"),
-  ]);
+  try {
+    [groups.value, names.value] = await Promise.all([
+      get<Speaker[]>("/api/speakers"),
+      get<string[]>("/api/names"),
+    ]);
+    failed.value = null;
+  } catch (e) {
+    failed.value = { msg: (e as Error).message, title: errorTitle(e) };
+  }
   loaded.value = true;
 }
 void load();
@@ -98,16 +107,27 @@ async function detach(g: Speaker, v: Voice) {
 
 <template>
   <AppHeader>
-    <span class="count" v-if="loaded">{{ groups.length }} 个说话人 · {{ unnamed }} 个未命名</span>
+    <span class="count" v-if="groups.length"
+      >{{ groups.length }} 个说话人 · {{ unnamed }} 个未命名</span
+    >
   </AppHeader>
   <main>
-    <div class="tabs">
+    <div v-if="groups.length" class="tabs">
       <button :class="{ on: filter === 'unnamed' }" @click="filter = 'unnamed'">待命名</button>
       <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部</button>
     </div>
     <p v-if="flash" class="flash">{{ flash }}</p>
-    <p v-if="error && !errorAt" class="error" role="alert">{{ error }}</p>
-    <p v-if="!loaded" class="empty">加载中…</p>
+    <p v-if="error && !errorAt" class="error" role="alert" :title="detail">{{ error }}</p>
+    <Skeleton v-if="!loaded" />
+    <div v-else-if="failed" class="empty" :title="failed.title">
+      <Icon name="alert-circle" :size="48" />{{ failed.msg }}
+    </div>
+    <div v-else-if="!groups.length" class="empty">
+      <Icon name="users" :size="48" />
+      <div>还没有认出说话人。录到对话以后，每个声音会列在这里，听一听再起名字</div>
+      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+    </div>
+    <p v-else-if="!list.length" class="empty">每个声音都有名字了</p>
 
     <section v-for="g in list.slice(0, shown)" :key="g.id" class="card">
       <div class="head">
@@ -128,7 +148,8 @@ async function detach(g: Speaker, v: Voice) {
           :disabled="player.failed.has(voiceId(v))"
           @click="listen(v)"
         >
-          {{ player.playing === voiceId(v) ? "■" : "▶" }} {{ v.clip_text || day(v.start) }}
+          <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+          <span>{{ v.clip_text || day(v.start) }}</span>
         </button>
       </div>
       <p v-if="g.co.length" class="meta">常一起出现：{{ g.co.join("、") }}</p>
@@ -172,7 +193,9 @@ async function detach(g: Speaker, v: Voice) {
           {{ open === g.id ? "收起" : `对话列表（${g.count}）` }}
         </button>
       </div>
-      <p v-if="error && errorAt === g.id" class="error" role="alert">{{ error }}</p>
+      <p v-if="error && errorAt === g.id" class="error" role="alert" :title="detail">
+        {{ error }}
+      </p>
       <div v-if="editing === g.id && names.length" class="chips">
         <button v-for="n in names.slice(0, 12)" :key="n" class="chip" @click="name(g, n, title(g))">
           {{ n }}
@@ -181,13 +204,14 @@ async function detach(g: Speaker, v: Voice) {
 
       <div v-for="(s, i) in g.suggested" :key="i" class="suggest">
         <span
-          >可能也是 {{ g.name }}：{{ s.count }} 段对话（相似度 {{ s.score.toFixed(2) }}）<template
+          >可能也是 {{ g.name }}（声音{{ likeness(s.score) }}）：{{ s.count }} 段对话<template
             v-if="s.called.length"
             >，被叫作{{ s.called.map((x) => `「${x.name}」`).join("") }}</template
           ></span
         >
         <button v-for="v in s.samples" :key="voiceId(v)" class="clip" @click="listen(v)">
-          {{ player.playing === voiceId(v) ? "■" : "▶" }} {{ v.clip_text || day(v.start) }}
+          <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+          <span>{{ v.clip_text || day(v.start) }}</span>
         </button>
         <button :disabled="busy" @click="name(g, g.name!, `${s.count} 段`, s.id)">
           是 {{ g.name }}
@@ -203,12 +227,17 @@ async function detach(g: Speaker, v: Voice) {
             <RouterLink :to="`/c/${v.conv}`">{{ day(v.start) }}</RouterLink>
           </td>
           <td>
-            <button class="mini" @click="listen(v)">
-              {{ player.playing === voiceId(v) ? "■" : "▶" }}
+            <button
+              class="mini"
+              :title="player.playing === voiceId(v) ? '停止' : '播放'"
+              @click="listen(v)"
+            >
+              <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
             </button>
             {{ v.title || "（无标题）" }}
             <span class="meta"
-              >· {{ v.label }} · {{ v.n }} 句 · 同场 {{ v.with.join("、") || "无" }}</span
+              >· {{ speakerLabel(v.label) }} · {{ v.n }} 句 · 同场
+              {{ v.with.join("、") || "无" }}</span
             >
           </td>
           <td>
@@ -266,10 +295,17 @@ main {
   align-items: center;
 }
 .clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.clip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .clip.playing {
   border-color: var(--accent);
@@ -301,6 +337,10 @@ main {
   white-space: nowrap;
 }
 .mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
   min-height: 32px;
   min-width: 32px;
   padding: 0 6px;

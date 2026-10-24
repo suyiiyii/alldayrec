@@ -2,10 +2,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Listen from "../components/Listen.vue";
+import Skeleton from "../components/Skeleton.vue";
 import {
   CHARGE,
   build,
   get,
+  hhmm,
+  hhmmss,
   holdLeft,
   hot,
   phoneLine,
@@ -30,6 +33,23 @@ useSocket(
     if (m.type === "status") status.value = m;
   },
   async () => (status.value = await get<Status>("/api/status")),
+);
+
+// The whole server, what the live page's status line showed before it was cut to 录音中 / 未在录音: the recording
+// device, how far behind finals and the screen are, the queue, the speaker pass, the conversation open, the build.
+// With none recording (no audio for 2 min), when the last one did instead of a "behind" that only counts the time
+// since (10-07: 落后 13408 秒 at 01:06, nothing recording); the queue is the recording device's own
+const when = (iso?: string | null) =>
+  !iso
+    ? "—"
+    : iso.slice(0, 10) === new Date().toLocaleDateString("sv")
+      ? hhmm(iso)
+      : `${iso.slice(5, 10)} ${hhmm(iso)}`;
+const topQueued = computed(
+  () =>
+    status.value?.devices?.find((d) => d.device === status.value?.device)?.queued ??
+    status.value?.queued ??
+    0,
 );
 
 // what transcription and the AI calls did today, and the money left for them; every minute
@@ -65,7 +85,7 @@ const callLine = (c: CallSum) => {
     nf ? `失败 ${nf}（${failed.map(([w, n]) => `${w} ×${n}`).join("，")}）` : "",
     `耗时中位 ${secs(c.ms50)}，慢的 ${secs(c.ms90)}`,
     c.sent_h
-      ? `送出 ${c.sent_h} 小时${c.engine === "volc" ? `（约 ${Math.round(c.sent_h * 450)} AFP）` : ""}`
+      ? `送出 ${c.sent_h} 小时音频${c.engine === "volc" ? `（约 ${Math.round(c.sent_h * 450)} 个火山计费单位 AFP）` : ""}`
       : "",
     c.prompt_tokens ? `token 入 ${c.prompt_tokens} 出 ${c.completion_tokens}` : "",
   ]
@@ -157,6 +177,49 @@ const eta = (d: DeviceStatus) => {
 <template>
   <AppHeader />
   <main>
+    <section v-if="status" class="card">
+      <div class="top">
+        <b>整体</b
+        ><span :class="status.recording === false ? 'muted' : 'ok'">{{
+          status.recording === false ? "未在录音" : "录音中"
+        }}</span>
+      </div>
+      <div class="grid">
+        <template v-if="status.recording === false"
+          ><span>最后录音</span><span>{{ when(status.last_audio) }}</span></template
+        >
+        <template v-else>
+          <span>录音设备</span><span>{{ status.device || "等待录音" }}</span> <span>定稿落后</span
+          ><span :class="{ bad: (status.behind_s ?? 0) > 30 }"
+            >{{
+              status.behind_s == null ? "—" : status.behind_s + " 秒"
+            }}（最新的录音离定稿还差多久）</span
+          >
+          <span>上屏延迟</span
+          ><span :class="{ bad: (status.latency_s ?? 0) > 60 }"
+            >{{ status.latency_s ?? "—" }} 秒（说完到字幕出现）</span
+          >
+        </template>
+        <span>待识别</span
+        ><span :class="{ bad: topQueued }">{{ topQueued }} 块音频（正在录音的设备）</span>
+        <span>说话人</span
+        ><span :class="{ bad: status.refine?.error }">{{
+          status.refine
+            ? status.refine.error
+              ? "区分失败：" + status.refine.error
+              : `最近一次区分 ${status.refine.at.slice(11)}，用时 ${(status.refine.ms / 1000).toFixed(0)} 秒`
+            : "等待区分"
+        }}</span>
+        <span>当前对话</span
+        ><span>{{
+          status.conversation
+            ? `${hhmmss(status.conversation.start)} 开始 · ${status.conversation.sentences} 句`
+            : "没有进行中的对话"
+        }}</span>
+        <span>识别引擎</span><span>{{ status.engine || "—" }}</span> <span>服务器版本</span
+        ><span>{{ status.commit || "—" }}</span>
+      </div>
+    </section>
     <section v-for="d in devices" :key="d.device" class="card">
       <div class="top">
         <span
@@ -175,7 +238,8 @@ const eta = (d: DeviceStatus) => {
           ><span>补传</span><span>{{ held(d) }}</span></template
         >
         <span>速度</span><span>{{ d.rate ? `${d.rate} 倍实时` : "—" }}</span> <span>预计完成</span
-        ><span>{{ caughtUp(d) ? "—" : d.hold ? "补传完之后" : eta(d) }}</span> <span>最近一轮</span
+        ><span>{{ caughtUp(d) ? "—" : d.hold ? "补传完之后" : eta(d) }}</span>
+        <span>说话人区分</span
         ><span :class="{ bad: d.refine?.error }">{{
           d.refine?.error
             ? "失败：" + d.refine.error
@@ -209,7 +273,7 @@ const eta = (d: DeviceStatus) => {
             <span>手机</span
             ><span :class="{ bad: outdated(d) }"
               >{{ phoneLine(d.hw)
-              }}{{ outdated(d) ? `（不是最新，最新 build ${newest}）` : "" }}</span
+              }}{{ outdated(d) ? `（不是最新版，最新的版本号是 ${newest}）` : "" }}</span
             >
             <span>手机状态</span
             ><span :class="{ bad: hot(d.hw) }">{{ phoneState(d.hw) || "—" }}</span> <span>上传</span
@@ -229,7 +293,7 @@ const eta = (d: DeviceStatus) => {
     <section v-if="calls" class="card">
       <div class="top"><b>转写和 AI 调用</b><span class="muted">今天</span></div>
       <div v-if="balance" class="call">
-        <b>StepFun 余额</b> <span :class="{ bad: balance.low }">{{ balance.text }}</span>
+        <b>识别余额（StepFun）</b> <span :class="{ bad: balance.low }">{{ balance.text }}</span>
       </div>
       <div v-for="c in calls.calls" :key="c.kind + c.engine" class="call">
         <b>{{ KINDS[c.kind] ?? c.kind }}</b> <span class="muted">{{ c.engine }}</span>
@@ -244,7 +308,7 @@ const eta = (d: DeviceStatus) => {
       </div>
     </section>
     <div v-if="status && !devices.length" class="muted">还没有设备的处理任务</div>
-    <div v-if="!status" class="muted">加载中…</div>
+    <Skeleton v-if="!status" />
   </main>
 </template>
 
@@ -253,6 +317,9 @@ const eta = (d: DeviceStatus) => {
   display: flex;
   justify-content: space-between;
   margin-bottom: 6px;
+}
+.top b + a {
+  margin-left: var(--space-2);
 }
 main {
   padding-top: var(--space-3);
@@ -267,7 +334,7 @@ main {
 }
 .grid {
   display: grid;
-  grid-template-columns: 5em 1fr;
+  grid-template-columns: 5.5em 1fr;
   gap: 2px 12px;
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;

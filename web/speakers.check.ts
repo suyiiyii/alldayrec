@@ -1,6 +1,6 @@
 // node --experimental-strip-types speakers.check.ts: speakerColor and initial (src/lib/speakers.ts)
 import assert from "node:assert/strict";
-import { initial, speakerColor } from "./src/lib/speakers.ts";
+import { initial, likeness, speakerColor, speakerLabel } from "./src/lib/speakers.ts";
 
 assert.equal(speakerColor("我"), "var(--accent)");
 for (const s of ["S2", "S?", "", null, undefined]) assert.equal(speakerColor(s), "var(--muted)");
@@ -18,4 +18,13 @@ assert.deepEqual(["同事A", "alice", "S2", "S?", "𠮷野", null].map(initial),
   "𠮷",
   "?",
 ]);
+assert.deepEqual(["S2", "S12", "S?", "我", "同事A", null].map(speakerLabel), [
+  "说话人 2",
+  "说话人 12",
+  "未识别",
+  "我",
+  "同事A",
+  "—",
+]);
+assert.deepEqual([0.72, 0.7, 0.69].map(likeness), ["很像", "很像", "有点像"]);
 console.log("speakers ok");

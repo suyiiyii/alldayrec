@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
+import Icon from "../components/Icon.vue";
 import MediaFold from "../components/MediaFold.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
@@ -24,6 +25,7 @@ import {
 import { play, player } from "../lib/audio";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
+import { likeness, speakerLabel } from "../lib/speakers";
 
 const props = defineProps<{ id: string }>();
 const route = useRoute();
@@ -93,7 +95,7 @@ useSocket((m) => {
   }
 }, load);
 
-const { busy: regenerating, error: regenError, run: runRegen } = useMutation();
+const { busy: regenerating, error: regenError, detail: regenDetail, run: runRegen } = useMutation();
 async function regen() {
   await runRegen(async () => {
     await post(`/api/conversation/${props.id}/summarize`);
@@ -103,7 +105,7 @@ async function regen() {
 
 // a correction in the owner's words, kept for a later read-back across many of them
 const note = ref("");
-const { busy: sending, error: noteError, run: runNote } = useMutation();
+const { busy: sending, error: noteError, detail: noteDetail, run: runNote } = useMutation();
 async function sendNote() {
   if (!note.value.trim()) return;
   await runNote(async () => {
@@ -126,7 +128,7 @@ const editing = ref(""),
   newName = ref(""),
   names = ref<string[]>([]),
   flash = ref("");
-const { busy: saving, error, run: runSpeaker } = useMutation();
+const { busy: saving, error, detail, run: runSpeaker } = useMutation();
 const named = (p: string) => p !== "我" && !/^S(\d+|\?)$/.test(p);
 const labels = computed(() =>
   (c.value?.participants ?? []).filter((p) => p !== "我" && p !== "S?"),
@@ -145,7 +147,7 @@ async function rename(from: string, to: string) {
       { from, to },
     );
     flash.value =
-      `${from} → ${to}，改了 ${r.renamed} 句` +
+      `${speakerLabel(from)} → ${speakerLabel(to)}，改了 ${r.renamed} 句` +
       (anon(to) || to === "我"
         ? ""
         : r.voiceprints
@@ -170,7 +172,7 @@ async function alias(name: string, of: string) {
 <template>
   <AppHeader />
   <main>
-    <RouterLink to="/conversations">← 全部对话</RouterLink>
+    <RouterLink class="back" to="/conversations"><Icon name="chevron-left" :size="18" />全部对话</RouterLink>
     <div v-if="missing" class="empty">找不到这段对话</div>
     <template v-else-if="c">
       <h2>{{ s?.status === "done" ? s.title || "（无标题）" : "对话 " + hhmm(c.start) }}</h2>
@@ -180,19 +182,19 @@ async function alias(name: string, of: string) {
         <template v-for="(p, i) in c.participants" :key="p"
           >{{ i ? "、" : ""
           }}<RouterLink v-if="named(p)" :to="`/p/${encodeURIComponent(p)}`">{{ p }}</RouterLink
-          ><template v-else>{{ p }}</template></template
+          ><template v-else>{{ speakerLabel(p) }}</template></template
         ><template v-if="!c.participants.length">—</template>
       </div>
 
       <div v-if="labels.length" class="rename">
         <template v-if="!editing">
           <span class="muted">改名：</span>
-          <button v-for="l in labels" :key="l" class="tag" @click="edit(l)">{{ l }}</button>
+          <button v-for="l in labels" :key="l" class="tag" @click="edit(l)">{{ speakerLabel(l) }}</button>
         </template>
         <template v-else>
           <input
             v-model="newName"
-            :placeholder="`${editing} 是谁`"
+            :placeholder="`${speakerLabel(editing)} 是谁`"
             autofocus
             @keydown.enter="save"
           />
@@ -202,14 +204,14 @@ async function alias(name: string, of: string) {
         </template>
       </div>
       <div v-if="flash" class="flash">{{ flash }}</div>
-      <p v-if="error" class="bad" role="alert">{{ error }}</p>
+      <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
 
       <div v-if="anySug" class="sug">
         <h3>说话人建议 <span class="hint">点了才会改</span></h3>
         <ul class="items">
           <li v-for="h in sug!.names" :key="`n${h.who}${h.name}${h.at}`">
-            <span class="who">{{ h.who }}</span
-            >{{ h.kind === "self" ? "" : `被 ${h.by} ` }}{{ said[h.kind] }}「{{ h.name }}」<template
+            <span class="who">{{ speakerLabel(h.who) }}</span
+            >{{ h.kind === "self" ? "" : `被 ${speakerLabel(h.by)} ` }}{{ said[h.kind] }}「{{ h.name }}」<template
               v-if="h.canon !== h.name"
               >（{{ h.name }} 是 {{ h.canon }} 的别名）</template
             >
@@ -223,15 +225,15 @@ async function alias(name: string, of: string) {
             <div class="quote">「{{ h.quote }}」</div>
           </li>
           <li v-for="l in sug!.like" :key="`l${l.who}`">
-            <button v-if="sug!.clips[l.who]" class="play" @click="hear(l.who)">
-              {{ player.playing === `${id}|${l.who}` ? "■" : "▶" }}</button
-            ><span class="who">{{ l.who }}</span>的声音像 {{ l.name }}（相似度 {{ l.score.toFixed(2) }}）
+            <button v-if="sug!.clips[l.who]" class="play" title="听一听" @click="hear(l.who)">
+              <Icon :name="player.playing === `${id}|${l.who}` ? 'square' : 'play'" :size="14" /></button
+            ><span class="who">{{ speakerLabel(l.who) }}</span>的声音{{ likeness(l.score) }} {{ l.name }}
             <button :disabled="saving" @click="rename(l.who, l.name)">是 {{ l.name }}</button>
           </li>
           <li v-for="e in sug!.elsewhere" :key="`e${e.who}${e.name}`">
-            <button v-if="sug!.clips[e.who]" class="play" @click="hear(e.who)">
-              {{ player.playing === `${id}|${e.who}` ? "■" : "▶" }}</button
-            ><span class="who">{{ e.who }}</span>的声音在另外 {{ e.convs }} 段对话里被叫作「{{ e.name }}」
+            <button v-if="sug!.clips[e.who]" class="play" title="听一听" @click="hear(e.who)">
+              <Icon :name="player.playing === `${id}|${e.who}` ? 'square' : 'play'" :size="14" /></button
+            ><span class="who">{{ speakerLabel(e.who) }}</span>的声音在另外 {{ e.convs }} 段对话里被叫作「{{ e.name }}」
             <button :disabled="saving" @click="rename(e.who, e.name)">改名为 {{ e.name }}</button>
           </li>
           <li v-for="m in allMerges ? sug!.merge : sug!.merge.slice(0, 5)" :key="`m${m.from}${m.to}`">
@@ -240,16 +242,16 @@ async function alias(name: string, of: string) {
                 >{{ j ? " 和 " : "" }}<button
                   v-if="sug!.clips[l]"
                   class="play"
-                  :title="`听 ${l}`"
+                  :title="`听 ${speakerLabel(l)}`"
                   @click="hear(l)"
                 >
-                  {{ player.playing === `${id}|${l}` ? "■" : "▶" }}</button
-                >{{ l }}</template
+                  <Icon :name="player.playing === `${id}|${l}` ? 'square' : 'play'" :size="14" /></button
+                >{{ speakerLabel(l) }}</template
               ></span
             >可能是同一个人：{{
-              m.name ? `都被叫作「${m.name}」` : `声音相似度 ${m.score?.toFixed(2)}`
+              m.name ? `都被叫作「${m.name}」` : `声音${likeness(m.score ?? 0)}`
             }}
-            <button :disabled="saving" @click="rename(m.from, m.to)">合并到 {{ m.to }}</button>
+            <button :disabled="saving" @click="rename(m.from, m.to)">合并到 {{ speakerLabel(m.to) }}</button>
           </li>
           <li v-if="sug!.merge.length > 5 && !allMerges">
             <button class="btn-ghost" @click="allMerges = true">再显示 {{ sug!.merge.length - 5 }} 条合并建议</button>
@@ -276,7 +278,7 @@ async function alias(name: string, of: string) {
               <RouterLink v-if="named(p.who)" class="who" :to="`/p/${encodeURIComponent(p.who)}`">{{
                 p.who
               }}</RouterLink>
-              <span v-else class="who">{{ p.who }}</span>
+              <span v-else class="who">{{ speakerLabel(p.who) }}</span>
               <ul class="points">
                 <li v-for="x in p.points" :key="x">{{ x }}</li>
               </ul>
@@ -287,7 +289,7 @@ async function alias(name: string, of: string) {
           <h3>待办</h3>
           <ul class="items">
             <li v-for="(t, i) in s.todos" :key="i">
-              <span class="who">{{ t.owner || "未知" }}{{ t.to ? ` → ${t.to}` : "" }}</span
+              <span class="who">{{ t.owner ? speakerLabel(t.owner) : "未知" }}{{ t.to ? ` → ${speakerLabel(t.to)}` : "" }}</span
               >{{ t.text
               }}<span v-if="t.due" class="due"
                 >{{ t.due }}{{ t.due_date ? " · " + t.due_date.slice(5) : "" }}</span
@@ -337,28 +339,30 @@ async function alias(name: string, of: string) {
           </div>
         </template>
         <div class="muted foot">
-          {{
-            s.model
-              ? `由 ${s.model}${s.via === "live" ? "（会中实时 Agent）" : ""} 生成 · ${(s.created_at ?? "").slice(5, 16).replace("T", " ")}`
-              : "语音不足 60 秒，没有生成摘要"
-          }}
+          <span
+            v-if="s.model"
+            :title="`由 ${s.model} 生成${s.via === 'live' ? '，会中实时分析写的' : ''}`"
+            >AI 摘要 · {{ (s.created_at ?? "").slice(5, 16).replace("T", " ") }}</span
+          >
+          <template v-else>语音不足 60 秒，没有生成摘要</template>
           <button :disabled="regenerating" @click="regen">重新生成</button>
         </div>
       </template>
       <div v-else-if="s?.status === 'failed'" class="summary card bad">
-        摘要生成失败：{{ s.error }} <button :disabled="regenerating" @click="regen">重新生成</button>
+        <span :title="s.error ?? ''">摘要没能生成</span>
+        <button :disabled="regenerating" @click="regen">重新生成</button>
       </div>
       <div v-else class="summary card muted">摘要生成中…</div>
-      <p v-if="regenError" class="bad" role="alert">{{ regenError }}</p>
+      <p v-if="regenError" class="bad" role="alert" :title="regenDetail">{{ regenError }}</p>
 
       <div class="note">
         <textarea
           v-model="note"
           rows="2"
-          placeholder="哪里判断错了？比如：这段不是视频、S2 其实是我、摘要漏了某件事"
+          placeholder="哪里判断错了？比如：这段不是视频、说话人 2 其实是我、摘要漏了某件事"
         ></textarea>
         <button :disabled="sending || !note.trim()" @click="sendNote">提交纠正</button>
-        <p v-if="noteError" class="bad" role="alert">{{ noteError }}</p>
+        <p v-if="noteError" class="bad" role="alert" :title="noteDetail">{{ noteError }}</p>
         <div v-for="(f, i) in c.feedback" :key="i" class="muted">
           {{ f.at.slice(5, 16).replace("T", " ") }} {{ f.text }}
         </div>
@@ -476,9 +480,20 @@ ul.items > li {
   margin-left: 6px;
 }
 .sug button.play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
   margin: 0 4px 0 0;
   min-width: 32px;
+  min-height: 32px;
   padding: 0;
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-left: -4px;
 }
 .hint {
   font-weight: 400;

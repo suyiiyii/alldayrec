@@ -3,10 +3,21 @@ import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vu
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
+import Icon from "../components/Icon.vue";
 import SelfVoice from "../components/SelfVoice.vue";
 import TodoMarks from "../components/TodoMarks.vue";
-import { get, hhmm, minutes, MOSTLY_MEDIA, post, type Conversation, type Status } from "../lib/api";
+import {
+  errorTitle,
+  get,
+  hhmm,
+  minutes,
+  MOSTLY_MEDIA,
+  post,
+  type Conversation,
+  type Status,
+} from "../lib/api";
 import { shiftDay, today } from "../lib/calendar";
+import { speakerLabel } from "../lib/speakers";
 import { useSocket } from "../lib/socket";
 
 // newest first, PAGE at a time as the end scrolls into view; words, one tag and the kind filter it; ?day= starts
@@ -47,7 +58,8 @@ const kept = () => {
 };
 const reply = ref<Reply | null>(kept()),
   asking = ref(false),
-  askErr = ref("");
+  askErr = ref(""),
+  askErrTitle = ref("");
 watch(reply, (r) => {
   try {
     sessionStorage.setItem("ask", JSON.stringify(r));
@@ -62,6 +74,7 @@ async function askAI() {
     reply.value = { ...r, secs: Math.round((Date.now() - t0) / 1000) };
   } catch (e) {
     askErr.value = String((e as Error).message ?? e);
+    askErrTitle.value = errorTitle(e);
   }
   asking.value = false;
 }
@@ -241,17 +254,18 @@ useSocket((m) => {
           · 查了 {{ reply.calls.length }} 次 · {{ reply.secs }} 秒</template
         >
         <button
-          class="x"
+          class="x btn-ghost"
+          title="关掉"
           @click="
             reply = null;
             askErr = '';
           "
         >
-          ×
+          <Icon name="x" :size="18" />
         </button>
       </div>
       <div v-if="asking" class="muted">正在查……一般要 10~30 秒</div>
-      <div v-else-if="askErr" class="bad">{{ askErr }}</div>
+      <div v-else-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</div>
       <div v-else class="answer">
         <template v-for="(p, i) in answer" :key="i"
           ><RouterLink v-if="p.s" :to="'/c/' + p.s.id" :title="p.s.title ?? ''">{{
@@ -327,7 +341,7 @@ useSocket((m) => {
         <div class="meta">
           {{ (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA ? "媒体 · " : ""
           }}{{ c.kind === "口述" ? "口述 · " : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }} ·
-          {{ minutes(c) }} 分钟 · {{ (c.participants || []).join("、") || "—" }}
+          {{ minutes(c) }} 分钟 · {{ (c.participants || []).map(speakerLabel).join("、") || "—" }}
           <template v-if="c.summary?.todos?.length">
             · {{ c.summary.todos.length }} 条待办</template
           >
@@ -355,9 +369,16 @@ useSocket((m) => {
         </template>
       </RouterLink>
     </template>
-    <div v-if="done && !items.length && !open && !reply && !asking" class="empty">
-      {{ q || tag ? "没有匹配的对话" : "还没有对话" }}
-    </div>
+    <template v-if="done && !items.length && !open && !reply && !asking">
+      <div v-if="q || tag || day || kind !== '对话'" class="empty">
+        <Icon name="search" :size="48" />没有匹配的对话
+      </div>
+      <div v-else class="empty">
+        <Icon name="message-circle" :size="48" />
+        <div>还没有对话。装好 App、连上录音设备以后，聊过的话会在这里整理成一段段对话</div>
+        <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+      </div>
+    </template>
     <button v-show="!done" ref="more" class="more" @click="page">
       {{ loading ? "加载中…" : "更早" }}
     </button>
@@ -365,7 +386,7 @@ useSocket((m) => {
 </template>
 
 <style scoped>
-/* sticky under the header (AppHeader: 45 px; on a phone, two rows, 75 px) */
+/* sticky under the header (AppHeader: 45 px; on a phone, two rows, 79 px) */
 .find {
   position: sticky;
   top: 45px;
@@ -427,11 +448,13 @@ useSocket((m) => {
 }
 .ask .x {
   float: right;
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 36px;
   padding: 0;
   margin: -8px -8px 0 0;
-  line-height: 1;
+  color: var(--muted);
 }
 .answer {
   white-space: pre-wrap;
@@ -489,7 +512,7 @@ useSocket((m) => {
 }
 @media (max-width: 600px) {
   .find {
-    top: 75px;
+    top: 79px;
   }
 }
 /* after the phone rule: inside the app there is no header to stay under */

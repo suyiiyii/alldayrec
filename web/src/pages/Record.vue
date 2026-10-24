@@ -97,7 +97,7 @@ function piece(): MediaRecorder {
     }),
     start = Date.now();
   r.ondataavailable = (e) => e.data.size && enqueue(e.data, start);
-  r.onerror = (e) => note("recorder error " + String((e as ErrorEvent).error ?? e));
+  r.onerror = (e) => note("录音出错：" + String((e as ErrorEvent).error ?? e));
   r.start();
   setTimeout(() => {
     if (rec === r) {

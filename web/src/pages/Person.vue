@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
-import { get, hhmm, post, type Person, type Profile } from "../lib/api";
+import Icon from "../components/Icon.vue";
+import { errorTitle, get, hhmm, post, type Person, type Profile } from "../lib/api";
+import { speakerLabel } from "../lib/speakers";
 
 const props = defineProps<{ name: string }>();
 const p = ref<Person | null>(null),
@@ -27,7 +29,8 @@ const day = (iso: string) => iso.slice(0, 10);
 
 // the profile: made on a click, then kept up to date as conversations with them close
 const making = ref(false),
-  profileError = ref("");
+  profileError = ref(""),
+  profileTitle = ref("");
 async function makeProfile() {
   making.value = true;
   profileError.value = "";
@@ -36,6 +39,7 @@ async function makeProfile() {
     p.value!.profile_newer = 0;
   } catch (e) {
     profileError.value = (e as Error).message;
+    profileTitle.value = errorTitle(e);
   } finally {
     making.value = false;
   }
@@ -49,7 +53,8 @@ const sections = [
 
 // other ways this person is called (A哥 for A): a hint with one of them suggests this name
 const newAlias = ref(""),
-  aliasError = ref("");
+  aliasError = ref(""),
+  aliasTitle = ref("");
 async function setAlias(alias: string, name: string) {
   aliasError.value = "";
   try {
@@ -58,6 +63,7 @@ async function setAlias(alias: string, name: string) {
     newAlias.value = "";
   } catch (e) {
     aliasError.value = (e as Error).message;
+    aliasTitle.value = errorTitle(e);
   }
 }
 const link = (id: string, at: string | null) =>
@@ -67,7 +73,9 @@ const link = (id: string, at: string | null) =>
 <template>
   <AppHeader />
   <main>
-    <RouterLink to="/speakers">← 说话人</RouterLink>
+    <RouterLink class="back" to="/speakers"
+      ><Icon name="chevron-left" :size="18" />说话人</RouterLink
+    >
     <div v-if="missing" class="empty">没有带「{{ name }}」的对话</div>
     <template v-else-if="p">
       <h2>{{ p.name }}</h2>
@@ -83,12 +91,14 @@ const link = (id: string, at: string | null) =>
       </div>
       <div class="aliases muted">
         别名：<span v-for="a in p.aliases" :key="a" class="tag"
-          >{{ a }} <button class="x" title="删掉这个别名" @click="setAlias(a, '')">×</button></span
+          >{{ a }}
+          <button class="x" title="删掉这个别名" @click="setAlias(a, '')">
+            <Icon name="x" :size="14" /></button></span
         ><input
           v-model="newAlias"
           placeholder="添加别名，回车"
           @keydown.enter="newAlias.trim() && setAlias(newAlias.trim(), p.name)"
-        /><span class="bad">{{ aliasError }}</span>
+        /><span class="bad" :title="aliasTitle">{{ aliasError }}</span>
       </div>
       <div v-if="p.tags.length" class="tags">
         <RouterLink
@@ -122,10 +132,12 @@ const link = (id: string, at: string | null) =>
             </template>
           </template>
           <div class="muted foot">
-            档案由 {{ p.profile.model }} 根据 {{ p.profile.inputs.conversations }} 段对话、{{
-              p.profile.inputs.mentions
-            }}
-            处提及生成 · {{ p.profile.at.slice(5, 16).replace("T", " ") }}
+            <span :title="p.profile.model ? `由 ${p.profile.model} 生成` : ''"
+              >AI 档案 · 根据 {{ p.profile.inputs.conversations }} 段对话、{{
+                p.profile.inputs.mentions
+              }}
+              处提及 · {{ p.profile.at.slice(5, 16).replace("T", " ") }}</span
+            >
             <template v-if="p.profile_newer">· 之后又有 {{ p.profile_newer }} 段对话</template>
             <button :disabled="making" @click="makeProfile">
               {{ making ? "生成中…" : "更新档案" }}
@@ -135,7 +147,7 @@ const link = (id: string, at: string | null) =>
         <button v-else :disabled="making" @click="makeProfile">
           {{ making ? "生成中…（几十秒）" : "生成档案" }}
         </button>
-        <span class="bad">{{ profileError }}</span>
+        <span class="bad" :title="profileTitle">{{ profileError }}</span>
       </section>
 
       <template v-if="p.theirs.length">
@@ -168,7 +180,8 @@ const link = (id: string, at: string | null) =>
       <section v-for="c in p.conversations.slice(0, shown)" :key="c.id" class="conv">
         <RouterLink :to="`/c/${c.id}`" class="title">{{ c.title || "（无标题）" }}</RouterLink>
         <span class="muted">
-          · {{ day(c.start) }} {{ hhmm(c.start) }} · {{ c.participants.join("、") }}</span
+          · {{ day(c.start) }} {{ hhmm(c.start) }} ·
+          {{ c.participants.map(speakerLabel).join("、") }}</span
         >
         <ul v-if="c.points.length" class="points">
           <li v-for="x in c.points" :key="x">{{ x }}</li>
@@ -264,7 +277,15 @@ h3 {
   padding: 2px 8px;
   width: 9em;
 }
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  margin-left: -4px;
+}
 .aliases .x {
+  display: inline-flex;
+  align-items: center;
   border: 0;
   background: none;
   min-height: 28px;

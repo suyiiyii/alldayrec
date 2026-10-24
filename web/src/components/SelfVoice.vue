@@ -5,6 +5,7 @@
 import { onMounted, ref } from "vue";
 import { get, post } from "../lib/api";
 import { play, player } from "../lib/audio";
+import Icon from "./Icon.vue";
 
 interface Clip {
   start: string;
@@ -81,7 +82,8 @@ async function answer(a: number | "none" | "later") {
         :disabled="player.failed.has(clipId(cl))"
         @click="play(clipId(cl), src(cl))"
       >
-        {{ player.playing === clipId(cl) ? "■" : "▶" }} {{ cl.text || "（无文字）" }}
+        <Icon :name="player.playing === clipId(cl) ? 'square' : 'play'" :size="14" />
+        {{ cl.text || "（无文字）" }}
       </button>
       <div v-if="!c.clips.length" class="muted">没有合适的试听句子</div>
       <div class="acts">
@@ -127,7 +129,9 @@ async function answer(a: number | "none" | "later") {
   color: var(--fg);
 }
 .clip {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   text-align: left;
   margin-top: 6px;

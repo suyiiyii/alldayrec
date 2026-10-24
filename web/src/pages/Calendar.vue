@@ -1,13 +1,24 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
+import Icon from "../components/Icon.vue";
 import MonthGrid from "../components/MonthGrid.vue";
+import Skeleton from "../components/Skeleton.vue";
+import { errorTitle } from "../lib/api";
 import { calendar, loadCalendar } from "../lib/calendar";
 
-// Every month with sentences, newest first: a day's conversations and speech minutes, a tap opens its conversations
+// Every month with sentences, newest first: a day's conversations and speech minutes, a tap opens its conversations.
+// loaded: an instance with nothing recorded yet has no months, which is not loading
 const router = useRouter();
-onMounted(() => loadCalendar(true));
+const loaded = ref(false),
+  failed = ref<{ msg: string; title: string } | null>(null);
+onMounted(() =>
+  loadCalendar(true).then(
+    () => (loaded.value = true),
+    (e) => (failed.value = { msg: (e as Error).message, title: errorTitle(e) }),
+  ),
+);
 const months = computed(() => {
   const by: Record<string, { conversations: number; dictations: number; min: number }> = {};
   for (const [d, x] of Object.entries(calendar.value)) {
@@ -34,7 +45,15 @@ const open = (day: string) => router.push({ path: "/conversations", query: { day
       </h2>
       <MonthGrid :month="m" big @pick="open" />
     </section>
-    <div v-if="!months.length" class="muted">加载中…</div>
+    <div v-if="failed" class="empty" :title="failed.title">
+      <Icon name="alert-circle" :size="48" />{{ failed.msg }}
+    </div>
+    <Skeleton v-else-if="!loaded" />
+    <div v-else-if="!months.length" class="empty">
+      <Icon name="calendar" :size="48" />
+      <div>还没有录音。连上手机和录音设备后，每天录了多少会显示在这里</div>
+      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+    </div>
   </main>
 </template>
 

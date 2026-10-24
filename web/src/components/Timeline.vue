@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { hhmmss, type LiveTopic } from "../lib/api";
+import { speakerLabel } from "../lib/speakers";
 
 // open: the last topic is still being discussed
 defineProps<{ topics: LiveTopic[]; open?: boolean }>();
@@ -24,7 +25,7 @@ defineEmits<{ jump: [start: string] }>();
       <li v-for="p in t.points" :key="p">{{ p }}</li>
       <li v-for="d in t.decisions" :key="'d' + d" class="dec">定：{{ d }}</li>
       <li v-for="(x, j) in t.todos" :key="'t' + j" class="todo">
-        待办：<span class="who">{{ x.who || "未知" }}</span> {{ x.what }}
+        待办：<span class="who">{{ x.who ? speakerLabel(x.who) : "未知" }}</span> {{ x.what }}
       </li>
       <li v-for="q in t.open_questions" :key="'q' + q" class="q">待定：{{ q }}</li>
     </ul>

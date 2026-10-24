@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, useTemplateRef, watch } from "vue";
+import Icon from "./Icon.vue";
 import MonthGrid from "./MonthGrid.vue";
 import { calendar, dayLabel, loadCalendar, neighbour, today } from "../lib/calendar";
 
-// ‹ 10月1日 周三 ›: the arrows go to the nearest day with sentences, the date opens a month of them
+// < 10月1日 周三 >: the arrows go to the nearest day with sentences, the date opens a month of them
 const props = defineProps<{ day: string }>();
 const emit = defineEmits<{ pick: [day: string] }>();
 const open = ref(false),
@@ -42,18 +43,26 @@ function pick(d: string) {
 
 <template>
   <div ref="root" class="picker">
-    <button class="arrow" :disabled="!prev" title="前一天" @click="prev && pick(prev)">‹</button>
+    <button class="arrow" :disabled="!prev" title="前一天" @click="prev && pick(prev)">
+      <Icon name="chevron-left" />
+    </button>
     <button class="label" @click="toggle">
       {{ day === today() ? "今天" : dayLabel(day) }}
       <span v-if="info" class="sub">{{ info.conversations }} 段对话</span>
     </button>
-    <button class="arrow" :disabled="!next" title="后一天" @click="next && pick(next)">›</button>
+    <button class="arrow" :disabled="!next" title="后一天" @click="next && pick(next)">
+      <Icon name="chevron-right" />
+    </button>
     <slot />
     <div v-if="open" class="pop" :style="at">
       <div class="head">
-        <button class="arrow" @click="shiftMonth(-1)">‹</button>
+        <button class="arrow" title="上个月" @click="shiftMonth(-1)">
+          <Icon name="chevron-left" />
+        </button>
         <span>{{ month.replace("-", " 年 ") }} 月</span>
-        <button class="arrow" @click="shiftMonth(1)">›</button>
+        <button class="arrow" title="下个月" @click="shiftMonth(1)">
+          <Icon name="chevron-right" />
+        </button>
         <button class="today" @click="pick(today())">今天</button>
       </div>
       <MonthGrid :month="month" :selected="day" @pick="pick" />
@@ -69,9 +78,11 @@ function pick(d: string) {
   gap: 6px;
 }
 .arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 36px;
-  padding: 0 var(--space-2);
-  font-size: var(--fs-md);
+  padding: 0;
 }
 .arrow:disabled {
   opacity: 0.4;

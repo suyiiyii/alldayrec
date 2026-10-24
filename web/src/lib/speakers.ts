@@ -23,3 +23,10 @@ export function speakerColor(name?: string | null): string {
 // what the avatar shows: a name's first character (a letter in capitals), an unnamed label's number, S? a ?
 export const initial = (name?: string | null) =>
   !name ? "?" : anonymous(name) ? name.slice(1) : [...name][0].toUpperCase();
+
+// a label as the page says it: S2 is 说话人 2, S? 未识别; names as they are (the API keeps the labels)
+export const speakerLabel = (name?: string | null) =>
+  !name ? "—" : name === "S?" ? "未识别" : /^S\d+$/.test(name) ? `说话人 ${name.slice(1)}` : name;
+
+// a voiceprint score in words: no numbers on the page
+export const likeness = (score: number) => (score >= 0.7 ? "很像" : "有点像");

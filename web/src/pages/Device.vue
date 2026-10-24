@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import LineChart from "../components/LineChart.vue";
+import Skeleton from "../components/Skeleton.vue";
 import {
   CHARGE,
   get,
@@ -199,7 +200,7 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
         </button>
       </span>
     </div>
-    <div v-if="!log" class="muted">加载中…</div>
+    <Skeleton v-if="!log" />
     <template v-else>
       <section class="card">
         <div class="head">
@@ -273,8 +274,8 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
         <div v-else class="muted">
           {{
             measure < MEASURES.length
-              ? "这段时间没有测过的音频（10-07 之前上传的还没补算）"
-              : "这段时间没有写卡统计（SD_WRITES，录音设备每 10 分钟记一次）"
+              ? "这段时间没有测过的音频（早期上传的录音没有这项统计）"
+              : "这段时间没有写卡统计（录音设备每 10 分钟记一次写卡有多忙，事件 SD_WRITES）"
           }}
         </div>
       </section>
@@ -307,7 +308,7 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
           :gap="10 * 60000"
           :marks="marks"
         />
-        <div v-else class="muted">这段时间手机没有上报（App 1.4.6 起才有）</div>
+        <div v-else class="muted">这段时间手机没有上报（较早版本的 App 不上报）</div>
       </section>
       <section class="card">
         <div class="head">
