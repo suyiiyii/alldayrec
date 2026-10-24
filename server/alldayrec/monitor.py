@@ -13,6 +13,7 @@ import traceback
 from pathlib import Path
 
 import anyio
+import anyio.to_thread
 
 from alldayrec import asr
 from alldayrec import audio
@@ -22,6 +23,7 @@ from alldayrec import device_pipeline
 from alldayrec import perf
 from alldayrec import stepfun_asr
 from alldayrec import tenant
+from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import state
 from alldayrec.pipeline_state import PipelineState
@@ -33,7 +35,9 @@ HERE = Path(__file__).resolve().parent
 
 def device_status(device: str, st: PipelineState) -> dict:
     end, done, pr = st.audio_end, st.done_to, st.progress
-    lat = st.latency if st.drafting else st.final_latency  # what the page shows first: drafts while it watches (the last 10)
+    # what the page shows first: drafts while it watches (the last 10); copies, as status() runs in a thread while the
+    # loop appends to these and clears them (progress it replaces whole)
+    lat, fin = list(st.latency if st.drafting else st.final_latency), list(st.final_latency)
     left, received_to = audio.backlog(device, done)
     hold, seen, arrived = audio.held(device), audio.hold_seen(device), audio.arrival(device)
     # seconds of audio finalized per second, over the commits of the last 10 min (silence goes fast, speech ~8x)
@@ -57,7 +61,7 @@ def device_status(device: str, st: PipelineState) -> dict:
             "draft_to": st.draft_to.isoformat(timespec="seconds") if st.draft_to else None,
             # how far behind what one reads now is: its newest sentence's end to its showing; the median a diagnosis
             "latency_s": lat[-1] if lat else None, "latency_med_s": sorted(lat)[len(lat) // 2] if lat else None,
-            "final_latency_s": st.final_latency[-1] if st.final_latency else None,
+            "final_latency_s": fin[-1] if fin else None,
             "arrival": arrived, "sound": sound(device, received_to)}
 
 
@@ -71,8 +75,9 @@ def sound(device: str, end: dt.datetime | None) -> dict | None:
 
 def status() -> dict:
     """What the page's status line shows (the device whose audio came in last), every device's pipeline, and the
-    pieces still queued over all devices."""
-    ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in T().devices.items()]
+    pieces still queued over all devices. Its callers run it in a thread (threads.DB): its reads of the pieces held the
+    event loop up to 0.8 s under load (10-24)."""
+    ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in list(T().devices.items())]  # a pipeline may start meanwhile
     top = max(ds, key=lambda d: d["audio_end"] or "", default={"device": None, "audio_end": None, "behind_s": None, "done_to": None,
                                                                  "last_speech": None, "refine": None, "conversation": None, "latency_s": None,
                                                                  "latency_med_s": None, "final_latency_s": None})
@@ -87,7 +92,7 @@ def status() -> dict:
 async def status_loop():
     while True:
         if T().clients:  # a tenant with no page open has nobody to tell
-            await ws.broadcast({"type": "status", **status()})
+            await ws.broadcast({"type": "status", **await anyio.to_thread.run_sync(status, limiter=threads.DB)})
         await anyio.sleep(2)
 
 
@@ -175,7 +180,8 @@ async def metrics_loop():
         if VM_INGEST_URL:
             try:
                 auth = base64.b64encode(f"{os.environ.get('VM_INGEST_USER', '')}:{os.environ.get('VM_INGEST_PASSWORD', '')}".encode()).decode()
-                body = ("".join(tenant.call(t, metrics) for t in core.TENANTS) + (process_metrics(s) if s and core.TENANTS else "")).encode()
+                tenants = await anyio.to_thread.run_sync(lambda: "".join(tenant.call(t, metrics) for t in core.TENANTS), limiter=threads.DB)
+                body = (tenants + (process_metrics(s) if s and core.TENANTS else "")).encode()
                 await asr._http(VM_INGEST_URL, body, {"Authorization": f"Basic {auth}", "Content-Type": "text/plain"})
             except Exception as e:
                 log.warning("metrics push: %s", asr.failure(e))  # the class and code, never the URL or credentials

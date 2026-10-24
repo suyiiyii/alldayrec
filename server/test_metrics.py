@@ -1,12 +1,13 @@
 """metrics() is Prometheus text VictoriaMetrics takes (names, escaped labels, numbers), names no phone and says nothing
 said; metrics_loop keeps the process's minute and pushes both with basic auth, and sends nothing without VM_INGEST_URL.
-loop_stalls logs a route that blocks the event loop, and keeps it."""
+loop_stalls logs a route that blocks the event loop, and keeps it; status() runs off the loop."""
 import base64
 import contextlib
 import datetime as dt
 import logging
 import re
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -22,6 +23,8 @@ from alldayrec import db
 from alldayrec import monitor
 from alldayrec import perf
 from alldayrec import pipeline_state
+from alldayrec import routes_api
+from alldayrec import ws
 from alldayrec.tenant import T
 
 LINE = re.compile(r'[a-zA-Z_:][a-zA-Z0-9_:]*\{[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*"(?:,[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*")*\} '
@@ -39,6 +42,41 @@ def test_status_latency():
     st.drafting = False  # no page watches: no drafts, the final rows'
     d = monitor.device_status("LR-P3-116C", st)
     assert (d["latency_s"], d["latency_med_s"], d["final_latency_s"]) == (12.0, 70.0, 12.0)
+
+
+def test_status_off_the_loop(monkeypatch):
+    """The page's push and /api/status take status() in a thread (its reads of the pieces held the event loop up to
+    0.8 s, 10-24) and say what it says there."""
+    t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    now, dev = int(time.time() * 1000), "LR-P3-116C"
+    for k in range(30):  # 10 s pieces up to a minute ago, each in 2 s after its end
+        db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path, received_ms, rms, hum, zero_ms, full) "
+                          "VALUES (?, ?, 10, 'x', ?, -40, -60, 100, 1)", (dev, now - 360_000 + k * 10_000, now - 348_000 + k * 10_000))
+    t.devices[dev] = pipeline_state.PipelineState(done_to=dt.datetime.fromtimestamp((now - 200_000) / 1000), latency=[3.0, 5.0],
+                                                  final_latency=[9.0], drafting=True)
+    want = monitor.status()
+    d = want["devices"][0]
+    assert (d["left_s"], d["sound"], d["arrival"]["lag_s"], d["recording"], d["latency_s"]) == (140.0, {"s": 300.0, "zero_s": 3.0, "full": 30}, 2.0, True, 5.0), d
+    where, status, sent = set(), monitor.status, []
+
+    def traced():
+        where.add(threading.get_ident())
+        return status()
+    monkeypatch.setattr(monitor, "status", traced)
+    monkeypatch.setattr(routes_api, "status", traced)
+
+    async def push(msg):
+        sent.append(msg)
+
+    async def run():
+        monkeypatch.setattr(ws, "broadcast", push)
+        t.clients.add("a page")
+        with anyio.move_on_after(0.5):
+            await monitor.status_loop()
+        return threading.get_ident(), await routes_api.status_now()
+    loop, got = anyio.run(run)
+    assert sent[0] == {"type": "status", **want} and got == want
+    assert where and loop not in where, "not on the event loop"
 
 
 def test_metrics(monkeypatch):

@@ -59,7 +59,7 @@ async def health():
 
 @router.get("/api/status")
 async def status_now():
-    return status()
+    return await anyio.to_thread.run_sync(status, limiter=threads.DB)
 
 
 @router.get("/api/lang")
