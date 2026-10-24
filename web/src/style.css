@@ -215,6 +215,26 @@ a.card:hover {
   margin-right: 6px;
   white-space: nowrap;
 }
+/* something going on now (recording, a sentence being said): a small dot that breathes */
+.pulse {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}
 /* nothing here yet: an icon, a line, one button */
 .empty {
   display: flex;

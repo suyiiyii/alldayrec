@@ -14,15 +14,17 @@ import {
   type Status,
 } from "../lib/api";
 
-// What the live analysis does for one device today, its result in a pane (on the live page, under its header; its
-// height dragged when resizable). The page owns the data: the status, the analyses, today's closed conversations.
+// The live analysis of the conversation going on, as a card: the newest topic is the headline (always in sight), the
+// topics under it (a tap on the head folds them away on a phone; a wide screen always shows them). With none going on,
+// the last conversation today and its summary. mini: the headline line alone (Today's live card). The page owns the
+// data: the status, the analyses, today's closed conversations.
 // doneTo: up to where a device's rows are final (the live page knows it from final messages; else the status's)
 const props = defineProps<{
   status: Status | null;
   lives: LiveState[];
   convs: Conversation[];
   doneTo?: (device: string) => string;
-  resizable?: boolean;
+  mini?: boolean;
 }>();
 defineEmits<{ jump: [start: string] }>();
 const doneTo = (device: string) =>
@@ -60,20 +62,28 @@ const last = computed(() =>
     .reduce<Conversation | null>((a, c) => (a && a.end > c.end ? a : c), null),
 );
 const said = (s: number) => (s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`);
-const barText = computed(() => {
-  const d = barDev.value,
-    c = talk.value,
+// the head: what it is (label), the newest topic or how long the conversation has gone before there is one (headline)
+const sub = computed(() =>
+  [current.value && `更新于 ${hhmm(current.value.at)}`, barDev.value?.analyzing && "分析中…"]
+    .filter(Boolean)
+    .join(" · "),
+);
+const label = computed(() => {
+  const p = last.value;
+  if (!talk.value && p) return `上一段对话 · ${hhmm(p.start)}–${hhmm(p.end)}`;
+  return "AI 实时摘要" + (sub.value && " · " + sub.value);
+});
+const headline = computed(() => {
+  const c = talk.value,
     l = current.value;
-  // not recording: the status line above says so already
-  const prev = last.value ? `上一段 ${hhmm(last.value.start)}《${convLink(last.value)}》` : "";
-  if (!props.status?.recording) return prev;
-  if (!c) return "暂无进行中的对话" + (prev && " · " + prev);
-  if (l) return `实时分析 · 更新于 ${hhmm(l.at)}` + (d?.analyzing ? " · 分析中…" : "");
-  if (d?.analyzing) return "分析中…";
-  return (
-    `对话进行中 · 已说 ${said(c.speech_s)}` +
-    (c.speech_s < MIN_SPEECH_S ? `，满 ${MIN_SPEECH_S / 60} 分钟自动分析` : "")
-  );
+  if (l) return l.topics.at(-1)?.title || "正在总结";
+  if (c)
+    return (
+      `对话进行中 · 已说 ${said(c.speech_s)}` +
+      (c.speech_s < MIN_SPEECH_S ? `，满 ${MIN_SPEECH_S / 60} 分钟自动总结` : "")
+    );
+  if (last.value) return convLink(last.value);
+  return "对话开始后，AI 会边听边总结要点";
 });
 const body = computed(() => (current.value ? "live" : !talk.value && last.value ? "last" : ""));
 // 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
@@ -113,35 +123,7 @@ function toggle() {
     localStorage.setItem("livePaneOpen", paneOpen.value ? "1" : "0");
   } catch {}
 }
-const clampH = (h: number) => Math.round(Math.min(Math.max(h, 80), window.innerHeight * 0.7));
-const paneH = ref(
-  clampH(
-    Number(
-      (() => {
-        try {
-          return localStorage.getItem("livePaneH");
-        } catch {
-          return null;
-        }
-      })(),
-    ) || 220,
-  ),
-);
 const paneBox = ref<HTMLElement | null>(null);
-let drag: { y: number; h: number } | null = null;
-function dragStart(e: PointerEvent) {
-  drag = { y: e.clientY, h: paneH.value };
-  (e.target as HTMLElement).setPointerCapture(e.pointerId);
-}
-function dragMove(e: PointerEvent) {
-  if (drag) paneH.value = clampH(drag.h + e.clientY - drag.y);
-}
-function dragEnd() {
-  drag = null;
-  try {
-    localStorage.setItem("livePaneH", String(paneH.value));
-  } catch {}
-}
 watch(
   () => [current.value?.at, paneOpen.value],
   async () => {
@@ -152,21 +134,34 @@ watch(
 </script>
 
 <template>
-  <div v-if="status && barText" class="pane">
-    <div class="pane-line">
+  <div v-if="status && mini" class="mini">
+    <Icon class="spark" name="sparkles" :size="16" />
+    <div class="mini-text">
+      <b>{{ headline }}</b>
+      <span v-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</span>
+      <span v-else-if="sub" class="muted">{{ sub }}</span>
+    </div>
+    <button
+      v-if="talk"
+      class="ask"
+      :disabled="asking || barDev?.analyzing || !fresh"
+      :title="fresh ? '' : '没有新的语音'"
+      @click="askNow"
+    >
+      {{ current ? "立即更新" : "立即总结" }}
+    </button>
+  </div>
+  <section v-else-if="status" class="card sum" :class="{ shut: !paneOpen }">
+    <div class="head">
       <button
         class="fold"
         :disabled="!body"
         :aria-expanded="body ? paneOpen : undefined"
         @click="toggle"
       >
-        <Icon
-          v-if="body"
-          class="caret"
-          :name="paneOpen ? 'chevron-down' : 'chevron-right'"
-          :size="14"
-        />{{ barText }}
-        <span v-if="askErr" class="bad" :title="askErrTitle"> · {{ askErr }}</span>
+        <span class="label"><Icon name="sparkles" :size="14" />{{ label }}</span>
+        <b class="title">{{ headline }}</b>
+        <span v-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</span>
       </button>
       <button
         v-if="talk"
@@ -177,15 +172,17 @@ watch(
       >
         {{ current ? "立即更新" : "立即总结" }}
       </button>
+      <Icon
+        v-if="body"
+        class="caret"
+        :name="paneOpen ? 'chevron-down' : 'chevron-right'"
+        :size="18"
+        @click="toggle"
+      />
     </div>
-    <div
-      v-if="body && paneOpen"
-      ref="paneBox"
-      class="pane-body"
-      :style="{ [current && resizable ? 'height' : 'maxHeight']: paneH + 'px' }"
-    >
+    <div v-if="body" ref="paneBox" class="body">
       <template v-if="current">
-        <div class="pane-meta">
+        <div class="meta">
           {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
           {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
           {{ current.sentences }} 句
@@ -193,121 +190,123 @@ watch(
         <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
       </template>
       <template v-else-if="last">
-        <div class="pane-meta">
-          对话 {{ hhmmss(last.start) }}–{{ hhmmss(last.end) }} · {{ last.sentences }} 句 ·
-          <RouterLink :to="'/c/' + last.id">查看</RouterLink>
-        </div>
-        <p v-if="last.summary?.status !== 'done'" class="muted">{{ convLink(last) }}</p>
+        <p v-if="last.summary?.status !== 'done'" class="muted">还在整理这段对话</p>
         <p v-else-if="last.summary.summary">{{ last.summary.summary }}</p>
         <p v-else class="muted">这段太短，没有生成摘要</p>
+        <RouterLink :to="'/c/' + last.id">查看这段对话</RouterLink>
       </template>
     </div>
-    <div
-      v-if="resizable && body && paneOpen"
-      class="grip"
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="拖动调整实时分析的高度"
-      title="拖动调整高度"
-      @pointerdown="dragStart"
-      @pointermove="dragMove"
-      @pointerup="dragEnd"
-      @pointercancel="dragEnd"
-    ></div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.pane-line {
+/* Today's card: the headline on one line, its time under it, the button on the right */
+.mini {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-top: 4px;
+  gap: var(--space-2);
 }
-.fold {
+.spark {
+  flex: none;
+  color: var(--accent);
+  align-self: flex-start;
+  margin-top: 4px;
+}
+.mini-text {
   flex: 1;
   min-width: 0;
-  border: 0;
-  padding: 0;
-  text-align: left;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  background: none;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
 }
-.caret {
-  margin-right: 2px;
-  color: var(--accent);
+.mini-text span {
+  font-size: var(--fs-xs);
 }
 .ask {
   flex: none;
 }
-.pane-body {
-  overflow-y: auto;
-  overscroll-behavior: contain;
+/* the live page's card: the head always, the topics under it scroll by themselves */
+.sum {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
 }
-.pane-body p {
-  margin: 4px 0;
-  font-size: var(--fs-sm);
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
-.pane-meta {
+.fold {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  background: none;
+  color: var(--fg);
+  min-height: 44px;
+}
+.fold:disabled {
+  color: var(--fg);
+}
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--fs-xs);
   color: var(--muted);
-  padding-top: 4px;
 }
-/* the whole strip takes the drag (tall enough for a finger); its bottom is the header's bottom line, through the
-   header's padding, and a handle sits on that line: the line between the analysis and the transcript is what moves */
-.grip {
-  position: relative;
-  height: 24px;
-  margin-bottom: -12px;
-  cursor: ns-resize;
-  touch-action: none;
+.label svg {
+  color: var(--accent);
 }
-.grip::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 -1px;
-  height: 2px;
-  background: var(--accent);
-  opacity: 0;
-  transition: opacity 0.15s;
+.title {
+  font-size: var(--fs-md);
+  line-height: 1.45;
 }
-.grip::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -9px;
-  width: 48px;
-  height: 18px;
-  margin-left: -24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background:
-    linear-gradient(var(--muted) 0 0) 50% 5px / 18px 1.5px no-repeat,
-    linear-gradient(var(--muted) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--surface);
-  box-shadow: var(--shadow);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+.fold .bad {
+  font-size: var(--fs-xs);
 }
-.grip:hover::before,
-.grip:active::before {
-  opacity: 1;
+.caret {
+  flex: none;
+  color: var(--muted);
+  cursor: pointer;
 }
-.grip:hover::after,
-.grip:active::after {
-  border-color: var(--accent);
-  background:
-    linear-gradient(var(--accent) 0 0) 50% 5px / 18px 1.5px no-repeat,
-    linear-gradient(var(--accent) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--surface);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: 28vh;
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--line);
 }
-@media (max-width: 600px) {
-  .grip {
-    height: 28px;
-    margin-bottom: -8px; /* the header's padding here */
+.body p {
+  margin: var(--space-2) 0;
+  font-size: var(--fs-sm);
+}
+.meta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  padding-top: var(--space-2);
+}
+@media (max-width: 899px) {
+  .shut .body {
+    display: none;
+  }
+}
+/* a wide screen: the card is a column of its own, always open, as tall as the screen allows */
+@media (min-width: 900px) {
+  .caret {
+    display: none;
+  }
+  .fold {
+    pointer-events: none;
+  }
+  .body {
+    flex: 1;
+    max-height: none;
   }
 }
 </style>

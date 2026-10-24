@@ -10,18 +10,15 @@ import TranscriptRow from "../components/TranscriptRow.vue";
 import {
   convLink,
   fold,
-  get,
   inSpans,
   hhmm,
   hhmmss,
   holdLeft,
   type Conversation,
-  type LiveState,
   type Row,
-  type Status,
 } from "../lib/api";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
-import { useSocket, useWatch } from "../lib/socket";
+import { useLive } from "../lib/live";
 import { speakerLabel } from "../lib/speakers";
 
 // One day at a time (?day=YYYY-MM-DD; none: today, which follows the live stream)
@@ -30,15 +27,13 @@ const CATCHUP_MS = 2 * 60 * 1000; // final rows this far short of a device's dra
 const route = useRoute(),
   router = useRouter();
 const today = todayOf();
-const day = computed(() => (route.query.day as string | undefined) || today),
-  live = computed(() => day.value === today);
-const rows = ref<Row[]>([]),
-  partials = ref<Record<string, Row>>({}), // per device, the sentence being said now (DRAFT_ENGINE qwen-stream)
-  convs = ref<Conversation[]>([]),
-  status = ref<Status | null>(null);
-const lives = ref<LiveState[]>([]),
-  hit = ref("");
-const ready = ref(false);
+const day = computed(() => (route.query.day as string | undefined) || today);
+const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } =
+  useLive(day);
+const said = computed(() => new Set(Object.values(partials.value))); // the sentences being said now
+// the summary card: the conversation going on, or with none the last one today (a new instance has neither)
+const side = computed(() => live.value && (going.value || convs.value.length > 0));
+const hit = ref("");
 const follow = ref(true);
 
 type Item =
@@ -47,12 +42,6 @@ type Item =
   | { k: "conv"; key: string; c: Conversation }
   | { k: "gap"; key: string; at: string }
   | { k: "catchup"; key: string; device: string; from: string; to: string; tail: string };
-// a device's finalized time: the status's, or its last final message's (it comes before the next status, every 2 s)
-function doneTo(device: string) {
-  const s = status.value?.devices?.find((d) => d.device === device)?.done_to ?? "",
-    f = finalTo[device] ?? "";
-  return s > f ? s : f;
-}
 // Per device, the time between its final rows and its drafts (or, with none, its newest audio): the drafts follow
 // what is said now while a backlog (a phone back after hours offline) is finalized in order, so this time is not lost.
 // Held: the phone still reads older audio off the recorder's card in the background; finals wait for it
@@ -129,52 +118,10 @@ const mediaOf = (r: Row) =>
       inSpans(r, c.summary?.media_spans),
   );
 
-// per device, up to where final rows cover the time: its drafts before that are no longer shown (they stay on the server)
-const finalTo: Record<string, string> = {};
-function finalize(m: { device?: string; from: string; to: string; rows: Row[] }) {
-  if (m.device) finalTo[m.device] = m.to;
-  rows.value = rows.value
-    .filter((r) =>
-      r.state === "draft"
-        ? !(r.source === m.device && r.start < m.to)
-        : !(m.from <= r.start && r.start < m.to && (!m.device || r.source === m.device)),
-    )
-    .concat(m.rows);
-}
-function addDrafts(m: { device: string; rows: Row[] }) {
-  const to = finalTo[m.device] || "";
-  delete partials.value[m.device]; // the sentence it showed has ended: now a draft row
-  rows.value = rows.value.concat(m.rows.filter((r) => r.start >= to));
-}
-function addConv(c: Conversation) {
-  if (c.state === "open") return;
-  const i = convs.value.findIndex((x) => x.id === c.id);
-  if (i >= 0) convs.value[i] = c;
-  else convs.value.push(c);
-}
-
-async function loadDay() {
-  const d = day.value;
-  const [rs, cs, ls] = await Promise.all([
-    get<Row[]>("/api/sentences", { date: d }),
-    get<Conversation[]>("/api/conversations", { date: d }),
-    get<LiveState[]>("/api/live"),
-  ]);
-  if (d !== day.value) return; // another day was picked meanwhile
-  rows.value = rs;
-  lives.value = ls;
-  convs.value = [];
-  cs.forEach(addConv);
-  ready.value = true;
-  await nextTick();
-  if (live.value) toBottom();
-  else window.scrollTo(0, 0);
-}
 const go = (d: string) => router.push({ query: d === today ? {} : { day: d } });
 watch(day, () => {
-  ready.value = false;
   follow.value = live.value;
-  loadDay();
+  window.scrollTo(0, 0);
 });
 
 const atBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 40;
@@ -186,44 +133,31 @@ watch(timeline, async () => {
   toBottom();
 });
 
-onMounted(async () => {
+// the header's height: the summary card sticks right under it
+const headH = ref(0);
+let sizer: ResizeObserver | undefined;
+onMounted(() => {
   window.addEventListener("scroll", onScroll);
   loadCalendar();
   follow.value = live.value;
-  await loadDay();
+  const h = document.querySelector("header");
+  if (h) (sizer = new ResizeObserver(() => (headH.value = h.offsetHeight))).observe(h);
 });
-onUnmounted(() => window.removeEventListener("scroll", onScroll));
-
-const { connected, send } = useSocket((m) => {
-  // rows and conversations of another day than the one shown are not for this page
-  if (m.type === "final") {
-    if (live.value) finalize(m);
-  } else if (m.type === "draft") {
-    if (live.value) addDrafts(m);
-  } else if (m.type === "partial") {
-    if (live.value && m.row) partials.value[m.device] = m.row;
-    else delete partials.value[m.device];
-  } else if (m.type === "conversation") {
-    if (m.start.slice(0, 10) === day.value) addConv(m);
-  } else if (m.type === "summary") {
-    const c = convs.value.find((x) => x.id === m.conversation);
-    if (c) c.summary = { ...m };
-  } else if (m.type === "live") {
-    lives.value = lives.value.filter((l) => l.device !== m.device).concat(m.live ? [m.live] : []);
-  } else if (m.type === "status") status.value = m;
-}, loadDay);
-
-useWatch(send, connected, () => live.value);
+onUnmounted(() => {
+  window.removeEventListener("scroll", onScroll);
+  sizer?.disconnect();
+});
 
 function jump(start: string) {
   hit.value = start;
+  follow.value = false; // the next words would pull the page back down before it gets there
   const el = document.querySelector(`[data-start="${CSS.escape(start)}"]`);
   if (!el) return;
-  const head = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
-  window.scrollTo({
-    top: el.getBoundingClientRect().top + window.scrollY - head - 8,
-    behavior: "smooth",
-  });
+  // just under what stays on top: the header, and on a phone the summary card stuck under it (wide: beside the row)
+  const r = el.getBoundingClientRect(),
+    s = document.querySelector(".side")?.getBoundingClientRect();
+  const cover = headH.value + (s && s.left < r.right && r.left < s.right ? s.height : 0);
+  window.scrollTo({ top: r.top + window.scrollY - cover - 8, behavior: "smooth" });
 }
 </script>
 
@@ -245,45 +179,53 @@ function jump(start: string) {
         <template v-else>连接中…</template>
       </RouterLink>
     </div>
-    <LivePanel
-      v-if="live"
-      :status="status"
-      :lives="lives"
-      :convs="convs"
-      :done-to="doneTo"
-      resizable
-      @jump="jump"
-    />
   </AppHeader>
-  <main>
-    <template v-for="it in timeline" :key="it.key">
-      <TranscriptRow
-        v-if="it.k === 'row'"
-        :row="it.r"
-        :media="it.media"
-        :hit="hit === it.r.start"
-      />
-      <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" />
-      <div v-else-if="it.k === 'conv'" class="conv">
-        对话 {{ hhmmss(it.c.start) }}–{{ hhmmss(it.c.end) }} 结束 · 参与
-        {{ it.c.participants.map(speakerLabel).join("、") || "—" }} · {{ it.c.sentences }} 句 ·
-        <RouterLink :to="'/c/' + it.c.id">{{ convLink(it.c) }}</RouterLink>
+  <!-- today: the summary card on top (a phone) or on the right (a wide screen), the captions large -->
+  <main :class="{ cols: side }" :style="{ '--head': headH + 'px' }">
+    <aside v-if="side" class="side">
+      <LivePanel :status="status" :lives="lives" :convs="convs" :done-to="doneTo" @jump="jump" />
+    </aside>
+    <div class="caps">
+      <template v-for="it in timeline" :key="it.key">
+        <TranscriptRow
+          v-if="it.k === 'row'"
+          :row="it.r"
+          :media="it.media"
+          :hit="hit === it.r.start"
+          :caption="live"
+          :now="said.has(it.r)"
+        />
+        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" />
+        <div v-else-if="it.k === 'conv'" class="conv">
+          对话 {{ hhmmss(it.c.start) }}–{{ hhmmss(it.c.end) }} 结束 · 参与
+          {{ it.c.participants.map(speakerLabel).join("、") || "—" }} · {{ it.c.sentences }} 句 ·
+          <RouterLink :to="'/c/' + it.c.id">{{ convLink(it.c) }}</RouterLink>
+        </div>
+        <div v-else-if="it.k === 'catchup'" class="gap">
+          正在补齐 {{ it.device }} {{ hhmm(it.from) }}–{{ hhmm(it.to) }} 的录音{{ it.tail }}
+        </div>
+        <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
+      </template>
+      <!-- nothing being said: where the next words will come up, under today's earlier ones -->
+      <div v-if="live && ready && !going && !said.size" class="empty">
+        <Icon name="mic" :size="48" />
+        <b class="none">现在没有进行中的对话</b>
+        <template v-if="status?.devices?.length"
+          >戴上录音设备开口说话，或在 App 里点「录音」，字幕会实时出现在这里</template
+        >
+        <template v-else>连上手机和录音设备，说的话会实时出现在这里</template>
+        <RouterLink v-if="!status?.devices?.length" class="btn btn-primary" to="/connect"
+          >连接手机</RouterLink
+        >
       </div>
-      <div v-else-if="it.k === 'catchup'" class="gap">
-        正在补齐 {{ it.device }} {{ hhmm(it.from) }}–{{ hhmm(it.to) }} 的录音{{ it.tail }}
+      <div v-else-if="ready && !rows.length && !live" class="empty">
+        <Icon name="calendar" :size="48" />这一天没有转写内容
       </div>
-      <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
-    </template>
-    <div v-if="ready && !rows.length && live" class="empty">
-      <Icon name="mic" :size="48" />
-      <div>今天还没有转写内容。连上手机和录音设备，说的话会实时出现在这里</div>
-      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
-    </div>
-    <div v-else-if="ready && !rows.length" class="empty">
-      <Icon name="calendar" :size="48" />这一天没有转写内容
     </div>
   </main>
-  <button v-show="live && !follow" class="jump" @click="toBottom">回到最新</button>
+  <button v-show="live && !follow" class="jump" @click="toBottom">
+    <Icon name="chevron-down" :size="16" />回到最新
+  </button>
 </template>
 
 <style scoped>
@@ -293,11 +235,6 @@ function jump(start: string) {
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
-}
-.pane {
-  flex-basis: 100%;
-  border-top: 1px solid var(--line);
-  margin-top: 4px;
 }
 .conv {
   color: var(--accent);
@@ -323,12 +260,52 @@ function jump(start: string) {
 .back {
   margin-left: auto;
 }
+/* 回到最新: a pill over the captions while they wait for the reader to come back down */
 .jump {
   position: fixed;
-  right: 24px;
-  bottom: calc(var(--tabbar) + 24px);
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--tabbar) + var(--space-4));
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: 0;
   border-radius: var(--radius-pill);
   padding: 0 var(--space-4);
-  box-shadow: var(--shadow);
+  background: var(--accent);
+  color: var(--surface);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+}
+/* a phone: the summary card sticks under the header, the captions scroll under it */
+.side {
+  position: sticky;
+  top: var(--head);
+  z-index: 1;
+  background: var(--bg);
+  padding: var(--space-2) 0;
+}
+.none {
+  color: var(--fg);
+}
+/* a wide screen: captions on the left, the summary on the right, as tall as the screen */
+@media (min-width: 900px) {
+  main.cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-areas: "caps side";
+    column-gap: var(--space-5);
+    align-items: start;
+  }
+  .caps {
+    grid-area: caps;
+  }
+  .side {
+    grid-area: side;
+    padding: var(--space-3) 0;
+  }
+  .side > * {
+    max-height: calc(100dvh - var(--head) - var(--space-5));
+  }
 }
 </style>

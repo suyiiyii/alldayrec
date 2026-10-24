@@ -6,8 +6,16 @@ import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
 // media: played aloud, not said in the room. seek: the page has a player (the conversation page): ▶ and a tap on
-// the row play from this sentence on; without it ▶ plays the sentence alone
-const { row, seek } = defineProps<{ row: Row; hit?: boolean; media?: boolean; seek?: (r: Row) => void }>();
+// the row play from this sentence on; without it ▶ plays the sentence alone. caption: the live page's large text under
+// the speaker; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot
+const { row, seek } = defineProps<{
+  row: Row;
+  hit?: boolean;
+  media?: boolean;
+  seek?: (r: Row) => void;
+  caption?: boolean;
+  now?: boolean;
+}>();
 // a tap, not the end of selecting text to copy
 const tap = () => seek && !getSelection()?.toString() && seek(row);
 </script>
@@ -15,7 +23,14 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
 <template>
   <div
     class="row"
-    :class="{ pending: row.state && row.state !== 'final', hit, media, seekable: seek }"
+    :class="{
+      pending: row.state && row.state !== 'final',
+      hit,
+      media,
+      seekable: seek,
+      caption,
+      now,
+    }"
     :data-start="row.start"
     :title="row.state === 'draft' ? '实时初稿，稍后定稿' : undefined"
     @click="tap"
@@ -37,12 +52,13 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
       >{{ hhmmss(row.start) }}
     </div>
     <div class="spk" :class="{ me: row.speaker === '我' }">
-      <Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}
+      <template v-if="now && !row.speaker">正在说</template>
+      <template v-else><Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}</template>
     </div>
     <div v-if="row.error" class="text err" :title="row.error">这一句没能识别出文字</div>
     <div v-else class="text">
       <span v-if="row.dictation" class="dict">口述→{{ row.dictation }}</span
-      >{{ row.text || "（空）" }}
+      >{{ row.text || (now ? "" : "（空）") }}<span v-if="now" class="pulse" />
     </div>
   </div>
 </template>
@@ -59,7 +75,9 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
 /* the sentence jumped to, or playing */
 .row.hit {
   background: var(--accent-soft);
-  box-shadow: -8px 0 0 var(--accent-soft), 8px 0 0 var(--accent-soft);
+  box-shadow:
+    -8px 0 0 var(--accent-soft),
+    8px 0 0 var(--accent-soft);
 }
 .row.seekable {
   cursor: pointer;
@@ -122,6 +140,40 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
 .err {
   color: var(--err);
   font-size: var(--fs-sm);
+}
+/* the live page: who and when on a small line, the words large under it */
+.row.caption {
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "spk t" "text text";
+  column-gap: var(--space-2);
+  row-gap: 0;
+  padding: var(--space-3) 0 var(--space-1);
+  border-bottom: 0;
+}
+.caption .spk {
+  grid-area: spk;
+  font-size: var(--fs-sm);
+}
+.caption .t {
+  grid-area: t;
+}
+.caption .text {
+  grid-area: text;
+  font-size: var(--fs-lg);
+  line-height: 1.6;
+}
+.row.caption.pending .text {
+  color: var(--fg-2);
+}
+.row.caption.now .text {
+  color: var(--muted);
+}
+.now .play {
+  display: none; /* its audio is still coming */
+}
+.text .pulse {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 @media (max-width: 600px) {
   .row {

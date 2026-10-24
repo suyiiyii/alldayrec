@@ -5,14 +5,13 @@ import AppHeader from "../components/AppHeader.vue";
 import ConversationItem from "../components/ConversationItem.vue";
 import DueTodos from "../components/DueTodos.vue";
 import Icon from "../components/Icon.vue";
-import LivePanel from "../components/LivePanel.vue";
+import LiveCard from "../components/LiveCard.vue";
 import RecapCard from "../components/RecapCard.vue";
 import Skeleton from "../components/Skeleton.vue";
 import {
   get,
   type Conversation,
   type Due,
-  type LiveState,
   type Recap,
   type Status,
 } from "../lib/api";
@@ -24,7 +23,6 @@ import { useSocket, useWatch } from "../lib/socket";
 const router = useRouter();
 const day = today();
 const status = ref<Status | null>(null),
-  lives = ref<LiveState[]>([]),
   convs = ref<Conversation[]>([]),
   due = ref<Due[]>([]),
   recap = ref<Recap | null>(null),
@@ -37,16 +35,14 @@ function addConv(c: Conversation) {
   else convs.value.push(c);
 }
 async function load() {
-  const [st, ls, cs, du, rc] = await Promise.all([
+  const [st, cs, du, rc] = await Promise.all([
     get<Status>("/api/status"),
-    get<LiveState[]>("/api/live"),
     get<Conversation[]>("/api/conversations", { date: day }),
     get<Due[]>("/api/todos/due"),
     get<Recap | null>("/api/recap"),
     loadCalendar(true),
   ]);
   status.value = st;
-  lives.value = ls;
   convs.value = [];
   cs.forEach(addConv);
   due.value = du;
@@ -57,8 +53,6 @@ onMounted(load);
 
 const { connected, send } = useSocket((m) => {
   if (m.type === "status") status.value = m;
-  else if (m.type === "live")
-    lives.value = lives.value.filter((l) => l.device !== m.device).concat(m.live ? [m.live] : []);
   else if (m.type === "conversation") addConv(m);
   else if (m.type === "summary") {
     const c = convs.value.find((x) => x.id === m.conversation);
@@ -112,6 +106,7 @@ function openSheet() {
         {{ hello }}<template v-if="convs.length"> · 今天 {{ convs.length }} 段对话</template>
       </div>
     </div>
+    <LiveCard v-if="going" />
     <Skeleton v-if="!ready" />
     <div v-else-if="empty" class="card start">
       <h2>三步开始</h2>
@@ -130,14 +125,6 @@ function openSheet() {
     <template v-else>
       <DueTodos :due="due" />
       <RecapCard v-if="recap" :recap="recap" open />
-      <section v-if="going" class="card live">
-        <RouterLink class="live-head" to="/live">
-          <span class="rec" />进行中的对话<span class="more"
-            >实时字幕<Icon name="chevron-right" :size="16"
-          /></span>
-        </RouterLink>
-        <LivePanel :status="status" :lives="lives" :convs="convs" @jump="router.push('/live')" />
-      </section>
       <h2 class="sec">今天的对话</h2>
       <ConversationItem v-for="c in newest" :key="c.id" :c="c" />
       <p v-if="!convs.length" class="muted none">今天还没有聊完的对话</p>
@@ -204,28 +191,6 @@ h1 {
 }
 .none {
   font-size: var(--fs-sm);
-}
-/* the conversation going on: its head opens the live captions */
-.live-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-weight: 600;
-  color: var(--fg);
-}
-.rec {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--err);
-}
-.more {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--fs-sm);
-  font-weight: 400;
-  color: var(--accent);
 }
 /* the three steps, numbered in circles */
 .start h2 {
