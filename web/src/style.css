@@ -6,8 +6,8 @@
   --fg-2: #4a4f63; /* secondary text */
   --muted: #6b7080; /* grey text, 4.9:1 on white */
   --line: #dfe2ea; /* table and list dividers only; cards have no border */
-  --accent: #3b3f9e; /* what can be clicked, and 我 */
-  --accent-soft: #e9eafc;
+  --accent: #0f6569; /* what can be clicked, and 我 */
+  --accent-soft: #e3f4f3;
   --ok: #1f7a4d;
   --ok-soft: #e3f3ea;
   --warn: #9a6b1f;
@@ -51,8 +51,8 @@
     --fg-2: #c3c7d3;
     --muted: #a4a9bb;
     --line: #2c303b;
-    --accent: #8b8ff0;
-    --accent-soft: #2a2d4a;
+    --accent: #45b0b5;
+    --accent-soft: #1b3537;
     --ok: #5fcf8f;
     --ok-soft: #1d3328;
     --warn: #e2b25b;
