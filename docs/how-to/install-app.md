@@ -7,7 +7,7 @@ type: how-to
 App 录手机麦克风或蓝牙录音设备，把音频上传到你的服务器，并显示服务器的网页。界面目前只有中文。
 
 ::: info 适用版本
-Releases 里最新的安卓 APK 是 `apk-v1.5.0`（1.5.0+25）。它只能连 `https://` 服务器；连 `http://` 的支持在 main 分支上，见[如何让手机连上服务器](./remote-access.md)。
+Releases 里最新的安卓 APK 是 `apk-v1.5.1`（1.5.1+26），能连 `https://` 和 `http://`（Tailscale、局域网）服务器，见[如何让手机连上服务器](./remote-access.md)。
 :::
 
 ## 安装

@@ -63,11 +63,11 @@ remote machine they first run `ssh -L 8770:127.0.0.1:8770 <user>@<host>` on thei
 
 `docker-compose.yml` publishes port 8770 on `127.0.0.1` only, so a phone can't reach it yet. Choose with the user:
 
-- **HTTPS (works with the released Android APK 1.5.0):** put a TLS reverse proxy in front of port 8770 (Caddy, nginx,
+- **HTTPS:** put a TLS reverse proxy in front of port 8770 (Caddy, nginx,
   Cloudflare Tunnel, Tailscale Serve). It must pass WebSockets (`/ws`); its health check is `GET /api/health`. With
   nginx, raise `client_max_body_size` or large imports fail with 413.
 - **Plain http on Tailscale or a LAN:** change `ports:` to `"8770:8770"` (or `"<tailscale-ip>:8770:8770"`) and run
-  `docker compose up -d`. The app accepts `http://` only in builds from the main branch; no released APK has it yet.
+  `docker compose up -d`. The Android APK accepts `http://` since 1.5.1 (apk-v1.5.1).
 
 Never expose a server whose token is empty.
 

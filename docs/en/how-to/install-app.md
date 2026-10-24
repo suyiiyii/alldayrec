@@ -7,7 +7,7 @@ type: how-to
 The app records the phone's mic or a BLE recorder, uploads the audio to your server and shows the server's web pages. Its UI is in Chinese only for now.
 
 ::: info Version
-The newest Android APK on Releases is `apk-v1.5.0` (1.5.0+25). It connects only to `https://` servers; support for `http://` is on the main branch, see [Reach the server from a phone](./remote-access.md).
+The newest Android APK on Releases is `apk-v1.5.1` (1.5.1+26). It connects to `https://` and to `http://` servers (Tailscale, LAN), see [Reach the server from a phone](./remote-access.md).
 :::
 
 ## Install

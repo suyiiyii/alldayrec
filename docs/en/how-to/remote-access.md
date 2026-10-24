@@ -7,7 +7,7 @@ type: how-to
 By default the server listens only on `127.0.0.1:8770` on its own machine. To upload recordings, the phone has to reach it. This page gives two ways to do that, depending on your network.
 
 ::: warning App version
-Support for `http://` addresses in the app is on the main branch (commit 62b9950) and not yet in a released APK: the newest one on Releases, `apk-v1.5.0`, connects only to `https://`. To use `http://` directly inside Tailscale or a LAN, build the Android APK from main yourself; on iOS you build the app yourself anyway (see [Install and connect the phone app](./install-app.md)). With the released APK, follow [The phone connects over the public internet](#the-phone-connects-over-the-public-internet) below.
+Since `apk-v1.5.1` the app connects to `http://` addresses: inside Tailscale or a LAN, enter the `http://` address directly (an iOS build from main too, see [Install and connect the phone app](./install-app.md)). Older APKs (1.5.0 and before) connect only to `https://`: upgrade, or follow [The phone connects over the public internet](#the-phone-connects-over-the-public-internet) below.
 
 :::
 
