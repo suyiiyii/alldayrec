@@ -1,5 +1,5 @@
-"""The people bank (the voiceprint of each name the diarists name clusters by) kept as a ledger of what taught it
-(#295).
+"""The people bank (the voiceprint of each name the diarists name clusters by) kept as a ledger of what taught it, and
+the two-half test of a voice card (#295).
 
 The ledger, table enrolled: one row per sentence learnt (row: its rowid in sentences, n 1, e its voiceprint), and per
 name at most one row NULL, n its sentences: the bank as it stood before the ledger (10-25). A name's voiceprint is
@@ -85,3 +85,42 @@ def sync(*names: str) -> None:
                 dia.people[name] = unit(people[name][1])
             else:
                 dia.people.pop(name, None)
+
+
+MIXED_MIN = 20     # voices a card needs before naming it checks for two people in it
+MIXED_BELOW = 0.5  # two halves this little alike (cosine of their centroids) are two people: #295, the one mixed named
+                   # card 0.29 and 0.34 on its two recorders; 69 card x recorder splits median 0.72, p10 0.52
+CLASS_MIN = 10     # voices of one recorder (device) a split needs: the halves are compared within one recorder
+HALF_MIN = 3       # a smaller half is an odd voice or two (不是 on the card), not a second person
+
+
+def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] | None:
+    """The two-half test of a card (#295 §4): its voices of each recorder split in two (k-means, device-centred
+    voiceprints, vec by conv|label); the recorder whose halves are least alike decides. Two people: the card's voices
+    in two, each with the nearer of that split's centroids, the bigger half first. None: one person, or too few voices."""
+    from sklearn.cluster import KMeans
+    if len(members) < MIXED_MIN:
+        return None
+    key = lambda m: f"{m['conv']}|{m['label']}"
+    by = {}
+    for m in members:
+        if key(m) in vec:
+            by.setdefault(m.get("device"), []).append(vec[key(m)])
+    worst = None
+    for xs in by.values():
+        if len(xs) < CLASS_MIN:
+            continue
+        X = np.array(xs)
+        lab = KMeans(2, n_init=10, random_state=0).fit_predict(X)
+        if min(lab.sum(), len(lab) - lab.sum()) < HALF_MIN:
+            continue
+        c = [unit(X[lab == k].mean(0)) for k in (0, 1)]
+        if (s := float(c[0] @ c[1])) < MIXED_BELOW and (not worst or s < worst[0]):
+            worst = (s, c)
+    if not worst:
+        return None
+    out = [[], []]
+    for m in members:
+        if key(m) in vec:
+            out[int(vec[key(m)] @ worst[1][1] > vec[key(m)] @ worst[1][0])].append(m)
+    return sorted(out, key=lambda h: -sum(m.get("speech_s") or 0 for m in h))

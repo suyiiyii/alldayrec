@@ -300,7 +300,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, what the renamed sentences taught the people bank (the ledger, bank.py) both ways, the centroid a 「这是我」 added to 我's voiceprint dropped. 409 when the id is unknown (taken back already, too old, the server restarted) or a conversation changed since. | body: JSON object |
+| `POST` | Takes back a rename, merge or 拆开 by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, what the renamed sentences taught the people bank (the ledger, bank.py) both ways, the centroid a 「这是我」 added to 我's voiceprint dropped. 409 when the id is unknown (taken back already, too old, the server restarted) or a conversation changed since. | body: JSON object |
 
 ### `/api/speakers`
 
@@ -314,17 +314,29 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | (no docstring) | `gid` (path, string) |
 
+### `/api/speakers/{gid}/halves`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | The two-half test of a card (bank.halves): mixed, and its two halves when it sounds like two people. | `gid` (path, string) |
+
 ### `/api/speakers/name`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations. | body: JSON object |
+| `POST` | Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations; with voices (conv\|label), only those. | body: JSON object |
 
 ### `/api/speakers/detach`
 
 | Method | Description | Parameters |
 |---|---|---|
 | `POST` | A voice that is not this speaker: a named one goes back to a fresh S&lt;n> of its conversation; either way it is kept apart from the group from now on. | body: JSON object |
+
+### `/api/speakers/{gid}/split`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | 拆开: the voices of a card a request picks (chosen: a half from the two-half test) out of it into a card of their own, in one transaction, with an undo. | `gid` (path, string)<br>body: JSON object |
 
 ### `/api/conversation/{conv_id}/speakers`
 

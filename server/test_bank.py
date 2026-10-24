@@ -1,8 +1,10 @@
 """The people bank as a ledger (bank.py, #295): what a rename teaches is filtered, recorded per sentence and taken back
-by the undo either way round."""
+by the undo either way round; a card that sounds like two people is not named whole without asking, and 拆开 moves a
+half out in one transaction with an undo."""
 import anyio
 import numpy as np
 import pytest
+from fastapi import HTTPException
 
 from alldayrec import bank
 from alldayrec import core
@@ -104,6 +106,54 @@ def test_rename_away_forgets_and_undo_restores(store):
     assert ledger() == was and db.people()["张三"][0] == 6 and "李四" not in db.people()
     anyio.run(routes_speakers.speaker_detach, {"conv": c1, "label": "张三", "group": "张三"})
     assert db.people()["张三"][0] == 3
+
+
+def test_split_named_card_and_undo(store):
+    """拆开 of a named card: the half's labels back to fresh S<n>, kept apart from the name, what they taught gone, in
+    one transaction; the undo puts all of it back."""
+    convs = [conv(i, "S1", [v] * 3) for i, v in enumerate([A] * 12 + [B] * 9)]
+    for c in convs:
+        anyio.run(rename, c, {"from": "S1", "to": "张三"})
+    dump = lambda: [sorted(map(tuple, db.conn().execute(f"SELECT * FROM {n}"))) for n in ("sentences", "conversations", "voices", "apart", "enrolled", "people")]
+    was = dump()
+    h = anyio.run(routes_speakers.speaker_halves, "张三")
+    assert h["mixed"] and [x["count"] for x in h["halves"]] == [12, 9]
+    r = anyio.run(routes_speakers.speaker_split, "张三", {"voices": h["halves"][1]["voices"]})
+    assert r["moved"] == 9 and [db.conversation(c)["participants"] for c in convs[12:]] == [["S1"]] * 9
+    assert db.apart() == {(f"{c}|S1", "张三") for c in convs[12:]} and db.people()["张三"][0] == 12 * 3
+    g = {g["id"]: g for g in routes_speakers.speaker_groups()}
+    assert len(g["张三"]["members"]) == 12 and not g["张三"]["suggested"]
+    assert anyio.run(speaker_undo, {"undo": r["undo"]}) == {"undone": 9}
+    assert dump() == was
+
+    r = anyio.run(routes_speakers.speaker_name, {"group": "张三", "name": "李四"})
+    assert r["mixed"] and db.conversation(convs[0])["participants"] == ["张三"], "asked, nothing renamed"
+    r = anyio.run(routes_speakers.speaker_name, {"group": "张三", "name": "李四", "voices": h["halves"][0]["voices"]})
+    assert r["renamed"] == 12 and db.conversation(convs[0])["participants"] == ["李四"]
+    assert db.conversation(convs[-1])["participants"] == ["张三"]
+    r = anyio.run(routes_speakers.speaker_name, {"group": "李四", "name": "王五", "all": True})
+    assert r["renamed"] == 12
+
+
+def test_split_unnamed_card_and_undo(store):
+    """拆开 of an unnamed card: the half without the card's leader is kept apart from it, and is a card of its own;
+    the undo drops those pins only."""
+    u = bank.unit(A + 0.9 * B)  # 0.74 from A: one group at link 0.5
+    convs = [conv(i, "S1", [v] * 3) for i, v in enumerate([A] * 3 + [u] * 2 + [-A] * 5)]  # -A: the recorder's mean near 0
+    db.conn().execute("INSERT INTO apart VALUES (?, 'x')", (f"{convs[0]}|S1",))
+    mine = lambda: sorted(len(g["members"]) for g in routes_speakers.speaker_groups() if any(m["conv"] in convs[:5] for m in g["members"]))
+    g = next(g for g in routes_speakers.speaker_groups() if any(m["conv"] == convs[3] for m in g["members"]))
+    assert len(g["members"]) == 5 and mine() == [5]
+    with pytest.raises(HTTPException):
+        anyio.run(routes_speakers.speaker_split, g["id"], {"voices": [f"{c}|S1" for c in convs[:5]]})  # all of it
+    half = [f"{c}|S1" for c in convs[:3]]
+    assert g["id"] in half  # the half with the leader: the other one is what is kept apart
+    r = anyio.run(routes_speakers.speaker_split, g["id"], {"voices": half})
+    assert r["moved"] == 2, "the half that goes, not the one asked for"
+    assert db.apart() == {(f"{convs[0]}|S1", "x")} | {(f"{c}|S1", g["id"]) for c in convs[3:5]}
+    assert mine() == [2, 3]
+    anyio.run(speaker_undo, {"undo": r["undo"]})
+    assert db.apart() == {(f"{convs[0]}|S1", "x")} and mine() == [5]
 
 
 def test_one_sentence_fix_forgets_and_learns(store):

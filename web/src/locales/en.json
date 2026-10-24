@@ -790,7 +790,17 @@
     "notThem": "Not them",
     "more": "Show 30 more",
     "others": "Other voices ({n})",
-    "othersWhy": "little speech, or in one conversation only"
+    "othersWhy": "little speech, or in one conversation only",
+    "mixed": "This card sounds like two people",
+    "mixedWhy": "Its voices fall into two halves that don't sound alike. Listen first, then decide.",
+    "halfA": "One half: {convs} conversation · {len} | One half: {convs} conversations · {len}",
+    "halfB": "The other half: {convs} conversation · {len} | The other half: {convs} conversations · {len}",
+    "nameHalf": "Name this half only",
+    "nameAll": "Name all of it",
+    "split": "Split",
+    "notHalf": "This half isn't {name}",
+    "oneVoice": "Sounds like one person: nothing to split",
+    "splitDone": "Split: {n} conversation moved to a card of its own | Split: {n} conversations moved to a card of their own"
   },
   "timeline": {
     "start": "Get started in three steps",

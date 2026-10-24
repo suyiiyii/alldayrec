@@ -173,7 +173,7 @@ def keep_undo(befores: list[dict]) -> str:
 
 @router.post("/api/speakers/undo")
 async def speaker_undo(body: dict):
-    """Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins
+    """Takes back a rename, merge or 拆开 by the undo id its answer gave: the rows, the participants, the voices, pins
     and name hints as they were, the summaries redone, what the renamed sentences taught the people bank (the ledger,
     bank.py) both ways, the centroid a 「这是我」 added to 我's voiceprint dropped. 409 when the id is unknown (taken back
     already, too old, the server restarted) or a conversation changed since."""
@@ -182,6 +182,9 @@ async def speaker_undo(body: dict):
         raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
     with db.tx() as t:
         for b in reversed(bs):  # one conversation's renames in a row: the last first
+            if "pins" in b:  # 拆开 of an unnamed card: the pins it added
+                t.executemany("DELETE FROM apart WHERE voice = ? AND grp = ?", b["pins"])
+                continue
             now = t.execute("SELECT participants FROM conversations WHERE id = ?", (b["conv"],)).fetchone()
             if not now or json.loads(now[0]) != b["after"]:
                 raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
@@ -198,13 +201,14 @@ async def speaker_undo(body: dict):
             bank.forget(t, b["to"], b["rows"])  # learnt already (enroll); a later one skips sentences no longer to's
             bank.restore(t, b.get("enrolled") or [])
     T().speakers["at"] = 0.0
-    bank.sync(*{x for b in bs for x in (b["from"], b["to"])})
+    bank.sync(*{x for b in bs if "to" in b for x in (b["from"], b["to"])})
     if k := bs[0].get("me"):  # 「这是我」's centroid
         forget_me(key=k)
-    for cid in dict.fromkeys(b["conv"] for b in bs):
+    for cid in dict.fromkeys(b["conv"] for b in bs if "conv" in b):
         queue_summary(find_conversation(cid), keep=True)
     b = bs[0]
-    ws.note(f"撤销改名：{b['to']} 改回 {b['from']}" if len(bs) == 1 else f"撤销改名：{len(bs)} 段对话的 {b['to']} 改回原来的说话人", "state")
+    ws.note("撤销拆开" if "pins" in b else f"撤销改名：{b['to']} 改回 {b['from']}" if len(bs) == 1 else
+            f"撤销改名：{len(bs)} 段对话的 {b['to']} 改回原来的说话人", "state")
     return {"undone": len(bs)}
 
 
@@ -291,7 +295,7 @@ def describe(members: list[dict], convs: dict, called: dict[str, set[str]]) -> d
         c = convs.get(v["conv"]) or {}
         s = (c.get("summary") or {})
         pts = next((p.get("points") or [] for p in s.get("people") or [] if p.get("who") == v["label"]), [])
-        ms.append({"conv": v["conv"], "label": v["label"], "start": conv_start(v["conv"]), "n": v["n"], "speech_s": v["speech_s"],
+        ms.append({"conv": v["conv"], "label": v["label"], "device": v.get("device"), "start": conv_start(v["conv"]), "n": v["n"], "speech_s": v["speech_s"],
                    "clip": v.get("clip"), "clip_start": v.get("clip_start"), "clip_end": v.get("clip_end"), "clip_text": v.get("clip_text"),
                    "title": s.get("title"), "points": pts[:2],
                    "with": [p for p in c.get("participants") or [] if p != v["label"]]})
@@ -351,14 +355,51 @@ def check_name(to: str):
         raise HTTPException(400, "bad name")
 
 
+def voice_key(m: dict) -> str:
+    return f"{m['conv']}|{m['label']}"
+
+
+def chosen(g: dict, body: dict) -> list[dict]:
+    """The voices of a card a request picks (naming a half, 拆开): voices, a list of conv|label. Another way to pick
+    (say, the voices heard as music) is another key of the body here."""
+    want = set(body.get("voices") or [])
+    return [m for m in g["members"] if voice_key(m) in want]
+
+
+def half(ms: list[dict]) -> dict:
+    """One half of a card that sounds like two people: its voices (conv|label), how many and how much speech, and 3
+    of them spread over time to listen to (each a clip as the card's samples)."""
+    return {"voices": [voice_key(m) for m in ms], "count": len(ms), "speech_s": round(sum(m["speech_s"] for m in ms), 1),
+            "samples": [{k: m[k] for k in SAMPLE if m[k] is not None} for m in ms[:: max(1, len(ms) // 3)][:3]]}
+
+
+def two_halves(g: dict) -> dict:
+    h = bank.halves(g["members"], T().speakers["vec"])
+    return {"mixed": bool(h), "halves": [half(x) for x in h or []]}
+
+
+@router.get("/api/speakers/{gid}/halves")
+async def speaker_halves(gid: str):
+    """The two-half test of a card (bank.halves): mixed, and its two halves when it sounds like two people."""
+    return two_halves(await anyio.to_thread.run_sync(find_group, gid, limiter=threads.DB))
+
+
 @router.post("/api/speakers/name")
 async def speaker_name(body: dict):
-    """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations. The
-    answer comes when the store has it; the voice is learnt after (enroll_soon), 我's before it (learn_me)."""
+    """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations; with
+    voices (conv|label), only those. A card of bank.MIXED_MIN voices or more that sounds like two people (bank.halves)
+    is not named: the answer is {mixed: true, halves} for the page to ask, unless all is true. The answer comes when the
+    store has it; the voice is learnt after (enroll_soon), 我's before it (learn_me)."""
     to = (body.get("name") or "").strip()
     check_name(to)
+    g = await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB)
+    ms = g["members"]
+    if body.get("voices"):
+        ms = chosen(g, body)
+    elif not body.get("all") and (h := two_halves(g))["mixed"]:
+        return h
     rows, befores, me = [], [], []
-    for m in (await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB))["members"]:
+    for m in ms:
         if m["label"] == to:
             continue
         v = voice_of(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
@@ -381,17 +422,56 @@ async def speaker_detach(body: dict):
     conv, label, group = body["conv"], body["label"], body["group"]
     key = f"{conv}|{label}"
     if not speakers.ANON.fullmatch(label):
-        c = find_conversation(conv)
-        if not c:
-            raise HTTPException(404, "no such conversation")
-        used = {int(p[1:]) for p in c["participants"] if re.fullmatch(r"S\d+", p)}
-        new = f"S{max(used, default=0) + 1}"
-        apply_rename(conv, label, new)  # S<n>: nothing to learn
+        new = unnamed(conv, label)[0]
         forget_me(voice=key)
         key = f"{conv}|{new}"
     db.conn().execute("INSERT OR IGNORE INTO apart VALUES (?, ?)", (key, group))
     T().speakers["at"] = 0.0
     return {"key": key}
+
+
+def unnamed(conv: str, label: str) -> tuple[str, dict]:
+    """A named label of a conversation back to a fresh S<n> of it (S<n>: nothing to learn), and apply_rename's before."""
+    c = find_conversation(conv)
+    if not c:
+        raise HTTPException(404, "no such conversation")
+    used = {int(p[1:]) for p in c["participants"] if re.fullmatch(r"S\d+", p)}
+    new = f"S{max(used, default=0) + 1}"
+    return new, apply_rename(conv, label, new)[2]
+
+
+@router.post("/api/speakers/{gid}/split")
+async def speaker_split(gid: str, body: dict):
+    """拆开: the voices of a card a request picks (chosen: a half from the two-half test) out of it into a card of
+    their own, in one transaction, with an undo. A named card's go back to a fresh S<n> each (what they taught the
+    people bank going with them), kept apart from the name; an unnamed card's half without the card's leader (its id:
+    pins are against it) is kept apart from it."""
+    g = await anyio.to_thread.run_sync(find_group, gid, limiter=threads.DB)
+    ms = chosen(g, body)
+    if not ms or len(ms) == len(g["members"]):
+        raise HTTPException(400, "bad voices")
+    befores = []
+    with db.tx() as t:
+        if g["name"]:
+            for m in ms:
+                new, before = unnamed(m["conv"], m["label"])
+                t.execute("INSERT OR IGNORE INTO apart VALUES (?, ?)", (f"{m['conv']}|{new}", g["name"]))
+                befores.append(before)
+        else:
+            want = {voice_key(m) for m in ms}
+            out = ms if gid not in want else [m for m in g["members"] if voice_key(m) not in want]
+            pins = [(voice_key(m), gid) for m in out if not t.execute("SELECT 1 FROM apart WHERE voice = ? AND grp = ?", (voice_key(m), gid)).fetchone()]
+            t.executemany("INSERT INTO apart VALUES (?, ?)", pins)
+            befores.append({"pins": pins})
+            ms = out
+    T().speakers["at"] = 0.0
+    if g["name"]:
+        bank.sync(g["name"])
+        if g["name"] == "我":
+            for m in ms:
+                forget_me(voice=voice_key(m))
+    ws.note(f"拆开「{g['name'] or gid}」：{len(ms)} 段对话的声音分出去了", "state")
+    return {"moved": len(ms), "undo": keep_undo(befores)}
 
 
 def label_suggestions(c: dict, groups: list[dict], vec: dict, hs: dict | None, al: dict[str, str]) -> dict:

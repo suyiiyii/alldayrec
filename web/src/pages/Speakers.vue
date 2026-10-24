@@ -17,6 +17,7 @@ import {
 } from "../lib/api";
 import { play, player } from "../lib/audio";
 import { shiftDay, today } from "../lib/calendar";
+import { useDismiss } from "../lib/dismiss";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerLabel } from "../lib/speakers";
 import { toast } from "../lib/toast";
@@ -127,16 +128,68 @@ async function expand(g: Speaker) {
   members.value = [];
   members.value = (await get<{ members: Voice[] }>(`/api/speakers/${encodeURIComponent(g.id)}`)).members;
 }
-async function name(g: Speaker, to: string, what: string, suggestion?: string) {
+// 这张卡像是两个人: a card's two halves (the server's two-half test), from naming it (to: the name asked
+// for) or from its ⋯ 拆开; a half's voices (conv|label) are what 只命名这一半 names and 拆开 moves out
+interface Half {
+  voices: string[];
+  count: number;
+  speech_s: number;
+  samples: Sample[];
+}
+type Halves = { mixed: boolean; halves: Half[] };
+type Sheet = { id: string; halves: Half[]; to?: string; what?: string; suggestion?: string };
+const sheet = ref<Sheet | null>(null);
+const menu = ref(false),
+  menuFor = ref(""),
+  menuEl = ref<HTMLElement | null>(null);
+useDismiss(menu, menuEl);
+function more(g: Speaker, e: Event) {
+  menuEl.value = (e.currentTarget as HTMLElement).parentElement;
+  menu.value = !(menu.value && menuFor.value === g.id);
+  menuFor.value = g.id;
+}
+async function halves(g: Speaker) {
+  menu.value = false;
+  await card(g.id).run(async () => {
+    const r = await get<Halves>(`/api/speakers/${encodeURIComponent(g.id)}/halves`);
+    if (r.mixed) sheet.value = { id: g.id, halves: r.halves };
+    else toast(t("speakers.oneVoice"));
+  });
+}
+async function split(g: Speaker, h: Half) {
+  await card(g.id).run(async () => {
+    const r = await post<{ moved: number; undo: string }>(
+      `/api/speakers/${encodeURIComponent(g.id)}/split`,
+      { voices: h.voices },
+    );
+    sheet.value = null;
+    toast(t("speakers.splitDone", { n: r.moved }, r.moved), {
+      undo: () => void undo(r.undo),
+      ms: 10_000,
+    });
+    await load();
+  });
+}
+async function name(
+  g: Speaker,
+  to: string,
+  what: string,
+  suggestion?: string,
+  only: { voices?: string[]; all?: boolean } = {},
+) {
   to = to.trim();
   if (!to) return;
   await card(g.id).run(async () => {
     flash.value = "";
-    const r = await post<{ renamed: number; learned?: boolean; undo: string | null }>("/api/speakers/name", {
-      name: to,
-      group: g.id,
-      suggestion,
-    });
+    const r = await post<Halves | { renamed: number; learned?: boolean; undo: string | null }>(
+      "/api/speakers/name",
+      { name: to, group: g.id, suggestion, ...only },
+    );
+    if ("mixed" in r) {
+      sheet.value = { id: g.id, halves: r.halves, to, what, suggestion };
+      return;
+    }
+    sheet.value = null;
     // 撤销 for 10 s: every conversation of it back as it was (the server keeps what it changed)
     // 这是我: 我's voiceprint learnt it too, unless there was too little of it (server learn_me)
     toast(
@@ -231,6 +284,22 @@ async function detach(g: Speaker, v: Voice) {
               >{{ t("speakers.convs", { n: g.count }, g.count) }} · {{ mins(g.speech_s) }}
             </div>
           </div>
+          <div v-if="g.name" class="kebab">
+            <button
+              class="btn-ghost"
+              :aria-label="t('conv.more')"
+              aria-haspopup="menu"
+              :aria-expanded="menu && menuFor === g.id"
+              @click="more(g, $event)"
+            >
+              <Icon name="more-horizontal" />
+            </button>
+            <div v-if="menu && menuFor === g.id" class="menu" role="menu">
+              <button role="menuitem" :disabled="card(g.id).busy.value" @click="halves(g)">
+                <Icon name="users" :size="18" />{{ t("speakers.split") }}
+              </button>
+            </div>
+          </div>
         </div>
         <div class="samples">
           <button
@@ -305,6 +374,61 @@ async function detach(g: Speaker, v: Voice) {
         <p v-if="card(g.id).error.value" class="error" role="alert" :title="card(g.id).detail.value">
           {{ card(g.id).error.value }}
         </p>
+        <div v-if="sheet && sheet.id === g.id" class="mixed">
+          <strong>{{ t("speakers.mixed") }}</strong>
+          <p class="meta">{{ t("speakers.mixedWhy") }}</p>
+          <div v-for="(h, i) in sheet.halves" :key="i" class="half">
+            <div>
+              {{
+                t(
+                  i ? "speakers.halfB" : "speakers.halfA",
+                  { convs: h.count, len: mins(h.speech_s) },
+                  h.count,
+                )
+              }}
+            </div>
+            <div class="samples">
+              <button
+                v-for="v in h.samples"
+                :key="voiceId(v)"
+                class="clip"
+                :class="{ playing: player.playing === voiceId(v) }"
+                :disabled="player.failed.has(voiceId(v))"
+                @click="listen(v)"
+              >
+                <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+                <span>{{ v.clip_text || day(v.start) }}</span>
+              </button>
+            </div>
+            <button
+              v-if="sheet.to"
+              :disabled="card(g.id).busy.value"
+              @click="name(g, sheet.to, sheet.what!, sheet.suggestion, { voices: h.voices })"
+            >
+              {{ t("speakers.nameHalf") }}
+            </button>
+            <button v-else-if="g.name" :disabled="card(g.id).busy.value" @click="split(g, h)">
+              {{ t("speakers.notHalf", { name: speakerLabel(g.name) }) }}
+            </button>
+          </div>
+          <div class="actions">
+            <button
+              v-if="sheet.to"
+              :disabled="card(g.id).busy.value"
+              @click="name(g, sheet.to, sheet.what!, sheet.suggestion, { all: true })"
+            >
+              {{ t("speakers.nameAll") }}
+            </button>
+            <button
+              v-if="sheet.to && !g.name && !sheet.suggestion"
+              :disabled="card(g.id).busy.value"
+              @click="split(g, sheet.halves[1])"
+            >
+              {{ t("speakers.split") }}
+            </button>
+            <button class="btn-ghost" @click="sheet = null">{{ t("speakers.cancel") }}</button>
+          </div>
+        </div>
         <div v-if="editing === g.id && names.length" class="chips">
           <button
             v-for="n in names.slice(0, 12)"
@@ -499,6 +623,64 @@ h1 {
 }
 .more {
   width: 100%;
+}
+.kebab {
+  position: relative;
+  margin-left: auto;
+}
+.kebab > .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  margin-right: -10px;
+  color: var(--fg-2);
+}
+.menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 5;
+  min-width: 160px;
+  padding: var(--space-1) 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  text-align: left;
+}
+.mixed {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+.mixed > .meta {
+  margin: 2px 0 0;
+}
+.half {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.half > button {
+  margin-top: 8px;
 }
 .fold {
   display: flex;

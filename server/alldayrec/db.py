@@ -173,6 +173,9 @@ def read_only(path) -> sqlite3.Connection:
 @contextmanager
 def tx():
     c = conn()
+    if c.in_transaction:  # inside another tx(): a part of it, committed or rolled back with it
+        yield c
+        return
     c.execute("BEGIN IMMEDIATE")
     try:
         yield c

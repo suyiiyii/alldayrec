@@ -141,6 +141,8 @@ REQUESTS = {
     ("POST", "/api/conversation/{conv_id}/rename"): ("POST", f"/api/conversation/{CID}/rename", dict(json={"from": "S1", "to": "MARKa人"})),
     ("GET", "/api/speakers"): ("GET", "/api/speakers", {}),
     ("GET", "/api/speakers/{gid}"): ("GET", "/api/speakers/{gid}", {}),  # gid: the first group a's /api/speakers lists
+    ("GET", "/api/speakers/{gid}/halves"): ("GET", "/api/speakers/{gid}/halves", {}),
+    ("POST", "/api/speakers/{gid}/split"): ("POST", "/api/speakers/{gid}/split", dict(json={"voices": [f"{CID}|S1"]})),  # all of it: 400
     ("POST", "/api/speakers/name"): ("POST", "/api/speakers/name", dict(json={"group": "{gid}", "name": "老王"})),
     ("POST", "/api/speakers/detach"): ("POST", "/api/speakers/detach", dict(json={"conv": CID, "label": "老王", "group": "{gid}"})),
     ("POST", "/api/speakers/undo"): ("POST", "/api/speakers/undo", dict(json={"undo": "x"})),  # none of a's: 409

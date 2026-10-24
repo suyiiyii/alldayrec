@@ -790,7 +790,17 @@
     "notThem": "不是",
     "more": "再显示 30 个",
     "others": "其他声音（{n}）",
-    "othersWhy": "说得很少，或只在一段对话里出现过"
+    "othersWhy": "说得很少，或只在一段对话里出现过",
+    "mixed": "这张卡像是两个人",
+    "mixedWhy": "卡里的声音分成两半，两半听起来不太像。先听一听再决定。",
+    "halfA": "一半：{convs} 段对话 · {len}",
+    "halfB": "另一半：{convs} 段对话 · {len}",
+    "nameHalf": "只命名这一半",
+    "nameAll": "全部命名",
+    "split": "拆开",
+    "notHalf": "这一半不是 {name}",
+    "oneVoice": "听起来是同一个人，不用拆开",
+    "splitDone": "已拆开：{n} 段对话分成了另一张卡"
   },
   "timeline": {
     "start": "三步开始",
