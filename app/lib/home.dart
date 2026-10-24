@@ -132,6 +132,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final c = WebViewController.fromPlatformCreationParams(WebViewPlatform.instance is WebKitWebViewPlatform
         ? WebKitWebViewControllerCreationParams(allowsInlineMediaPlayback: true, mediaTypesRequiringUserAction: const {})
         : const PlatformWebViewControllerCreationParams());
+    c.setBackgroundColor(Colors.transparent);  // the scaffold shows through until the page paints (no white flash in dark mode)
     final p = c.platform;
     if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
     if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
