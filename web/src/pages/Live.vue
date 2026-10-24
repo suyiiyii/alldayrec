@@ -291,6 +291,7 @@ function jump(start: string) {
 /* a wide screen: captions on the left, the summary on the right, as tall as the screen */
 @media (min-width: 900px) {
   main.cols {
+    padding-bottom: 0; /* on .caps instead: the summary column, stuck, may reach the bottom of the screen */
     display: grid;
     grid-template-columns: minmax(0, 1fr) 320px;
     grid-template-areas: "caps side";
@@ -299,6 +300,7 @@ function jump(start: string) {
   }
   .caps {
     grid-area: caps;
+    padding-bottom: 60px;
   }
   .side {
     grid-area: side;
