@@ -33,7 +33,7 @@ MS = int(dt.datetime.fromisoformat(AT).timestamp() * 1000)
 OGG = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=2:r=16000", "-c:a", "libopus", "-f", "ogg", "pipe:1"],
                      capture_output=True, check=True).stdout
 VEC = np.ones(4) / 2
-TODO = db.todo_id(CID, {"text": "MARKa 待办"})  # a's todo (seed); b's has another id
+TODO = db.todo_ids(CID, [{"text": "MARKa 待办"}])[0]  # a's todo (seed); b's has another id
 
 
 def make(root: Path, id: str, token: str) -> tenant.Tenant:

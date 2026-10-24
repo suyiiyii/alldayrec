@@ -44,7 +44,7 @@ def test_due_context_and_stale(tmp_path):
     assert got["今天的"] == {"id": f"{C1}:2026-10-01T10:05:00.000", "mark": None, "conv": C1, "text": "今天的", "to": "S1", "due": "某天",
                            "due_date": day, "at": "2026-10-01T10:05:00.000", "quote": "我今天把文档发你", "title": "周会",
                            "start": "2026-10-01T10:00:00.000", "with": ["S1"], "age_days": 0, "stale": False}
-    assert got["过了八天"]["with"] == ["S1", "老王"] and got["过了八天"]["id"] == db.todo_id(C1, {"text": "过了八天"}), "no to: the others, aliases as their person"
+    assert got["过了八天"]["with"] == ["S1", "老王"] and got["过了八天"]["id"].startswith(f"{C1}:") and "#" not in got["过了八天"]["id"], "no to: the others, aliases as their person"
     assert got["没标题的"]["title"] is None and got["没标题的"]["with"] == []
     store(tmp_path / "v7", [mine("旧版", d(0))], v1=7)
     assert db.due_todos(day) == [], "before prompt v8 a due_date is not trusted"
@@ -99,9 +99,26 @@ def test_feedback_marks_carried_over(tmp_path):
     db.add_feedback(C1, "S2 其实是我")
     db.conn().execute("DROP TABLE todo_marks")  # a store from before todo_marks
     db.init()
-    assert db.closed_todos() == {f"{C1}:2026-10-01T10:01:00.000": "done", db.todo_id(C1, {"text": "记错了"}): "wrong"}
+    assert db.closed_todos() == {f"{C1}:2026-10-01T10:01:00.000": "done", db.todo_by_text(C1, "记错了")[0]: "wrong"}
     assert [t["text"] for t in anyio.run(todos_due)] == ["还开着"]
     assert len(db.feedback(C1)) == 4, "the feedback lines stay"
     anyio.run(todo_unmark, f"{C1}:2026-10-01T10:01:00.000")
     db.init()
     assert len(db.closed_todos()) == 1, "once: an undone mark is not carried over again"
+
+
+def test_ids_unique_per_summary(tmp_path):
+    """Two todos said in one sentence share their at: the later gets #2 (in the summary's order), and each is marked on
+    its own, the carried-over feedback marks too."""
+    today, at = dt.date.today().isoformat(), "2026-10-01T10:05:00.000"
+    store(tmp_path, [mine("发文档", today, at=at), mine("约会议", today, at=at), mine("没时间", today), mine("没时间", today), mine("别的", today)])
+    ids = db.todo_ids(C1, db.summary(C1)["todos"])
+    assert ids[:2] == [f"{C1}:{at}", f"{C1}:{at}#2"] and ids[3] == ids[2] + "#2" and len(set(ids)) == 5, ids
+    assert [t["id"] for t in anyio.run(todos_due)] == ids and db.todo(ids[1])["text"] == "约会议"
+    anyio.run(todo_mark, ids[1], {"mark": "done"})
+    assert [t["text"] for t in anyio.run(todos_due)] == ["发文档", "没时间", "没时间", "别的"], "the sibling stays open"
+    assert [t["mark"] for t in anyio.run(conversation, C1)["summary"]["todos"]] == [None, "done", None, None, None]
+    db.add_feedback(C1, db.TODO_MARKS[1] + "约会议")
+    db.conn().execute("DROP TABLE todo_marks")
+    db.init()
+    assert db.closed_todos() == {ids[1]: "wrong"}, "the migration names todos the same way"

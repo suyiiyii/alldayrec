@@ -1673,8 +1673,8 @@ async def recap_get(date: str = ""):
         closed, al, todos = db.closed_todos(), db.aliases(), []
         for x in r["todos"]:
             c, s = db.conversation(x["conv"]), db.summary(x["conv"]) or {}
-            t = db.todo(x["id"]) if x.get("id") else db.todo_by_text(x["conv"], x["text"])  # recaps before 10-24 hold no id
-            v = {**db.todo_view(c, s, t, closed, al), **x} if c and t else x
+            found = (x["id"], db.todo(x["id"])) if x.get("id") else db.todo_by_text(x["conv"], x["text"])  # recaps before 10-24 hold no id
+            v = {**db.todo_view(c, s, *found, closed, al), **x} if c and found and found[1] else x
             if v.get("id") not in closed:
                 todos.append(v)
         r["todos"] = todos
@@ -1692,7 +1692,7 @@ MARKS = ("done", "wrong")
 
 @app.put("/api/todos/{todo_id}/mark")
 async def todo_mark(todo_id: str, body: dict):
-    """完成 (done) or 不对 (wrong) on one todo, by its id (db.todo_id); a mark again replaces it."""
+    """完成 (done) or 不对 (wrong) on one todo, by its id (db.todo_ids); a mark again replaces it."""
     if body.get("mark") not in MARKS:
         raise HTTPException(400, "mark is done or wrong")
     if not db.todo(todo_id):
@@ -1749,7 +1749,7 @@ async def conversation(conv_id: str):
         raise HTTPException(404, "no such conversation")
     s, closed = db.summary(conv_id), db.closed_todos()
     if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark)
-        s["todos"] = [{**t, "id": (i := db.todo_id(conv_id, t)), "mark": closed.get(i)} for t in s["todos"]]
+        s["todos"] = [{**t, "id": i, "mark": closed.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
             "rows": conversation_rows(c)}
 

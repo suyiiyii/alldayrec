@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
-CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_id), at: when; a row dropped is the undo
+CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_ids), at: when; a row dropped is the undo
     id TEXT PRIMARY KEY, conv TEXT NOT NULL, mark TEXT NOT NULL CHECK (mark IN ('done', 'wrong')), at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);  -- per device: finalized_to:<d>, draft_to:<d>, open_conversation:<d>, end_at:<d>, live:<d>
 CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as its phone uploads it. src 'rec': the recorder's
@@ -91,8 +91,8 @@ def init():
         with tx() as c:
             for conv, at, text in c.execute("SELECT conv, at, text FROM feedback").fetchall():
                 for mark, prefix in zip(("done", "wrong"), TODO_MARKS):
-                    if text.startswith(prefix) and (t := todo_by_text(conv, text[len(prefix):])):
-                        c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (todo_id(conv, t), conv, mark, at))
+                    if text.startswith(prefix) and (found := todo_by_text(conv, text[len(prefix):])):
+                        c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (found[0], conv, mark, at))
     if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
         conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")
     if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files (pack_pieces.py)
@@ -316,20 +316,31 @@ TODO_MARKS = ("待办完成：", "待办不对：")  # before todo_marks, 完成
 SAME_DAY = ("待会", "等下", "一会", "今晚", "晚上", "下午", "今天", "明天")  # a due said like this is stale 3 days after, not 7
 
 
-def todo_id(conv: str, t: dict) -> str:
-    """A todo's id: its conversation and the time it was said (one todo per time in practice), else a hash of its text."""
-    return f"{conv}:{t.get('at') or hashlib.sha1((conv + (t.get('text') or '')).encode()).hexdigest()[:16]}"
+def todo_ids(conv: str, todos: list[dict]) -> list[str]:
+    """The ids of a summary's todos, in its order: the conversation and the time the todo was said (else a hash of its
+    text); a later one said at the same time as an earlier one gets #2, #3… Stable while the summary is unchanged."""
+    seen, out = {}, []
+    for t in todos:
+        base = f"{conv}:{t.get('at') or hashlib.sha1((conv + (t.get('text') or '')).encode()).hexdigest()[:16]}"
+        seen[base] = n = seen.get(base, 0) + 1
+        out.append(base if n == 1 else f"{base}#{n}")
+    return out
 
 
-def todo_by_text(conv: str, text: str) -> dict | None:
-    """The todo of conv's summary with this text (the recaps before ids, the marks before todo_marks name one by it)."""
-    return next((t for t in (summary(conv) or {}).get("todos") or [] if t.get("text") == text), None)
+def _todos(conv: str) -> list[tuple[str, dict]]:
+    """Id and todo of each todo of conv's summary."""
+    todos = (summary(conv) or {}).get("todos") or []
+    return list(zip(todo_ids(conv, todos), todos))
+
+
+def todo_by_text(conv: str, text: str) -> tuple[str, dict] | None:
+    """Id and todo of conv's summary with this text (the recaps before ids, the marks before todo_marks name one by it)."""
+    return next(((i, t) for i, t in _todos(conv) if t.get("text") == text), None)
 
 
 def todo(id: str) -> dict | None:
     """The todo with this id, from its conversation's summary."""
-    conv = id.split(":", 1)[0]
-    return next((t for t in (summary(conv) or {}).get("todos") or [] if todo_id(conv, t) == id), None)
+    return next((t for i, t in _todos(id.split(":", 1)[0]) if i == id), None)
 
 
 def closed_todos() -> dict[str, str]:
@@ -347,11 +358,11 @@ def mark_todos(ids: list[str], mark: str | None):
             c.executemany("INSERT OR REPLACE INTO todo_marks VALUES (?, ?, ?, ?)", [(i, i.split(":", 1)[0], mark, now) for i in ids])
 
 
-def todo_view(conv: dict, s: dict, t: dict, closed: dict, al: dict) -> dict:
+def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict) -> dict:
     """A todo as the pages show it: with its id and mark, the sentence it came from, whom it is to (an alias as its
     person; none given: the others in the conversation), the conversation's title and start."""
     to = al.get(t.get("to"), t.get("to"))
-    return {"id": (i := todo_id(conv["id"], t)), "mark": closed.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
+    return {"id": i, "mark": closed.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
             **{k: t.get(k) for k in ("due", "due_date", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
             "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
@@ -364,10 +375,11 @@ def due_todos(day: str) -> list[dict]:
     for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
                             " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
         conv, s = _conversation(r), json.loads(r["body"])
-        for t in s.get("todos") or []:
-            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and todo_id(conv["id"], t) not in closed:
+        todos = s.get("todos") or []
+        for i, t in zip(todo_ids(conv["id"], todos), todos):
+            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and i not in closed:
                 age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
-                out.append({**todo_view(conv, s, t, closed, al), "age_days": age,
+                out.append({**todo_view(conv, s, i, t, closed, al), "age_days": age,
                             "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)})
     return sorted(out, key=lambda t: (t["due_date"], t["conv"]))
 
