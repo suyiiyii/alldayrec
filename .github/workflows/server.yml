@@ -22,6 +22,19 @@ jobs:
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv sync --locked  # uv.lock as it is (deploy.sh: uv sync --frozen); without the [local] extra, as pip installs it
       - run: uv run --with pytest pytest -q
-      - run: |  # the wheel pip and uvx install (no web app built here: its pages say so), its command up to --help
+
+  wheel:  # the wheel pip and uvx install (no web app built here: its pages say so), its command up to --help
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ['3.11', '3.14']  # the oldest it takes and the newest onnxruntime has wheels for
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: pipx install uv
+      - run: |  # --no-build: every dependency from a wheel, nothing compiled
           uv build
-          uv run --isolated --no-project --python 3.11 --with dist/alldayrec-*.whl alldayrec --help
+          uv run --isolated --no-project --no-build --python ${{ matrix.python }} --with dist/alldayrec-*.whl alldayrec --help

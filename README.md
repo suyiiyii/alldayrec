@@ -114,12 +114,12 @@ LLM_MODEL=qwen-plus
 ```
 
 ```bash
-uvx --python 3.11 --env-file .env alldayrec    # 首次启动下载模型文件（约 55 MB），生成 tenants.json
+uvx --env-file .env alldayrec    # 首次启动下载模型文件（约 55 MB），生成 tenants.json
 ```
 
 日志里有一行 `first start: ... open http://127.0.0.1:8770/connect?token=...`，在这台电脑上打开那个链接就登录了。`tenants.json`、模型文件和数据库都在用户数据目录里（Linux 是 `~/.local/share/alldayrec`，macOS 是 `~/Library/Application Support/alldayrec`），在 `.env` 里设 `DATA_DIR` 可以换地方。服务默认只让本机访问；要让手机直连，在 `.env` 里加 `HOST=0.0.0.0`。
 
-也可以 `pip install alldayrec`（Python 3.11）后运行 `alldayrec`，设置同样从环境变量读。用 `ENGINE=local` 时装带 `local` 的版本：`uvx --python 3.11 --env-file .env --from 'alldayrec[local]' alldayrec`，或 `pip install 'alldayrec[local]'`。
+也可以 `pip install alldayrec`（Python 3.11 或更新的版本）后运行 `alldayrec`，设置同样从环境变量读。用 `ENGINE=local` 时装带 `local` 的版本：`uvx --env-file .env --from 'alldayrec[local]' alldayrec`，或 `pip install 'alldayrec[local]'`。
 
 ### 用 Docker
 

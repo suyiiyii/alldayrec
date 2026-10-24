@@ -114,12 +114,12 @@ LLM_MODEL=qwen-plus
 ```
 
 ```bash
-uvx --python 3.11 --env-file .env alldayrec    # the first start downloads the model files (about 55 MB) and makes tenants.json
+uvx --env-file .env alldayrec    # the first start downloads the model files (about 55 MB) and makes tenants.json
 ```
 
 The log has a line `first start: ... open http://127.0.0.1:8770/connect?token=...`: open that link on this computer and you are signed in. `tenants.json`, the model files and the databases live in your user data directory (`~/.local/share/alldayrec` on Linux, `~/Library/Application Support/alldayrec` on macOS); set `DATA_DIR` in `.env` to put them elsewhere. The server only lets this machine in by default; for phones to connect directly, add `HOST=0.0.0.0` to `.env`.
 
-`pip install alldayrec` (Python 3.11) and then `alldayrec` works the same way, with the settings from the environment. For `ENGINE=local`, install it with the `local` extra: `uvx --python 3.11 --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
+`pip install alldayrec` (Python 3.11 or newer) and then `alldayrec` works the same way, with the settings from the environment. For `ENGINE=local`, install it with the `local` extra: `uvx --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
 
 ### With Docker
 

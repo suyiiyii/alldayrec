@@ -12,7 +12,7 @@ The server is published on PyPI as `alldayrec`, with the web pages packed in: no
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (for uvx; it fetches Python 3.11 itself), or Python 3.11 and pip
+- [uv](https://docs.astral.sh/uv/) (for uvx; it downloads a Python itself when there is no 3.11 or newer), or Python 3.11 or newer and pip
 - ffmpeg: `brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Debian and Ubuntu
 
 ## Steps
@@ -29,7 +29,7 @@ The server is published on PyPI as `alldayrec`, with the web pages packed in: no
 2. Start it:
 
    ```bash
-   uvx --python 3.11 --env-file .env alldayrec
+   uvx --env-file .env alldayrec
    ```
 
    The first start downloads the model files (about 55 MB) and makes `tenants.json`. The log has a line like this:
@@ -51,6 +51,6 @@ set -a && . ./.env && set +a && alldayrec
 
 - All data is in `DATA_DIR`: by default your user data directory (`~/.local/share/alldayrec` on Linux, `~/Library/Application Support/alldayrec` on macOS), with `tenants.json`, the model files in `models/`, and the database and recordings of the tenant `main`. Set `DATA_DIR` in `.env` to put it elsewhere; see [Data layout](../reference/data.md).
 - The server listens on `127.0.0.1` only by default. For phones to connect directly, add `HOST=0.0.0.0` to `.env`; see [Reach the server from a phone](./remote-access.md).
-- `ENGINE=local` (speech recognition on this machine) needs the `local` extra: `uvx --python 3.11 --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
+- `ENGINE=local` (speech recognition on this machine) needs the `local` extra: `uvx --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
 - Another port: `alldayrec --port 8771`, or `PORT` in `.env`.
 - To upgrade, see [Upgrade and roll back](./upgrade.md).

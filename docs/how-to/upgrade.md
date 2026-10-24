@@ -36,7 +36,7 @@ docker compose up -d
 ## uvx 或 pip
 
 ```bash
-uvx --python 3.11 --env-file .env alldayrec@latest    # uvx：用 PyPI 上的最新版启动
+uvx --env-file .env alldayrec@latest    # uvx：用 PyPI 上的最新版启动
 pip install -U alldayrec                              # pip：升级后重启 alldayrec
 ```
 

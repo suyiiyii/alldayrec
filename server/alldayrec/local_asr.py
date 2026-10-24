@@ -38,7 +38,7 @@ FILES = {  # file in the tarball: sha256
     "bpe.model": "f87a38025a5fdd1e4e9591f6a44bb81295097ce0b80df6f4ab9f44e52c64ca5f",
 }
 NEEDS = ("ENGINE=local needs sherpa-onnx, the [local] extra: pip install 'alldayrec[local]', "
-         "uvx --python 3.11 --from 'alldayrec[local]' alldayrec, or in a checkout uv sync --extra local")
+         "uvx --from 'alldayrec[local]' alldayrec, or in a checkout uv sync --extra local")
 PIECE_S = 20.0   # most audio in one decode (the bench's); longer is cut at the quietest 100 ms past half of it
 TOKEN_MS = 300   # a token ends where the next starts, at most this much later (a pause after it is not it)
 PAUSE_MS = 300   # a sentence ends before a token starting this long after the last one ended ...

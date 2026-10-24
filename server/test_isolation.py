@@ -337,7 +337,7 @@ def test_nothing_per_person_in_a_module():
     here = Path(server.__file__).parent
     mutable = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
     found = {}
-    for name, m in sys.modules.items():
+    for name, m in list(sys.modules.items()):  # a getattr below may import a module (seen on 3.14)
         f = Path(getattr(m, "__file__", "") or "")
         if f.parent != here or f.name == "__init__.py":
             continue

@@ -2,12 +2,12 @@
 name = "alldayrec"
 version = "0.2.0"
 description = "alldayrec server: a continuous audio stream in, conversations out — local VAD + cloud or local ASR + web page"
-requires-python = "==3.11.*"
+requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
-    "numpy==1.26.4",
+    "numpy>=1.26",
     "kaldi-native-fbank==1.22.3",
     "onnxruntime==1.30.0",
     "websockets>=17.1",

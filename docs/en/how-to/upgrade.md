@@ -36,7 +36,7 @@ If the data has problems, put back the backup from before the upgrade, as in [Ba
 ## uvx or pip
 
 ```bash
-uvx --python 3.11 --env-file .env alldayrec@latest    # uvx: start the newest version on PyPI
+uvx --env-file .env alldayrec@latest    # uvx: start the newest version on PyPI
 pip install -U alldayrec                              # pip: then restart alldayrec
 ```
 
