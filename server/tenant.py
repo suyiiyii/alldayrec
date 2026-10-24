@@ -8,12 +8,14 @@ Tenant; nothing per person stays in a module.
 The tenants are in tenants.json beside the server dir (/opt/<instance>/tenants.json, next to its .env), mode 600: it
 holds every token, and nothing else does (server/tenants.sh made it from each instance's .env):
     [{"id": "main", "token": "...", "data": "/opt/alldayrec/data", "recordings": "/opt/alldayrec/recordings"}, ...]
-A process with one tenant whose token is empty runs without auth (loopback only).
+A process with one tenant whose token is empty runs without auth (loopback only). "lang" (optional): the language the
+models write that tenant's summaries, recaps and answers in, zh or en; without it UI_LANG, else zh.
 """
 import contextvars
 import hmac
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
 
 current: contextvars.ContextVar["Tenant"] = contextvars.ContextVar("tenant")
 FILE = Path(__file__).resolve().parent.parent / "tenants.json"
+LANGS = ("zh", "en")
 
 
 @dataclass(eq=False)
@@ -33,6 +36,7 @@ class Tenant:
     token: str  # what its apps and pages send (Bearer or cookie); empty: no auth, loopback only, the only tenant
     data: Path  # live.db, the passes trace, owner-redimnet2.npz, voice clips
     recordings: Path
+    lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang changes it until a restart
     db: Path = None  # data / live.db unless given (a test's own file)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
@@ -86,7 +90,10 @@ def load(path: Path = FILE) -> list[Tenant]:
         raise SystemExit(f"{path}: no tenants file (see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
-    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"]) for x in json.loads(path.read_text())]
+    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh")
+          for x in json.loads(path.read_text())]
+    if bad := [t.id for t in ts if t.lang not in LANGS]:
+        raise SystemExit(f"{path}: lang (or UI_LANG) of {', '.join(bad)} is not one of {', '.join(LANGS)}")
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")

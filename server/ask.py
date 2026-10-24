@@ -34,7 +34,8 @@ SYSTEM = """你在帮我回答关于我自己过去生活的问题。资料来�
 - 几段、几次、多长时间、哪天最多这类数数和统计的问题，不要自己数上面的摘要（长了会数错）：用 calendar 查每天的段数和时长，用 day 拿某一天的清单和段数，都是查库的准确数字；一段对话算在它开始的那天
 - 问某个人的事（最近一次和 TA 聊、聊过什么、答应过 TA 什么），先用 person 按名字查：它按参与者找，比关键词搜全
 - 每个回答都要带出处，统计的回答也一样：先给数字，再写「出处：」列出数到的对话 [对话 id]（多于 10 个就列 10 个），并说明数字是查哪一天、哪个月得到的
-- 回答简洁，用中文纯文本，不用 Markdown
+- 回答简洁，用纯文本，不用 Markdown
+{lang}
 今天是 {today}（星期{weekday}）。
 
 最近 {days} 天的对话摘要（{lo} 起）：
@@ -166,7 +167,8 @@ SPECS = [
 
 def system(now: dt.datetime) -> str:
     lo = (now.date() - dt.timedelta(days=DIGEST_DAYS - 1)).isoformat()
-    return SYSTEM.format(days=DIGEST_DAYS, today=now.date().isoformat(), weekday="一二三四五六日"[now.weekday()], lo=lo) + \
+    return SYSTEM.format(days=DIGEST_DAYS, today=now.date().isoformat(), weekday="一二三四五六日"[now.weekday()], lo=lo,
+                         lang=summary.lang_line()) + \
         digest(db.conversations(lo, _next_day(now.date().isoformat())))
 
 

@@ -105,6 +105,8 @@ REQUESTS = {
     ("GET", "/api/live"): ("GET", "/api/live", {}),
     ("POST", "/api/live/{device}"): ("POST", f"/api/live/{DEV}", {}),
     ("GET", "/api/status"): ("GET", "/api/status", {}),
+    ("GET", "/api/lang"): ("GET", "/api/lang", {}),
+    ("PUT", "/api/lang"): ("PUT", "/api/lang", dict(json={"lang": "en"})),
     ("GET", "/api/sentences"): ("GET", "/api/sentences", {}),
     ("GET", "/api/conversations"): ("GET", "/api/conversations", {}),
     ("GET", "/api/days"): ("GET", "/api/days", {}),
@@ -226,6 +228,7 @@ def test_routes(two, monkeypatch):
     assert snapshot(b) == before, "nothing of b's changed"
     assert b.events[-1]["text"] == "MARKb" and len(b.events) == 1 and b.devices[DEV].conversation["note"] == "MARKb"
     assert a.chunks and b.chunks is None, "the upload is a's"
+    assert a.lang == "en" and b.lang == "zh", "a's PUT /api/lang is a's"
     assert b.summaries[1].statistics().current_buffer_used == 0 and a.summaries[1].statistics().current_buffer_used >= 1
 
 

@@ -185,6 +185,7 @@ All settings are environment variables; [`.env.example`](.env.example) lists eve
 | `ENGINE` | The ASR engine of the final transcript. `qwen` (default) needs only `DASHSCOPE_API_KEY` |
 | `DASHSCOPE_API_KEY` | Alibaba Cloud Bailian key, Beijing region |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Any OpenAI-compatible `/chat/completions` endpoint with tool calls and JSON mode: summaries, to-dos, "ask AI", the recap |
+| `UI_LANG` | Optional: the language the model writes summaries, to-dos, the recap and "ask AI" answers in, `zh` (default) or `en`; a person's `lang` in `tenants.json` wins |
 
 ASR engines:
 

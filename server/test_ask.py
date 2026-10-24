@@ -54,14 +54,14 @@ def test_ask(tmp_path, monkeypatch):
 
             assert await server.live_ask(DEVICE) == {"analyzing": True}
             assert server.device_status(DEVICE, st())["analyzing"]
-            assert await asked() == "正在分析"
+            assert await asked() == "[analyzing] 正在分析"
             for _ in range(20):
                 if st().live:
                     break
                 await anyio.sleep(0.2)
             assert st().live["asked"] and st().live["topics"] and len(calls) == 1
             assert not server.device_status(DEVICE, st())["analyzing"]
-            assert await asked() == "没有新的语音", "no wait between asks: only speech it has not seen"
+            assert await asked() == "[no_new_speech] 没有新的语音", "no wait between asks: only speech it has not seen"
 
             db.put_kv(f"end_at:{DEVICE}", server.iso(t0 + dt.timedelta(seconds=len(x) / SR)))  # the recorder stops
             for _ in range(20):
@@ -70,7 +70,7 @@ def test_ask(tmp_path, monkeypatch):
                 await anyio.sleep(0.5)
             c = T().summaries[1].receive_nowait()
             assert c["via_live"] and c["speech_s"] == speech and db.timeline(c["id"])["asked"]
-            assert not st().live and await asked() == "没有进行中的对话"
+            assert not st().live and await asked() == "[no_open_conversation] 没有进行中的对话"
             res = await server.summarize(c, [])
             assert res["via"] == "live" and res["title"] == "短的" and len(calls) == 2, "asked: the agent writes the summary"
             db.put_timeline(c["id"], {**db.timeline(c["id"]), "asked": False})
@@ -88,4 +88,4 @@ def test_ask_without_pipeline(monkeypatch):
     for device in ("nobody", "starting"):
         with pytest.raises(HTTPException) as e:
             anyio.run(server.live_ask, device)
-        assert e.value.status_code == 404 and e.value.detail == "没有这台设备的处理流程"
+        assert e.value.status_code == 404 and e.value.detail == "[no_pipeline] 没有这台设备的处理流程"

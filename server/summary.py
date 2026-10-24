@@ -11,6 +11,7 @@ import time
 
 import db
 import net
+from tenant import T
 
 MIN_SPEECH_S = 60
 PROMPT_VERSION = 8  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
@@ -42,6 +43,18 @@ due_date 按这段对话的日期换算（最后一行写了这段对话哪天�
 people 只列在这段里说了实质内容的标签（观点、信息、经历、提问、表态），「我」在最前；S?、只有附和的、只说了一两句零碎话（问一句、喊人、接一句玩笑、递东西）的都不列。人多的闲聊挑主要说话的几个，一般不超过 8 个。按这个人自己的话写，不要写成别人对他的评价。
 summary 只写这段里有的事：没有媒体、没有对 AI 说话、没有待办时不要提「没有」。
 没有就给空数组，不编造原文里没有的内容。"""
+
+
+# the last line of every prompt whose reply the owner reads (summary, live, recap, ask, profiles): the tenant's lang.
+# 我, S1, 未知 are keys the code matches (recap and due todos keep owner 我), never words to translate.
+ZH = "用中文写；名字、说话人标签和原句（quote）照原文。"
+EN = ("Write everything in English, though these instructions are in Chinese. Never translate, keep exactly as given: "
+      "JSON keys, speaker labels (我, S1, S2, S?, 未知), names, quotes, times (HH:MM:SS) and dates (YYYY-MM-DD). "
+      "我 is the recorder: \"I\" in prose. A title is at most 8 words.")
+
+
+def lang_line() -> str:
+    return EN if T().lang == "en" else ZH
 
 
 def transcript(rows: list[dict]) -> str:
@@ -76,10 +89,11 @@ async def complete(messages: list[dict], timeout: int = 300, kind: str = "summar
 
 
 def instructions(known_tags: list[str], start: str) -> str:
-    """SYSTEM, the tags in use and the day the conversation started (start: its ISO start), which due_date counts from."""
+    """SYSTEM, the tags in use, the day the conversation started (start: its ISO start), which due_date counts from, and
+    the language to write in."""
     d = dt.datetime.fromisoformat(start)
     return (SYSTEM + ("\n已有标签：" + "、".join(known_tags) if known_tags else "")
-            + f"\n这段对话开始于 {d:%Y-%m-%d}（周{'一二三四五六日'[d.weekday()]}）{d:%H:%M}。")
+            + f"\n这段对话开始于 {d:%Y-%m-%d}（周{'一二三四五六日'[d.weekday()]}）{d:%H:%M}。\n" + lang_line())
 
 
 async def chat(text: str, known_tags: list[str], start: str) -> tuple[dict, dict]:
@@ -163,7 +177,11 @@ def media_labels(rows: list[dict], spans: list[dict]) -> set[str]:
 
 
 if __name__ == "__main__":
+    import tempfile
+    from pathlib import Path
+
     import anyio
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     rows = [dict(start="2026-09-30T10:00:01.200", text="我们先定一下", speaker="我"), dict(start="2026-09-30T10:02:00.000", text="好", speaker="S1")]
     r = anchor({"topics": [{"title": "b", "at": "10:02:00"}, {"title": "a", "at": "10:00:01"}], "todos": [{"text": "x", "at": "9:99"}]}, rows)
     assert [t["title"] for t in r["topics"]] == ["a", "b"] and r["topics"][0]["at"] == rows[0]["start"]
@@ -171,7 +189,7 @@ if __name__ == "__main__":
     todos = anchor({"todos": [{"due": "明天", "due_date": "2026-10-01"}, {"due": "下周", "due_date": "下周"}, {"due": None, "due_date": "2026-10-01"},
                               {"due": "周五", "due_date": "2026-10-1"}, {"due": "月底", "due_date": "2026-09-31"}]}, rows)["todos"]
     assert [t["due_date"] for t in todos] == ["2026-10-01", None, None, None, None], todos
-    assert instructions(["工作"], "2026-10-04T23:50:10.000").endswith("\n已有标签：工作\n这段对话开始于 2026-10-04（周日）23:50。")
+    assert instructions(["工作"], "2026-10-04T23:50:10.000").endswith("\n已有标签：工作\n这段对话开始于 2026-10-04（周日）23:50。\n" + ZH)
     assert anchor({"people": [{"who": "S1", "points": ["a"]}, {"who": "S1", "points": ["b"]}, "x"]}, rows)["people"] == [{"who": "S1", "points": ["a", "b"]}]
     rows = [dict(rows[0], end="2026-09-30T10:00:09.000"), dict(rows[1], end="2026-09-30T10:02:09.000"), dict(start="2026-09-30T10:03:00.000", end="2026-09-30T10:03:30.000", text="欢迎收看", speaker="S2")]
     spans = anchor({"media_spans": [{"from": "10:03:00", "to": "10:03:00"}, {"from": "10:00:01", "to": "bad"}, "x"]}, rows)["media_spans"]

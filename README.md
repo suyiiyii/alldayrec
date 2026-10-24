@@ -185,6 +185,7 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 | `ENGINE` | 定稿转写用的语音识别引擎。`qwen`（默认）只需要 `DASHSCOPE_API_KEY` |
 | `DASHSCOPE_API_KEY` | 阿里云百炼的 key，北京区 |
 | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | 任何支持工具调用和 JSON 模式的 OpenAI 兼容 `/chat/completions` 接口：用于摘要、待办、「问 AI」、每日回顾 |
+| `UI_LANG` | 可选：大模型写摘要、待办、每日回顾和「问 AI」回答用的语言，`zh`（默认）或 `en`；`tenants.json` 里每人的 `lang` 优先 |
 
 语音识别引擎：
 

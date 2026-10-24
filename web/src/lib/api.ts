@@ -257,6 +257,7 @@ export interface Status {
   commit?: string;
   devices?: DeviceStatus[];
   summaries_pending?: number;
+  lang?: "zh" | "en"; // what the models write in (GET/PUT /api/lang)
 }
 
 // GET /api/calls: the ASR and LLM calls since a time, by kind and engine, and the StepFun balance
@@ -327,12 +328,15 @@ export interface LogEvent {
 }
 
 // A failed request in words for the page (401, 5xx and no network said plainly; another refusal says the server's
-// own detail when that is Chinese, many are English for scripts); what actually came back is in `detail`, for a title
+// own detail when that is Chinese, many are English for scripts); what actually came back is in `detail`, for a title.
+// A detail may start with a stable code, "[no_summaries] 那天没有摘要": the message leaves it out, `code` keeps it
 export class ApiError extends Error {
   detail: string;
-  constructor(message: string, detail: string) {
+  code: string;
+  constructor(message: string, detail: string, code = "") {
     super(message);
     this.detail = detail;
+    this.code = code;
   }
 }
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
@@ -346,7 +350,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const j = await r.json().catch(() => ({}));
   if (r.ok) return j;
-  const said = typeof j.detail === "string" ? j.detail : "";
+  const raw = typeof j.detail === "string" ? j.detail : "";
+  const code = /^\[([a-z_]+)\] /.exec(raw)?.[1] ?? "";
+  const said = code ? raw.slice(code.length + 3) : raw;
   throw new ApiError(
     r.status === 401
       ? "登录已失效，请重新扫码"
@@ -355,7 +361,8 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
         : /\p{Script=Han}/u.test(said)
           ? said
           : `请求没有成功（${r.status}）`,
-    `${path}: HTTP ${r.status}${said && " " + said}`,
+    `${path}: HTTP ${r.status}${raw && " " + raw}`,
+    code,
   );
 }
 

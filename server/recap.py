@@ -40,7 +40,7 @@ async def make(day: str) -> dict | None:
              for c in convs for t in c["summary"].get("todos") or [] if t.get("owner") == "我" and (c["id"], t.get("text") or "") not in closed]
     listing = "\n".join(f"#{i}{' →' + t['to'] if t['to'] else ''} {t['text']}{'（' + t['due'] + '）' if t['due'] else ''}"
                         for i, t in enumerate(todos, 1)) or "（没有）"
-    res, raw = await summary.complete([{"role": "system", "content": SYSTEM},
+    res, raw = await summary.complete([{"role": "system", "content": SYSTEM + "\n" + summary.lang_line()},
                                  {"role": "user", "content": f"{day} 的对话摘要：\n\n{ask.digest(convs)}\n\n待办清单：\n{listing}"}], timeout=120,
                                 kind="recap")
     ids = {c["id"] for c in convs}

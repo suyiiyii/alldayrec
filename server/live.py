@@ -7,7 +7,7 @@ whole timeline. When the conversation closes, one more turn asks the same agent 
 """
 import json
 
-from summary import complete, instructions, transcript
+from summary import complete, instructions, lang_line, transcript
 
 FIELDS = ("points", "decisions", "todos", "open_questions")
 SYSTEM = """你在一段正在进行的对话现场（开会、讨论、聊天、日常生活都算），持续整理议题时间线，帮在场的我随时回顾刚才讲了什么。
@@ -47,7 +47,7 @@ def background(convs: list[dict]) -> str:
 
 def new(start: str, device: str, earlier: list[dict]) -> dict:
     return {"start": start, "device": device, "topics": [], "next_id": 1, "fed_to": "",
-            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": background(earlier)}]}
+            "messages": [{"role": "system", "content": SYSTEM + "\n" + lang_line()}, {"role": "user", "content": background(earlier)}]}
 
 
 def public(state: dict) -> dict:
@@ -130,7 +130,13 @@ async def final(state: dict, rows: list[dict], known_tags: list[str], start: str
 
 
 if __name__ == "__main__":
+    import tempfile
+    from pathlib import Path
+
     import anyio
+
+    import db
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     rows = [dict(start=f"2026-10-02T10:{m:02d}:00.000", text=f"句{m}", speaker="S1") for m in range(0, 20, 2)]
     s = new("2026-10-02T10:00:00.000", "phone", [
         {"start": "2026-10-02T08:00:00", "end": "2026-10-02T08:30:00", "participants": ["我", "老王"],

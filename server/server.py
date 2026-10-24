@@ -999,11 +999,11 @@ async def pipeline(device: str):
         it stays (summarize)."""
         o, lv = open_view(), st.live
         if st.analyzing:
-            return "正在分析"
+            return "[analyzing] 正在分析"
         if not o or not present(o):
-            return "没有进行中的对话"
+            return "[no_open_conversation] 没有进行中的对话"
         if o["speech_s"] <= (lv["speech_s"] if lv and overlaps(lv, o) else 0):
-            return "没有新的语音"
+            return "[no_new_speech] 没有新的语音"
         start_analysis(asked=True)
         return None
 
@@ -1358,7 +1358,7 @@ def status() -> dict:
     return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
-            "commit": state["commit"], "chunks": T().chunks,
+            "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,
             "engine": f"{ENGINE} · 初稿 {DRAFT_ENGINE}" + (f" · 兜底 {ENGINE_FALLBACK}" if ENGINE_FALLBACK else "")}
 
 
@@ -1567,7 +1567,7 @@ async def live_ask(device: str):
     st = T().devices.get(device)
     ask = st.ask if st else None  # none until its pipeline's task group is ready
     if not ask:
-        raise HTTPException(404, "没有这台设备的处理流程")
+        raise HTTPException(404, "[no_pipeline] 没有这台设备的处理流程")
     if why := ask():
         raise HTTPException(409, why)
     return {"analyzing": True}
@@ -1582,6 +1582,22 @@ async def health():
 @app.get("/api/status")
 async def status_now():
     return status()
+
+
+@app.get("/api/lang")
+async def lang_get():
+    """What the models write this tenant's summaries, recaps and answers in (tenant.py): {"lang": "zh"} or "en"."""
+    return {"lang": T().lang}
+
+
+@app.put("/api/lang")
+async def lang_put(body: dict):
+    """The language from the next model call on; existing summaries keep theirs (重新生成 rewrites one). Until a restart
+    only: then tenants.json's lang (or UI_LANG) again."""
+    if body.get("lang") not in tenant.LANGS:
+        raise HTTPException(400, "lang is zh or en")
+    T().lang = body["lang"]
+    return {"lang": T().lang}
 
 
 @app.get("/api/sentences")
@@ -1637,7 +1653,7 @@ async def ask_ai(body: dict):
         return await ask.ask(q)
     except Exception as e:  # HTTP errors, timeouts
         log.warning("ask failed: %r", e)
-        raise HTTPException(502, f"模型调用失败：{e!r}"[:300])
+        raise HTTPException(502, f"[llm_failed] 模型调用失败：{e!r}"[:300])
 
 
 @app.post("/mcp")
@@ -1690,9 +1706,9 @@ async def recap_redo(date: str):
         r = await write_recap(date)
     except Exception as e:
         log.warning("recap %s failed: %r", date, e)
-        raise HTTPException(502, f"模型调用失败：{e!r}"[:300])
+        raise HTTPException(502, f"[llm_failed] 模型调用失败：{e!r}"[:300])
     if not r:
-        raise HTTPException(404, "那天没有摘要")
+        raise HTTPException(404, "[no_summaries] 那天没有摘要")
     return r
 
 
@@ -1874,7 +1890,7 @@ def find_group(gid: str, sid: str | None = None) -> dict:
     if g and sid:
         g = next((x for x in g["suggested"] if x["id"] == sid), None)
     if not g:
-        raise HTTPException(409, "说话人分组已经变了，刷新页面再试")
+        raise HTTPException(409, "[speakers_changed] 说话人分组已经变了，刷新页面再试")
     return g
 
 
@@ -2079,7 +2095,7 @@ async def person_profile(name: str):
     except HTTPException:
         raise
     except Exception as e:  # the model: HTTP errors, a reply that is not JSON
-        raise HTTPException(502, f"生成失败：{e!r}"[:300])
+        raise HTTPException(502, f"[llm_failed] 生成失败：{e!r}"[:300])
 
 
 @app.get("/api/voice-clip/{name}")
@@ -2213,7 +2229,7 @@ async def self_answer(body: dict):
     st = db.kv("selfvoice") or {}
     card, a, now = st.get("card"), body.get("answer"), dt.datetime.now()
     if not card or owner_npz().exists():
-        raise HTTPException(409, "没有待确认的声音，刷新页面再试")
+        raise HTTPException(409, "[no_pending_voice] 没有待确认的声音，刷新页面再试")
     if a == "none":
         st["wait"] = {"convs": len({v["conv"] for v in db.voices()})}
     elif a == "later":
