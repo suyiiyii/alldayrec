@@ -305,6 +305,57 @@ def test_final_goes_on_after_a_gap(tmp_path, monkeypatch):
     anyio.run(run)
 
 
+def test_final_goes_on_after_a_recording_of_odd_length(tmp_path, monkeypatch):
+    """As above, with recordings not a whole number of milliseconds long (imported files), the next one's speech
+    going on at the newest audio: the final layer takes the next recording from where the last one ended, not a sample
+    or a few short of it, in the same pipeline and in one started after it (10-24: the finalized time came back from a
+    restart cut to the millisecond; the 11 samples after it went to the engine alone, and the local engine, which fails
+    on less than 0.1 s, was asked again every 10 s for good)."""
+    short = []
+
+    async def engine(x, partial=None):
+        if len(x) < SR // 10:
+            short.append(len(x))
+            raise RuntimeError("Invalid input shape: {0,80}")  # local_asr's on that little audio
+        return heard(x)
+    rig(tmp_path, monkeypatch, engine)
+    t0 = dt.datetime.fromtimestamp(round(time.time()) - 900)
+    at = lambda k: t0 + dt.timedelta(seconds=180 * k)  # a recording every 3 min, 4 s and 11 samples long
+    finals = lambda: [r["text"] for r in db.sentences(core.iso(t0), core.iso(at(5)), source=DEVICE)]
+
+    async def until(want):
+        for _ in range(60):
+            if finals() == want:
+                return
+            await anyio.sleep(0.5)
+        assert finals() == want, (finals(), st().done_to, short)
+
+    async def record(k: int):
+        """Recording k (tones 2k and 2k + 1) in two pieces: the first ends in speech (more of it is to come, as far as
+        the VAD knows), the second is quiet at its end; then the recorder stops. Its end comes back 1 sample early
+        from at()'s float and the clock's int, 11 from the store's milliseconds."""
+        quiet = lambda s: np.zeros(int(s * SR), np.int16)
+        save(at(k), flac(np.concatenate([quiet(0.25), tone(2 * k, 0.75), quiet(1.25), tone(2 * k + 1, 0.25)])))
+        await anyio.sleep(3)
+        save(at(k) + dt.timedelta(seconds=2.5), flac(np.concatenate([tone(2 * k + 1, 0.25), quiet(1.25), np.zeros(11, np.int16)])))
+        db.put_kv(f"end_at:{DEVICE}", core.iso(at(k) + dt.timedelta(seconds=4 + 11 / SR)))
+        await until([str(i) for i in range(2 * k + 2)])
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
+            await record(0)
+            await record(1)
+            tg.cancel_scope.cancel()
+        async with anyio.create_task_group() as tg:  # restarted
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
+            await record(2)
+            tg.cancel_scope.cancel()
+        assert not short, short
+
+    anyio.run(run)
+
+
 def test_hold_release(tmp_path, monkeypatch):
     """The phone no longer has the recorder (unbound, or another bound): the hold goes at once, not HOLD_MAX_S after
     the phone last said it (10-07: LR-P3-116C's 261 pieces waited from 17:47 to 05:47). Meanwhile the status says when

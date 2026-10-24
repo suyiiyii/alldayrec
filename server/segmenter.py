@@ -82,7 +82,7 @@ class Segmenter:
     def sample_at(self, t: dt.datetime) -> int:
         i = next((k for k in range(len(self.anchors) - 1, -1, -1) if self.anchors[k][1] <= t), 0)
         idx, t0 = self.anchors[i]
-        s = idx + int((t - t0).total_seconds() * SR)
+        s = idx + round((t - t0).total_seconds() * SR)  # time_at's times are to the µs: the sample they came from
         # a time in the gap before the next session has no audio: the first sample after the gap
         return min(s, self.anchors[i + 1][0]) if i + 1 < len(self.anchors) else s
 
