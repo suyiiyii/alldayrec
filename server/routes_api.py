@@ -9,8 +9,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 import ask
+import asr
+import audio
 import db
 import live
+import local_asr
 import mcp_server
 import tenant
 import threads
@@ -22,6 +25,7 @@ from transcript import merge_drafts
 
 log = logging.getLogger("live")
 router = APIRouter()
+VOICE_MAX_S = 61  # a spoken question (the page stops at 60 s)
 
 
 @router.get("/api/events")
@@ -126,6 +130,27 @@ async def ask_ai(body: dict):
     except Exception as e:  # HTTP errors, timeouts
         log.warning("ask failed: %r", e)
         raise HTTPException(502, f"[llm_failed] 模型调用失败：{e!r}"[:300])
+
+
+@router.post("/api/ask/voice")
+async def ask_voice(request: Request):
+    """A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as
+    text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. Decoded as an uploaded piece
+    (audio.decode), heard by the draft layer's engine when it takes a whole window (fast, text alone; qwen-stream is a
+    session), else the final layer's, ENGINE_FALLBACK as ever, each try in the calls table as `voice`. Nothing kept."""
+    body = await request.body()
+    if not body or len(body) > 4 << 20:
+        raise HTTPException(400, "empty or too long")
+    x = await anyio.to_thread.run_sync(audio.decode, body, limiter=threads.MEDIA)
+    if x is None or len(x) > VOICE_MAX_S * audio.SR:
+        raise HTTPException(400, "[bad_audio] 不是一段能听的录音，或超过一分钟")
+    engine = asr.DRAFT_ENGINE if asr.DRAFT_ENGINE in asr.PROVIDERS else asr.ENGINE
+    try:
+        segs = await asr.engine_segs(x, [], engine=engine, kind="voice")
+    except Exception as e:  # engine_segs: the last engine's error once the fallback failed too
+        log.warning("ask voice failed: %r", e)
+        raise HTTPException(502, f"[asr_failed] 语音识别失败：{e!r}"[:300])
+    return {"text": local_asr.text([" " + g["text"] for g in segs])}  # sentences as words: CJK joined, English spaced
 
 
 @router.post("/mcp")

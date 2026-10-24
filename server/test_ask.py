@@ -1,8 +1,10 @@
 """立即总结 (POST /api/live/{device}): the live analysis of the conversation going on before its minute of speech, one at
 a time, only with speech it has not seen. Asked once, its agent writes the final summary though the conversation
 stays under summary.MIN_SPEECH_S; one never asked still gets its first sentence as the title and no call. The pipeline
-rig of test_backlog: real audio store, streams and pipeline, fake engines and LLM, a page watching."""
+rig of test_backlog: real audio store, streams and pipeline, fake engines and LLM, a page watching. The ask sheet's spoken
+question (POST /api/ask/voice): a recording as text."""
 import datetime as dt
+import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -12,6 +14,7 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
+import asr
 import core
 import db
 import device_pipeline
@@ -96,3 +99,38 @@ def test_ask_without_pipeline(monkeypatch):
         with pytest.raises(HTTPException) as e:
             anyio.run(routes_api.live_ask, device)
         assert e.value.status_code == 404 and e.value.detail == "[no_pipeline] 没有这台设备的处理流程"
+
+
+def test_ask_voice(monkeypatch):
+    """What the browser recorded (Ogg/Opus here, as Firefox writes; Chrome's webm, Safari's mp4 decode the same way) to
+    the draft engine as one line of text, its sentences joined as words; nothing heard: ""; no recording, not audio, or
+    over a minute: 400; each try in the calls table as `voice`, never its text."""
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    lo = dt.datetime.now().isoformat()
+    heard = []
+
+    async def engine(x, partial=None):
+        heard.append(round(len(x) / SR, 1))
+        return [{"start_ms": 0, "end_ms": 500, "text": "昨天，"}, {"start_ms": 600, "end_ms": 900, "text": "我答应了"},
+                {"start_ms": 1000, "end_ms": 1900, "text": "Bob 什么？"}] if np.abs(x).max() > 1000 else []
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "fake")
+    monkeypatch.setitem(asr.PROVIDERS, "fake", engine)
+
+    class Rec:  # the request: only its body is read
+        def __init__(self, src: str, s: float = 2):
+            self.b = src and subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"{src}:d={s}", "-c:a", "libopus", "-f", "ogg", "pipe:1"],
+                                            capture_output=True, check=True).stdout
+
+        async def body(self):
+            return self.b or b"not audio"
+
+    ask = lambda r: anyio.run(routes_api.ask_voice, r)
+    assert ask(Rec("sine=f=440:r=48000")) == {"text": "昨天，我答应了 Bob 什么？"}
+    assert ask(Rec("anullsrc=r=48000:cl=mono")) == {"text": ""}, "nothing heard: the page says 没听清"
+    assert heard == [2.0, 2.0]
+    for r in (Rec(""), Rec("anullsrc=r=48000:cl=mono", 62)):
+        with pytest.raises(HTTPException) as e:
+            ask(r)
+        assert e.value.status_code == 400 and e.value.detail.startswith("[bad_audio]")
+    assert len(heard) == 2, "a refused recording never reaches the engine"
+    assert [(c["kind"], c["engine"], c["n"]) for c in db.calls(lo)] == [("voice", "fake", 2)]

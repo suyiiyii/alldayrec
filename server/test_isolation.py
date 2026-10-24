@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 from starlette.testclient import TestClient
 
+import asr
 import audio
 import core
 import db
@@ -119,6 +120,7 @@ REQUESTS = {
     ("GET", "/api/calendar"): ("GET", "/api/calendar", {}),
     ("GET", "/api/search"): ("GET", "/api/search", dict(params={"q": "说的话"})),
     ("POST", "/api/ask"): ("POST", "/api/ask", dict(json={"q": "说过什么？"})),
+    ("POST", "/api/ask/voice"): ("POST", "/api/ask/voice", dict(content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/mcp"): ("POST", "/mcp", dict(json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "grep", "arguments": {"q": "说的话"}}})),
     ("DELETE", "/mcp"): ("DELETE", "/mcp", {}),
     ("GET", "/mcp"): ("GET", "/mcp", {}),
@@ -212,6 +214,10 @@ def test_routes(two, monkeypatch):
                                                               "function": {"name": "grep", "arguments": '{"q": "说的话"}'}}]}}]}
         return {"choices": [{"message": {"content": json.dumps({"headline": "h", "answer": "a"}) if kind != "ask" else f"好 [{CID}]"}}]}
     monkeypatch.setattr(summary, "call", llm)
+
+    async def heard(x, partial=None):  # a spoken question
+        return [{"start_ms": 0, "end_ms": 1000, "text": "说过什么？"}]
+    monkeypatch.setitem(asr.PROVIDERS, asr.DRAFT_ENGINE, heard)
     before = snapshot(b)
 
     async def run():
