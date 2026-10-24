@@ -261,12 +261,23 @@ export interface Status {
   last_audio?: string | null; // where the newest stored audio of any device ends
   refine?: { at: string; ms: number; error?: string } | null;
   conversation?: { start: string; sentences: number } | null;
-  engine?: string;
+  engine?: string; // the speech engines: the final layer's, the drafts', the one a failed window goes to (engines())
+  draft_engine?: string;
+  fallback_engine?: string | null;
   commit?: string;
   devices?: DeviceStatus[];
   summaries_pending?: number;
   lang?: "zh" | "en"; // what the models write in (GET/PUT /api/lang)
 }
+
+export const engines = (s: Status) =>
+  [
+    s.engine,
+    s.draft_engine && t("api.draftEngine", { e: s.draft_engine }),
+    s.fallback_engine && t("api.fallbackEngine", { e: s.fallback_engine }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 // GET /api/calls: the ASR and LLM calls since a time, by kind and engine, and the StepFun balance
 export interface CallSum {

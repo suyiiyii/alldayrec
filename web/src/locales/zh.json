@@ -54,6 +54,8 @@
     "someLike": "有点像"
   },
   "api": {
+    "draftEngine": "初稿 {e}",
+    "fallbackEngine": "兜底 {e}",
     "charge": {
       "battery": "用电池",
       "charging": "充电中",

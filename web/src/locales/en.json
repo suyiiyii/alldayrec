@@ -54,6 +54,8 @@
     "someLike": "somewhat similar"
   },
   "api": {
+    "draftEngine": "drafts {e}",
+    "fallbackEngine": "fallback {e}",
     "charge": {
       "battery": "on battery",
       "charging": "charging",

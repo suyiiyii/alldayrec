@@ -4,7 +4,7 @@ import AppHeader from "../components/AppHeader.vue";
 import DeviceCard from "../components/DeviceCard.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
 import { lang, setLang, t, type Lang } from "../i18n";
-import { get, post, type Due, type Status } from "../lib/api";
+import { engines, get, post, type Due, type Status } from "../lib/api";
 import { useSocket } from "../lib/socket";
 import { open } from "../lib/todos";
 import { toast } from "../lib/toast";
@@ -84,7 +84,7 @@ function pick(l: Lang) {
           ><b>{{ t("me.about") }}</b
           ><span class="muted"
             >alldayrec · {{ t("me.version", { commit: status?.commit || "—" })
-            }}{{ status?.engine ? " · " + t("me.engine", { engine: status.engine }) : "" }}</span
+            }}{{ status?.engine ? " · " + t("me.engine", { engine: engines(status) }) : "" }}</span
           ></span
         >
       </div>

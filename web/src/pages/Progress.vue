@@ -9,6 +9,7 @@ import {
   build,
   card,
   caughtUp,
+  engines,
   get,
   hhmm,
   hhmmss,
@@ -246,7 +247,7 @@ const eta = (d: DeviceStatus) => {
             : t("progress.noConversation")
         }}</span>
         <span>{{ t("progress.engine") }}</span
-        ><span>{{ status.engine || "—" }}</span> <span>{{ t("progress.version") }}</span
+        ><span>{{ engines(status) || "—" }}</span> <span>{{ t("progress.version") }}</span
         ><span>{{ status.commit || "—" }}</span>
       </div>
     </section>

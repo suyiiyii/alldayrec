@@ -71,7 +71,7 @@ def status() -> dict:
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
             "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,
-            "engine": f"{asr.ENGINE} · 初稿 {asr.DRAFT_ENGINE}" + (f" · 兜底 {asr.ENGINE_FALLBACK}" if asr.ENGINE_FALLBACK else "")}
+            "engine": asr.ENGINE, "draft_engine": asr.DRAFT_ENGINE, "fallback_engine": asr.ENGINE_FALLBACK or None}  # the pages word them
 
 
 async def status_loop():
