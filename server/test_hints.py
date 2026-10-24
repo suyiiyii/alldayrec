@@ -182,7 +182,8 @@ def test_undo_takes_a_merge_back(tmp_path):
 def test_this_is_me_learns_a_centroid(tmp_path):
     """「这是我」 (a rename to 我) relabels like any merge and adds one centroid to 我's voiceprint: the unit mean of the
     voices, weighted by speech. The undo takes both back: the file gone when the click made it, else the centroid
-    dropped and the npz before kept as .prev. Under 10 s of voice relabels only."""
+    dropped and the npz before kept as .prev. Under 10 s of voice relabels only. 不是他 out of 我 drops a centroid
+    with the last of the voices it was learnt from."""
     db.open_db(tmp_path / "t.db")
     npz, A, B = tmp_path / "owner-redimnet2.npz", np.array([1.0, 0, 0, 0]), np.array([0.8, 0.6, 0, 0])
     convs = [f"c2026100510000{i}" for i in range(2)]
@@ -217,6 +218,17 @@ def test_this_is_me_learns_a_centroid(tmp_path):
     assert list(np.load(tmp_path / "owner-redimnet2.npz.prev")) == ["self"]
     anyio.run(speaker_undo, {"undo": r["undo"]})
     assert dump() == was and list(np.load(npz)) == ["self"] and list(tenant.T().owner) == ["self"]
+    assert db.kv("me_centroids") == {}, "the undos took their voices' lists too"
 
     r = anyio.run(rename, convs[1], {"from": "S2", "to": "我"})  # 4 s of voice
     assert not r["learned"] and r["participants"] == ["S1", "我"] and list(np.load(npz)) == ["self"]
+
+    g = next(g for g in anyio.run(routes_speakers.speaker_list) if g["count"] == 2)
+    assert anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我"})["learned"]
+    me = next(k for k in np.load(npz) if k != "self")
+    assert db.kv("me_centroids") == {me: [f"{c}|我" for c in convs[::-1]]}  # the group's members, newest first
+    anyio.run(routes_speakers.speaker_detach, {"conv": convs[0], "label": "我", "group": "我"})
+    assert db.conversation(convs[0])["participants"] == ["S3", "S2"] and list(np.load(npz)) == ["self", me], "one voice left"
+    assert db.kv("me_centroids") == {me: [f"{convs[1]}|我"]}
+    anyio.run(routes_speakers.speaker_detach, {"conv": convs[1], "label": "我", "group": "我"})
+    assert list(np.load(npz)) == ["self"] and list(tenant.T().owner) == ["self"] and db.kv("me_centroids") == {}

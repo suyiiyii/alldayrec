@@ -125,10 +125,12 @@ def learn_me(to: str, vs: list[tuple[np.ndarray, float] | None], befores: list[d
     weighted by speech. A centroid, not a mean into the old one: the diarist takes the best of them (Diarist.add), and a
     voice split from 我 is one the old centroids missed (another recorder, another room); a mean would pull the old
     one off the voice it does match. The npz before is kept beside it (.prev); the undo drops the centroid again (any
-    order of undos). Less than ME_MIN_S of speech with a voiceprint learns nothing. Another name: nothing to say."""
+    order of undos), and so does 不是他 on its voices (forget_me: kv me_centroids holds them, conv|我 each). Less than
+    ME_MIN_S of speech with a voiceprint learns nothing. Another name: nothing to say. vs: one per befores."""
     if to != "我":
         return {}
-    vs = [v for v in vs if v]  # a label without one: an open conversation, under 3 sentences, no recording here
+    # a label without one: an open conversation, under 3 sentences, no recording here
+    vs, convs = [v for v in vs if v], [b["conv"] for v, b in zip(vs, befores) if v]
     s = sum(x for _, x in vs)
     if s < ME_MIN_S or not befores:
         return {"learned": False}
@@ -137,8 +139,22 @@ def learn_me(to: str, vs: list[tuple[np.ndarray, float] | None], befores: list[d
         shutil.copyfile(owner_npz(), owner_npz().with_name(owner_npz().name + ".prev"))
     k = befores[0]["me"] = f"me-{secrets.token_hex(4)}"
     save_owner({**bank, k: selfvoice.unit(sum(x * selfvoice.unit(e) for e, x in vs)).astype(np.float32)})
+    db.put_kv("me_centroids", {**(db.kv("me_centroids") or {}), k: [f"{c}|我" for c in convs]})
     ws.note(f"「我」的声音：多记住了一种（{round(s)} 秒），从下一段对话起认出", "state")
     return {"learned": True}
+
+
+def forget_me(key: str | None = None, voice: str | None = None):
+    """Centroids 「这是我」 added to 我's voiceprint taken out again: `key` (its undo), and those left without a voice
+    once `voice` (conv|我, 不是他) leaves their list. No centroid left: no npz, nobody is 我."""
+    # ponytail: a centroid of several voices keeps the share of one taken out until its last goes; keep each voice's
+    # vector and speech with the list and recompute it if a mixed one ever lets others in
+    m = {k: [x for x in vs if x != voice] for k, vs in (db.kv("me_centroids") or {}).items()}
+    gone = {k for k, vs in m.items() if not vs} | ({key} if key else set())
+    db.put_kv("me_centroids", {k: vs for k, vs in m.items() if k not in gone})
+    bank = owner_bank()
+    if [bank.pop(k) for k in gone if k in bank]:
+        save_owner(bank)
 
 
 def keep_undo(befores: list[dict]) -> str:
@@ -176,9 +192,7 @@ async def speaker_undo(body: dict):
                 db.put_name_hints(b["hints"], t)
     T().speakers["at"] = 0.0
     if k := bs[0].get("me"):  # 「这是我」's centroid
-        bank = owner_bank()
-        if bank.pop(k, None) is not None:
-            save_owner(bank)
+        forget_me(key=k)
     for cid in dict.fromkeys(b["conv"] for b in bs):
         queue_summary(find_conversation(cid), keep=True)
     b = bs[0]
@@ -343,7 +357,7 @@ async def speaker_name(body: dict):
 @router.post("/api/speakers/detach")
 async def speaker_detach(body: dict):
     """A voice that is not this speaker: a named one goes back to a fresh S<n> of its conversation; either way it is
-    kept apart from the group from now on."""
+    kept apart from the group from now on. Out of 我, the centroid a 「这是我」 learnt from it alone goes too."""
     conv, label, group = body["conv"], body["label"], body["group"]
     key = f"{conv}|{label}"
     if not speakers.ANON.fullmatch(label):
@@ -353,6 +367,7 @@ async def speaker_detach(body: dict):
         used = {int(p[1:]) for p in c["participants"] if re.fullmatch(r"S\d+", p)}
         new = f"S{max(used, default=0) + 1}"
         apply_rename(conv, label, new)  # S<n>: nothing to learn
+        forget_me(voice=key)
         key = f"{conv}|{new}"
     db.conn().execute("INSERT OR IGNORE INTO apart VALUES (?, ?)", (key, group))
     T().speakers["at"] = 0.0
