@@ -122,7 +122,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final to = _tabOf(Uri.parse(url).path);
     if (to == null || to == tab) return;
     if (to < webs.length) (webs[to] ??= _web(tab: to)).loadRequest(_url(Uri.parse(url).path));
-    setState(() => page = to);
+    _show(to);
     final c = webs[tab]!;
     c.canGoBack().then((b) => b ? c.goBack() : c.loadRequest(_url(paths[tab])));
   }
@@ -192,10 +192,17 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  /// Shows a tab. The page leaving stays alive and, to the browser, visible: it is told so its sound stops.
+  void _show(int to) {
+    if (to == page) return;
+    if (page < webs.length) webs[page]?.runJavaScript("window.dispatchEvent(new Event('app-hidden'))");
+    setState(() => page = to);
+  }
+
   Future<void> _back() async {  // back key: history inside the page's WebView first, then to 今天, then leave
     final w = page < webs.length ? webs[page] : null;
     if (w != null && await w.canGoBack()) return w.goBack();
-    if (page != 0) return setState(() => page = 0);
+    if (page != 0) return _show(0);
     SystemNavigator.pop();
   }
 
@@ -241,7 +248,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             ]))]),
       bottomNavigationBar: settings == null ? null : NavigationBar(
         selectedIndex: page,
-        onDestinationSelected: (i) => setState(() => page = i),
+        onDestinationSelected: _show,
         destinations: const [
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '今天'),
           NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '对话'),

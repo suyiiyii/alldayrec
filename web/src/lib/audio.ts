@@ -193,3 +193,9 @@ export function trackRate() {
   track.rate = RATES[(RATES.indexOf(track.rate) + 1) % RATES.length];
   if (el) el.playbackRate = el.defaultPlaybackRate = track.rate;
 }
+
+// Sound stops when the page goes out of sight: the browser's visibilitychange (another tab, the lock screen) and the
+// app's own 'app-hidden' (its bottom tabs keep every page alive and visible to the browser, so it says so itself).
+const hidden = () => { audio?.pause(); trackPause(); };
+document.addEventListener("visibilitychange", () => document.hidden && hidden());
+window.addEventListener("app-hidden", hidden);
