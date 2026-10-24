@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useRoute } from "vue-router";
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import Icon, { type IconName } from "./Icon.vue";
 
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
@@ -19,6 +20,12 @@ const TABS: { to: string; label: string; icon: IconName; under: RegExp }[] = [
   { to: "/me", label: "我的", icon: "user", under: /^\/(me|connect|progress|device\/|record)/ },
 ];
 const route = useRoute();
+const router = useRouter();
+// inside the app a page under a tab (进度, a device, the calendar...) has no way back: the app hides this header's
+// navigation and has no back key on iOS, so such a page gets a 返回 row (CSS shows it in the app only)
+const under = computed(() => TABS.find((t) => t.under.test(route.path)));
+const sub = computed(() => !!under.value && route.path !== under.value.to);
+const back = () => (history.state?.back ? router.back() : router.push(under.value?.to ?? "/"));
 </script>
 
 <template>
@@ -43,6 +50,10 @@ const route = useRoute();
       </nav>
     </div>
   </header>
+  <div v-if="sub" class="back-row">
+    <button class="btn-ghost" @click="back"><Icon name="chevron-left" :size="20" />返回</button>
+    <span class="where">{{ route.meta.title }}</span>
+  </div>
   <!-- a phone: the same four as tabs at the bottom -->
   <nav class="nav-tabs">
     <RouterLink v-for="t in TABS" :key="t.to" :to="t.to" :class="{ on: t.under.test(route.path) }"
@@ -52,6 +63,25 @@ const route = useRoute();
 </template>
 
 <style scoped>
+.back-row {
+  display: none; /* the app only, below */
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  min-height: 40px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.back-row .where {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+:global(html.in-app .back-row) {
+  display: flex;
+}
 header {
   position: sticky;
   top: 0;
