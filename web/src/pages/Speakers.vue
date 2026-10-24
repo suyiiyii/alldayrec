@@ -21,9 +21,10 @@ const groups = ref<Speaker[]>([]),
   editing = ref(""),
   newName = ref(""),
   flash = ref(""),
-  errorAt = ref(""), // the card whose name box the error is about; "" puts it at the top
   failed = ref<{ msg: string; title: string } | null>(null); // the list itself did not load
-const { busy, error, detail, run } = useMutation();
+// one per card: a change under way there (a rename of many conversations takes seconds) leaves the other cards usable
+const cards = new Map<string, ReturnType<typeof useMutation>>();
+const card = (id: string) => cards.get(id) ?? cards.set(id, useMutation()).get(id)!;
 
 async function load() {
   try {
@@ -72,11 +73,11 @@ const quoted = (names: string[]) =>
 function edit(id: string) {
   editing.value = id;
   newName.value = "";
-  error.value = "";
+  card(id).error.value = "";
 }
 function cancel() {
+  card(editing.value).error.value = "";
   editing.value = "";
-  error.value = "";
 }
 async function expand(g: Speaker) {
   if (open.value === g.id) return (open.value = "");
@@ -87,8 +88,7 @@ async function expand(g: Speaker) {
 async function name(g: Speaker, to: string, what: string, suggestion?: string) {
   to = to.trim();
   if (!to) return;
-  errorAt.value = editing.value === g.id ? g.id : "";
-  await run(async () => {
+  await card(g.id).run(async () => {
     flash.value = "";
     const r = await post<{ renamed: number }>("/api/speakers/name", {
       name: to,
@@ -96,13 +96,12 @@ async function name(g: Speaker, to: string, what: string, suggestion?: string) {
       suggestion,
     });
     flash.value = t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed);
-    editing.value = "";
+    if (editing.value === g.id) editing.value = ""; // another card's box opened meanwhile stays
     await load();
   });
 }
-async function addAlias(alias: string, name: string) {
-  errorAt.value = "";
-  await run(async () => {
+async function addAlias(g: Speaker, alias: string, name: string) {
+  await card(g.id).run(async () => {
     flash.value = "";
     await post("/api/aliases", { alias, name });
     flash.value = t("speakers.aliasSaved", { alias, name: speakerLabel(name) });
@@ -110,8 +109,7 @@ async function addAlias(alias: string, name: string) {
   });
 }
 async function detach(g: Speaker, v: Voice) {
-  errorAt.value = "";
-  await run(async () => {
+  await card(g.id).run(async () => {
     flash.value = "";
     await post("/api/speakers/detach", { conv: v.conv, label: v.label, group: g.name ?? g.id });
     flash.value = t("speakers.detached", { day: day(v.start), group: title(g) });
@@ -134,7 +132,6 @@ async function detach(g: Speaker, v: Voice) {
       </button>
     </div>
     <p v-if="flash" class="flash">{{ flash }}</p>
-    <p v-if="error && !errorAt" class="error" role="alert" :title="detail">{{ error }}</p>
     <Skeleton v-if="!loaded" />
     <div v-else-if="failed" class="empty" :title="failed.title">
       <Icon name="alert-circle" :size="48" />{{ failed.msg }}
@@ -183,14 +180,19 @@ async function detach(g: Speaker, v: Voice) {
         {{ g.name ? t("speakers.alsoCalled") : t("speakers.called")
         }}<template v-for="x in g.called.filter((x) => x.name !== g.name)" :key="x.name"
           >{{ t("speakers.calledIn", { name: x.name, n: x.convs.length }) }}
-          <button v-if="!g.name" class="chip" :disabled="busy" @click="name(g, x.name, title(g))">
+          <button
+            v-if="!g.name"
+            class="chip"
+            :disabled="card(g.id).busy.value"
+            @click="name(g, x.name, title(g))"
+          >
             {{ t("speakers.nameAs", { name: x.name }) }}
           </button>
           <button
             v-else-if="g.name !== '我'"
             class="chip"
-            :disabled="busy"
-            @click="addAlias(x.name, g.name)"
+            :disabled="card(g.id).busy.value"
+            @click="addAlias(g, x.name, g.name)"
           >
             {{ t("speakers.asAlias") }}
           </button></template
@@ -210,7 +212,7 @@ async function detach(g: Speaker, v: Voice) {
             list="names"
             @keyup.enter="name(g, newName, title(g))"
           />
-          <button :disabled="busy" @click="name(g, newName, title(g))">
+          <button :disabled="card(g.id).busy.value" @click="name(g, newName, title(g))">
             {{ t("speakers.save") }}
           </button>
           <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
@@ -221,12 +223,19 @@ async function detach(g: Speaker, v: Voice) {
         <button class="btn-ghost" @click="expand(g)">
           {{ open === g.id ? t("speakers.collapse") : t("speakers.list", { n: g.count }) }}
         </button>
+        <span v-if="card(g.id).busy.value" class="meta">{{ t("speakers.saving") }}</span>
       </div>
-      <p v-if="error && errorAt === g.id" class="error" role="alert" :title="detail">
-        {{ error }}
+      <p v-if="card(g.id).error.value" class="error" role="alert" :title="card(g.id).detail.value">
+        {{ card(g.id).error.value }}
       </p>
       <div v-if="editing === g.id && names.length" class="chips">
-        <button v-for="n in names.slice(0, 12)" :key="n" class="chip" @click="name(g, n, title(g))">
+        <button
+          v-for="n in names.slice(0, 12)"
+          :key="n"
+          class="chip"
+          :disabled="card(g.id).busy.value"
+          @click="name(g, n, title(g))"
+        >
           {{ n }}
         </button>
       </div>
@@ -248,7 +257,7 @@ async function detach(g: Speaker, v: Voice) {
           <span>{{ v.clip_text || day(v.start) }}</span>
         </button>
         <button
-          :disabled="busy"
+          :disabled="card(g.id).busy.value"
           @click="name(g, g.name!, t('speakers.nConvs', { n: s.count }, s.count), s.id)"
         >
           {{ t("speakers.isThem", { name: speakerLabel(g.name) }) }}
@@ -286,7 +295,7 @@ async function detach(g: Speaker, v: Voice) {
             >
           </td>
           <td>
-            <button class="btn-ghost mini" :disabled="busy" @click="detach(g, v)">
+            <button class="btn-ghost mini" :disabled="card(g.id).busy.value" @click="detach(g, v)">
               {{ t("speakers.notThem") }}
             </button>
           </td>
