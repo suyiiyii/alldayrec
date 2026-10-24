@@ -386,4 +386,8 @@ input {
   padding: 4px 8px;
   min-height: 36px;
 }
+/* inside the app the native bar already says 人物 */
+:global(.in-app) main > h1 {
+  display: none;
+}
 </style>
