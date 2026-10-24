@@ -28,7 +28,7 @@
 
 ![实时字幕](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
 
-页面开着时的实时字幕（初稿层）。下面是网页在手机上的样子，示例数据都是编的（截图是中文界面；main 上的网页也可以在「我的」页换成英文）。
+页面开着时的实时字幕（初稿层）。下面是网页在手机上的样子，示例数据都是编的（截图是中文界面；网页可以在「我的」页换成英文）。
 
 </div>
 
@@ -213,7 +213,7 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 - **安卓：** 用 `cd app && flutter build apk --release` 自己构建，或者从 [Releases 页面](https://github.com/suyiiyii/alldayrec/releases)（`apk-v*` 标签）下载 APK。服务器也可以在 `/app.apk` 提供更新。
 - **iOS：** 不上架 App Store，需要自己用 Xcode 构建安装：把 `app/ios/Flutter/Signing.local.xcconfig.example` 复制成 `Signing.local.xcconfig`，填自己的 Team ID（以及一个你自己的 bundle id 后缀）。用免费 Apple ID 装的应用 7 天后会打不开，要重新安装一次；付费开发者账号没有这个限制。
 
-连接 App：在网页里打开 **连接手机**（`/connect`），在 App 设置里点 **扫码登录** 扫它的二维码，或者手动输入服务器地址和 token。App 界面目前只有中文。
+连接 App：在网页里打开 **连接手机**（`/connect`），在 App 设置里点 **扫码登录** 扫它的二维码，或者手动输入服务器地址和 token。App 界面跟随系统语言（中文或英文，1.5.1 起）。
 
 ### 硬件（可选）
 

@@ -213,7 +213,7 @@ The LLM is always an external service: the project doesn't bundle or run one. To
 - **Android:** build it with `cd app && flutter build apk --release`, or install the APK from the [Releases page](https://github.com/suyiiyii/alldayrec/releases) (`apk-v*` tags). The server can also offer updates at `/app.apk`.
 - **iOS:** there is no App Store build; you build and install it yourself from Xcode. Copy `app/ios/Flutter/Signing.local.xcconfig.example` to `Signing.local.xcconfig` and put in your Team ID (and a bundle id suffix of your own). With a free Apple ID, an app you install this way stops opening after 7 days and has to be installed again; a paid Apple Developer account removes that limit.
 
-Connect the app: in the web UI open **连接手机** (`/connect`) and scan its QR code from the app's settings (**扫码登录**), or type the server address and token by hand. The app's UI is in Chinese for now.
+Connect the app: in the web UI open **连接手机** (`/connect`) and scan its QR code from the app's settings (**扫码登录**), or type the server address and token by hand. The app's UI follows the system language (Chinese or English, since 1.5.1).
 
 ### Hardware (optional)
 

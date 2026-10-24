@@ -4,7 +4,7 @@ type: how-to
 
 # How to install and connect the phone app
 
-The app records the phone's mic or a BLE recorder, uploads the audio to your server and shows the server's web pages. Its UI is in Chinese only for now.
+The app records the phone's mic or a BLE recorder, uploads the audio to your server and shows the server's web pages. Its UI follows the phone's system language: Chinese or English (since 1.5.1).
 
 ::: info Version
 The newest Android APK on Releases is `apk-v1.5.1` (1.5.1+26). It connects to `https://` and to `http://` servers (Tailscale, LAN), see [Reach the server from a phone](./remote-access.md).
