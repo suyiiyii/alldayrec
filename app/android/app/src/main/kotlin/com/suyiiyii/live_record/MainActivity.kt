@@ -44,7 +44,7 @@ class MainActivity : FlutterActivity() {
                         val need = Ble.permissions.filterNot(::granted)
                         if (need.isNotEmpty()) {
                             requestPermissions(need.toTypedArray(), 2)
-                            return@setMethodCallHandler result.error("permission", "允许蓝牙权限后再点开始", null)
+                            return@setMethodCallHandler result.error("permission", null, null)
                         }
                     }
                     val i = Intent(this, RecorderService::class.java)
@@ -122,7 +122,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "usbDisk" -> {  // the connected board's card to the computer's USB, or back
                     val link = RecorderService.link
-                    if (link == null) result.error("none", "先开始录音，连上录音设备", null)
+                    if (link == null) result.error("notStarted", null, null)
                     else { link.usbDisk(call.argument<Boolean>("on")!!); result.success(null) }
                 }
                 "unbind" -> Thread {  // the recorder forgets every phone (when connected), then this phone forgets it
@@ -142,12 +142,12 @@ class MainActivity : FlutterActivity() {
                 "listen" -> {  // the recorder's sound played on this phone as it comes (Listen.kt), or not; off when the app leaves the front
                     val on = call.argument<Boolean>("on")!!
                     val link = RecorderService.link
-                    if (link == null) { if (on) result.error("none", "先开始录音，连上录音设备", null) else result.success(null) }
-                    else try { link.listen(on); result.success(null) } catch (e: Exception) { result.error("listen", "没法播放：${e.message}", null) }
+                    if (link == null) { if (on) result.error("notStarted", null, null) else result.success(null) }
+                    else try { link.listen(on); result.success(null) } catch (e: Exception) { result.error("listen", e.message, null) }
                 }
                 "pause" -> {  // the connected recorder keeps nothing for s seconds (0: records again)
                     try { RecorderService.link!!.pause(call.argument<Int>("s")!!); result.success(null) }
-                    catch (e: Exception) { result.error("none", "录音设备没连上", null) }
+                    catch (e: Exception) { result.error("notConnected", null, null) }
                 }
                 "dfu" -> {  // a package from the server for `model`: only onto a recorder that said it is that model
                     val p = getSharedPreferences("recorder", MODE_PRIVATE)
@@ -156,7 +156,7 @@ class MainActivity : FlutterActivity() {
                     val sha = java.security.MessageDigest.getInstance("SHA-256").digest(zip).joinToString("") { "%02x".format(it) }
                     val no = Dfu.refusal(want, model, addr, RecorderService.slicer != null, sha, call.argument<String>("sha256"),
                                          call.argument<String>("version"), p.getString("bleFw", null))
-                    if (no != null) result.error(no.first, no.second, null)
+                    if (no != null) result.error(no["code"] as String, null, no)
                     else {  // refusal() checked both
                         val f = File(cacheDir, "$model.zip").apply { writeBytes(zip) }
                         Dfu.log = DfuLog(Ble.tag(p.getString("bleName", null) ?: model!!), p.getString("bleFw", null),

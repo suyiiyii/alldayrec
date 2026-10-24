@@ -99,11 +99,11 @@ object Ble {
      *  card's state the board reports since. A slow card answers late (lend() flushes, closes and unmounts before
      *  it answers; 10-13 BDAE went past 15 s and the app said it failed, a second tap took the disk back): no answer is
      *  not a failure, the board's state is what the switch shows and the note says. */
-    fun usbNote(on: Boolean, err: Int?, store: Int): String? = when {
-        err == -107 -> "录音设备没接在电脑的 USB 上"
-        err != null && err != 0 -> "切换失败 $err"
-        (store == -16) != on -> (if (on) "还没切到 U 盘模式" else "还在 U 盘模式") + "（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）"
-        on -> "U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回"
+    fun usbNote(on: Boolean, err: Int?, store: Int): Map<String, Any?>? = when {
+        err == -107 -> say("usbNoComputer")
+        err != null && err != 0 -> say("usbFailed", "err" to err)
+        (store == -16) != on -> say(if (on) "usbNotYetOn" else "usbStillOn")  // no answer in time: the switch follows the board
+        on -> say("usbOn")
         else -> null
     }
 
@@ -159,12 +159,11 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
               private val sliceS: () -> Int, private val onPiece: (Int) -> Unit,
               private val onName: (String) -> Unit, private val report: (String, Map<String, Any?>) -> Unit) {
     companion object {
-        const val KICKED = "已被其他手机绑定：在「录音设备」页重新添加"
         // what Android reports when the link cannot be encrypted with the keys it has
         val AUTH_FAILED = setOf("GATT 5", "GATT 15", "GATT 137")
     }
 
-    @Volatile var state = "正在找录音设备"
+    @Volatile var state: Map<String, Any?> = say("scanning")  // what the link does, as a code (say()) the app words
     @Volatile var hw: Map<String, Any?> = emptyMap()
     @Volatile private var on = true
     private val adapter = ctx.getSystemService(BluetoothManager::class.java).adapter
@@ -182,7 +181,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                     main.removeCallbacksAndMessages(null)
                     gatt?.let { abort(it) }
                     gatt?.close(); gatt = null
-                    state = "蓝牙已关闭"
+                    state = say("bluetoothOff")
                 }
                 BluetoothAdapter.STATE_ON -> {
                     DeviceLog.app(DeviceLog.mine(), "bluetooth", "手机蓝牙开了", fields = mapOf("on" to true))
@@ -208,10 +207,10 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     }
 
     private fun scan() {
-        val scanner = adapter.bluetoothLeScanner ?: return retry("蓝牙未打开") { scan() }
-        val bound = prefs.getString("bleName", null) ?: run { state = "未绑定录音设备"; return }
-        if (prefs.getBoolean("bleKicked", false)) { state = KICKED; return }
-        state = "正在找 $bound"
+        val scanner = adapter.bluetoothLeScanner ?: return retry(say("bluetoothNotOn")) { scan() }
+        val bound = prefs.getString("bleName", null) ?: run { state = say("unbound"); return }
+        if (prefs.getBoolean("bleKicked", false)) { state = say("kicked"); return }
+        state = say("scanning", "name" to bound)
         // filtered by service: unfiltered scans are paused while the screen is off
         scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Ble.STORE)).build()),
             ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCb)
@@ -222,36 +221,35 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             val name = Ble.fullName(r) ?: return
             if (name != prefs.getString("bleName", null)) return
             val st = Ble.state(r)
-            if (!r.isConnectable) { state = "$name 正连着其他手机"; return }
+            if (!r.isConnectable) { state = say("elsewhere", "name" to name); return }
             adapter.bluetoothLeScanner?.stopScan(this)
             Log.i("live-record", "ble found ${r.device.address} $name rssi=${r.rssi} state=$st")
             prefs.edit().putString("bleAddress", r.device.address).apply()  // for a firmware update
             onName(Ble.tag(name))
             if (on) connect(r.device, false)
         }
-        override fun onScanFailed(code: Int) = retry("扫描失败 $code") { scan() }
+        override fun onScanFailed(code: Int) = retry(say("scanFailed", "err" to code)) { scan() }
     }
 
-    private fun retry(why: String, delayMs: Long = 5000, what: () -> Unit) {
-        state = "$why，${delayMs / 1000} 秒后重试"
+    private fun retry(why: Map<String, Any?>, delayMs: Long = 5000, what: () -> Unit) {
+        state = why + ("s" to delayMs / 1000)
         if (on) main.postDelayed({ if (on) what() }, delayMs)
     }
 
     /** The first try connects directly (quick); after a drop autoConnect waits for the device without a timeout. */
     private fun connect(d: BluetoothDevice, auto: Boolean) {
-        state = if (auto) "录音设备不在附近，它在离线录音" + (lastSeen?.let { "（最后连接 $it）" } ?: "") + "，回来后自动补传"
-                else "正在连接录音设备"
-        gatt = d.connectGatt(ctx, auto, cb, BluetoothDevice.TRANSPORT_LE) ?: return retry("连接失败") { connect(d, true) }
+        state = if (auto) say("away", "lastSeen" to lastSeen) else say("connecting")
+        gatt = d.connectGatt(ctx, auto, cb, BluetoothDevice.TRANSPORT_LE) ?: return retry(say("connectFailed")) { connect(d, true) }
     }
 
     @Volatile private var pairingFailed = false
-    @Volatile private var lastSeen: String? = null  // HH:mm the link last went down
+    @Volatile private var lastSeen: Long? = null  // wall ms the link last went down
     @Volatile var pausedUntil = 0L                   // wall ms the recorder's pause ends (0: recording), as last known
 
     //
     // One GATT operation at a time: the session thread starts one and waits for its callback
     //
-    private class Gone : Exception("录音设备已断开")
+    private class Gone : Exception("link gone")
     @Volatile private var pending: CompletableFuture<ByteArray>? = null
     private val ctrl = LinkedBlockingQueue<ByteArray>()
     private val data = LinkedBlockingQueue<ByteArray>()
@@ -264,7 +262,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         pending = f
         var tries = 0
         while (!start()) {  // the stack is busy with something else (a notify subscription by Android itself)
-            if (++tries > 20 || gatt == null) throw Exception("$what 无法发起")
+            if (++tries > 20 || gatt == null) throw Exception("$what could not start")
             Thread.sleep(50)
         }
         try { return f.get(timeoutS, TimeUnit.SECONDS) } catch (e: java.util.concurrent.ExecutionException) { throw e.cause!! }
@@ -275,7 +273,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         if (status == BluetoothGatt.GATT_SUCCESS) f.complete(value) else f.completeExceptionally(Exception("GATT $status"))
     }
 
-    private fun chr(g: BluetoothGatt, s: UUID, c: UUID) = g.getService(s)?.getCharacteristic(c) ?: throw Exception("设备上没有 $c")
+    private fun chr(g: BluetoothGatt, s: UUID, c: UUID) = g.getService(s)?.getCharacteristic(c) ?: throw Exception("no $c on the device")
 
     private fun read(g: BluetoothGatt, s: UUID, c: UUID) = chr(g, s, c).let { ch -> op("read $c") { g.readCharacteristic(ch) } }
 
@@ -305,7 +303,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     /** Bonded or not at all: the firmware asks for encryption on connect, so Android pairs by itself (Just Works). */
     private fun bond(d: BluetoothDevice): Boolean {
         if (d.bondState == BluetoothDevice.BOND_BONDED) return true
-        state = "正在配对"
+        state = say("pairing")
         if (d.bondState == BluetoothDevice.BOND_NONE) d.createBond()
         val until = System.currentTimeMillis() + 60_000
         Thread.sleep(500)
@@ -313,29 +311,29 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         return d.bondState == BluetoothDevice.BOND_BONDED
     }
 
-    /** Runs one step of a session, shown on the app's status bar and logged with how long it took. */
-    private fun <T> step(what: String, block: () -> T): T {
-        state = what
+    /** Runs one step of a session, shown on the app's status bar ([code]) and logged ([what]) with how long it took. */
+    private fun <T> step(code: String, what: String, block: () -> T): T {
+        state = say(code)
         val t0 = android.os.SystemClock.elapsedRealtime()
-        return block().also { val ms = android.os.SystemClock.elapsedRealtime() - t0; Log.i("live-record", "ble $what: $ms ms"); DeviceLog.step(what, ms) }
+        return block().also { val ms = android.os.SystemClock.elapsedRealtime() - t0; Log.i("live-record", "ble $code: $ms ms"); DeviceLog.step(what, ms) }
     }
 
     private fun session(g: BluetoothGatt) {
         val name = prefs.getString("bleName", null) ?: g.device.name ?: g.device.address
         try {
-            step("已连接，协商包长") { op("mtu") { g.requestMtu(512) } }  // a record per notify
+            step("mtu", "已连接，协商包长") { op("mtu") { g.requestMtu(512) } }  // a record per notify
             val adding = prefs.getBoolean("bindPending", false)
             if (g.device.bondState != BluetoothDevice.BOND_BONDED) {
                 if (!adding) return kicked(g, "this phone's bond is gone")
-                if (!step("正在配对") { bond(g.device) }) {
+                if (!step("pairing", "正在配对") { bond(g.device) }) {
                     Log.w("live-record", "ble pairing with $name failed")
                     pairingFailed = true
-                    state = "配对没有完成，30 秒后重试"
+                    state = say("pairingFailed")
                     g.disconnect()
                     return
                 }
             }
-            step("读取设备服务") { op("services") { g.discoverServices() } }
+            step("services", "读取设备服务") { op("services") { g.discoverServices() } }
             // the first encrypted read: a recorder that no longer knows this phone fails it
             try { read(g, Ble.STORE, Ble.TIME) } catch (e: Exception) {
                 if (!adding && e.message in AUTH_FAILED) return kicked(g, "${e.message}") else throw e
@@ -345,11 +343,11 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             subscribe(g, Ble.STORE, Ble.CTRL)  // replies to LIST/READ/DELETE and the app's USB disk switch
             subscribe(g, Ble.STORE, Ble.DATA)
             subscribe(g, Ble.STORE, Ble.LIVE)  // first: nothing the stream adds after LIST is missed
-            var synced = step("给设备对时") { sync(g) }
-            val st = step("读取设备状态") { status(g, name, fresh = true) }
+            var synced = step("clock", "给设备对时") { sync(g) }
+            val st = step("status", "读取设备状态") { status(g, name, fresh = true) }
             Log.i("live-record", "ble status: boot ${st.boot} frame ${st.frame} " + hw.entries.joinToString(" ") { "${it.key}=${it.value}" })
             if (adding) {
-                if (prefs.getBoolean("bindForce", false)) step("让录音设备忘掉其他手机") {
+                if (prefs.getBoolean("bindForce", false)) step("forgetOthers", "让录音设备忘掉其他手机") {
                     val r = reply(g, byteArrayOf(5), 0x85)  // FORGET: every phone but this one
                     Log.i("live-record", "ble forgot other phones: ${r?.let { le(it).getInt(1) }}")
                 }
@@ -366,7 +364,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             open = -1; liveFloor = -1; ahead = -1; reading = null; needList = true; listFull = false; liveRead = true; stalls.clear()
             holeAt = -1; refollow = false; abandoned = -1; liveGaps = 0; settleUntil = android.os.SystemClock.elapsedRealtime() + 3000
             caught = 0; caughtSince = 0
-            state = "正在接上实时"
+            state = say("joining")
             var live0 = false  // LIVE taken since the file it goes on in was caught up
             var lastStatus = android.os.SystemClock.elapsedRealtime()
             var lastCharge = lastStatus
@@ -395,7 +393,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                     live0 = true
                     DeviceLog.read(mirrorName, { write(g, Ble.STORE, Ble.CTRL, it) }, ctrl, data)
                     DeviceLog.connected(mirrorName)
-                    state = "已连接 · 实时上传"
+                    state = say("connected")
                 }
                 if (reading == null) nextRead(g, m)
                 val now = android.os.SystemClock.elapsedRealtime()
@@ -422,7 +420,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         } catch (e: Gone) {
         } catch (e: Exception) {
             Log.w("live-record", "ble session: $e")
-            if (gatt === g) { state = "录音设备出错：${e.message}"; g.disconnect() }
+            if (gatt === g) { state = say("linkError", "detail" to (e.message ?: "$e")); g.disconnect() }
         } finally {
             syncDoneKb = 0; syncTotalKb = 0; syncLiveKb = 0  // no link, no catch-up under way
         }
@@ -442,13 +440,13 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         Log.w("live-record", "ble kicked: $why")
         prefs.edit().putBoolean("bleKicked", true).apply()
         DeviceLog.app(Ble.tag(prefs.getString("bleName", null) ?: g.device.address), "kicked", "录音设备不再认这台手机（$why），不再重连", "error")
-        state = KICKED
+        state = say("kicked")
         g.disconnect()
     }
 
     /** Pause the recording for `s` seconds (0: go on now); the recorder keeps the time itself. */
     fun pause(s: Int) {
-        if (gatt == null) throw Exception("录音设备没连上")
+        if (gatt == null) throw Exception("not connected")
         jobs.put { g ->
             write(g, Ble.STORE, Ble.CTRL, le(ByteArray(5)).put(0x20).putInt(s).array())  // PAUSE
             pausedUntil = if (s > 0) System.currentTimeMillis() + s * 1000L else 0L
@@ -481,17 +479,17 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
 
     /** What the app asks of the connected board, run on the session thread between status reads. */
     private val jobs = LinkedBlockingQueue<(BluetoothGatt) -> Unit>()
-    @Volatile var usbNote: String? = null
+    @Volatile var usbNote: Map<String, Any?>? = null
     private var usbAsk: Pair<Boolean, Int?>? = null  // the switch's last ask (on, its answer), until the board reports that state (status())
-    @Volatile var syncNote: String? = null  // the last catch-up, for the app's recorder page
+    @Volatile var syncNote: Map<String, Any?>? = null  // the last catch-up, for the app's recorder page
     @Volatile var syncDoneKb = 0L           // the catch-up under way: taken of total (0 of 0: none)
     @Volatile var syncTotalKb = 0L
     @Volatile var syncLiveKb = 0L           // of it, what LIVE still waits for: the file being recorded
 
     /** The board's SD card as a USB disk on the computer it is plugged into (CTRL 0x06), or back. */
     fun usbDisk(on: Boolean) {
-        if (gatt == null) { usbNote = "录音设备没连上"; return }
-        usbNote = if (on) "正在切换到 U 盘模式" else "正在切回录音"
+        if (gatt == null) { usbNote = say("notConnected"); return }
+        usbNote = say(if (on) "usbSwitchingOn" else "usbSwitchingOff")
         jobs.put { g ->
             val err = reply(g, byteArrayOf(6, if (on) 1 else 0), 0x86)?.get(5)?.toInt()
             Log.i("live-record", "ble usb disk $on: ${err ?: "no answer"}")
@@ -580,7 +578,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         write(g, Ble.STORE, Ble.CTRL, byteArrayOf(1))  // LIST
         var o = -1L
         while (true) {
-            val x = ctrl.poll(10, TimeUnit.SECONDS) ?: throw Exception("卡上文件列表超时")
+            val x = ctrl.poll(10, TimeUnit.SECONDS) ?: throw Exception("LIST timed out")
             if (x[0] == 0x81.toByte()) r[le(x).getInt(1).toLong() and 0xffffffffL] = le(x).getInt(5).toLong() and 0xffffffffL
             if (x[0] == 0x80.toByte()) {
                 if (x[1] != 0.toByte()) Log.w("live-record", "ble LIST error ${x[1]}")
@@ -635,7 +633,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         if (caughtSince > 0 && behind(m) == 0L) {  // caught up
             val s = (android.os.SystemClock.elapsedRealtime() - caughtSince) / 1000
             Log.i("live-record", "ble caught up: $caught B in $s s")
-            syncNote = "${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())} 补传录音设备的录音 ${caught / 1024} KB"
+            syncNote = say("synced", "at" to System.currentTimeMillis(), "kb" to caught / 1024)
             if (caught > 0) DeviceLog.app(mirrorName, "sync", "补传 ${caught / 1024} KB，用时 $s s")
             caught = 0; caughtSince = 0; ahead = -1
             unhold(m)
@@ -684,7 +682,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val until = System.currentTimeMillis() + 3000
         while (ctrl.none { it[0] == 0x82.toByte() } && System.currentTimeMillis() < until) Thread.sleep(50)
         // no end: its DATA may still come and be taken for what goes next on DATA (LOG): the link again instead
-        if (ctrl.none { it[0] == 0x82.toByte() }) throw Exception("READ 停不下来")
+        if (ctrl.none { it[0] == 0x82.toByte() }) throw Exception("READ does not stop")
         while (keep) {
             val d = data.poll() ?: break
             if (d.size <= 4) continue
@@ -809,7 +807,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                 if (gatt !== g) return  // an old link, already given up (Bluetooth turned off)
                 gatt = null
                 DeviceLog.disconnected(mirrorName.ifEmpty { Ble.tag(g.device.name ?: g.device.address) }, status)
-                lastSeen = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+                lastSeen = System.currentTimeMillis()
                 // a pairing that did not finish (a dialog left alone) waits a little; unbound or kicked: no reconnecting
                 val wait = if (pairingFailed) 30_000L else 0L
                 pairingFailed = false

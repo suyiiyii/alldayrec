@@ -50,7 +50,7 @@ class _RecorderPageState extends State<RecorderPage> {
     try {
       await f();
     } on PlatformException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message ?? '$e'), behavior: SnackBarBehavior.floating));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(platformText(context, e)), behavior: SnackBarBehavior.floating));
     }
     _load();
   }
@@ -86,8 +86,8 @@ class _RecorderPageState extends State<RecorderPage> {
     }
   }
 
-  void _pauseDone(String? error) {
-    if (error != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error), behavior: SnackBarBehavior.floating));
+  void _pauseDone(PlatformException? e) {
+    if (e != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(platformText(context, e)), behavior: SnackBarBehavior.floating));
     _load();
   }
 
@@ -113,7 +113,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final syncDone = (st['syncDone'] as num?) ?? 0, syncTotal = (st['syncTotal'] as num?) ?? 0, syncLive = (st['syncLive'] as num?) ?? 0;
     final syncing = recording && syncTotal > 0;
     final lent = store == -16;
-    final dfu = (st['dfu'] ?? r['dfu']) as String?;
+    final dfuState = st['dfu'] ?? r['dfu'], dfu = dfuState == null ? null : nativeText(context, dfuState);
     final listen = st['listen'] as List?;  // listening on this phone: its lines
 
     // connection chip: what the link is doing, in one colour
@@ -220,7 +220,7 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(st['lastSync'] != null ? Icons.check_circle_rounded : Icons.cloud_sync_rounded,
                   color: st['lastSync'] != null ? Colors.green.shade600 : cs.outline),
               const SizedBox(width: 8),
-              Expanded(child: Text((st['lastSync'] as String?) ?? l.syncIdleHelp)),
+              Expanded(child: Text(st['lastSync'] == null ? l.syncIdleHelp : nativeText(context, st['lastSync']))),
             ]),
         ])),
         // USB disk
@@ -229,7 +229,7 @@ class _RecorderPageState extends State<RecorderPage> {
             contentPadding: EdgeInsets.zero,
             secondary: Icon(Icons.usb_rounded, color: lent ? cs.primary : cs.onSurfaceVariant),
             title: Text(l.cardAsUsbDisk),
-            subtitle: Text(st['usbNote'] as String? ?? l.usbDiskHelp),
+            subtitle: Text(st['usbNote'] == null ? l.usbDiskHelp : nativeText(context, st['usbNote'])),
             value: lent,
             onChanged: linked ? (v) => _call(() => Recorder.usbDisk(v)) : null,
           ),

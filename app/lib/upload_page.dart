@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
 import 'recorder.dart';
+import 'recorder_status.dart';
 import 'settings.dart';
 
 /// The phone's upload queue (from the native side's status) and how far the server has got with this device's audio.
@@ -118,7 +119,7 @@ class _UploadPageState extends State<UploadPage> {
             color: cs.errorContainer,
             child: ListTile(
                 leading: Icon(Icons.error_outline_rounded, color: cs.onErrorContainer),
-                title: Text('${st['note']}', style: TextStyle(color: cs.onErrorContainer))),
+                title: Text(nativeText(context, st['note']), style: TextStyle(color: cs.onErrorContainer))),
           ),
         if (pending > 0 && !running && !uploading)
           Padding(

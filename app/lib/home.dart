@@ -220,7 +220,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       await Recorder.start(server: s.server, token: s.token, device: s.device, archive: s.archive, source: s.source,
           slices: await Slices.fetch(s) ?? await Slices.cached());
     } on PlatformException catch (e) {
-      setState(() => note = l.cannotStartRecording('${e.message}'));
+      setState(() => note = l.cannotStartRecording(platformText(context, e)));
     }
   }
 
@@ -344,7 +344,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// The BLE recorder as the source: nothing to start or stop, only where its audio is.
   Widget _bleBody(ColorScheme cs) {
     final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context);
-    final link = '${s['link'] ?? l.starting}';
+    final link = s['link'] == null ? l.starting : nativeText(context, s['link']);
     final syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0, syncLive = (s['syncLive'] as num?) ?? 0;
     final (IconData icon, Color color) = syncing
         ? (Icons.sync_rounded, cs.tertiary)
@@ -374,7 +374,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
           ],
           if (detail.isNotEmpty) Text(detail, style: small),
-          if (s['note'] != null) Text('${s['note']}', style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
+          if (s['note'] != null) Text(nativeText(context, s['note']), style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
           if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
         ]),
       ),
@@ -382,8 +382,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ]);
   }
 
-  void _pauseNote(String? error) {
-    if (error != null) setState(() => note = error);
+  void _pauseNote(PlatformException? e) {
+    if (e != null && mounted) setState(() => note = platformText(context, e));
   }
 
   /// This phone's microphone as the source: started and stopped here.
@@ -396,7 +396,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       detail = l.waitingLastPieces(s['pending'] ?? 0);
     } else if (running) {
       headline = l.recordingPieceSeconds('${s['slice']}');
-      if (s['link'] != null) headline += ' · ${s['link']}';
+      if (s['link'] != null) headline += ' · ${nativeText(context, s['link'])}';
       detail = l.sentPending('${s['sent']}', '${s['pending']}');
       final hw = hwLine(l, s['hw'] as Map?);
       if (hw.isNotEmpty) detail += ' · $hw';
@@ -406,8 +406,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       if (n > 0) detail = s['uploading'] == true ? l.uploadingLeftover(n) : l.piecesPending(n);
     }
     final warn = [
-      if (s['error'] != null) l.recordingError('${s['error']}'),
-      if (s['note'] != null) '${s['note']}',  // also when stopped: iOS reports leftovers sent after a kill
+      if (s['error'] != null) l.recordingError(nativeText(context, s['error'])),
+      if (s['note'] != null) nativeText(context, s['note']),  // also when stopped: iOS reports leftovers sent after a kill
       if (running && s['interruptedAt'] != null)
         l.interruptedRecovered(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)),
     ];

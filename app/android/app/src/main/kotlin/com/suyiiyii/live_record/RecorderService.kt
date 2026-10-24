@@ -22,6 +22,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** What the app shows, said as a code and its values for the app to word in the phone's language (recorder_status.dart
+ *  nativeText): a link state, a note, a firmware update's step. */
+fun say(code: String, vararg kv: Pair<String, Any?>): Map<String, Any?> = mapOf("code" to code, *kv)
+
 /** Foreground service that owns recording and uploading, so neither needs the Flutter UI alive. Uploading does not
  *  depend on recording: after a stop (or a launch, or a kill, with pieces left) the service stays up as a dataSync
  *  service until the queue is empty, sends the end signal after the last piece and stops itself.
@@ -42,7 +46,7 @@ class RecorderService : Service() {
                 "error" to slicer?.error, "sent" to uploader?.sent, "note" to uploader?.note,
                 "pending" to q.size, "pendingBytes" to q.sumOf { it.length() }, "oldest" to q.firstOrNull()?.let(Uploader::startMs),
                 "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to link?.state,
-                "connected" to (link?.state?.startsWith("已连接") == true), "tag" to slicer?.tag, "hw" to link?.hw,  // link is text to show; this, to test
+                "connected" to (link?.state?.get("code") == "connected"), "tag" to slicer?.tag, "hw" to link?.hw,
                 "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (link != null) "ble" else "mic"), "usbNote" to link?.usbNote, "lastSync" to link?.syncNote,
                 "syncDone" to link?.syncDoneKb, "syncTotal" to link?.syncTotalKb, "syncLive" to link?.syncLiveKb, "pausedUntil" to link?.pausedUntil,
                 "listen" to link?.listening?.lines)
@@ -61,44 +65,79 @@ class RecorderService : Service() {
             try { ctx.startForegroundService(i) } catch (e: Exception) { Log.w("live-record", "relink after dfu: $e") }
         }
 
-        /** The recorder's card when it does not record to it, as main.dart cardState says it: store an errno, total_kb 0
-         *  when none mounted this boot (no card, or one not seated: -19, a mount that timed out -116). */
-        fun cardLine(store: Int?, totalKb: Long?): String? = when {
+        /** The recorder's card when it does not record to it, as recorder_status.dart cardState says it: store an errno,
+         *  total_kb 0 when none mounted this boot (no card, or one not seated: -19, a mount that timed out -116). */
+        fun cardLine(store: Int?, totalKb: Long?): Int? = when {
             store == null || store == 0 -> null
-            store == -28 -> "存储卡已满"
-            store == -16 -> "存储卡在 U 盘模式"
-            (totalKb ?: 0L) == 0L -> "没插存储卡"
-            else -> "存储卡出错"
+            store == -28 -> R.string.card_full
+            store == -16 -> R.string.card_usb
+            (totalKb ?: 0L) == 0L -> R.string.card_none
+            else -> R.string.card_error
         }
 
         const val BACKLOG_MS = 120_000L  // a piece waiting longer (the longest slice is 60 s, then its upload) is a backlog
 
+        /** A code from say() in words, as recorder_status.dart nativeText says it: the ones the notification shows (the
+         *  link's and the upload's). [str]: getString. */
+        fun said(v: Map<*, *>?, str: (Int, Array<out Any?>) -> String): String? {
+            fun s(id: Int, vararg a: Any?) = str(id, a)
+            return when (v?.get("code") ?: return null) {
+                "scanning" -> v["name"]?.let { s(R.string.link_scanning_name, it) } ?: s(R.string.link_scanning)
+                "bluetoothOff" -> s(R.string.link_bluetooth_off)
+                "unbound" -> s(R.string.link_unbound)
+                "kicked" -> s(R.string.link_kicked)
+                "elsewhere" -> s(R.string.link_elsewhere, v["name"])
+                "bluetoothNotOn" -> s(R.string.link_bluetooth_not_on, v["s"])
+                "scanFailed" -> s(R.string.link_scan_failed, v["err"], v["s"])
+                "connectFailed" -> s(R.string.link_connect_failed, v["s"])
+                "away" -> (v["lastSeen"] as Long?)?.let { s(R.string.link_away_since, SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))) }
+                    ?: s(R.string.link_away)
+                "connecting" -> s(R.string.link_connecting)
+                "mtu" -> s(R.string.link_mtu)
+                "pairing" -> s(R.string.link_pairing)
+                "pairingFailed" -> s(R.string.link_pairing_failed)
+                "services" -> s(R.string.link_services)
+                "clock" -> s(R.string.link_clock)
+                "status" -> s(R.string.link_status)
+                "forgetOthers" -> s(R.string.link_forget_others)
+                "joining" -> s(R.string.link_joining)
+                "connected" -> s(R.string.link_connected)
+                "linkError" -> s(R.string.link_error, v["detail"])
+                "rejected" -> s(R.string.note_rejected)
+                "uploadFailed" -> s(R.string.note_upload_failed, v["detail"])
+                "endFailed" -> s(R.string.note_end_failed, v["detail"])
+                "archiveFailed" -> s(R.string.note_archive_failed, v["detail"])
+                else -> "${v["code"]}"
+            }
+        }
+
         /** The notification for a status(): title and text, as the app's status sheet puts it (home.dart _bleBody). The BLE
-         *  recorder's battery only while connected: the last read stays in hw after the link is gone. */
-        fun notice(s: Map<String, Any?>, now: Long = System.currentTimeMillis()): Pair<String, String> {
-            val note = s["note"] as String?
-            if (s["running"] != true) return "alldayrec 正在上传 · 剩 ${s["pending"]} 块" to (note ?: "")
+         *  recorder's battery only while connected: the last read stays in hw after the link is gone. [str]: getString. */
+        fun notice(s: Map<String, Any?>, now: Long = System.currentTimeMillis(), str: (Int, Array<out Any?>) -> String): Pair<String, String> {
+            fun t(id: Int, vararg a: Any?) = str(id, a)
+            val note = said(s["note"] as Map<*, *>?, str)
+            if (s["running"] != true) return t(R.string.notice_uploading, s["pending"]) to (note ?: "")
             val total = s["syncTotal"] as Long? ?: 0L
             val title = when {
-                s["source"] != "ble" -> "alldayrec 正在录音"
+                s["source"] != "ble" -> t(R.string.notice_recording)
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
-                total > 0 -> if ((s["link"] as String?).orEmpty().startsWith("已连接"))
-                    "实时上传 · 后台补传 %.1f / %.1f MB".format((s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
-                else "接上实时前先取正在录的这段 · 还差 %.1f MB".format((s["syncLive"] as Long? ?: 0L) / 1024.0)
-                else -> s["link"] as String? ?: "正在启动"
+                total > 0 -> if (s["connected"] == true)
+                    t(R.string.notice_live_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
+                else t(R.string.notice_fetching_current, (s["syncLive"] as Long? ?: 0L) / 1024.0)
+                else -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
             }
-            val hw = (s["hw"] as Map<*, *>?).takeIf { title.startsWith("已连接") || total > 0 }
+            val hw = (s["hw"] as Map<*, *>?).takeIf { s["connected"] == true || total > 0 }
             val paused = (s["pausedUntil"] as Long? ?: 0L) - now
             val oldest = s["oldest"] as Long?
             return title to listOfNotNull(
-                (s["error"] as String?)?.let { "录音错误 $it" },
+                (s["error"] as String?)?.let { t(R.string.notice_recording_error, it) },
                 note,
-                if (paused > 0) "已暂停，还剩 ${(paused + 59_999) / 60_000} 分钟" else null,
-                hw?.get("battery")?.let { "电量 $it%" },
-                mapOf("battery" to "用电池", "charging" to "充电中", "full" to "已充满")[hw?.get("charge")],
-                cardLine((hw?.get("store") as Number?)?.toInt(), (hw?.get("total_kb") as Number?)?.toLong()),
-                if (oldest != null && now - oldest > BACKLOG_MS) "待传 ${s["pending"]} 块" else null,
-                (s["interruptedAt"] as Long?)?.let { "曾在 ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))} 被系统中断，已自动恢复" },
+                if (paused > 0) t(R.string.notice_paused, (paused + 59_999) / 60_000) else null,
+                hw?.get("battery")?.let { t(R.string.notice_battery, it) },
+                mapOf("battery" to R.string.on_battery, "charging" to R.string.charging, "full" to R.string.charged)[hw?.get("charge")]?.let { t(it) },
+                cardLine((hw?.get("store") as Number?)?.toInt(), (hw?.get("total_kb") as Number?)?.toLong())?.let { t(it) },
+                if (oldest != null && now - oldest > BACKLOG_MS) t(R.string.notice_pending, s["pending"]) else null,
+                (s["interruptedAt"] as Long?)?.let { t(R.string.notice_interrupted, SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))) },
             ).joinToString(" · ")
         }
     }
@@ -215,7 +254,7 @@ class RecorderService : Service() {
     private var shown: Pair<String, String>? = null  // what the notification says; null: not in the foreground
 
     private fun foreground(type: Int) = synchronized(this) {
-        shown = notice(status(File(filesDir, "chunks"))).also { startForeground(1, notification(it), type) }
+        shown = notice(status(File(filesDir, "chunks"))) { id, a -> getString(id, *a) }.also { startForeground(1, notification(it), type) }
     }
 
     /** The notification follows the status (link, catch-up, upload errors, battery): checked every 2 s, posted only
@@ -223,7 +262,7 @@ class RecorderService : Service() {
      *  it was set once at the start and never again). Never out of the foreground: a post after stopForeground
      *  would leave a stray notification. */
     private fun refresh() = synchronized(this) {
-        val n = notice(status(File(filesDir, "chunks")))
+        val n = notice(status(File(filesDir, "chunks"))) { id, a -> getString(id, *a) }
         if (shown != null && n != shown) { shown = n; getSystemService(NotificationManager::class.java).notify(1, notification(n)) }
     }
 
@@ -257,7 +296,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                private val archive: File?) : Thread() {
     @Volatile var running = true
     @Volatile var sent = 0
-    @Volatile var note: String? = null
+    @Volatile var note: Map<String, Any?>? = null
     @Volatile private var fails = 0      // in a row, and since when (wall ms)
     private var failedAt = 0L
     @Volatile private var okAt = 0L      // the last upload the server took (wall ms; 0: none since the start)
@@ -322,7 +361,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                         DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_rejected", "服务端无法解码 ${b.size} 块" +
                             "（起于 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startMs(b[0])))}，${bytes / 1024} KB），已丢弃",
                             "error", mapOf("start" to startMs(b[0]), "pieces" to b.size, "bytes" to bytes))
-                        b.forEach { it.delete() }; note = "服务端无法解码一块，已丢弃"
+                        b.forEach { it.delete() }; note = say("rejected")
                     }
                     else -> throw Exception("HTTP $code")
                 }
@@ -332,7 +371,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                     failedAt = System.currentTimeMillis()
                     DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_fail", "上传失败：${e.message}", "error")
                 }
-                note = "上传失败 ${e.message}"
+                note = say("uploadFailed", "detail" to e.message)
                 sleep(5000L * minOf(fails, 6))
             }
         }
@@ -353,13 +392,13 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     }
 
     fun end(atMs: Long, bleName: String? = null) {
-        try { post("$server/api/chunks/end?device=${enc(bleName ?: device)}&t=$atMs", ByteArray(0), null) } catch (e: Exception) { note = "结束信号失败 ${e.message}" }
+        try { post("$server/api/chunks/end?device=${enc(bleName ?: device)}&t=$atMs", ByteArray(0), null) } catch (e: Exception) { note = say("endFailed", "detail" to e.message) }
     }
 
     private fun keep(f: File) {
         if (archive == null) { f.delete(); return }
         val day = File(archive, SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(startMs(f)))).apply { mkdirs() }
-        try { f.copyTo(File(day, f.name), overwrite = true) } catch (e: Exception) { note = "归档失败 ${e.message}" }  // internal -> external: no rename
+        try { f.copyTo(File(day, f.name), overwrite = true) } catch (e: Exception) { note = say("archiveFailed", "detail" to e.message) }  // internal -> external: no rename
         f.delete()
     }
 

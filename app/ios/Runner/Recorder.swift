@@ -77,7 +77,7 @@ enum Recorder {
         for k in ["bleKicked", "bleModel", "bleFw"] { defaults.removeObject(forKey: k) }
         result(nil)
       case "usbDisk":  // the connected board's card to the computer's USB, or back
-        guard let l = link else { return result(FlutterError(code: "none", message: "先开始录音，连上录音设备", details: nil)) }
+        guard let l = link else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
         l.usbDisk(a["on"] as? Bool ?? false)
         result(nil)
       case "unbind":  // the recorder forgets every phone (when connected); this iPhone's keys stay (no API: Settings)
@@ -92,27 +92,27 @@ enum Recorder {
         }
       case "listen":  // the recorder's sound played on this phone as it comes (Listen.swift), or not; off when the app leaves the front
         let on = a["on"] as? Bool ?? false
-        guard let l = link else { return result(on ? FlutterError(code: "none", message: "先开始录音，连上录音设备", details: nil) : nil) }
-        do { try l.listen(on); result(nil) } catch { result(FlutterError(code: "listen", message: "没法播放：\(error.localizedDescription)", details: nil)) }
+        guard let l = link else { return result(on ? FlutterError(code: "notStarted", message: nil, details: nil) : nil) }
+        do { try l.listen(on); result(nil) } catch { result(FlutterError(code: "listen", message: error.localizedDescription, details: nil)) }
       case "pause":  // the connected recorder keeps nothing for s seconds (0: records again)
         do {
           guard let l = link else { throw CocoaError(.featureUnsupported) }
           try l.pause(a["s"] as? Int ?? 0)
           result(nil)
-        } catch { result(FlutterError(code: "none", message: "录音设备没连上", details: nil)) }
+        } catch { result(FlutterError(code: "notConnected", message: nil, details: nil)) }
       case "dfu":  // a package from the server for `model`: only onto a recorder that said it is that model (DfuRun.swift)
         let zip = (a["zip"] as? FlutterStandardTypedData)?.data ?? Data(), id = defaults.string(forKey: "bleId")
         if let no = Dfu.refusal(want: a["model"] as? String, model: defaults.string(forKey: "bleModel"), id: id,
                                 linked: slicer != nil || link != nil, sha256: Dfu.sha256(zip), expected: a["sha256"] as? String,
                                 version: a["version"] as? String, running: defaults.string(forKey: "bleFw")) {
-          return result(FlutterError(code: no.0, message: no.1, details: nil))
+          return result(FlutterError(code: no["code"] as! String, message: nil, details: no))
         }
         Dfu.log = DfuLog(device: Ble.tag(defaults.string(forKey: "bleName") ?? id!), from: defaults.string(forKey: "bleFw"),
                          to: a["version"] as? String ?? "?", bytes: zip.count, sha256: a["sha256"] as? String ?? "", battery: a["battery"] as? Int)
         do { try Dfu.start(UUID(uuidString: id!)!, zip); result(nil) }  // refusal() checked the identifier
         catch {
           Dfu.log?.fail(nil, "固件包打不开：\(error)")
-          result(FlutterError(code: "zip", message: "固件包打不开：\(error)", details: nil))
+          result(FlutterError(code: "zip", message: "\(error)", details: nil))
         }
       default: result(FlutterMethodNotImplemented)
       }
@@ -128,7 +128,7 @@ enum Recorder {
             "pending": q.count, "pendingBytes": bytes, "oldest": q.first.flatMap { Uploader.piece($0)?.start } ?? NSNull(),
             "note": uploader?.note ?? NSNull(), "interruptedAt": interruptedAt ?? NSNull(),
             "source": (slicer != nil ? "mic" : l != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? NSNull(),
-            "connected": l?.state.hasPrefix("已连接") ?? false, "tag": l?.tag ?? NSNull(),  // link is text to show; this, to test
+            "connected": l?.state["code"] as? String == "connected", "tag": l?.tag ?? NSNull(),
             "hw": l?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
             "syncDone": l?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
             "dfu": Dfu.state ?? NSNull(), "dfuBusy": Dfu.busy, "listen": l?.listening?.lines ?? NSNull()]
@@ -270,7 +270,7 @@ enum Recorder {
     defaults.set(false, forKey: "active")
     upload()
     if killed {
-      uploader?.note = "上次录音被系统终止，未传的 \(Uploader.pending(dir)) 块正在补传，需要手动重新开始"
+      uploader?.note = ["code": "killed", "count": Uploader.pending(dir)]
       DeviceLog.app(DeviceLog.mine(), "killed", "上次用手机麦克风录音时被系统终止，没有自动恢复", level: "warn")
       if last > 0 { defaults.set(last, forKey: "endAt") }  // close the conversation the kill left open
     }
@@ -349,7 +349,7 @@ enum Recorder {
 final class Slicer {
   var foreground = true
   private(set) var files = 0
-  private(set) var error: String?
+  private(set) var error: Any?  // a code the app words (recorder_status.dart), or the system's own message
   private let dir: URL
   private var fgS: Int, bgS: Int  // set on q
   private var engine = AVAudioEngine()  // new after a media services reset
@@ -384,7 +384,7 @@ final class Slicer {
       },
       nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] n in
         guard let self, n.object as AnyObject === self.engine, self.gapFrom == nil else { return }
-        do { try self.restart() } catch { self.pause(); self.failed("切换输入后恢复失败", error) }
+        do { try self.restart() } catch { self.pause(); self.failed("routeFailed", error) }
       },
     ]
   }
@@ -412,7 +412,7 @@ final class Slicer {
   /// The system took the microphone: the piece being written ends here and the gap starts.
   private func pause() {
     if gapFrom == nil { gapFrom = Recorder.now() }
-    error = "\(Recorder.clock(gapFrom!)) 起被系统中断，等待恢复"
+    error = ["code": "interrupted", "at": gapFrom!]
     q.sync { finishRun() }
   }
 
@@ -427,11 +427,11 @@ final class Slicer {
       gapFrom = nil
       error = nil
       Recorder.resumed(after: from)
-    } catch { failed("中断后恢复失败", error) }
+    } catch { failed("resumeFailed", error) }
   }
 
-  private func failed(_ what: String, _ e: Error) {
-    error = "\(Recorder.clock(gapFrom ?? Recorder.now())) 起没有录音：\(what)（\(e.localizedDescription)），回到前台时重试"
+  private func failed(_ code: String, _ e: Error) {
+    error = ["code": code, "at": gapFrom ?? Recorder.now(), "detail": e.localizedDescription]
     Recorder.gap(from: gapFrom ?? Recorder.now())
   }
 
@@ -489,7 +489,7 @@ final class Slicer {
 final class Uploader: Thread {
   var server = "", token = "", device = "phone", archive: URL?
   private(set) var sent = 0
-  var note: String?
+  var note: [String: Any]?  // a code the app words (recorder_status.dart)
   private let dir: URL
   @Shared private var fails = 0      // in a row, and since when (unix ms)
   private var failedAt: Int64 = 0
@@ -558,7 +558,7 @@ final class Uploader: Thread {
         let bytes = b.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
         DeviceLog.app(p.device ?? device, "upload_rejected", "服务端无法解码 \(b.count) 块（起于 \(Recorder.clock(p.start))，\(bytes / 1024) KB），已丢弃",
                       level: "error", fields: ["start": p.start, "pieces": b.count, "bytes": bytes])
-        b.forEach { try? FileManager.default.removeItem(at: $0) }; note = "服务端无法解码一块，已丢弃"
+        b.forEach { try? FileManager.default.removeItem(at: $0) }; note = ["code": "rejected"]
       default: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
       }
     } catch {
@@ -567,13 +567,13 @@ final class Uploader: Thread {
         failedAt = Recorder.now()
         DeviceLog.app(p.device ?? device, "upload_fail", "上传失败：\(DeviceLog.why(error, server: server))", level: "error")
       }
-      note = "上传失败 \(error.localizedDescription)"
+      note = ["code": "uploadFailed", "detail": error.localizedDescription]
       Thread.sleep(forTimeInterval: 5 * Double(min(fails, 6)))
     }
   }
 
   func end(_ atMs: Int64, device ble: String? = nil) {
-    do { _ = try post("\(server)/api/chunks/end?device=\(enc(ble ?? device))&t=\(atMs)", Data(), nil) } catch { note = "结束信号失败 \(error.localizedDescription)" }
+    do { _ = try post("\(server)/api/chunks/end?device=\(enc(ble ?? device))&t=\(atMs)", Data(), nil) } catch { note = ["code": "endFailed", "detail": error.localizedDescription] }
   }
 
   /// What the phone last read from its BLE recorder, for the server's progress page, with the phone's own state and this
@@ -604,7 +604,7 @@ final class Uploader: Thread {
       try fm.createDirectory(at: day, withIntermediateDirectories: true)
       try? fm.removeItem(at: day.appendingPathComponent(f.lastPathComponent))
       try fm.moveItem(at: f, to: day.appendingPathComponent(f.lastPathComponent))
-    } catch { note = "归档失败 \(error.localizedDescription)"; try? fm.removeItem(at: f) }
+    } catch { note = ["code": "archiveFailed", "detail": error.localizedDescription]; try? fm.removeItem(at: f) }
   }
 
   private func post(_ url: String, _ body: Data, _ type: String?) throws -> Int {

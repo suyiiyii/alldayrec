@@ -13,7 +13,7 @@ import java.io.File
  *  the recorder page downloaded from the server (firmware.dart, server/firmware.py). Only while not recording: the
  *  recorder takes one connection at a time. */
 object Dfu {
-    @Volatile var state: String? = null
+    @Volatile var state: Map<String, Any?>? = null  // a code (say()) the recorder page words
     @Volatile var busy = false  // from start until done, aborted or failed: the app keeps the recorder link down
     @Volatile var log: DfuLog? = null  // the update under way, or the last one until its recorder is back
 
@@ -24,18 +24,18 @@ object Dfu {
         l.back(fw)
     }
 
-    /** Why the package may not go onto the bound recorder (error code, message), as Dfu.refusal in Dfu.swift: the model
+    /** Why the package may not go onto the bound recorder (a code with its values, the method channel's error), as Dfu.refusal in Dfu.swift: the model
      *  the recorder said it is must be the package's, its revision as last read ([running]) not the package's [version]
      *  (the same build sent again, a page that offered it from a stale revision), and the bytes must be the ones
      *  the server listed ([expected]). Null: go on. */
     fun refusal(want: String?, model: String?, address: String?, linked: Boolean, sha256: String, expected: String?,
-                version: String?, running: String?): Pair<String, String>? = when {
-        busy -> "busy" to "正在升级"
-        linked -> "busy" to "录音设备的连接还没断开，稍后再试"
-        address == null || model == null -> "none" to "还没连上过录音设备，不知道它的型号"
-        want != model -> "model" to "这个固件是 $want 的，录音设备是 $model，不能刷"
-        version != null && version == running -> "same" to "录音设备已经是 $version，不用再升级"
-        sha256 != expected -> "sha256" to "固件下载不完整，再试一次"
+                version: String?, running: String?): Map<String, Any?>? = when {
+        busy -> say("updating")
+        linked -> say("linked")
+        address == null || model == null -> say("noModel")
+        want != model -> say("model", "want" to (want ?: "?"), "model" to model)
+        version != null && version == running -> say("same", "version" to version)
+        sha256 != expected -> say("sha256")
         else -> null
     }
 
@@ -43,30 +43,30 @@ object Dfu {
         DfuServiceInitiator.createDfuNotificationChannel(ctx)
         DfuServiceListenerHelper.registerProgressListener(ctx, object : DfuProgressListenerAdapter() {
             var asked = false  // the recorder was told to reboot into its bootloader: the next start is there
-            override fun onDeviceConnecting(a: String) { state = "正在连接录音设备" }
-            override fun onEnablingDfuMode(a: String) { state = "录音设备重启进入升级模式"; asked = true }
-            override fun onDfuProcessStarting(a: String) { state = "开始升级"; if (asked) log?.reached("boot") }
+            override fun onDeviceConnecting(a: String) { state = say("connecting") }
+            override fun onEnablingDfuMode(a: String) { state = say("dfuRebooting"); asked = true }
+            override fun onDfuProcessStarting(a: String) { state = say("dfuStarting"); if (asked) log?.reached("boot") }
             override fun onDfuProcessStarted(a: String) { log?.reached("send") }
             override fun onProgressChanged(a: String, percent: Int, speed: Float, avgSpeed: Float, part: Int, parts: Int) {
-                state = "升级中 $percent% · ${"%.1f".format(avgSpeed)} KB/s"
+                state = say("dfuProgress", "pct" to percent, "kbps" to Math.round(avgSpeed * 10) / 10.0)
                 log?.progress(percent, avgSpeed.toDouble())
             }
             override fun onDfuCompleted(a: String) {
-                log?.done(); state = "升级完成，录音设备已重启"; busy = false
+                log?.done(); state = say("dfuDone"); busy = false
                 // what the page shows until the link reads it
                 log?.let { ctx.getSharedPreferences("recorder", Context.MODE_PRIVATE).edit().putString("bleFw", it.to).apply() }
                 ended()
             }
-            override fun onDfuAborted(a: String) { log?.fail(null, "升级已取消"); state = "升级已取消"; busy = false; ended() }
+            override fun onDfuAborted(a: String) { log?.fail(null, "升级已取消"); state = say("dfuAborted"); busy = false; ended() }
             override fun onError(a: String, error: Int, errorType: Int, message: String?) {
                 log?.fail(error, message ?: "")
-                state = "升级失败：$message（录音设备还在就再试一次，不见了就插 USB 用 lr.sh flash 刷）"; busy = false
+                state = say("dfuFailed", "detail" to message); busy = false
                 android.util.Log.w("live-record", "dfu error $error type $errorType: $message")
                 ended()
             }
             fun ended() { DfuServiceListenerHelper.unregisterProgressListener(ctx, this); RecorderService.relink(ctx) }
         })
-        state = "准备升级"; busy = true
+        state = say("dfuPreparing"); busy = true
         android.util.Log.i("live-record", "dfu ${zip.name} to $address")
         DfuServiceInitiator(address).setDeviceName(name).setKeepBond(true)
             .setForceDfu(false)

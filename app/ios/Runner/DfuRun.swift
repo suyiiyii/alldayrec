@@ -19,22 +19,23 @@ extension Dfu {
   /// Updates the recorder with peripheral identifier `id`; throws when `zip` is no DFU package.
   static func start(_ id: UUID, _ zip: Data) throws {
     let fw = try DFUFirmware(zipFile: zip)
-    state = "准备升级"
+    state = ["code": "dfuPreparing"]
     busy = true
     NSLog("live-record dfu %d B to %@", zip.count, id.uuidString)
     run = DfuRun(id, fw)
   }
 
-  fileprivate static func end(_ s: String) {
+  fileprivate static func end(_ s: [String: Any]) {
     state = s
     busy = false
     run = nil
     Recorder.relink()
   }
 
-  fileprivate static func failed(_ why: String, code: Int? = nil) {
-    log?.fail(code, why)
-    end("升级失败：\(why)（录音设备还在就再试一次，不见了就插 USB 用 lr.sh flash 刷）")
+  /// `why`: the app's own reason (a code the page words, DfuRun.said its device log text), nil: the library's `text`.
+  fileprivate static func failed(_ why: String?, _ text: String, detail: String? = nil, code: Int? = nil) {
+    log?.fail(code, text)
+    end(["code": "dfuFailed", "why": why ?? NSNull(), "detail": detail ?? NSNull()])
   }
 }
 
@@ -56,6 +57,11 @@ private final class DfuRun: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     central = CBCentralManager(delegate: self, queue: nil)
   }
 
+  /// The device log's words for the app's own reasons (DfuLog); the page words the codes.
+  static let said = ["dfuNoBluetooth": "蓝牙不可用", "dfuUnknown": "这台 iPhone 不认识录音设备", "dfuNoConnect": "连不上录音设备",
+                     "dfuNoService": "录音设备上没有升级服务", "dfuNoReboot": "录音设备没有重启", "dfuRefused": "录音设备拒绝进入升级模式",
+                     "dfuDropped": "录音设备断开了", "dfuNoBootloader": "录音设备没有进入升级模式"]
+
   /// Fails with `why` unless the next step comes within `s` seconds (a connect request on iOS never times out).
   private func within(_ s: Double, _ why: String) {
     deadline?.cancel()
@@ -64,55 +70,55 @@ private final class DfuRun: NSObject, CBCentralManagerDelegate, CBPeripheralDele
     DispatchQueue.main.asyncAfter(deadline: .now() + s, execute: w)
   }
 
-  private func fail(_ why: String) {
+  private func fail(_ why: String, _ detail: String? = nil) {
     guard controller == nil else { return }  // the library's now: it reports its own end
-    NSLog("live-record dfu: %@", why)
+    NSLog("live-record dfu: %@ %@", why, detail ?? "")
     deadline?.cancel()
     if let c = central {
       c.delegate = nil
       if c.state == .poweredOn { c.stopScan(); if let p = recorder { c.cancelPeripheralConnection(p) } }
     }
-    Dfu.failed(why)
+    Dfu.failed(why, DfuRun.said[why]! + (detail.map { "（\($0)）" } ?? ""), detail: detail)
   }
 
   func centralManagerDidUpdateState(_ c: CBCentralManager) {
-    guard c.state == .poweredOn else { if c.state != .unknown { fail("蓝牙不可用") }; return }
-    guard let p = c.retrievePeripherals(withIdentifiers: [id]).first else { return fail("这台 iPhone 不认识录音设备") }
+    guard c.state == .poweredOn else { if c.state != .unknown { fail("dfuNoBluetooth") }; return }
+    guard let p = c.retrievePeripherals(withIdentifiers: [id]).first else { return fail("dfuUnknown") }
     recorder = p
     p.delegate = self
-    Dfu.state = "正在连接录音设备"
+    Dfu.state = ["code": "connecting"]
     c.connect(p)
-    within(20, "连不上录音设备")
+    within(20, "dfuNoConnect")
   }
 
-  func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) { fail("连不上录音设备") }
+  func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) { fail("dfuNoConnect") }
 
   func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
-    Dfu.state = "录音设备重启进入升级模式"
+    Dfu.state = ["code": "dfuRebooting"]
     p.discoverServices([DfuRun.service])
   }
 
   func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
-    guard let s = p.services?.first(where: { $0.uuid == DfuRun.service }) else { return fail("录音设备上没有升级服务") }
+    guard let s = p.services?.first(where: { $0.uuid == DfuRun.service }) else { return fail("dfuNoService") }
     p.discoverCharacteristics([DfuRun.cp], for: s)
   }
 
   func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
-    guard let ch = s.characteristics?.first(where: { $0.uuid == DfuRun.cp }) else { return fail("录音设备上没有升级服务") }
+    guard let ch = s.characteristics?.first(where: { $0.uuid == DfuRun.cp }) else { return fail("dfuNoService") }
     wrote = true
     p.writeValue(Data([0x06]), for: ch, type: .withResponse)  // it resets before it answers
-    within(15, "录音设备没有重启")  // iOS sees the link gone at its supervision timeout (up to 6 s)
+    within(15, "dfuNoReboot")  // iOS sees the link gone at its supervision timeout (up to 6 s)
   }
 
   func peripheral(_ p: CBPeripheral, didWriteValueFor ch: CBCharacteristic, error: Error?) {
     NSLog("live-record dfu: 0x06 written: %@", error.map { "\($0)" } ?? "ok")
-    if let e = error as? CBATTError { fail("录音设备拒绝进入升级模式（\(e.localizedDescription)）") }  // it answered: no reset
+    if let e = error as? CBATTError { fail("dfuRefused", e.localizedDescription) }  // it answered: no reset
   }
 
   func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
-    guard wrote else { return fail("录音设备断开了") }
+    guard wrote else { return fail("dfuDropped") }
     c.scanForPeripherals(withServices: [DfuRun.service])
-    within(30, "录音设备没有进入升级模式")
+    within(30, "dfuNoBootloader")
   }
 
   func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData a: [String: Any], rssi: NSNumber) {
@@ -132,23 +138,23 @@ private final class DfuRun: NSObject, CBCentralManagerDelegate, CBPeripheralDele
 
   func dfuStateDidChange(to s: DFUState) {
     switch s {
-    case .starting: Dfu.state = "开始升级"; Dfu.log?.reached("boot")
+    case .starting: Dfu.state = ["code": "dfuStarting"]; Dfu.log?.reached("boot")
     case .uploading: Dfu.log?.reached("send")
     case .completed:  // no .aborted: nothing here aborts (Android's notification can)
       Dfu.log?.done()
       if let to = Dfu.log?.to { Recorder.defaults.set(to, forKey: "bleFw") }  // what the page shows until the link reads it
-      Dfu.end("升级完成，录音设备已重启")
+      Dfu.end(["code": "dfuDone"])
     default: break
     }
   }
 
   func dfuError(_ e: DFUError, didOccurWithMessage m: String) {
     NSLog("live-record dfu error %d: %@", e.rawValue, m)
-    Dfu.failed(m, code: e.rawValue)
+    Dfu.failed(nil, m, detail: m, code: e.rawValue)
   }
 
   func dfuProgressDidChange(for part: Int, outOf totalParts: Int, to progress: Int, currentSpeedBytesPerSecond: Double, avgSpeedBytesPerSecond: Double) {
-    Dfu.state = String(format: "升级中 %d%% · %.1f KB/s", progress, avgSpeedBytesPerSecond / 1000)  // Android's B/ms
+    Dfu.state = ["code": "dfuProgress", "pct": progress, "kbps": (avgSpeedBytesPerSecond / 100).rounded() / 10]  // KB/s, Android's B/ms
     Dfu.log?.progress(progress, kbps: avgSpeedBytesPerSecond / 1000)
   }
 

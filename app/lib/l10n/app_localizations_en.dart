@@ -823,4 +823,263 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get pause1Hour => 'Pause 1 hour';
+
+  @override
+  String get linkScanning => 'Looking for the recorder';
+
+  @override
+  String linkScanningName(Object name) {
+    return 'Looking for $name';
+  }
+
+  @override
+  String get linkBluetoothOff => 'Bluetooth is off';
+
+  @override
+  String get linkNoPermission =>
+      'No Bluetooth permission: allow it in Settings › alldayrec';
+
+  @override
+  String get linkUnbound => 'No recorder bound';
+
+  @override
+  String get linkKicked =>
+      'Bound to another phone: add it again on the Recorder page';
+
+  @override
+  String linkElsewhere(Object name) {
+    return '$name is connected to another phone';
+  }
+
+  @override
+  String linkBluetoothNotOn(Object s) {
+    return 'Bluetooth is not on, retrying in $s s';
+  }
+
+  @override
+  String linkScanFailed(Object err, Object s) {
+    return 'Scan failed ($err), retrying in $s s';
+  }
+
+  @override
+  String linkConnectFailed(Object s) {
+    return 'Could not connect, retrying in $s s';
+  }
+
+  @override
+  String get linkAway =>
+      'The recorder is away and records offline; it catches up when back';
+
+  @override
+  String linkAwaySince(Object time) {
+    return 'The recorder is away and records offline (last connected $time); it catches up when back';
+  }
+
+  @override
+  String get linkConnecting => 'Connecting to the recorder';
+
+  @override
+  String linkStalePairing(Object name) {
+    return 'This iPhone still has an old pairing with $name: go to Settings › Bluetooth › $name › Forget This Device, then come back (retrying in 30 s)';
+  }
+
+  @override
+  String get linkMtu => 'Connected, negotiating the packet size';
+
+  @override
+  String get linkPairing => 'Pairing';
+
+  @override
+  String get linkPairingDialog => 'Pairing: tap Pair in the dialog';
+
+  @override
+  String get linkEncrypting => 'Setting up an encrypted connection';
+
+  @override
+  String get linkPairingFailed => 'Pairing did not finish, retrying in 30 s';
+
+  @override
+  String get linkServices => 'Reading the recorder\'s services';
+
+  @override
+  String get linkClock => 'Setting the recorder\'s clock';
+
+  @override
+  String get linkStatus => 'Reading the recorder\'s status';
+
+  @override
+  String get linkForgetOthers => 'Making the recorder forget other phones';
+
+  @override
+  String get linkJoining => 'Going live';
+
+  @override
+  String get linkConnected => 'Connected · live upload';
+
+  @override
+  String linkError(Object detail) {
+    return 'Recorder error: $detail';
+  }
+
+  @override
+  String lastSynced(Object time, Object kb) {
+    return 'Fetched $kb KB of the recorder\'s audio at $time';
+  }
+
+  @override
+  String get usbSwitchingOn => 'Switching to USB disk mode';
+
+  @override
+  String get usbSwitchingOff => 'Switching back to recording';
+
+  @override
+  String get usbNoComputer =>
+      'The recorder is not plugged into a computer\'s USB';
+
+  @override
+  String usbFailed(Object err) {
+    return 'Switch failed ($err)';
+  }
+
+  @override
+  String get usbNotYetOn =>
+      'Not in USB disk mode yet (the recorder did not answer in time, a slow card takes longer; the switch follows the recorder)';
+
+  @override
+  String get usbStillOn =>
+      'Still in USB disk mode (the recorder did not answer in time, a slow card takes longer; the switch follows the recorder)';
+
+  @override
+  String get usbOn =>
+      'USB disk mode: an OMI disk shows up on the computer (about 20 s); eject it there before switching back';
+
+  @override
+  String get noteRejected => 'The server could not decode a piece: dropped';
+
+  @override
+  String noteUploadFailed(Object detail) {
+    return 'Upload failed: $detail';
+  }
+
+  @override
+  String noteEndFailed(Object detail) {
+    return 'End signal failed: $detail';
+  }
+
+  @override
+  String noteArchiveFailed(Object detail) {
+    return 'Archiving failed: $detail';
+  }
+
+  @override
+  String noteKilled(Object count) {
+    return 'The system ended the last recording: uploading the $count pieces left; start again by hand';
+  }
+
+  @override
+  String micInterrupted(Object time) {
+    return 'Interrupted by the system since $time, waiting to recover';
+  }
+
+  @override
+  String micRouteFailed(Object time, Object detail) {
+    return 'Not recording since $time: could not resume after the input changed ($detail); retrying in the foreground';
+  }
+
+  @override
+  String micResumeFailed(Object time, Object detail) {
+    return 'Not recording since $time: could not resume after the interruption ($detail); retrying in the foreground';
+  }
+
+  @override
+  String get dfuPreparing => 'Preparing the update';
+
+  @override
+  String get dfuRebooting => 'The recorder restarts into update mode';
+
+  @override
+  String get dfuStarting => 'Starting the update';
+
+  @override
+  String dfuProgress(Object pct, Object kbps) {
+    return 'Updating $pct% · $kbps KB/s';
+  }
+
+  @override
+  String get dfuDone => 'Update done, the recorder restarted';
+
+  @override
+  String get dfuAborted => 'Update cancelled';
+
+  @override
+  String dfuFailed(Object why) {
+    return 'Update failed: $why (recorder still there: try again; gone: plug it into USB and flash it with lr.sh flash)';
+  }
+
+  @override
+  String get dfuNoBluetooth => 'Bluetooth is unavailable';
+
+  @override
+  String get dfuUnknown => 'This iPhone does not know the recorder';
+
+  @override
+  String get dfuNoConnect => 'Cannot connect to the recorder';
+
+  @override
+  String get dfuNoService => 'The recorder has no update service';
+
+  @override
+  String get dfuNoReboot => 'The recorder did not restart';
+
+  @override
+  String dfuRefused(Object detail) {
+    return 'The recorder refused update mode ($detail)';
+  }
+
+  @override
+  String get dfuDropped => 'The recorder disconnected';
+
+  @override
+  String get dfuNoBootloader => 'The recorder did not enter update mode';
+
+  @override
+  String get errPermission => 'Allow Bluetooth, then tap Start again';
+
+  @override
+  String get errNotStarted => 'Start recording and connect the recorder first';
+
+  @override
+  String get errNotConnected => 'The recorder is not connected';
+
+  @override
+  String errListen(Object detail) {
+    return 'Cannot play: $detail';
+  }
+
+  @override
+  String get errUpdating => 'An update is under way';
+
+  @override
+  String get errLinked => 'The recorder is still connected, try again shortly';
+
+  @override
+  String get errNoModel => 'The recorder never connected: its model is unknown';
+
+  @override
+  String errModel(Object want, Object model) {
+    return 'This firmware is for $want and the recorder is $model: it cannot go on';
+  }
+
+  @override
+  String errSame(Object version) {
+    return 'The recorder already runs $version, no update needed';
+  }
+
+  @override
+  String get errSha256 => 'The firmware download is incomplete, try again';
+
+  @override
+  String errZip(Object detail) {
+    return 'Cannot open the firmware package: $detail';
+  }
 }

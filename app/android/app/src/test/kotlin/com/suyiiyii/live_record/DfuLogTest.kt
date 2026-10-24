@@ -62,15 +62,16 @@ class DfuLogTest {
         val sha = "ab".repeat(32); val running = "20261009.183242-1749146"; val version = "20261011.164128-098861b"
         fun no(want: String? = "LR-P3", model: String? = "LR-P3", address: String? = "AA:BB", linked: Boolean = false,
                sha256: String = sha, running: String? = "20261009.183242-1749146") =
-            Dfu.refusal(want, model, address, linked, sha256, sha, version, running)?.first
+            Dfu.refusal(want, model, address, linked, sha256, sha, version, running)?.get("code")
         assertEquals(null, no())  // the recorder's model, a newer version, the listed bytes: go
         assertEquals("same", no(running = version))
         assertEquals(null, no(running = null))  // a revision never read: go
         assertEquals("model", no(want = "LR-X1"))
-        assertEquals("none", no(model = null))
-        assertEquals("none", no(address = null))
+        assertEquals("noModel", no(model = null))
+        assertEquals("noModel", no(address = null))
         assertEquals("sha256", no(sha256 = "ab".repeat(31) + "ac"))
-        assertEquals("busy", no(linked = true))
+        assertEquals("linked", no(linked = true))
+        assertEquals(say("model", "want" to "LR-X1", "model" to "LR-P3"), Dfu.refusal("LR-X1", "LR-P3", "AA:BB", false, sha, sha, version, running))
         assertEquals(null, no(running = running))
     }
 }

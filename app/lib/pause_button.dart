@@ -7,7 +7,7 @@ import 'recorder.dart';
 /// Pause the connected recorder for 15 min or 1 h, or go on: a menu (status sheet) or two buttons (recorder page).
 class PauseButton extends StatelessWidget {
   final bool paused, labels;
-  final void Function(String? error) onDone;
+  final void Function(PlatformException? error) onDone;  // the caller words it (platformText)
   const PauseButton({super.key, required this.paused, required this.onDone, this.labels = false});
 
   Future<void> _pause(int s) async {
@@ -15,7 +15,7 @@ class PauseButton extends StatelessWidget {
       await Recorder.pause(s);
       onDone(null);
     } on PlatformException catch (e) {
-      onDone(e.message);
+      onDone(e);
     }
   }
 

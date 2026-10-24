@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
 import 'recorder.dart';
+import 'recorder_status.dart';
 import 'settings.dart';
 
 const _ch = MethodChannel('live_record/recorder');
@@ -128,7 +129,7 @@ class _FirmwarePageState extends State<FirmwarePage> {
       await Recorder.withoutLink(() => _ch.invokeMethod('dfu',
           {'model': m['model'], 'zip': res.bodyBytes, 'sha256': m['sha256'], 'version': m['version'], 'battery': battery}));
     } on PlatformException catch (e) {
-      note = e.message;
+      if (mounted) note = platformText(context, e);
     } catch (e) {
       note = l.downloadFailed('$e');
     }
@@ -187,7 +188,8 @@ class _FirmwarePageState extends State<FirmwarePage> {
   Widget build(BuildContext context) {
     final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
     final small = t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
-    final m = latest, fw = this.fw, wait = busy || dfuBusy, dfu = (st['dfu'] ?? r['dfu']) as String?;
+    final m = latest, fw = this.fw, wait = busy || dfuBusy, dfuState = st['dfu'] ?? r['dfu'];
+    final dfu = dfuState == null ? null : nativeText(context, dfuState);
     final canUpdate = m != null && newer(m);
     // LR-P1's bootloader (nice!nano 0.6.0) erases the firmware when the transfer starts, and a reset midway leaves it
     // in USB-only update mode: a failed Bluetooth update always ends on USB (10-05), so it is updated over USB only

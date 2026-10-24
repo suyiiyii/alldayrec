@@ -268,14 +268,14 @@ class UsbDiskTest {
     @Test fun note() {
         assertEquals(-16, Ble.store(status(-16)))
         assertEquals(-5, Ble.store(status(-5)))
-        val lent = "U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回"
+        val lent = say("usbOn")  // the app words it (U 盘模式：电脑上出现 OMI 盘…)
         assertEquals(lent, Ble.usbNote(true, 0, -16))
         assertEquals(lent, Ble.usbNote(true, null, -16))  // no answer in 15 s, yet the board reports the card lent
-        assertEquals("还没切到 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）", Ble.usbNote(true, null, 0))
+        assertEquals(say("usbNotYetOn"), Ble.usbNote(true, null, 0))
         assertEquals(null, Ble.usbNote(false, 0, 0))
         assertEquals(null, Ble.usbNote(false, null, 0))  // back, the answer late
-        assertEquals("还在 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）", Ble.usbNote(false, null, -16))
-        assertEquals("录音设备没接在电脑的 USB 上", Ble.usbNote(true, -107, 0))
-        assertEquals("切换失败 -19", Ble.usbNote(true, -19, -19))
+        assertEquals(say("usbStillOn"), Ble.usbNote(false, null, -16))
+        assertEquals(say("usbNoComputer"), Ble.usbNote(true, -107, 0))
+        assertEquals(say("usbFailed", "err" to -19), Ble.usbNote(true, -19, -19))
     }
 }

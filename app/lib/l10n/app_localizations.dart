@@ -1459,6 +1459,414 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂停 1 小时'**
   String get pause1Hour;
+
+  /// No description provided for @linkScanning.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在找录音设备'**
+  String get linkScanning;
+
+  /// No description provided for @linkScanningName.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在找 {name}'**
+  String linkScanningName(Object name);
+
+  /// No description provided for @linkBluetoothOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'蓝牙已关闭'**
+  String get linkBluetoothOff;
+
+  /// No description provided for @linkNoPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙'**
+  String get linkNoPermission;
+
+  /// No description provided for @linkUnbound.
+  ///
+  /// In zh, this message translates to:
+  /// **'未绑定录音设备'**
+  String get linkUnbound;
+
+  /// No description provided for @linkKicked.
+  ///
+  /// In zh, this message translates to:
+  /// **'已被其他手机绑定：在「录音设备」页重新添加'**
+  String get linkKicked;
+
+  /// No description provided for @linkElsewhere.
+  ///
+  /// In zh, this message translates to:
+  /// **'{name} 正连着其他手机'**
+  String linkElsewhere(Object name);
+
+  /// No description provided for @linkBluetoothNotOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'蓝牙未打开，{s} 秒后重试'**
+  String linkBluetoothNotOn(Object s);
+
+  /// No description provided for @linkScanFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'扫描失败 {err}，{s} 秒后重试'**
+  String linkScanFailed(Object err, Object s);
+
+  /// No description provided for @linkConnectFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接失败，{s} 秒后重试'**
+  String linkConnectFailed(Object s);
+
+  /// No description provided for @linkAway.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备不在附近，它在离线录音，回来后自动补传'**
+  String get linkAway;
+
+  /// No description provided for @linkAwaySince.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备不在附近，它在离线录音（最后连接 {time}），回来后自动补传'**
+  String linkAwaySince(Object time);
+
+  /// No description provided for @linkConnecting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接录音设备'**
+  String get linkConnecting;
+
+  /// No description provided for @linkStalePairing.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台 iPhone 还留着与 {name} 的旧配对：到 设置 › 蓝牙 › {name} › 忽略此设备，再回来（30 秒后自动重试）'**
+  String linkStalePairing(Object name);
+
+  /// No description provided for @linkMtu.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接，协商包长'**
+  String get linkMtu;
+
+  /// No description provided for @linkPairing.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在配对'**
+  String get linkPairing;
+
+  /// No description provided for @linkPairingDialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在配对：在弹出的对话框里点「配对」'**
+  String get linkPairingDialog;
+
+  /// No description provided for @linkEncrypting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在建立加密连接'**
+  String get linkEncrypting;
+
+  /// No description provided for @linkPairingFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对没有完成，30 秒后重试'**
+  String get linkPairingFailed;
+
+  /// No description provided for @linkServices.
+  ///
+  /// In zh, this message translates to:
+  /// **'读取设备服务'**
+  String get linkServices;
+
+  /// No description provided for @linkClock.
+  ///
+  /// In zh, this message translates to:
+  /// **'给设备对时'**
+  String get linkClock;
+
+  /// No description provided for @linkStatus.
+  ///
+  /// In zh, this message translates to:
+  /// **'读取设备状态'**
+  String get linkStatus;
+
+  /// No description provided for @linkForgetOthers.
+  ///
+  /// In zh, this message translates to:
+  /// **'让录音设备忘掉其他手机'**
+  String get linkForgetOthers;
+
+  /// No description provided for @linkJoining.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在接上实时'**
+  String get linkJoining;
+
+  /// No description provided for @linkConnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接 · 实时上传'**
+  String get linkConnected;
+
+  /// No description provided for @linkError.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备出错：{detail}'**
+  String linkError(Object detail);
+
+  /// No description provided for @lastSynced.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 补传录音设备的录音 {kb} KB'**
+  String lastSynced(Object time, Object kb);
+
+  /// No description provided for @usbSwitchingOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在切换到 U 盘模式'**
+  String get usbSwitchingOn;
+
+  /// No description provided for @usbSwitchingOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在切回录音'**
+  String get usbSwitchingOff;
+
+  /// No description provided for @usbNoComputer.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备没接在电脑的 USB 上'**
+  String get usbNoComputer;
+
+  /// No description provided for @usbFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换失败 {err}'**
+  String usbFailed(Object err);
+
+  /// No description provided for @usbNotYetOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没切到 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）'**
+  String get usbNotYetOn;
+
+  /// No description provided for @usbStillOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'还在 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）'**
+  String get usbStillOn;
+
+  /// No description provided for @usbOn.
+  ///
+  /// In zh, this message translates to:
+  /// **'U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回'**
+  String get usbOn;
+
+  /// No description provided for @noteRejected.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务端无法解码一块，已丢弃'**
+  String get noteRejected;
+
+  /// No description provided for @noteUploadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传失败 {detail}'**
+  String noteUploadFailed(Object detail);
+
+  /// No description provided for @noteEndFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'结束信号失败 {detail}'**
+  String noteEndFailed(Object detail);
+
+  /// No description provided for @noteArchiveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'归档失败 {detail}'**
+  String noteArchiveFailed(Object detail);
+
+  /// No description provided for @noteKilled.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次录音被系统终止，未传的 {count} 块正在补传，需要手动重新开始'**
+  String noteKilled(Object count);
+
+  /// No description provided for @micInterrupted.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 起被系统中断，等待恢复'**
+  String micInterrupted(Object time);
+
+  /// No description provided for @micRouteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 起没有录音：切换输入后恢复失败（{detail}），回到前台时重试'**
+  String micRouteFailed(Object time, Object detail);
+
+  /// No description provided for @micResumeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 起没有录音：中断后恢复失败（{detail}），回到前台时重试'**
+  String micResumeFailed(Object time, Object detail);
+
+  /// No description provided for @dfuPreparing.
+  ///
+  /// In zh, this message translates to:
+  /// **'准备升级'**
+  String get dfuPreparing;
+
+  /// No description provided for @dfuRebooting.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备重启进入升级模式'**
+  String get dfuRebooting;
+
+  /// No description provided for @dfuStarting.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始升级'**
+  String get dfuStarting;
+
+  /// No description provided for @dfuProgress.
+  ///
+  /// In zh, this message translates to:
+  /// **'升级中 {pct}% · {kbps} KB/s'**
+  String dfuProgress(Object pct, Object kbps);
+
+  /// No description provided for @dfuDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'升级完成，录音设备已重启'**
+  String get dfuDone;
+
+  /// No description provided for @dfuAborted.
+  ///
+  /// In zh, this message translates to:
+  /// **'升级已取消'**
+  String get dfuAborted;
+
+  /// No description provided for @dfuFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'升级失败：{why}（录音设备还在就再试一次，不见了就插 USB 用 lr.sh flash 刷）'**
+  String dfuFailed(Object why);
+
+  /// No description provided for @dfuNoBluetooth.
+  ///
+  /// In zh, this message translates to:
+  /// **'蓝牙不可用'**
+  String get dfuNoBluetooth;
+
+  /// No description provided for @dfuUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台 iPhone 不认识录音设备'**
+  String get dfuUnknown;
+
+  /// No description provided for @dfuNoConnect.
+  ///
+  /// In zh, this message translates to:
+  /// **'连不上录音设备'**
+  String get dfuNoConnect;
+
+  /// No description provided for @dfuNoService.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备上没有升级服务'**
+  String get dfuNoService;
+
+  /// No description provided for @dfuNoReboot.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备没有重启'**
+  String get dfuNoReboot;
+
+  /// No description provided for @dfuRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备拒绝进入升级模式（{detail}）'**
+  String dfuRefused(Object detail);
+
+  /// No description provided for @dfuDropped.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备断开了'**
+  String get dfuDropped;
+
+  /// No description provided for @dfuNoBootloader.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备没有进入升级模式'**
+  String get dfuNoBootloader;
+
+  /// No description provided for @errPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许蓝牙权限后再点开始'**
+  String get errPermission;
+
+  /// No description provided for @errNotStarted.
+  ///
+  /// In zh, this message translates to:
+  /// **'先开始录音，连上录音设备'**
+  String get errNotStarted;
+
+  /// No description provided for @errNotConnected.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备没连上'**
+  String get errNotConnected;
+
+  /// No description provided for @errListen.
+  ///
+  /// In zh, this message translates to:
+  /// **'没法播放：{detail}'**
+  String errListen(Object detail);
+
+  /// No description provided for @errUpdating.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在升级'**
+  String get errUpdating;
+
+  /// No description provided for @errLinked.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备的连接还没断开，稍后再试'**
+  String get errLinked;
+
+  /// No description provided for @errNoModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没连上过录音设备，不知道它的型号'**
+  String get errNoModel;
+
+  /// No description provided for @errModel.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个固件是 {want} 的，录音设备是 {model}，不能刷'**
+  String errModel(Object want, Object model);
+
+  /// No description provided for @errSame.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备已经是 {version}，不用再升级'**
+  String errSame(Object version);
+
+  /// No description provided for @errSha256.
+  ///
+  /// In zh, this message translates to:
+  /// **'固件下载不完整，再试一次'**
+  String get errSha256;
+
+  /// No description provided for @errZip.
+  ///
+  /// In zh, this message translates to:
+  /// **'固件包打不开：{detail}'**
+  String errZip(Object detail);
 }
 
 class _AppLocalizationsDelegate

@@ -1,4 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="recording_channel">录音中</string>
+    <string name="link_scanning">正在找录音设备</string>
+    <string name="link_scanning_name">正在找 %1$s</string>
+    <string name="link_bluetooth_off">蓝牙已关闭</string>
+    <string name="link_unbound">未绑定录音设备</string>
+    <string name="link_kicked">已被其他手机绑定：在「录音设备」页重新添加</string>
+    <string name="link_elsewhere">%1$s 正连着其他手机</string>
+    <string name="link_bluetooth_not_on">蓝牙未打开，%1$s 秒后重试</string>
+    <string name="link_scan_failed">扫描失败 %1$s，%2$s 秒后重试</string>
+    <string name="link_connect_failed">连接失败，%1$s 秒后重试</string>
+    <string name="link_away">录音设备不在附近，它在离线录音，回来后自动补传</string>
+    <string name="link_away_since">录音设备不在附近，它在离线录音（最后连接 %1$s），回来后自动补传</string>
+    <string name="link_connecting">正在连接录音设备</string>
+    <string name="link_mtu">已连接，协商包长</string>
+    <string name="link_pairing">正在配对</string>
+    <string name="link_pairing_failed">配对没有完成，30 秒后重试</string>
+    <string name="link_services">读取设备服务</string>
+    <string name="link_clock">给设备对时</string>
+    <string name="link_status">读取设备状态</string>
+    <string name="link_forget_others">让录音设备忘掉其他手机</string>
+    <string name="link_joining">正在接上实时</string>
+    <string name="link_connected">已连接 · 实时上传</string>
+    <string name="link_error">录音设备出错：%1$s</string>
+    <string name="note_rejected">服务端无法解码一块，已丢弃</string>
+    <string name="note_upload_failed">上传失败 %1$s</string>
+    <string name="note_end_failed">结束信号失败 %1$s</string>
+    <string name="note_archive_failed">归档失败 %1$s</string>
+    <string name="notice_uploading">alldayrec 正在上传 · 剩 %1$s 块</string>
+    <string name="notice_recording">alldayrec 正在录音</string>
+    <string name="notice_live_catching_up">实时上传 · 后台补传 %1$.1f / %2$.1f MB</string>
+    <string name="notice_fetching_current">接上实时前先取正在录的这段 · 还差 %1$.1f MB</string>
+    <string name="notice_starting">正在启动</string>
+    <string name="notice_recording_error">录音错误 %1$s</string>
+    <string name="notice_paused">已暂停，还剩 %1$s 分钟</string>
+    <string name="notice_battery">电量 %1$s%%</string>
+    <string name="notice_pending">待传 %1$s 块</string>
+    <string name="notice_interrupted">曾在 %1$s 被系统中断，已自动恢复</string>
+    <string name="on_battery">用电池</string>
+    <string name="charging">充电中</string>
+    <string name="charged">已充满</string>
+    <string name="card_full">存储卡已满</string>
+    <string name="card_usb">存储卡在 U 盘模式</string>
+    <string name="card_none">没插存储卡</string>
+    <string name="card_error">存储卡出错</string>
 </resources>

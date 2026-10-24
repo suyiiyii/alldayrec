@@ -496,5 +496,199 @@
   "resume": "继续",
   "pause15Min": "暂停 15 分钟",
   "oneHour": "1 小时",
-  "pause1Hour": "暂停 1 小时"
+  "pause1Hour": "暂停 1 小时",
+  "linkScanning": "正在找录音设备",
+  "linkScanningName": "正在找 {name}",
+  "@linkScanningName": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "linkBluetoothOff": "蓝牙已关闭",
+  "linkNoPermission": "没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙",
+  "linkUnbound": "未绑定录音设备",
+  "linkKicked": "已被其他手机绑定：在「录音设备」页重新添加",
+  "linkElsewhere": "{name} 正连着其他手机",
+  "@linkElsewhere": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "linkBluetoothNotOn": "蓝牙未打开，{s} 秒后重试",
+  "@linkBluetoothNotOn": {
+    "placeholders": {
+      "s": {}
+    }
+  },
+  "linkScanFailed": "扫描失败 {err}，{s} 秒后重试",
+  "@linkScanFailed": {
+    "placeholders": {
+      "err": {},
+      "s": {}
+    }
+  },
+  "linkConnectFailed": "连接失败，{s} 秒后重试",
+  "@linkConnectFailed": {
+    "placeholders": {
+      "s": {}
+    }
+  },
+  "linkAway": "录音设备不在附近，它在离线录音，回来后自动补传",
+  "linkAwaySince": "录音设备不在附近，它在离线录音（最后连接 {time}），回来后自动补传",
+  "@linkAwaySince": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "linkConnecting": "正在连接录音设备",
+  "linkStalePairing": "这台 iPhone 还留着与 {name} 的旧配对：到 设置 › 蓝牙 › {name} › 忽略此设备，再回来（30 秒后自动重试）",
+  "@linkStalePairing": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "linkMtu": "已连接，协商包长",
+  "linkPairing": "正在配对",
+  "linkPairingDialog": "正在配对：在弹出的对话框里点「配对」",
+  "linkEncrypting": "正在建立加密连接",
+  "linkPairingFailed": "配对没有完成，30 秒后重试",
+  "linkServices": "读取设备服务",
+  "linkClock": "给设备对时",
+  "linkStatus": "读取设备状态",
+  "linkForgetOthers": "让录音设备忘掉其他手机",
+  "linkJoining": "正在接上实时",
+  "linkConnected": "已连接 · 实时上传",
+  "linkError": "录音设备出错：{detail}",
+  "@linkError": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "lastSynced": "{time} 补传录音设备的录音 {kb} KB",
+  "@lastSynced": {
+    "placeholders": {
+      "time": {},
+      "kb": {}
+    }
+  },
+  "usbSwitchingOn": "正在切换到 U 盘模式",
+  "usbSwitchingOff": "正在切回录音",
+  "usbNoComputer": "录音设备没接在电脑的 USB 上",
+  "usbFailed": "切换失败 {err}",
+  "@usbFailed": {
+    "placeholders": {
+      "err": {}
+    }
+  },
+  "usbNotYetOn": "还没切到 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）",
+  "usbStillOn": "还在 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）",
+  "usbOn": "U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回",
+  "noteRejected": "服务端无法解码一块，已丢弃",
+  "noteUploadFailed": "上传失败 {detail}",
+  "@noteUploadFailed": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "noteEndFailed": "结束信号失败 {detail}",
+  "@noteEndFailed": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "noteArchiveFailed": "归档失败 {detail}",
+  "@noteArchiveFailed": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "noteKilled": "上次录音被系统终止，未传的 {count} 块正在补传，需要手动重新开始",
+  "@noteKilled": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "micInterrupted": "{time} 起被系统中断，等待恢复",
+  "@micInterrupted": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "micRouteFailed": "{time} 起没有录音：切换输入后恢复失败（{detail}），回到前台时重试",
+  "@micRouteFailed": {
+    "placeholders": {
+      "time": {},
+      "detail": {}
+    }
+  },
+  "micResumeFailed": "{time} 起没有录音：中断后恢复失败（{detail}），回到前台时重试",
+  "@micResumeFailed": {
+    "placeholders": {
+      "time": {},
+      "detail": {}
+    }
+  },
+  "dfuPreparing": "准备升级",
+  "dfuRebooting": "录音设备重启进入升级模式",
+  "dfuStarting": "开始升级",
+  "dfuProgress": "升级中 {pct}% · {kbps} KB/s",
+  "@dfuProgress": {
+    "placeholders": {
+      "pct": {},
+      "kbps": {}
+    }
+  },
+  "dfuDone": "升级完成，录音设备已重启",
+  "dfuAborted": "升级已取消",
+  "dfuFailed": "升级失败：{why}（录音设备还在就再试一次，不见了就插 USB 用 lr.sh flash 刷）",
+  "@dfuFailed": {
+    "placeholders": {
+      "why": {}
+    }
+  },
+  "dfuNoBluetooth": "蓝牙不可用",
+  "dfuUnknown": "这台 iPhone 不认识录音设备",
+  "dfuNoConnect": "连不上录音设备",
+  "dfuNoService": "录音设备上没有升级服务",
+  "dfuNoReboot": "录音设备没有重启",
+  "dfuRefused": "录音设备拒绝进入升级模式（{detail}）",
+  "@dfuRefused": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "dfuDropped": "录音设备断开了",
+  "dfuNoBootloader": "录音设备没有进入升级模式",
+  "errPermission": "允许蓝牙权限后再点开始",
+  "errNotStarted": "先开始录音，连上录音设备",
+  "errNotConnected": "录音设备没连上",
+  "errListen": "没法播放：{detail}",
+  "@errListen": {
+    "placeholders": {
+      "detail": {}
+    }
+  },
+  "errUpdating": "正在升级",
+  "errLinked": "录音设备的连接还没断开，稍后再试",
+  "errNoModel": "还没连上过录音设备，不知道它的型号",
+  "errModel": "这个固件是 {want} 的，录音设备是 {model}，不能刷",
+  "@errModel": {
+    "placeholders": {
+      "want": {},
+      "model": {}
+    }
+  },
+  "errSame": "录音设备已经是 {version}，不用再升级",
+  "@errSame": {
+    "placeholders": {
+      "version": {}
+    }
+  },
+  "errSha256": "固件下载不完整，再试一次",
+  "errZip": "固件包打不开：{detail}",
+  "@errZip": {
+    "placeholders": {
+      "detail": {}
+    }
+  }
 }

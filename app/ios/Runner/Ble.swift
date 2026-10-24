@@ -60,19 +60,11 @@ enum Ble {
   /// card's state the board reports since. A slow card answers late (lend() flushes, closes and unmounts before it
   /// answers; 10-13 BDAE went past 15 s and the app said it failed, a second tap took the disk back): no answer is not a
   /// failure, the board's state is what the switch shows and the note says.
-  static func usbNote(on: Bool, err: Int?, store: Int) -> String? {
-    if err == -107 { return "录音设备没接在电脑的 USB 上" }
-    if let err, err != 0 { return "切换失败 \(err)" }
-    if (store == -16) != on {
-      return (on ? "还没切到 U 盘模式" : "还在 U 盘模式") + "（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）"
-    }
-    return on ? "U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回" : nil
-  }
-
-  static func hhmm() -> String {
-    let f = DateFormatter()
-    f.dateFormat = "HH:mm"
-    return f.string(from: Date())
+  static func usbNote(on: Bool, err: Int?, store: Int) -> [String: Any]? {
+    if err == -107 { return ["code": "usbNoComputer"] }
+    if let err, err != 0 { return ["code": "usbFailed", "err": err] }
+    if (store == -16) != on { return ["code": on ? "usbNotYetOn" : "usbStillOn"] }  // no answer in time: the switch follows the board
+    return on ? ["code": "usbOn"] : nil
   }
 
   static func log(_ s: String) { NSLog("live-record ble %@", s) }
@@ -158,17 +150,16 @@ final class Nearby: NSObject, CBCentralManagerDelegate {
 /// Binding is the app's soft limit: a recorder that forgot this phone (another phone took it) is not
 /// paired again behind the person's back; the link stops and says so (prefs bleKicked) until they add it again.
 final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
-  static let kicked = "已被其他手机绑定：在「录音设备」页重新添加"
   static let restoreId = "live-record.recorder"
 
-  @Shared var state = "正在找录音设备"
+  @Shared var state: [String: Any] = ["code": "scanning"]  // what the link does, as a code the app words (recorder_status.dart)
   @Shared var hw: [String: Any] = [:]
   @Shared var tag: String?             // the board's name as pieces carry it
   @Shared var files = 0                // pieces made
   @Shared var pausedUntil: Int64 = 0   // wall ms the recorder's pause ends (0: recording), as last known
-  @Shared var usbNote: String?
+  @Shared var usbNote: [String: Any]?
   private var usbAsk: (on: Bool, err: Int?)?  // the switch's last ask, until the board reports that state (status())
-  @Shared var syncNote: String?        // the last catch-up, for the app's recorder page
+  @Shared var syncNote: [String: Any]?  // the last catch-up, for the app's recorder page
   @Shared var syncDoneKb: Int64 = 0    // the catch-up under way: taken of total (0 of 0: none)
   @Shared var syncTotalKb: Int64 = 0
   @Shared var syncLiveKb: Int64 = 0    // of it, what LIVE still waits for: the file being recorded
@@ -185,8 +176,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   @Shared private var conn: Conn?  // the connection a session belongs to (nil: none up)
   private let one = NSLock()       // one session at a time: an old one may still be finishing
   @Shared private var pairingFailed = false
-  @Shared private var lastSeen: String?   // HH:mm the link last went down
-  @Shared private var staleNote: String?  // iOS still has keys the recorder forgot: what the person has to do
+  @Shared private var lastSeen: Int64?    // wall ms the link last went down
+  @Shared private var staleNote: [String: Any]?  // iOS still has keys the recorder forgot: what the person has to do
   @Shared private var bluetoothOff = false  // as last logged
   @Shared private var waiting = false  // a reconnect request said in the device log, until the link is up again
 
@@ -252,8 +243,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       conn = nil
       abort()
       peripheral = nil
-      state = "蓝牙已关闭"
-    case .unauthorized: state = "没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙"
+      state = ["code": "bluetoothOff"]
+    case .unauthorized: state = ["code": "noPermission"]
     default: break
     }
   }
@@ -278,12 +269,12 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   /// The bound recorder by its identifier; scanning for it only when iOS does not know that one (anymore).
   private func find() {
     guard on, let c = central else { return }
-    guard let bound = prefs.string(forKey: "bleName") else { state = "未绑定录音设备"; return }
-    if prefs.bool(forKey: "bleKicked") { state = BleLink.kicked; return }
+    guard let bound = prefs.string(forKey: "bleName") else { state = ["code": "unbound"]; return }
+    if prefs.bool(forKey: "bleKicked") { state = ["code": "kicked"]; return }
     if let id = prefs.string(forKey: "bleId").flatMap(UUID.init(uuidString:)), let p = c.retrievePeripherals(withIdentifiers: [id]).first {
       return connect(p, auto: false)
     }
-    state = "正在找 \(bound)"
+    state = ["code": "scanning", "name": bound]
     Ble.log("scanning for \(bound)")
     c.scanForPeripherals(withServices: [Ble.store])
   }
@@ -294,7 +285,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     guard let bound = prefs.string(forKey: "bleName"), name == bound else {
       return Ble.log("scan: \(name ?? "-") (advertised \(a[CBAdvertisementDataLocalNameKey] as? String ?? "no name")) \(p.identifier)")
     }
-    if a[CBAdvertisementDataIsConnectable] as? Bool == false { state = "\(bound) 正连着其他手机"; return }
+    if a[CBAdvertisementDataIsConnectable] as? Bool == false { state = ["code": "elsewhere", "name": bound]; return }
     c.stopScan()
     Ble.log("found \(p.identifier) \(bound) rssi=\(rssi)")
     prefs.set(p.identifier.uuidString, forKey: "bleId")
@@ -303,8 +294,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
   private func connect(_ p: CBPeripheral, auto: Bool) {
     guard on, let c = central, c.state == .poweredOn else { return }
-    let away = "录音设备不在附近，它在离线录音" + (lastSeen.map { "（最后连接 \($0)）" } ?? "") + "，回来后自动补传"
-    state = staleNote ?? (auto ? away : "正在连接录音设备")
+    let away: [String: Any] = ["code": "away", "lastSeen": lastSeen ?? NSNull()]
+    state = staleNote ?? (auto ? away : ["code": "connecting"])
     p.delegate = self
     peripheral = p
     c.connect(p)
@@ -327,7 +318,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     abort()
     guard p === peripheral else { return }  // an old link, already given up
     DeviceLog.disconnected(tag ?? p.identifier.uuidString, error?.localizedDescription)
-    lastSeen = Ble.hhmm()
+    lastSeen = Recorder.now()
     if BleLink.stale(error) { forgotten(p) }
     // a pairing that did not finish (a dialog left alone) waits a little; unbound or kicked: no reconnecting
     let wait = pairingFailed ? 30.0 : 0
@@ -350,8 +341,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   /// (no API for that) before it pairs again; asked of the person, tried again every 30 s (gone()).
   private func forgotten(_ p: CBPeripheral) {
     if !prefs.bool(forKey: "bindPending") { return kicked(p, "peer removed pairing information") }
-    let name = prefs.string(forKey: "bleName") ?? "录音设备"
-    staleNote = "这台 iPhone 还留着与 \(name) 的旧配对：到 设置 › 蓝牙 › \(name) › 忽略此设备，再回来（30 秒后自动重试）"
+    staleNote = ["code": "stalePairing", "name": prefs.string(forKey: "bleName") ?? NSNull()]
     state = staleNote!
     pairingFailed = true
   }
@@ -361,7 +351,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     Ble.log("kicked: \(why)")
     prefs.set(true, forKey: "bleKicked")
     DeviceLog.app(tag ?? p.identifier.uuidString, "kicked", "录音设备不再认这台手机（\(why)），不再重连", level: "error")
-    state = BleLink.kicked
+    state = ["code": "kicked"]
     q.async { self.central?.cancelPeripheralConnection(p) }
   }
 
@@ -391,14 +381,14 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     q.async(execute: start)
     guard o.sem.wait(timeout: .now() + timeout) == .success else {
       q.sync { if pending === o { pending = nil } }  // a late callback must not complete the next operation
-      throw Fail(description: "\(what) 超时")
+      throw Fail(description: "\(what) timed out")
     }
     return try o.result.get()
   }
 
   private func chr(_ c: Conn, _ s: CBUUID, _ u: CBUUID) throws -> CBCharacteristic {
     guard let ch = q.sync(execute: { c.p.services?.first { $0.uuid == s }?.characteristics?.first { $0.uuid == u } }) else {
-      throw Fail(description: "设备上没有 \(u)")
+      throw Fail(description: "no \(u) on the device")
     }
     return ch
   }
@@ -444,11 +434,11 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
   }
 
-  /// Runs one step of a session, shown on the app's status bar and logged with how long it took.
-  private func step<T>(_ what: String, _ block: () throws -> T) rethrows -> T {
-    state = what
+  /// Runs one step of a session, shown on the app's status bar (`code`) and logged (`what`) with how long it took.
+  private func step<T>(_ code: String, _ what: String, _ block: () throws -> T) rethrows -> T {
+    state = ["code": code]
     let t0 = Date()
-    defer { let ms = Int(-t0.timeIntervalSinceNow * 1000); Ble.log("\(what): \(ms) ms"); DeviceLog.step(what, ms) }
+    defer { let ms = Int(-t0.timeIntervalSinceNow * 1000); Ble.log("\(code): \(ms) ms"); DeviceLog.step(what, ms) }
     return try block()
   }
 
@@ -462,7 +452,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     let name = prefs.string(forKey: "bleName") ?? p.p.identifier.uuidString
     let adding = prefs.bool(forKey: "bindPending")
     do {
-      try step("读取设备服务") {
+      try step("services", "读取设备服务") {
         _ = try op(p, "services") { p.p.discoverServices([Ble.store, Ble.bas, Ble.dis]) }
         for s in q.sync(execute: { p.p.services ?? [] }) { _ = try op(p, "characteristics") { p.p.discoverCharacteristics(nil, for: s) } }
       }
@@ -471,7 +461,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       // 30 s for an unencrypted link); a recorder that no longer knows this phone fails it
       pairingFailed = adding  // set first: a pairing left alone ends with the recorder dropping the link (gone())
       do {
-        _ = try step(adding ? "正在配对：在弹出的对话框里点「配对」" : "正在建立加密连接") { try read(p, Ble.store, Ble.time, timeout: 40) }
+        _ = try step(adding ? "pairingDialog" : "encrypting", adding ? "正在配对：在弹出的对话框里点「配对」" : "正在建立加密连接") { try read(p, Ble.store, Ble.time, timeout: 40) }
         staleNote = nil
         pairingFailed = false
       } catch {
@@ -480,7 +470,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if !adding, let e = error as? CBATTError, [.insufficientAuthentication, .insufficientEncryption].contains(e.code) {
           return kicked(p.p, "\(error)")  // no keys any more, and the person did not pair again in iOS's dialog
         }
-        if adding { state = "配对没有完成，30 秒后重试" }
+        if adding { state = ["code": "pairingFailed"] }
         throw error
       }
       live.clear(); ctrl.clear(); data.clear()
@@ -488,12 +478,12 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       try subscribe(p, Ble.ctrl)  // replies to LIST/READ/DELETE and the app's USB disk switch
       try subscribe(p, Ble.data)
       try subscribe(p, Ble.live)  // before LIST: nothing the stream adds after it is missed
-      var synced = try step("给设备对时") { try sync(p) }
-      let st = try step("读取设备状态") { try status(p, name, fresh: true) }
+      var synced = try step("clock", "给设备对时") { try sync(p) }
+      let st = try step("status", "读取设备状态") { try status(p, name, fresh: true) }
       Ble.log("status: boot \(st.boot) frame \(st.frame) mtu \(q.sync { p.p.maximumWriteValueLength(for: .withoutResponse) } + 3) \(hw)")
       if adding {
         if prefs.bool(forKey: "bindForce") {
-          try step("让录音设备忘掉其他手机") {
+          try step("forgetOthers", "让录音设备忘掉其他手机") {
             let r = try reply(p, [5], 0x85)  // FORGET: every phone but this one
             Ble.log("forgot other phones: \(r.map { Ble.u32($0, 1) } ?? -1)")
           }
@@ -512,7 +502,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       open = -1; liveFloor = -1; ahead = -1; reading = nil; needList = true; listFull = false; liveRead = true; stalls = [:]
       holeAt = -1; refollow = false; abandoned = -1; liveGaps = 0; settleUntil = Date(timeIntervalSinceNow: 3)
       caught = 0; caughtSince = nil
-      state = "正在接上实时"
+      state = ["code": "joining"]
       var live0 = false  // LIVE taken since the file it goes on in was caught up
       var lastStatus = Date(), lastPieces = Date.distantPast, lastCharge = Date()
       // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror lacks
@@ -543,7 +533,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             readLog(p)
             DeviceLog.connected(Ble.tag(name))
             waiting = false
-            state = "已连接 · 实时上传"
+            state = ["code": "connected"]
           }
           if reading == nil { try nextRead(p, m) }
           if -lastPieces.timeIntervalSinceNow >= 0.5 { try pieces(m); lastPieces = Date() }
@@ -574,7 +564,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     } catch {
       Ble.log("session: \(error)")
       if alive(p) {
-        if !state.hasPrefix("配对没有完成") { state = "录音设备出错：\(error)" }
+        if state["code"] as? String != "pairingFailed" { state = ["code": "linkError", "detail": "\(error)"] }
         q.async { self.central?.cancelPeripheralConnection(p.p) }
       }
     }
@@ -594,7 +584,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   /// page offered it the update it already ran.
   private func status(_ p: Conn, _ name: String, fresh: Bool = false) throws -> Status {
     let t = try read(p, Ble.store, Ble.time)
-    guard t.count >= 16 else { throw Fail(description: "状态只有 \(t.count) 字节") }
+    guard t.count >= 16 else { throw Fail(description: "status of \(t.count) bytes") }
     let s = Status(boot: Int(Store.le(t, 0, 2)), frame: Ble.u32(t, 2), store: Ble.store(t), at: Recorder.now())
     noCard = s.store < 0 && Ble.u32(t, 12) == 0
     let left = syncTotalKb - syncDoneKb, rate = caughtSince.map { Double(caught) / max(1, -$0.timeIntervalSinceNow) } ?? 0
@@ -633,7 +623,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
   /// Pause the recording for `s` seconds (0: go on now); the recorder keeps the time itself.
   func pause(_ s: Int) throws {
-    guard peripheral?.state == .connected else { throw Fail(description: "录音设备没连上") }
+    guard peripheral?.state == .connected else { throw Fail(description: "not connected") }
     jobs.put { [self] p in
       try write(p, Ble.ctrl, [0x20] + Store.le(UInt32(s)))  // PAUSE
       pausedUntil = s > 0 ? Recorder.now() + Int64(s) * 1000 : 0
@@ -671,8 +661,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
   /// The board's SD card as a USB disk on the computer it is plugged into (CTRL 0x06), or back.
   func usbDisk(_ on: Bool) {
-    guard peripheral?.state == .connected else { usbNote = "录音设备没连上"; return }
-    usbNote = on ? "正在切换到 U 盘模式" : "正在切回录音"
+    guard peripheral?.state == .connected else { usbNote = ["code": "notConnected"]; return }
+    usbNote = ["code": on ? "usbSwitchingOn" : "usbSwitchingOff"]
     jobs.put { [self] p in
       let err = try reply(p, [6, on ? 1 : 0], 0x86).map { Int(Int8(bitPattern: $0[5])) }
       Ble.log("usb disk \(on): \(err.map { "\($0)" } ?? "no answer")")
@@ -726,7 +716,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var o: Int64 = -1
     for waited in 0... {
       guard alive(p) else { throw Gone() }
-      guard let x = ctrl.poll(1) else { if waited >= 10 { throw Fail(description: "卡上文件列表超时") }; continue }
+      guard let x = ctrl.poll(1) else { if waited >= 10 { throw Fail(description: "LIST timed out") }; continue }
       if x.first == 0x81 && x.count >= 9 { r[Ble.u32(x, 1)] = Ble.u32(x, 5) }
       if x.first == 0x80 {
         if x.count > 1 && x[1] != 0 { Ble.log("LIST error \(Int8(bitPattern: x[1]))") }
@@ -779,7 +769,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     if let (f, _) = missing.first(where: { $0.0 != open }) { return try startRead(p, m, f) }
     if let t0 = caughtSince, behind(m) == 0 {  // caught up
       Ble.log("caught up: \(caught) B in \(Int(-t0.timeIntervalSinceNow)) s")
-      syncNote = "\(Ble.hhmm()) 补传录音设备的录音 \(caught / 1024) KB"
+      syncNote = ["code": "synced", "at": Recorder.now(), "kb": caught / 1024]
       if caught > 0 { DeviceLog.app(tag ?? "", "sync", "补传 \(caught / 1024) KB，用时 \(Int(-t0.timeIntervalSinceNow)) s") }
       caught = 0; caughtSince = nil; ahead = -1
       try unhold(m)
@@ -825,7 +815,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     let until = Date(timeIntervalSinceNow: 3)
     while !ctrl.contains(where: { $0.first == 0x82 }) && Date() < until && alive(p) { Thread.sleep(forTimeInterval: 0.05) }
     // no end: its DATA may still come and be taken for what goes next on DATA (LOG): the link again instead
-    guard ctrl.contains(where: { $0.first == 0x82 }) else { throw Fail(description: "READ 停不下来") }
+    guard ctrl.contains(where: { $0.first == 0x82 }) else { throw Fail(description: "READ does not stop") }
     while keep, let d = data.poll(0), d.count > 4 {
       let had = m.have(r.f)
       if try m.put(r.f, Ble.u32(d, 0), Data(d[4...])) != nil { break }
@@ -923,7 +913,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       var from = DeviceLog.from(tag)
       for _ in 0..<2 {
         data.clear()
-        guard let r = try reply(p, [7] + Store.le(UInt32(from)), 0x87), r.count >= 5 else { throw Fail(description: "LOG 没有回应") }  // LOG
+        guard let r = try reply(p, [7] + Store.le(UInt32(from)), 0x87), r.count >= 5 else { throw Fail(description: "LOG: no answer") }  // LOG
         let next = Ble.u32(r, 1)
         if next < from { Ble.log("devlog \(tag): log restarted at \(next) (had \(from))"); from = 0; continue }
         var packets: [[UInt8]] = []

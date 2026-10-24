@@ -1,5 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Any language but Chinese (res/values-zh), as the Flutter side (lib/l10n, main.dart appLocale) -->
+<!-- Any language but Chinese (res/values-zh), as the Flutter side (lib/l10n, main.dart appLocale). The rest is the
+     foreground notification (RecorderService.notice), worded as lib/l10n/app_en.arb words the same codes. -->
 <resources>
     <string name="recording_channel">Recording</string>
+    <string name="link_scanning">Looking for the recorder</string>
+    <string name="link_scanning_name">Looking for %1$s</string>
+    <string name="link_bluetooth_off">Bluetooth is off</string>
+    <string name="link_unbound">No recorder bound</string>
+    <string name="link_kicked">Bound to another phone: add it again on the Recorder page</string>
+    <string name="link_elsewhere">%1$s is connected to another phone</string>
+    <string name="link_bluetooth_not_on">Bluetooth is not on, retrying in %1$s s</string>
+    <string name="link_scan_failed">Scan failed (%1$s), retrying in %2$s s</string>
+    <string name="link_connect_failed">Could not connect, retrying in %1$s s</string>
+    <string name="link_away">The recorder is away and records offline; it catches up when back</string>
+    <string name="link_away_since">The recorder is away and records offline (last connected %1$s); it catches up when back</string>
+    <string name="link_connecting">Connecting to the recorder</string>
+    <string name="link_mtu">Connected, negotiating the packet size</string>
+    <string name="link_pairing">Pairing</string>
+    <string name="link_pairing_failed">Pairing did not finish, retrying in 30 s</string>
+    <string name="link_services">Reading the recorder\'s services</string>
+    <string name="link_clock">Setting the recorder\'s clock</string>
+    <string name="link_status">Reading the recorder\'s status</string>
+    <string name="link_forget_others">Making the recorder forget other phones</string>
+    <string name="link_joining">Going live</string>
+    <string name="link_connected">Connected · live upload</string>
+    <string name="link_error">Recorder error: %1$s</string>
+    <string name="note_rejected">The server could not decode a piece: dropped</string>
+    <string name="note_upload_failed">Upload failed: %1$s</string>
+    <string name="note_end_failed">End signal failed: %1$s</string>
+    <string name="note_archive_failed">Archiving failed: %1$s</string>
+    <string name="notice_uploading">alldayrec is uploading · %1$s pieces left</string>
+    <string name="notice_recording">alldayrec is recording</string>
+    <string name="notice_live_catching_up">Live upload · catching up %1$.1f / %2$.1f MB</string>
+    <string name="notice_fetching_current">Fetching the file being recorded before going live · %1$.1f MB left</string>
+    <string name="notice_starting">Starting</string>
+    <string name="notice_recording_error">Recording error: %1$s</string>
+    <string name="notice_paused">Paused, %1$s min left</string>
+    <string name="notice_battery">Battery %1$s%%</string>
+    <string name="notice_pending">%1$s pieces to upload</string>
+    <string name="notice_interrupted">Interrupted by the system at %1$s, recovered</string>
+    <string name="on_battery">On battery</string>
+    <string name="charging">Charging</string>
+    <string name="charged">Charged</string>
+    <string name="card_full">Card full</string>
+    <string name="card_usb">Card in USB disk mode</string>
+    <string name="card_none">No card in</string>
+    <string name="card_error">Card error</string>
 </resources>

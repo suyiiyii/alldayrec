@@ -800,4 +800,256 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pause1Hour => '暂停 1 小时';
+
+  @override
+  String get linkScanning => '正在找录音设备';
+
+  @override
+  String linkScanningName(Object name) {
+    return '正在找 $name';
+  }
+
+  @override
+  String get linkBluetoothOff => '蓝牙已关闭';
+
+  @override
+  String get linkNoPermission => '没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙';
+
+  @override
+  String get linkUnbound => '未绑定录音设备';
+
+  @override
+  String get linkKicked => '已被其他手机绑定：在「录音设备」页重新添加';
+
+  @override
+  String linkElsewhere(Object name) {
+    return '$name 正连着其他手机';
+  }
+
+  @override
+  String linkBluetoothNotOn(Object s) {
+    return '蓝牙未打开，$s 秒后重试';
+  }
+
+  @override
+  String linkScanFailed(Object err, Object s) {
+    return '扫描失败 $err，$s 秒后重试';
+  }
+
+  @override
+  String linkConnectFailed(Object s) {
+    return '连接失败，$s 秒后重试';
+  }
+
+  @override
+  String get linkAway => '录音设备不在附近，它在离线录音，回来后自动补传';
+
+  @override
+  String linkAwaySince(Object time) {
+    return '录音设备不在附近，它在离线录音（最后连接 $time），回来后自动补传';
+  }
+
+  @override
+  String get linkConnecting => '正在连接录音设备';
+
+  @override
+  String linkStalePairing(Object name) {
+    return '这台 iPhone 还留着与 $name 的旧配对：到 设置 › 蓝牙 › $name › 忽略此设备，再回来（30 秒后自动重试）';
+  }
+
+  @override
+  String get linkMtu => '已连接，协商包长';
+
+  @override
+  String get linkPairing => '正在配对';
+
+  @override
+  String get linkPairingDialog => '正在配对：在弹出的对话框里点「配对」';
+
+  @override
+  String get linkEncrypting => '正在建立加密连接';
+
+  @override
+  String get linkPairingFailed => '配对没有完成，30 秒后重试';
+
+  @override
+  String get linkServices => '读取设备服务';
+
+  @override
+  String get linkClock => '给设备对时';
+
+  @override
+  String get linkStatus => '读取设备状态';
+
+  @override
+  String get linkForgetOthers => '让录音设备忘掉其他手机';
+
+  @override
+  String get linkJoining => '正在接上实时';
+
+  @override
+  String get linkConnected => '已连接 · 实时上传';
+
+  @override
+  String linkError(Object detail) {
+    return '录音设备出错：$detail';
+  }
+
+  @override
+  String lastSynced(Object time, Object kb) {
+    return '$time 补传录音设备的录音 $kb KB';
+  }
+
+  @override
+  String get usbSwitchingOn => '正在切换到 U 盘模式';
+
+  @override
+  String get usbSwitchingOff => '正在切回录音';
+
+  @override
+  String get usbNoComputer => '录音设备没接在电脑的 USB 上';
+
+  @override
+  String usbFailed(Object err) {
+    return '切换失败 $err';
+  }
+
+  @override
+  String get usbNotYetOn => '还没切到 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）';
+
+  @override
+  String get usbStillOn => '还在 U 盘模式（录音设备没有及时回应，卡慢时会晚一些；开关跟着录音设备的状态）';
+
+  @override
+  String get usbOn => 'U 盘模式：电脑上出现 OMI 盘（约 20 秒）；用完先在电脑上推出，再切回';
+
+  @override
+  String get noteRejected => '服务端无法解码一块，已丢弃';
+
+  @override
+  String noteUploadFailed(Object detail) {
+    return '上传失败 $detail';
+  }
+
+  @override
+  String noteEndFailed(Object detail) {
+    return '结束信号失败 $detail';
+  }
+
+  @override
+  String noteArchiveFailed(Object detail) {
+    return '归档失败 $detail';
+  }
+
+  @override
+  String noteKilled(Object count) {
+    return '上次录音被系统终止，未传的 $count 块正在补传，需要手动重新开始';
+  }
+
+  @override
+  String micInterrupted(Object time) {
+    return '$time 起被系统中断，等待恢复';
+  }
+
+  @override
+  String micRouteFailed(Object time, Object detail) {
+    return '$time 起没有录音：切换输入后恢复失败（$detail），回到前台时重试';
+  }
+
+  @override
+  String micResumeFailed(Object time, Object detail) {
+    return '$time 起没有录音：中断后恢复失败（$detail），回到前台时重试';
+  }
+
+  @override
+  String get dfuPreparing => '准备升级';
+
+  @override
+  String get dfuRebooting => '录音设备重启进入升级模式';
+
+  @override
+  String get dfuStarting => '开始升级';
+
+  @override
+  String dfuProgress(Object pct, Object kbps) {
+    return '升级中 $pct% · $kbps KB/s';
+  }
+
+  @override
+  String get dfuDone => '升级完成，录音设备已重启';
+
+  @override
+  String get dfuAborted => '升级已取消';
+
+  @override
+  String dfuFailed(Object why) {
+    return '升级失败：$why（录音设备还在就再试一次，不见了就插 USB 用 lr.sh flash 刷）';
+  }
+
+  @override
+  String get dfuNoBluetooth => '蓝牙不可用';
+
+  @override
+  String get dfuUnknown => '这台 iPhone 不认识录音设备';
+
+  @override
+  String get dfuNoConnect => '连不上录音设备';
+
+  @override
+  String get dfuNoService => '录音设备上没有升级服务';
+
+  @override
+  String get dfuNoReboot => '录音设备没有重启';
+
+  @override
+  String dfuRefused(Object detail) {
+    return '录音设备拒绝进入升级模式（$detail）';
+  }
+
+  @override
+  String get dfuDropped => '录音设备断开了';
+
+  @override
+  String get dfuNoBootloader => '录音设备没有进入升级模式';
+
+  @override
+  String get errPermission => '允许蓝牙权限后再点开始';
+
+  @override
+  String get errNotStarted => '先开始录音，连上录音设备';
+
+  @override
+  String get errNotConnected => '录音设备没连上';
+
+  @override
+  String errListen(Object detail) {
+    return '没法播放：$detail';
+  }
+
+  @override
+  String get errUpdating => '正在升级';
+
+  @override
+  String get errLinked => '录音设备的连接还没断开，稍后再试';
+
+  @override
+  String get errNoModel => '还没连上过录音设备，不知道它的型号';
+
+  @override
+  String errModel(Object want, Object model) {
+    return '这个固件是 $want 的，录音设备是 $model，不能刷';
+  }
+
+  @override
+  String errSame(Object version) {
+    return '录音设备已经是 $version，不用再升级';
+  }
+
+  @override
+  String get errSha256 => '固件下载不完整，再试一次';
+
+  @override
+  String errZip(Object detail) {
+    return '固件包打不开：$detail';
+  }
 }
