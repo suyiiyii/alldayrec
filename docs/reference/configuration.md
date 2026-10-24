@@ -7,7 +7,7 @@ type: reference
 服务器的设置分两处：`tenants.json` 列出它为哪些人服务，环境变量（通常写在 `.env` 里）设置其余一切。服务器缺必填项时拒绝启动，并在日志里写出缺了哪些。
 
 ::: info 适用版本
-这一页按 main 分支写。v0.1.0 没有 `UI_LANG` 和 `tenants.json` 的 `lang` 字段，其余各项相同。
+这一页按 main 分支写。v0.1.0 没有 `UI_LANG` 和 `tenants.json` 的 `lang` 字段；v0.2.0 及以前 `LOOP_STALL_MS` 默认不检测。其余各项相同。
 :::
 
 ## tenants.json
@@ -120,4 +120,4 @@ type: reference
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `DIAR_TH`、`DIAR_JOIN`、`DIAR_GUARD`、`PEOPLE_MIN` | `0.5`、`0.35`、`0.6`、`0.7` | 一段对话内区分说话人的阈值 | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | 「哪个是你的声音」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |
-| `LOOP_STALL_MS` | 不检测 | 事件循环被卡住超过这么多毫秒时，日志里记一行卡了多久、卡在哪个函数（每秒最多一行，其间的次数一并记上）；排查卡顿时设，比如 `100` | `monitor.py` |
+| `LOOP_STALL_MS` | `100` | 事件循环被卡住超过这么多毫秒时，日志里记一行卡了多久、卡在哪个函数（每秒最多一行，其间的次数一并记上），同时存进 `perf_stalls` 表；每分钟的循环延迟和线程池占用也靠它测。约占 0.6% 个核；`0` 关闭 | `monitor.py` |

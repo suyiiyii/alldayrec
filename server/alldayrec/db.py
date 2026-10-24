@@ -68,6 +68,27 @@ CREATE TABLE IF NOT EXISTS calls (            -- every ASR and LLM call: how it 
     prompt_tokens INTEGER, completion_tokens INTEGER);
 CREATE INDEX IF NOT EXISTS calls_at ON calls(at);
 CREATE TABLE IF NOT EXISTS balances (at TEXT NOT NULL, provider TEXT NOT NULL, cny REAL NOT NULL);  -- a prepaid account, hourly
+-- what the server spent (perf.py), kept perf.KEEP_DAYS. The process's own (stalls, samples): in the first tenant's store
+CREATE TABLE IF NOT EXISTS perf_stalls (      -- the event loop held up (monitor.loop_stalls): a row per log line, at its end;
+    at TEXT NOT NULL, ms INTEGER NOT NULL,    -- frames: where the loop was; suppressed: the stalls since the last row
+    frames TEXT NOT NULL, suppressed INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS perf_stalls_at ON perf_stalls(at);
+CREATE TABLE IF NOT EXISTS perf_samples (     -- the process each minute: s since the last row, cpu_s self + children in it;
+    at TEXT NOT NULL, s REAL NOT NULL, cpu_s REAL NOT NULL,  -- rss_mb Linux only; hwm_mb: rss high-water mark; lag: the
+    rss_mb REAL, hwm_mb REAL, lag_p50_ms REAL, lag_p99_ms REAL, lag_max_ms REAL,  -- event loop's beat late by;
+    threads TEXT, queued INTEGER, clients INTEGER);  -- threads: per pool (threads.py) busy on average, most waiting
+CREATE INDEX IF NOT EXISTS perf_samples_at ON perf_samples(at);
+CREATE TABLE IF NOT EXISTS perf_requests (    -- HTTP requests: one of perf.SLOW_MS or more (n NULL; at its end), and per
+    at TEXT NOT NULL, method TEXT NOT NULL,   -- minute, method, route and status all of them (n; ms the slowest, p50,
+    route TEXT NOT NULL, status INTEGER NOT NULL, n INTEGER,  -- p95); bytes: of the response bodies
+    ms REAL NOT NULL, p50 REAL, p95 REAL, bytes INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS perf_requests_at ON perf_requests(at);
+CREATE TABLE IF NOT EXISTS perf_pieces (      -- a device's final pieces and draft passes (device_pipeline): ms each step took;
+    at TEXT NOT NULL, device TEXT NOT NULL, layer TEXT NOT NULL,  -- decode, vad, fed_s: its layer's stream since the
+    piece_s REAL, sentences INTEGER,          -- layer's last row (the draft layer's while no page watches: rows of its own,
+    decode_ms REAL, vad_ms REAL, fed_s REAL,  -- piece_s NULL, beside the final rows)
+    asr_ms REAL, embed_ms REAL, commit_ms REAL);
+CREATE INDEX IF NOT EXISTS perf_pieces_at ON perf_pieces(at);
 """
 
 _local = threading.local()  # .c: this thread's connection per file

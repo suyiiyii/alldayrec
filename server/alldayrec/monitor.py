@@ -1,5 +1,6 @@
 """What the pages and the metrics read about the pipelines: each device's status, the status line pushed to the pages,
-the Prometheus numbers pushed every minute, and the StepFun balance; and, when asked for, the event loop's stalls."""
+the Prometheus numbers pushed every minute, and the StepFun balance; the process each minute and the event loop's
+stalls, kept (perf.py)."""
 import base64
 import datetime as dt
 import hashlib
@@ -18,6 +19,7 @@ from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
+from alldayrec import perf
 from alldayrec import stepfun_asr
 from alldayrec import tenant
 from alldayrec import ws
@@ -147,14 +149,33 @@ def metrics() -> str:
     return "\n".join(out) + "\n"
 
 
+def process_metrics(s: dict) -> str:
+    """The process's minute (perf.sample) in Prometheus text, as the first tenant's instance."""
+    xs = [("process_cpu_cores", {}, s["cpu_s"] / s["s"] if s["s"] else None), ("process_rss_mb", {}, s["rss_mb"]),
+          ("process_hwm_mb", {}, s["hwm_mb"]), ("loop_lag_ms", {"quantile": "0.5"}, s["lag_p50_ms"]),
+          ("loop_lag_ms", {"quantile": "0.99"}, s["lag_p99_ms"])]
+    xs += [(f"threads_{k}", {"pool": pool}, v) for pool, t in (s["threads"] or {}).items() for k, v in t.items()]
+    return "".join(prom_line(f"lr_{n}", {"instance": core.TENANTS[0].id, **labels}, v) + "\n" for n, labels, v in xs if v is not None)
+
+
+def queued() -> int:
+    return sum(audio.queued(d) for d in T().devices)
+
+
 async def metrics_loop():
-    """Every tenant's metrics() to VictoriaMetrics every minute (basic auth VM_INGEST_USER / VM_INGEST_PASSWORD); a failed push is a
-    warning, the next minute tries again."""
+    """Every minute: the process's sample and every tenant's requests kept (perf.sample), and with VM_INGEST_URL every
+    tenant's metrics() and the sample to VictoriaMetrics (basic auth VM_INGEST_USER / VM_INGEST_PASSWORD); a failure is
+    a warning, the next minute tries again."""
     while True:
+        try:
+            s = perf.sample(sum(tenant.call(t, queued) for t in core.TENANTS), sum(len(t.clients) for t in core.TENANTS))
+        except Exception as e:
+            s = None
+            log.warning("perf sample: %r", e)
         if VM_INGEST_URL:
             try:
                 auth = base64.b64encode(f"{os.environ.get('VM_INGEST_USER', '')}:{os.environ.get('VM_INGEST_PASSWORD', '')}".encode()).decode()
-                body = "".join(tenant.call(t, metrics) for t in core.TENANTS).encode()
+                body = ("".join(tenant.call(t, metrics) for t in core.TENANTS) + (process_metrics(s) if s and core.TENANTS else "")).encode()
                 await asr._http(VM_INGEST_URL, body, {"Authorization": f"Basic {auth}", "Content-Type": "text/plain"})
             except Exception as e:
                 log.warning("metrics push: %s", asr.failure(e))  # the class and code, never the URL or credentials
@@ -162,19 +183,24 @@ async def metrics_loop():
 
 
 BEAT_S = 0.02  # how often loop_stalls' task beats, and its thread looks
+LOOP_STALL_MS = float(os.environ.get("LOOP_STALL_MS", "100"))  # 0: no loop_stalls
 
 
 async def loop_stalls():
-    """LOOP_STALL_MS (unset: off): the event loop held up longer than that (a blocking call in a route or a task, a
-    long computation on it) is one log line with how long and where the loop was when the thread watching its beat
+    """The event loop held up longer than LOOP_STALL_MS (a blocking call in a route or a task, a long computation on
+    it) is one log line and a perf_stalls row with how long and where the loop was when the thread watching its beat
     caught it (the frames of this directory's files, and the innermost one); at most a line a second, the stalls in
-    between counted. Cheap enough to leave on, unlike asyncio's debug mode."""
-    beat = {"at": time.monotonic(), "loop": threading.get_ident(), "stop": False}
-    threading.Thread(target=watch, args=(beat, float(os.environ["LOOP_STALL_MS"]) / 1000), daemon=True, name="loop-stalls").start()
+    between counted. Each beat's lag and the thread pools' use go to the minute's sample (perf.beat). ~0.6 % of a
+    core, unlike asyncio's debug mode."""
+    beat = {"at": time.monotonic(), "loop": threading.get_ident(), "stop": False, "stalls": []}
+    threading.Thread(target=watch, args=(beat, LOOP_STALL_MS / 1000), daemon=True, name="loop-stalls").start()
     try:
         while True:
             beat["at"] = time.monotonic()
             await anyio.sleep(BEAT_S)
+            perf.beat(time.monotonic() - beat["at"] - BEAT_S)
+            while beat["stalls"]:  # the thread's lines (a list append is atomic): their rows written here, on the loop
+                perf.stall(*beat["stalls"].pop(0))
     finally:
         beat["stop"] = True  # its thread with it
 
@@ -196,6 +222,7 @@ def watch(beat: dict, limit: float):
             quiet += 1
             continue
         where = [f for f in fs if Path(f.filename).resolve().parent == HERE] + [f for f in fs[-1:] if Path(f.filename).resolve().parent != HERE]
-        log.warning("event loop held up %d ms%s: %s", (beat["at"] - at - BEAT_S) * 1000, f" (+{quiet} more since the last line)" if quiet else "",
-                    " > ".join(f"{Path(f.filename).name}:{f.lineno} {f.name}" for f in where))
+        ms, frames = int((beat["at"] - at - BEAT_S) * 1000), " > ".join(f"{Path(f.filename).name}:{f.lineno} {f.name}" for f in where)
+        log.warning("event loop held up %d ms%s: %s", ms, f" (+{quiet} more since the last line)" if quiet else "", frames)
+        beat["stalls"].append((perf.now(), ms, frames, quiet))
         shown, quiet = time.monotonic(), 0

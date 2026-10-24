@@ -37,6 +37,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("POST", "/api/device-log", "device_log_upload"),
     ("GET", "/api/device-log", "device_log"),
     ("GET", "/api/calls", "calls"),
+    ("GET", "/api/perf", "perf_day"),
     ("GET", "/api/upgrades", "upgrades"),
     ("GET", "/api/client-config", "client_config"),
     ("GET", "/api/app-setup", "app_setup"),
@@ -101,4 +102,4 @@ def test_routes():
 
 
 def test_middleware():
-    assert [m.cls.__name__ for m in server.app.user_middleware] == ["Tenants"]
+    assert [m.cls.__name__ for m in server.app.user_middleware] == ["Tenants", "Requests"]

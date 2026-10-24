@@ -7,7 +7,7 @@ type: reference
 The server's settings live in two places: `tenants.json` lists the people it serves, and environment variables (usually in `.env`) set everything else. When a required setting is missing, the server refuses to start and writes the missing ones to its log.
 
 ::: info Version
-This page follows the main branch. v0.1.0 has no `UI_LANG` and no `lang` field in `tenants.json`; everything else is the same.
+This page follows the main branch. v0.1.0 has no `UI_LANG` and no `lang` field in `tenants.json`; up to v0.2.0, `LOOP_STALL_MS` is off by default. Everything else is the same.
 :::
 
 ## tenants.json
@@ -120,4 +120,4 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `routes_speakers.py` |
 | `DIAR_TH`, `DIAR_JOIN`, `DIAR_GUARD`, `PEOPLE_MIN` | `0.5`, `0.35`, `0.6`, `0.7` | Thresholds for telling speakers apart within a conversation | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你的声音」 (Which one is your voice) card pops up by itself | `selfvoice.py` |
-| `LOOP_STALL_MS` | no check | When the event loop is held up longer than this many milliseconds, the log gets one line with how long and in which function (at most a line a second, the ones in between counted); set it, e.g. `100`, when looking into slowness | `monitor.py` |
+| `LOOP_STALL_MS` | `100` | When the event loop is held up longer than this many milliseconds, the log gets one line with how long and in which function (at most a line a second, the ones in between counted), and the `perf_stalls` table a row; it also measures the loop's lag and the thread pools' use each minute. About 0.6% of a core; `0` turns it off | `monitor.py` |

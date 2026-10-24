@@ -1,6 +1,6 @@
 """metrics() is Prometheus text VictoriaMetrics takes (names, escaped labels, numbers), names no phone and says nothing
-said; metrics_loop pushes it with basic auth, and sends nothing without VM_INGEST_URL. loop_stalls logs a route that
-blocks the event loop."""
+said; metrics_loop keeps the process's minute and pushes both with basic auth, and sends nothing without VM_INGEST_URL.
+loop_stalls logs a route that blocks the event loop, and keeps it."""
 import base64
 import contextlib
 import datetime as dt
@@ -20,6 +20,7 @@ from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
 from alldayrec import monitor
+from alldayrec import perf
 from alldayrec import pipeline_state
 from alldayrec.tenant import T
 
@@ -96,17 +97,23 @@ def test_metrics(monkeypatch):
         assert scope.cancelled_caught, "the loop goes on"
     anyio.run(once, "")
     assert sent == [], "no VM_INGEST_URL: nothing sent"
+    (row,) = db.conn().execute("SELECT * FROM perf_samples").fetchall()  # kept all the same
+    assert row["cpu_s"] > 0 and row["s"] > 0 and row["queued"] == 1 and row["clients"] == 0 and row["lag_p50_ms"] is None, dict(row)
     monkeypatch.setenv("VM_INGEST_USER", "lr")
     monkeypatch.setenv("VM_INGEST_PASSWORD", "pw")
     anyio.run(once, "http://vm/api/v1/import/prometheus")
     (url, data, headers), = sent
     assert url == "http://vm/api/v1/import/prometheus" and data.startswith(b"lr_up{")
+    assert all(LINE.fullmatch(x) for x in data.decode().splitlines()) and b'lr_process_cpu_cores{instance="main"}' in data
     assert headers["Authorization"] == "Basic " + base64.b64encode(b"lr:pw").decode()
 
 
 def test_loop_stalls(monkeypatch, caplog):
-    """LOOP_STALL_MS set: a route that holds the event loop 0.3 s is one line, how long and where (its own frame)."""
-    monkeypatch.setenv("LOOP_STALL_MS", "100")
+    """A route that holds the event loop 0.3 s is one line and a perf_stalls row, how long and where (its own frame);
+    the beats' lag goes into the minute's sample."""
+    t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    monkeypatch.setattr(core, "TENANTS", [t])
+    monkeypatch.setattr(monitor, "LOOP_STALL_MS", 100.0)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
@@ -128,3 +135,7 @@ def test_loop_stalls(monkeypatch, caplog):
     lines = [r.getMessage() for r in caplog.records if " slow" in r.getMessage()]
     assert lines and all(re.search(r"held up \d+ ms.*: .*test_metrics.py:\d+ slow$", x) for x in lines), lines
     assert all(270 <= int(re.search(r"held up (\d+) ms", x)[1]) < 3000 for x in lines), lines
+    rows = [dict(r) for r in db.conn().execute("SELECT * FROM perf_stalls WHERE frames LIKE '%slow'")]
+    assert [(r["ms"], r["frames"]) for r in rows] == [(int(re.search(r"held up (\d+) ms", x)[1]), x.split(": ", 1)[1]) for x in lines], rows
+    s = perf.sample(0, 0)
+    assert s["lag_max_ms"] >= 270 and s["lag_p50_ms"] < 50 and s["threads"]["media"] == {"busy": 0, "waiting": 0}, s

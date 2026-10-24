@@ -155,6 +155,11 @@ def test_backlog_does_not_hold_drafts(tmp_path, monkeypatch):
             await anyio.sleep(3)  # the final layer's turn of the live analysis, now that the conversation is final
             assert st().live["start"] == lv["start"], "the same live analysis goes on"
             assert len(sum(fed, [])) == len(set(sum(fed, []))), fed
+            pieces = [dict(r) for r in db.conn().execute("SELECT * FROM perf_pieces WHERE device = ?", (DEVICE,))]
+            final, drafts = [p for p in pieces if p["layer"] == "final"], [p for p in pieces if p["layer"] == "draft"]
+            assert sum(p["sentences"] for p in final) >= N and all(p["commit_ms"] for p in final), "what each final piece took"
+            assert all(p["asr_ms"] and p["embed_ms"] for p in final if p["sentences"]) and sum(p["fed_s"] or 0 for p in final) > 0
+            assert any(p["asr_ms"] and p["sentences"] and p["vad_ms"] for p in drafts), drafts[:3]
             tg.cancel_scope.cancel()
 
     anyio.run(run)

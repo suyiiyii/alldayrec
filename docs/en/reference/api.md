@@ -112,6 +112,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | The ASR and LLM calls since `since`, by kind and engine (db.calls), and the StepFun balance (db.balance). | `since` (query, string) |
 
+### `/api/perf`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | A day's (YYYY-MM-DD) performance rows in this tenant's store, oldest first (perf.day): {stalls, samples, requests, pieces}; the event loop's stalls and the process's minutes are in the first tenant's only. | `day` (query, string) |
+
 ### `/api/upgrades`
 
 | Method | Description | Parameters |
@@ -203,6 +209,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `POST` | A question about my own past answered from this app's data (ask.py), in 10-30 s: {answer, sources, calls, usage}. | body: JSON object |
 
+### `/api/ask/voice`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. | — |
+
 ### `/mcp`
 
 | Method | Description | Parameters |
@@ -282,13 +294,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | One label renamed; with a name the conversation has already, a merge. | `conv_id` (path, string)<br>body: JSON object |
+| `POST` | One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me). | `conv_id` (path, string)<br>body: JSON object |
 
 ### `/api/speakers/undo`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone. | body: JSON object |
+| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, the centroid a 「这是我」 added to 我's voiceprint dropped. | body: JSON object |
 
 ### `/api/speakers`
 

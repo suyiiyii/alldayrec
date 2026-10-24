@@ -62,3 +62,9 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |
 | `calls` | Duration, result and usage of each ASR and LLM call, without content |
 | `balances` | Prepaid account balances, recorded hourly |
+| `perf_stalls` | Times the event loop was held up: when it ended, how many milliseconds, in which functions (only in the first tenant's store; new on main) |
+| `perf_samples` | The process, one row a minute: CPU seconds, memory, loop lag, thread pool use, queued pieces, open pages (only in the first tenant's store; new on main) |
+| `perf_requests` | HTTP requests: one row for each that took 50 ms or more, and each minute one row per method, route and status (new on main) |
+| `perf_pieces` | How long each step of each final piece and draft pass took: decode, VAD, ASR, voiceprints, store (new on main) |
+
+The `perf_` tables hold durations and resource use only, never content, and keep 90 days. `GET /api/perf?day=YYYY-MM-DD` reads one day; `python -m alldayrec.perf export <live.db> <YYYY-MM-DD>` exports one from a copy of the store.

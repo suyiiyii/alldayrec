@@ -16,6 +16,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import db
 from alldayrec import live
+from alldayrec import perf
 from alldayrec import qwen_stream
 from alldayrec import summary
 from alldayrec import threads
@@ -56,11 +57,12 @@ async def pipeline(device: str):
         drafts=db.drafts(iso(done0) if done0 else "", None, device))
     if resume:
         log.info("%s resuming after the last finalized row at %s", device, resume)
+    fcost, dcost = {}, {}  # what the final and the draft layer spent since their last perf_pieces row (perf.piece)
 
     async def feed():
         """The device's audio stream into the final layer's segmenter, taking the next stretch only while finalization
         is less than BUFFER_S - 300 s of audio behind: the buffer must not drop audio before it is finalized."""
-        async for t, x in audio.stream(device, st.done_to):
+        async for t, x in audio.stream(device, st.done_to, spent=fcost):
             while True:
                 done = st.done_to
                 a = max(seg.audio_base, seg.sample_at(done)) if seg.anchors and done else seg.audio_base
@@ -68,22 +70,24 @@ async def pipeline(device: str):
                     break
                 await anyio.sleep(1)
             st.audio_end = t + dt.timedelta(seconds=len(x) / SR)
-            try:
-                st.utts += [(u[0], u[1]) for u in seg.push(t, x)]
-            except Exception:
-                log.exception("%s: segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
+            with perf.timed(fcost, "vad_ms"):
+                try:
+                    st.utts += [(u[0], u[1]) for u in seg.push(t, x)]
+                except Exception:
+                    log.exception("%s: segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
 
     async def edge_feed():
         """The draft layer's own stream: the device's newest DRAFT_BACK_S of audio, whatever the final layer is busy
         with. A backlog (a phone back after hours offline sends them at once) is skipped here and finalized in order
         by the final layer; fed through feed(), drafts waited until it was all final (10-06: hours)."""
-        async for t, x in audio.stream(device, None, edge_s=DRAFT_BACK_S):
+        async for t, x in audio.stream(device, None, edge_s=DRAFT_BACK_S, spent=dcost):
             st.edge_end = t + dt.timedelta(seconds=len(x) / SR)
-            try:
-                utts = dseg.push(t, x)
-            except Exception:
-                log.exception("%s: draft segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
-                continue
+            with perf.timed(dcost, "vad_ms"):
+                try:
+                    utts = dseg.push(t, x)
+                except Exception:
+                    log.exception("%s: draft segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
+                    continue
             for i, u in enumerate(utts):
                 st.last_speech = u[1]  # a piece with no VAD speech is not sent to the engine
                 st.draft_utts.append((u[0], u[1]))
@@ -287,6 +291,11 @@ async def pipeline(device: str):
         start_analysis(asked=True)
         return None
 
+    def final_row(piece_s: float, sentences: int):
+        perf.piece(device, "final", piece_s, sentences, fcost)
+        if not st.drafting and dcost:  # no page watches, no draft passes: the draft layer's stream in a row of its own
+            perf.piece(device, "draft", None, None, dcost)
+
     async def final_piece() -> bool:
         """Cut and finalize the next piece when there is one; True when a piece was done (look for the next at once)."""
         nonlocal owner
@@ -322,15 +331,19 @@ async def pipeline(device: str):
         # no speech: nothing to send, the clock still advances. Nor in less than a VAD frame (25 ms), whatever the VAD is
         # in at the newest audio: a store finalized to the ms before this fix left the last samples of a recording here
         if len(x) < SR // 40 or (not any(rel(u[0]) < cut for u in known) and not seg.speaking()):
-            await commit(grouper.advance(hi), [], iso(base), hi)  # no rows: pages still drop their drafts of this time
+            with perf.timed(fcost, "commit_ms"):
+                await commit(grouper.advance(hi), [], iso(base), hi)  # no rows: pages still drop their drafts of this time
+            final_row(len(x) / SR, 0)
             return True
         t_run = time.perf_counter()
         was_open = bool(grouper.open)
         m0 = dia.mark()
         try:
-            segs = await asr.engine_segs(x, speech_in(seg, a0, len(x)), device=device)
+            with perf.timed(fcost, "asr_ms"):
+                segs = await asr.engine_segs(x, speech_in(seg, a0, len(x)), device=device)
             engine = segs[0]["engine"] if segs else None
-            marks = await anyio.to_thread.run_sync(label_sentences, dia, embed, segs, x, limiter=threads.INFER)
+            with perf.timed(fcost, "embed_ms"):
+                marks = await anyio.to_thread.run_sync(label_sentences, dia, embed, segs, x, limiter=threads.INFER)
         except Exception as e:
             dia.rollback(m0)
             log.warning("%s final piece failed: %r", device, e)
@@ -355,7 +368,9 @@ async def pipeline(device: str):
         del st.final_latency[:-10]
         closed = [c for r in rows for c in grouper.sentence(r)]
         closed += grouper.advance(hi)
-        await commit(closed, rows, iso(lo), hi)
+        with perf.timed(fcost, "commit_ms"):
+            await commit(closed, rows, iso(lo), hi)
+        final_row(len(x) / SR, len(rows))
         st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((time.perf_counter() - t_run) * 1000),
                         "engine": engine, "speakers": by_label, "changed": len(rows), "piece_s": round(len(x) / SR),
                         "backlog_s": round((seg.time_at(seg.samples) - hi).total_seconds())}
@@ -439,7 +454,8 @@ async def pipeline(device: str):
 
         async def publish(rows: list[dict], upto: dt.datetime, engine: str):
             nonlocal n_rows
-            await publish_drafts(rows, upto, engine)
+            with perf.timed(dcost, "commit_ms"):
+                await publish_drafts(rows, upto, engine)
             n_rows += len(rows)
 
         async def early(segs: list[dict]):
@@ -448,7 +464,8 @@ async def pipeline(device: str):
             segs = clip_turns(segs[:-1], sent)
             if not segs:
                 return
-            await anyio.to_thread.run_sync(label_sentences, ddia, embed, segs, x, limiter=threads.INFER)
+            with perf.timed(dcost, "embed_ms"):
+                await anyio.to_thread.run_sync(label_sentences, ddia, embed, segs, x, limiter=threads.INFER)
             rows = final_rows(segs, {g["speaker"]: g["speaker"] for g in segs}, t0, len(x) / SR, None, sent, at, 0.0)[2]
             sent = segs[-1]["end_ms"] / 1000
             await publish(rows, at(sent), segs[0]["engine"])
@@ -457,7 +474,7 @@ async def pipeline(device: str):
         got = []
 
         async def call():
-            with send:  # closed when the call ends, and with it the answers
+            with send, perf.timed(dcost, "asr_ms"):  # closed when the call ends, and with it the answers
                 got.append(await asr.engine_segs(x, speech_in(dseg, a0, len(x)), send.send_nowait, asr.DRAFT_ENGINE, "draft", device))
         m0 = ddia.mark()
         try:
@@ -469,7 +486,8 @@ async def pipeline(device: str):
                         m0 = ddia.mark()
             raw = got[0]
             segs = clip_turns(raw, sent)
-            marks = await anyio.to_thread.run_sync(label_sentences, ddia, embed, segs, x, limiter=threads.INFER)
+            with perf.timed(dcost, "embed_ms"):
+                marks = await anyio.to_thread.run_sync(label_sentences, ddia, embed, segs, x, limiter=threads.INFER)
         except Exception as e:
             e = threads.first(e)
             ddia.rollback(m0)
@@ -488,6 +506,7 @@ async def pipeline(device: str):
                                 "early_to": sent, "from": iso(at(since)), "to": iso(hi), "segs": raw}, ensure_ascii=False) + "\n")
         engine = raw[0]["engine"] if raw else asr.DRAFT_ENGINE
         await publish(rows, hi, engine)
+        perf.piece(device, "draft", len(x) / SR, n_rows, dcost)
         st.draft = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((time.perf_counter() - t_run) * 1000),
                        "engine": engine, "changed": n_rows, "early_s": round(sent - since), "to": iso(hi)}
         log.info("draft %s: %s", device, st.draft)

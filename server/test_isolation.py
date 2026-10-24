@@ -24,6 +24,7 @@ from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
 from alldayrec import monitor
+from alldayrec import perf
 from alldayrec import pipeline_state
 from alldayrec import server
 from alldayrec import summary
@@ -87,11 +88,11 @@ def seed(t: tenant.Tenant):
 
 
 def snapshot(t: tenant.Tenant) -> str:
-    """Every row of its store and every file of it, as one hash."""
+    """Every row of its store and every file of it, as one hash; not its perf_* rows (its own requests are timed there)."""
     def rows():
         c = db.conn()
         return [(name, sorted(map(tuple, c.execute(f"SELECT * FROM {name}")))) for (name,) in
-                c.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
+                c.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'perf_%' ORDER BY name")]
     files = sorted((str(p.relative_to(t.data)), p.read_bytes()) for p in t.data.rglob("*") if p.is_file() and not p.name.startswith("live.db"))
     return hashlib.sha256(repr((tenant.call(t, rows), files)).encode()).hexdigest()
 
@@ -105,6 +106,7 @@ REQUESTS = {
     ("POST", "/api/device-log"): ("POST", "/api/device-log", dict(params={"device": DEV}, json=[{"src": "app", "seq": 2, "at": MS, "data": {"kind": "x"}}])),
     ("GET", "/api/device-log"): ("GET", "/api/device-log", dict(params={"device": DEV, "since": TODAY})),
     ("GET", "/api/calls"): ("GET", "/api/calls", dict(params={"since": TODAY})),
+    ("GET", "/api/perf"): ("GET", "/api/perf", dict(params={"day": TODAY})),
     ("GET", "/api/upgrades"): ("GET", "/api/upgrades", dict(params={"device": DEV, "since": TODAY})),
     ("GET", "/api/client-config"): ("GET", "/api/client-config", {}),
     ("GET", "/api/app-setup"): ("GET", "/api/app-setup", {}),
@@ -214,6 +216,7 @@ def test_routes(two, monkeypatch):
                                                               "function": {"name": "grep", "arguments": '{"q": "说的话"}'}}]}}]}
         return {"choices": [{"message": {"content": json.dumps({"headline": "h", "answer": "a"}) if kind != "ask" else f"好 [{CID}]"}}]}
     monkeypatch.setattr(summary, "call", llm)
+    monkeypatch.setattr(perf, "SLOW_MS", 0)  # every request a row of its own, in its tenant's store
 
     async def heard(x, partial=None):  # a spoken question
         return [{"start_ms": 0, "end_ms": 1000, "text": "说过什么？"}]
@@ -243,6 +246,8 @@ def test_routes(two, monkeypatch):
     assert prompts and not [p for p in prompts if "MARKb" in p], "the model saw nothing of b's"
     assert any("MARKa" in p for p in prompts), "ask's tools read a's store"
     assert snapshot(b) == before, "nothing of b's changed"
+    timed = lambda t: tenant.call(t, lambda: {r[0] for r in db.conn().execute("SELECT route FROM perf_requests")})
+    assert timed(b) == {"/api/status", "/api/conversation/{conv_id}"} and "/api/perf" in timed(a), "each request timed in its own store"
     assert b.events[-1]["text"] == "MARKb" and len(b.events) == 1 and b.devices[DEV].conversation["note"] == "MARKb"
     assert a.chunks and b.chunks is None, "the upload is a's"
     assert a.lang == "en" and b.lang == "zh", "a's PUT /api/lang is a's"
@@ -333,7 +338,8 @@ def test_nothing_per_person_in_a_module():
     allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
                "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
-               "local_asr": {"FILES"}}  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
+               "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
+               "perf": {"POOLS", "_minute", "_last"}}  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
     here = Path(server.__file__).parent
     mutable = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
     found = {}

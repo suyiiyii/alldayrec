@@ -37,6 +37,8 @@ from alldayrec import db
 from alldayrec import firmware
 from alldayrec import infer
 from alldayrec import local_asr
+from alldayrec import monitor
+from alldayrec import perf
 from alldayrec import routes_api
 from alldayrec import routes_audio
 from alldayrec import routes_pages
@@ -66,7 +68,7 @@ async def lifespan(app):
         tg.start_soon(supervised, "metrics", metrics_loop, name="metrics")
         if os.environ.get("STEPFUN_API_KEY"):
             tg.start_soon(supervised, "balance", balance_loop, name="balance")
-        if os.environ.get("LOOP_STALL_MS"):
+        if monitor.LOOP_STALL_MS > 0:
             tg.start_soon(supervised, "stalls", loop_stalls, name="stalls")
         for t in core.TENANTS:
             tg.start_soon(run_tenant, t, name=f"tenant:{t.id}")
@@ -141,6 +143,7 @@ async def lasting(device: str):
         await anyio.sleep(RESTART_S)
 
 
+app.add_middleware(perf.Requests)  # inside Tenants (added after it): each request's tenant is known
 app.add_middleware(auth.Tenants)
 # the routers in this order: the routes match as they did when they were all in this file (test_routes_snapshot.py)
 app.include_router(routes_pages.router)

@@ -21,7 +21,7 @@ ALLOWED = {
     "migrate.py": {"import concurrent.futures as cf": "one-off (10-02 SQLite cutover): to delete",
                    "with cf.ThreadPoolExecutor(16) as ex:": "one-off: to delete"},
     "monitor.py": {  # loop_stalls' watcher runs beside the loop it watches for the process's life, not a job under a limiter
-        'threading.Thread(target=watch, args=(beat, float(os.environ["LOOP_STALL_MS"]) / 1000), daemon=True, name="loop-stalls").start()': "",
+        'threading.Thread(target=watch, args=(beat, LOOP_STALL_MS / 1000), daemon=True, name="loop-stalls").start()': "",
     },
 }
 

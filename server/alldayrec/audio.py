@@ -26,6 +26,7 @@ import anyio.to_thread
 import numpy as np
 
 from alldayrec import db
+from alldayrec import perf
 from alldayrec import threads
 from alldayrec.tenant import T
 
@@ -346,13 +347,14 @@ def hold_seen(device: str) -> float | None:
     return h and h["seen"]
 
 
-async def stream(device: str, after: dt.datetime | None, edge_s: float | None = None):
+async def stream(device: str, after: dt.datetime | None, edge_s: float | None = None, spent: dict | None = None):
     """(start time, samples) of one device in time order, from the piece holding `after` (its first piece when None),
     forever, each moment once (fresh). A piece arriving older than one already handed out is kept for playback but not
     streamed: a phone that sends what is said now ahead of older audio holds the queue (hold()) until the older audio
     is in. edge_s: only the device's newest edge_s seconds (before its newest piece's end or the clock, whichever is
     later), for a reader of what is said now: older pieces, a backlog arriving, are skipped; such a reader is not the
-    device's queue (read_to, queued)."""
+    device's queue (read_to, queued). spent: the ms its pieces took to decode (decode_ms) and the seconds it handed out
+    (fed_s) added to it (perf.piece)."""
     ms = int(after.timestamp() * 1000) if after else 0
     p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, ms)).fetchone()
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
@@ -371,11 +373,13 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         if p is None:
             await anyio.sleep(1)
             continue
-        got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
+        with perf.timed(spent, "decode_ms"):
+            got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
         at = p["start_ms"]
         if got is not None:
             s, x = got
             end = s + len(x) * 1000 / SR
+            perf.add(spent, fed_s=len(x) / SR)
             yield dt.datetime.fromtimestamp(s / 1000), x
 
 

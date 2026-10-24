@@ -60,6 +60,7 @@ class Tenant:
     tags: dict = field(default_factory=lambda: {"at": 0.0, "counts": {}})
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
     undo: dict = field(default_factory=dict)        # renames that can be taken back, by undo id (routes_speakers.keep_undo)
+    requests: dict = field(default_factory=dict)    # its HTTP requests this minute by (method, route, status): (ms, bytes) each (perf)
     summaries: tuple = None                         # (send, receive): its conversations waiting for a summary
     tg: "anyio.abc.TaskGroup | None" = None         # its tasks (run_tenant): pipelines, live analyses, loops
     scope: anyio.CancelScope | None = None          # cancelled: the tenant stops, every task of it with it

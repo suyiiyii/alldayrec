@@ -1,16 +1,19 @@
 """What the apps send and ask: the audio pieces, a recording's end, a hold let go, what they read off the recorders
 (status, event logs), the calls and firmware updates, and the settings they start with."""
 import datetime as dt
+import json
 import logging
 import os
 import time
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from alldayrec import audio
 from alldayrec import db
+from alldayrec import perf
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import iso
@@ -103,6 +106,19 @@ async def device_log(device: str, since: str, until: str | None = None):
 async def calls(since: str):
     """The ASR and LLM calls since `since`, by kind and engine (db.calls), and the StepFun balance (db.balance)."""
     return {"calls": db.calls(since), "balance": db.balance("stepfun")}
+
+
+@router.get("/api/perf")
+async def perf_day(day: str):
+    """A day's (YYYY-MM-DD) performance rows in this tenant's store, oldest first (perf.day): {stalls, samples, requests,
+    pieces}; the event loop's stalls and the process's minutes are in the first tenant's only."""
+    try:
+        dt.date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(400, "day is YYYY-MM-DD")
+    # thousands of rows: read and encoded off the event loop (FastAPI's own encoding of a list that long takes ~20 ms on it)
+    body = await anyio.to_thread.run_sync(lambda: json.dumps(perf.day(db.conn(), day), ensure_ascii=False), limiter=threads.DB)
+    return Response(body, media_type="application/json")
 
 
 @router.get("/api/upgrades")
