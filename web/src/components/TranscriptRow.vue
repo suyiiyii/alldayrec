@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { hhmmss, type Row } from "../lib/api";
 import { player, toggle } from "../lib/audio";
 import { speakerLabel } from "../lib/speakers";
@@ -32,17 +33,17 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
       now,
     }"
     :data-start="row.start"
-    :title="row.state === 'draft' ? '实时初稿，稍后定稿' : undefined"
+    :title="row.state === 'draft' ? t('transcriptRow.draft') : undefined"
     @click="tap"
   >
     <div class="t">
-      <button v-if="seek" class="play" title="从这一句开始播放" @click.stop="seek(row)">
+      <button v-if="seek" class="play" :title="t('transcriptRow.playFrom')" @click.stop="seek(row)">
         <Icon name="play" :size="14" /></button
       ><button
         v-else
         class="play"
         :disabled="player.failed.has(row.id)"
-        :title="player.failed.has(row.id) ? '这段录音取不出来' : '播放这一句'"
+        :title="player.failed.has(row.id) ? t('transcriptRow.failed') : t('transcriptRow.playOne')"
         @click="toggle(row)"
       >
         <Icon
@@ -52,13 +53,15 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
       >{{ hhmmss(row.start) }}
     </div>
     <div class="spk" :class="{ me: row.speaker === '我' }">
-      <template v-if="now && !row.speaker">正在说</template>
+      <template v-if="now && !row.speaker">{{ t("transcriptRow.speaking") }}</template>
       <template v-else><Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}</template>
     </div>
-    <div v-if="row.error" class="text err" :title="row.error">这一句没能识别出文字</div>
+    <div v-if="row.error" class="text err" :title="row.error">{{ t("transcriptRow.noText") }}</div>
     <div v-else class="text">
-      <span v-if="row.dictation" class="dict">口述→{{ row.dictation }}</span
-      >{{ row.text || (now ? "" : "（空）") }}<span v-if="now" class="pulse" />
+      <span v-if="row.dictation" class="dict">{{
+        t("transcriptRow.dictation", { to: row.dictation })
+      }}</span
+      >{{ row.text || (now ? "" : t("transcriptRow.empty")) }}<span v-if="now" class="pulse" />
     </div>
   </div>
 </template>

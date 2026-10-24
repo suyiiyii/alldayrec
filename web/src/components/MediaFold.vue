@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { t } from "../i18n";
 import { hhmmss, type Row } from "../lib/api";
 import Icon from "./Icon.vue";
 import TranscriptRow from "./TranscriptRow.vue";
@@ -11,8 +12,14 @@ const open = ref(false);
 
 <template>
   <button class="fold" @click="open = !open">
-    <Icon :name="open ? 'chevron-down' : 'chevron-right'" :size="16" /> 媒体
-    {{ hhmmss(rows[0].start) }}–{{ hhmmss(rows.at(-1)!.end) }} · {{ rows.length }} 句
+    <Icon :name="open ? 'chevron-down' : 'chevron-right'" :size="16" />
+    {{
+      t(
+        "mediaFold.line",
+        { from: hhmmss(rows[0].start), to: hhmmss(rows.at(-1)!.end), n: rows.length },
+        rows.length,
+      )
+    }}
   </button>
   <template v-if="open">
     <TranscriptRow

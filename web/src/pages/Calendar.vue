@@ -5,6 +5,7 @@ import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
 import MonthGrid from "../components/MonthGrid.vue";
 import Skeleton from "../components/Skeleton.vue";
+import { intl, lang, t } from "../i18n";
 import { errorTitle } from "../lib/api";
 import { calendar, loadCalendar } from "../lib/calendar";
 
@@ -29,17 +30,21 @@ const months = computed(() => {
   return Object.entries(by).sort((a, b) => (a[0] < b[0] ? 1 : -1));
 });
 const open = (day: string) => router.push({ path: "/", query: { day } });
+const monthLabel = (m: string) =>
+  lang() === "zh"
+    ? m.replace("-", " 年 ") + " 月"
+    : new Date(m + "-01T12:00:00").toLocaleDateString(intl(), { year: "numeric", month: "long" });
 </script>
 
 <template>
   <AppHeader />
   <main>
-    <section v-for="[m, t] in months" :key="m" class="month card">
+    <section v-for="[m, x] in months" :key="m" class="month card">
       <h2>
-        {{ m.replace("-", " 年 ") }} 月
+        {{ monthLabel(m) }}
         <span
-          >{{ t.conversations }} 段对话 ·
-          {{ (t.min / 60).toFixed(1) }} 小时</span
+          >{{ t("calendar.convs", x.conversations) }} ·
+          {{ t("common.hours", { n: (x.min / 60).toFixed(1) }) }}</span
         >
       </h2>
       <MonthGrid :month="m" big @pick="open" />
@@ -50,8 +55,8 @@ const open = (day: string) => router.push({ path: "/", query: { day } });
     <Skeleton v-else-if="!loaded" />
     <div v-else-if="!months.length" class="empty">
       <Icon name="calendar" :size="48" />
-      <div>还没有录音。连上手机和录音设备后，每天录了多少会显示在这里</div>
-      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+      <div>{{ t("calendar.none") }}</div>
+      <RouterLink class="btn btn-primary" to="/connect">{{ t("title.connect") }}</RouterLink>
     </div>
   </main>
 </template>

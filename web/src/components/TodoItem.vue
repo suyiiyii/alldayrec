@@ -2,6 +2,7 @@
 // One of my todos in two lines: what, then where it came from (the sentence, whom it is to, the conversation, the
 // time said); a tap opens the transcript at that sentence. On a phone a swipe left of 60 px marks it done
 import { computed, ref } from "vue";
+import { t as tr } from "../i18n";
 import { hhmm, type TodoView } from "../lib/api";
 import { speakerLabel } from "../lib/speakers";
 import Icon from "./Icon.vue";
@@ -9,20 +10,25 @@ import TodoMarks from "./TodoMarks.vue";
 
 const { t } = defineProps<{ t: TodoView }>();
 const cut = (s: string, n: number) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
-const who = (names: string[]) =>
-  names.slice(0, 2).map(speakerLabel).join("、") +
-  (names.length > 2 ? ` 等 ${names.length} 人` : "");
+const who = (names: string[]) => {
+  const two = names.slice(0, 2).map(speakerLabel).join(tr("common.list"));
+  return names.length > 2
+    ? tr("todoItem.andMore", { names: two, n: names.length, more: names.length - 2 })
+    : two;
+};
 const context = computed(() =>
   [
-    t.quote && `「${cut(t.quote, 40)}」`,
-    t.with?.length && (t.to ? "答应" : "和") + who(t.with),
-    t.title ? cut(t.title, 12) : t.start && "对话 " + hhmm(t.start),
+    t.quote && tr("todoItem.quote", { q: cut(t.quote, 40) }),
+    t.with?.length && tr(t.to ? "todoItem.promised" : "todoItem.with", { who: who(t.with) }),
+    t.title ? cut(t.title, 12) : t.start && tr("todoItem.conv", { t: hhmm(t.start) }),
     t.at && hhmm(t.at),
   ]
     .filter(Boolean)
     .join(" · "),
 );
-const when = computed(() => (t.age_days ? `过期 ${t.age_days} 天` : t.due));
+const when = computed(() =>
+  t.age_days ? tr("todoItem.overdue", { n: t.age_days }, t.age_days) : t.due,
+);
 const to = computed(
   () => `/c/${t.conv}` + (t.at ? "?" + new URLSearchParams({ tab: "transcript", at: t.at }) : ""),
 );
@@ -59,7 +65,7 @@ function guard(e: MouseEvent) {
 
 <template>
   <li class="todo-item" :class="{ swiping: dx }">
-    <span v-if="dx" class="behind"><Icon name="check" :size="18" />完成</span>
+    <span v-if="dx" class="behind"><Icon name="check" :size="18" />{{ tr("todoItem.done") }}</span>
     <div
       class="slide"
       :style="dx ? { transform: `translateX(${dx}px)` } : undefined"

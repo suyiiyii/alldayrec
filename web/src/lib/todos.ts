@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { t } from "../i18n";
 import { post, type Mark } from "./api";
 import { toast } from "./toast";
 
@@ -24,7 +25,7 @@ export async function markWithUndo(ids: string[], mark: Mark, msg: string) {
   toast(msg, {
     undo: () =>
       void setMarks(ids, null).then(
-        () => toast("已撤销"),
+        () => toast(t("common.undone")),
         (e: Error) => toast(e.message),
       ),
   });

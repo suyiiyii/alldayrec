@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { intl, lang, t } from "../i18n";
 import { calendar, today } from "../lib/calendar";
 
 // One month, Monday first: each day with sentences shows its conversation count, shaded by speech minutes;
@@ -21,30 +22,42 @@ const cells = computed(() => {
 });
 // 0 (none) .. 1 (two hours or more of speech)
 const heat = (min: number) => Math.min(1, Math.log1p(min) / Math.log1p(120));
-const t = today();
+const now = today();
+// Monday first: 一..日, or the language's short names (2024-01-01 was a Monday)
+const weekdays = computed(() =>
+  lang() === "zh"
+    ? [..."一二三四五六日"]
+    : Array.from({ length: 7 }, (_, i) =>
+        new Date(2024, 0, 1 + i).toLocaleDateString(intl(), { weekday: "short" }),
+      ),
+);
 </script>
 
 <template>
   <div class="grid" :class="{ big }">
-    <div v-for="w in '一二三四五六日'" :key="w" class="wd">{{ w }}</div>
+    <div v-for="(w, i) in weekdays" :key="i" class="wd">{{ w }}</div>
     <template v-for="(c, i) in cells" :key="i">
       <div v-if="!c" />
       <button
         v-else
         class="cell"
-        :class="{ on: c.day === selected, today: c.day === t, empty: !c.info }"
+        :class="{ on: c.day === selected, today: c.day === now, empty: !c.info }"
         :disabled="!c.info"
         :style="c.info ? { '--heat': heat(c.info.speech_min) } : {}"
         :title="
           c.info
-            ? `${c.info.conversations} 段对话 · ${Math.round(c.info.speech_min)} 分钟`
+            ? t('calendar.convs', c.info.conversations) +
+              ' · ' +
+              t('common.min', { n: Math.round(c.info.speech_min) })
             : ''
         "
         @click="emit('pick', c.day)"
       >
         <span class="n">{{ c.n }}</span>
         <span v-if="c.info?.conversations" class="count">{{ c.info.conversations }}</span>
-        <span v-if="big && c.info" class="min">{{ Math.round(c.info.speech_min) }} 分</span>
+        <span v-if="big && c.info" class="min">{{
+          t("monthGrid.min", { n: Math.round(c.info.speech_min) })
+        }}</span>
       </button>
     </template>
   </div>

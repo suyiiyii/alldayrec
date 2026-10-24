@@ -3,8 +3,9 @@ import { computed, ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import LineChart from "../components/LineChart.vue";
 import Skeleton from "../components/Skeleton.vue";
+import { t } from "../i18n";
 import {
-  CHARGE,
+  chargeText,
   get,
   hot,
   phoneLine,
@@ -34,11 +35,11 @@ import {
 // its audio sounded and arrived (a point a minute, the server's measure of each piece: levels only), and what
 // happened, the recorder's own event log and the app's, newest first, with each firmware update in a line.
 const props = defineProps<{ name: string }>();
-const RANGES: [string, number][] = [
-  ["6 小时", 6],
-  ["24 小时", 24],
-  ["3 天", 72],
-  ["7 天", 168],
+const RANGES: [() => string, number][] = [
+  [() => t("common.hours", { n: 6 }), 6],
+  [() => t("common.hours", { n: 24 }), 24],
+  [() => t("device.days", { n: 3 }, 3), 72],
+  [() => t("device.days", { n: 7 }, 7), 168],
 ];
 const hours = ref(24);
 const all = ref(false); // routine records too (heartbeats, connection parameters, ...)
@@ -51,7 +52,7 @@ const local = (t: number) =>
 watch(
   [() => props.name, hours],
   async () => {
-    document.title = `${props.name} · 设备日志`;
+    document.title = `${props.name} · ${t("title.device")}`;
     hi.value = Date.now();
     lo.value = hi.value - hours.value * 3600_000;
     const q = { device: props.name, since: local(lo.value) };
@@ -74,7 +75,7 @@ function said(e: DeviceEvent): Said {
       text ??
       Object.entries(rest)
         .map(([k, v]) => `${k} ${JSON.stringify(v)}`)
-        .join("，"),
+        .join(t("device.sep")),
     level: level === "error" ? "bad" : level === "warn" ? "warn" : "",
     routine: kind === "foreground" || kind === "background", // the app in front or not, tens a day
   };
@@ -90,7 +91,7 @@ const rows = computed(() => {
   const up = ups.value.map((u, i) => ({
     e: { src: "upgrade", seq: Number.MAX_SAFE_INTEGER - i, at: u.at, data: {} },
     key: u.at,
-    name: "固件升级",
+    name: t("device.upgrade"),
     label: "",
     text: upgradeText(u),
     level: (u.ok ? "" : u.ok == null ? "warn" : "bad") as Said["level"],
@@ -119,24 +120,25 @@ const pct = computed(() =>
 // what it runs on, as its phone last read it
 const charge = computed(() => (log.value?.status ?? []).filter((s) => s.charge).pop());
 const NAMES: Record<number, string> = {
-  [BOOT]: "重启",
-  [FAULT]: "崩溃",
-  [DFU]: "升级",
-  [DISCONNECT]: "断开",
+  [BOOT]: "device.mark.boot",
+  [FAULT]: "device.mark.fault",
+  [DFU]: "device.mark.dfu",
+  [DISCONNECT]: "device.mark.disconnect",
 };
 const marks = computed(() =>
   dated.value
     .map((e) => ({ t: Date.parse(e.at!), code: rec(e).code & ~UPTIME }))
     .filter((m) => NAMES[m.code])
-    .map((m) => ({ t: m.t, label: NAMES[m.code], strong: m.code !== DISCONNECT })),
+    .map((m) => ({ t: m.t, label: t(NAMES[m.code]), strong: m.code !== DISCONNECT })),
 );
-// what the audio card shows: a measure of each minute's audio, or the card's write load (SD_WRITES, every 10 min)
-const MEASURES: [string, string, (m: AudioMinute) => number | null][] = [
-  ["全 0", "s/分钟", (m) => m.zero_s], // runs of exact zeros >= 10 ms: the mic sent nothing
-  ["满幅", "次/分钟", (m) => m.full],
-  ["电平", "dBFS", (m) => m.rms],
-  ["哼声", "dBFS", (m) => m.hum], // mains hum, 50..250 Hz
-  ["到达延迟", "s", (m) => m.lag_s], // its end to the server's receiving it
+// what the audio card shows: a measure of each minute's audio, or the card's write load (SD_WRITES, every 10 min);
+// [its name's key, its unit, its value]
+const MEASURES: [string, () => string, (m: AudioMinute) => number | null][] = [
+  ["device.m.zero", () => t("device.unit.sPerMin"), (m) => m.zero_s], // runs of exact zeros >= 10 ms: the mic sent nothing
+  ["device.m.full", () => t("device.unit.perMin"), (m) => m.full],
+  ["device.m.rms", () => "dBFS", (m) => m.rms],
+  ["device.m.hum", () => "dBFS", (m) => m.hum], // mains hum, 50..250 Hz
+  ["device.m.lag", () => "s", (m) => m.lag_s], // its end to the server's receiving it
 ];
 const measure = ref(0); // MEASURES.length: the card's write load
 const points = (ps: { t: number; v: number | null }[]) =>
@@ -164,11 +166,11 @@ const sound = computed(() => {
 });
 // its phone and the link, from the status its phone sends every minute (App 1.4.6 on): the newest one says what
 // the phone runs and how its uploads go, the chart one measure over time
-const PHONE: [string, string, (s: RecorderStatus) => number | null | undefined][] = [
-  ["信号", "dBm", (s) => s.rssi],
-  ["待传", "块", (s) => s.queue_n],
-  ["手机电量", "%", (s) => s.phone_battery],
-  ["App 内存", "MB", (s) => s.app_mb],
+const PHONE: [string, () => string, (s: RecorderStatus) => number | null | undefined][] = [
+  ["device.p.rssi", () => "dBm", (s) => s.rssi],
+  ["device.p.queue", () => t("device.unit.pieces"), (s) => s.queue_n],
+  ["device.p.battery", () => "%", (s) => s.phone_battery],
+  ["device.p.memory", () => "MB", (s) => s.app_mb],
 ];
 const phoneMeasure = ref(0);
 const phone = computed(() => (log.value?.status ?? []).filter((s) => s.app).pop());
@@ -180,7 +182,8 @@ const phonePoints = computed(() =>
     })),
   ),
 );
-const secs = (s: number) => (s < 120 ? `${Math.round(s)} 秒` : `${Math.round(s / 60)} 分钟`);
+const secs = (s: number) =>
+  s < 120 ? t("common.sec", { n: Math.round(s) }) : t("common.min", { n: Math.round(s / 60) });
 const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + at.slice(11, 19);
 </script>
 
@@ -196,7 +199,7 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
           :class="['tag', { on: hours === h }]"
           @click="hours = h"
         >
-          {{ l }}
+          {{ l() }}
         </button>
       </span>
     </div>
@@ -204,8 +207,8 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
     <template v-else>
       <section class="card">
         <div class="head">
-          <b>电池电压</b
-          ><span class="muted">mV，录音设备每 10 分钟记一次（LR-P3 用电池时每分钟）</span>
+          <b>{{ t("device.voltage") }}</b
+          ><span class="muted">{{ t("device.voltageSub") }}</span>
         </div>
         <LineChart
           v-if="mv.length"
@@ -216,17 +219,21 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
           :gap="30 * 60000"
           :marks="marks"
         />
-        <div v-else class="muted">这段时间没有录音设备的日志（App 读到设备日志后才有）</div>
+        <div v-else class="muted">{{ t("device.noRecLog") }}</div>
         <div v-if="marks.length" class="legend muted">
-          <span><i class="solid" />重启 / 崩溃 / 升级</span><span><i class="dashed" />断开</span>
+          <span><i class="solid" />{{ t("device.legendStrong") }}</span
+          ><span><i class="dashed" />{{ t("device.mark.disconnect") }}</span>
         </div>
       </section>
       <section class="card">
         <div class="head">
-          <b>电量</b
+          <b>{{ t("device.battery") }}</b
           ><span class="muted"
-            >%，手机连着时每分钟读一次{{
-              charge ? `；${CHARGE[charge.charge!]}（${when(charge.at)}）` : ""
+            >{{ t("device.batterySub")
+            }}{{
+              charge
+                ? t("device.chargeAt", { charge: chargeText(charge.charge!), at: when(charge.at) })
+                : ""
             }}</span
           >
         </div>
@@ -239,49 +246,48 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
           :gap="10 * 60000"
           :marks="marks"
         />
-        <div v-else class="muted">这段时间手机没有上报电量</div>
+        <div v-else class="muted">{{ t("device.noBattery") }}</div>
       </section>
       <section class="card">
         <div class="head">
-          <b>录音</b>
+          <b>{{ t("device.audio") }}</b>
           <span class="ranges">
             <button
-              v-for="([l], i) in [...MEASURES, ['写卡忙']]"
+              v-for="([l], i) in [...MEASURES, ['device.m.busy']]"
               :key="i"
               :class="['tag', { on: measure === i }]"
               @click="measure = i"
             >
-              {{ l }}
+              {{ t(l as string) }}
             </button>
           </span>
         </div>
         <div v-if="sound.minutes" class="muted">
-          {{ sound.minutes }} 分钟有音频：<span :class="{ bad: sound.zero >= 1 }"
-            >全 0 共 {{ sound.zero }} 秒（{{ sound.zeroMinutes }} 分钟有）</span
-          >，满幅 {{ sound.full }} 次<template v-if="sound.lag"
-            >；到达延迟中位 {{ secs(sound.lag[0]) }}，最长 {{ secs(sound.lag[1]) }}</template
-          >
+          {{ t("device.soundMinutes", { n: sound.minutes })
+          }}<span :class="{ bad: sound.zero >= 1 }">{{
+            t("device.soundZero", { s: sound.zero, n: sound.zeroMinutes })
+          }}</span
+          >{{ t("device.soundFull", { n: sound.full }, sound.full)
+          }}<template v-if="sound.lag">{{
+            t("device.soundLag", { mid: secs(sound.lag[0]), max: secs(sound.lag[1]) })
+          }}</template>
         </div>
         <LineChart
           v-if="heard.length"
           :points="heard"
           :lo="lo"
           :hi="hi"
-          :unit="measure < MEASURES.length ? MEASURES[measure][1] : '%'"
+          :unit="measure < MEASURES.length ? MEASURES[measure][1]() : '%'"
           :gap="measure < MEASURES.length ? 3 * 60000 : 30 * 60000"
           :marks="marks"
         />
         <div v-else class="muted">
-          {{
-            measure < MEASURES.length
-              ? "这段时间没有测过的音频（早期上传的录音没有这项统计）"
-              : "这段时间没有写卡统计（录音设备每 10 分钟记一次写卡有多忙，事件 SD_WRITES）"
-          }}
+          {{ measure < MEASURES.length ? t("device.noAudio") : t("device.noCardWrites") }}
         </div>
       </section>
       <section class="card">
         <div class="head">
-          <b>手机和连接</b>
+          <b>{{ t("device.phone") }}</b>
           <span class="ranges">
             <button
               v-for="([l], i) in PHONE"
@@ -289,14 +295,15 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
               :class="['tag', { on: phoneMeasure === i }]"
               @click="phoneMeasure = i"
             >
-              {{ l }}
+              {{ t(l) }}
             </button>
           </span>
         </div>
         <div v-if="phone" class="muted">
-          {{ phoneLine(phone) }}（{{ when(phone.at) }}）<br /><span :class="{ bad: hot(phone) }">{{
-            phoneState(phone)
-          }}</span>
+          {{ t("device.phoneAt", { line: phoneLine(phone), at: when(phone.at) }) }}<br /><span
+            :class="{ bad: hot(phone) }"
+            >{{ phoneState(phone) }}</span
+          >
           · <span :class="{ bad: phone.upload_fails }">{{ queueLine(phone) }}</span>
         </div>
         <LineChart
@@ -304,29 +311,34 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
           :points="phonePoints"
           :lo="lo"
           :hi="hi"
-          :unit="PHONE[phoneMeasure][1]"
+          :unit="PHONE[phoneMeasure][1]()"
           :gap="10 * 60000"
           :marks="marks"
         />
-        <div v-else class="muted">这段时间手机没有上报（较早版本的 App 不上报）</div>
+        <div v-else class="muted">{{ t("device.noPhone") }}</div>
       </section>
       <section class="card">
         <div class="head">
-          <b>事件</b>
+          <b>{{ t("device.events") }}</b>
           <label v-if="routine" class="muted"
-            ><input v-model="all" type="checkbox" /> 显示例行记录（{{ routine }} 条）</label
+            ><input v-model="all" type="checkbox" />
+            {{ t("device.showRoutine", { n: routine }) }}</label
           >
         </div>
         <div v-for="r in rows" :key="r.e.src + r.e.seq" :class="['ev', r.level]">
-          <span class="at">{{ r.e.at ? when(r.e.at) : "时间不明" }}</span>
+          <span class="at">{{ r.e.at ? when(r.e.at) : t("device.noTime") }}</span>
           <span class="src">{{
-            r.e.src === "rec" ? "设备" : r.e.src === "upgrade" ? "汇总" : "App"
+            r.e.src === "rec"
+              ? t("device.srcRec")
+              : r.e.src === "upgrade"
+                ? t("device.srcUpgrade")
+                : "App"
           }}</span>
           <span
             ><b>{{ r.label || r.name }}</b> <span class="detail">{{ r.text }}</span></span
           >
         </div>
-        <div v-if="!rows.length" class="muted">这段时间没有事件</div>
+        <div v-if="!rows.length" class="muted">{{ t("device.noEvents") }}</div>
       </section>
     </template>
   </main>
@@ -383,6 +395,9 @@ h2 {
   padding: 3px 0;
   border-top: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
+}
+.ev:lang(en) {
+  grid-template-columns: auto 3.6em 1fr; /* Device, Update, App */
 }
 .at,
 .src,

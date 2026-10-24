@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { intl } from "../i18n";
 
 // One measure over time on [lo, hi] (ms; the charts of a page share it); points further apart than `gap` ms are not
 // joined. Marks are events drawn as hairlines (solid: `strong`). Hover: the nearest point's value and time.
@@ -93,7 +94,7 @@ function move(e: PointerEvent) {
         :y1="T"
         :y2="H - B"
       >
-        <title>{{ m.label }} {{ new Date(m.t).toLocaleString("zh-CN", { hour12: false }) }}</title>
+        <title>{{ m.label }} {{ new Date(m.t).toLocaleString(intl(), { hour12: false }) }}</title>
       </line>
       <path class="line" :d="path" />
       <circle v-for="p in lone" :key="p.t" class="dot" :cx="x(p.t)" :cy="y(p.v)" r="3" />
@@ -104,7 +105,7 @@ function move(e: PointerEvent) {
     </svg>
     <div v-if="hover" class="tip" :style="{ left: Math.min(x(hover.t) + 8, w - 130) + 'px' }">
       <b>{{ hover.v }} {{ unit }}</b>
-      <span>{{ new Date(hover.t).toLocaleString("zh-CN", { hour12: false }) }}</span>
+      <span>{{ new Date(hover.t).toLocaleString(intl(), { hour12: false }) }}</span>
     </div>
   </div>
 </template>

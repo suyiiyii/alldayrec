@@ -14,6 +14,12 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: true },
   },
   plugins: lazyPlugins(() => [vue()]),
+  // vue-i18n's build flags: the Composition API only (no legacy API in the bundle), no devtools in production
+  define: {
+    __VUE_I18N_FULL_INSTALL__: true,
+    __VUE_I18N_LEGACY_API__: false,
+    __INTLIFY_PROD_DEVTOOLS__: false,
+  },
   build: { outDir: "../server/static/dist", emptyOutDir: true },
   server: {
     proxy: {

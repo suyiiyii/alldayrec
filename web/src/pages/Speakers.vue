@@ -4,6 +4,7 @@ import AppHeader from "../components/AppHeader.vue";
 import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
 import Skeleton from "../components/Skeleton.vue";
+import { lang, t } from "../i18n";
 import { errorTitle, get, hhmm, post, type Speaker, type Voice } from "../lib/api";
 import { play, player } from "../lib/audio";
 import { shiftDay, today } from "../lib/calendar";
@@ -46,13 +47,14 @@ const list = computed(() =>
 );
 const unnamed = computed(() => groups.value.filter((g) => !g.name).length);
 
-const mins = (s: number) => (s < 60 ? `${Math.round(s)} 秒` : `${Math.round(s / 60)} 分钟`);
+const mins = (s: number) =>
+  s < 60 ? t("common.sec", { n: Math.round(s) }) : t("common.min", { n: Math.round(s / 60) });
 const day = (iso: string) => `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
 const heard = (iso: string) =>
   iso.startsWith(today())
-    ? `今天 ${hhmm(iso)}`
+    ? t("common.todayAt", { t: hhmm(iso) })
     : iso.startsWith(shiftDay(today(), -1))
-      ? `昨天 ${hhmm(iso)}`
+      ? t("common.yesterdayAt", { t: hhmm(iso) })
       : iso.slice(5, 10);
 const voiceId = (v: Voice) => `${v.conv}|${v.label}`;
 function listen(v: Voice) {
@@ -62,7 +64,10 @@ function listen(v: Voice) {
   play(voiceId(v), src);
 }
 const num = (g: Speaker) => groups.value.filter((x) => !x.name).indexOf(g) + 1;
-const title = (g: Speaker) => g.name ?? `声音 ${num(g)}`;
+const title = (g: Speaker) => (g.name ? speakerLabel(g.name) : t("speakers.voice", { n: num(g) }));
+// names a voice was called, each in quotes
+const quoted = (names: string[]) =>
+  names.map((name) => t("speakers.quoted", { name })).join(lang() === "zh" ? "" : ", ");
 
 function edit(id: string) {
   editing.value = id;
@@ -90,7 +95,7 @@ async function name(g: Speaker, to: string, what: string, suggestion?: string) {
       group: g.id,
       suggestion,
     });
-    flash.value = `${what} → ${to}：改了 ${r.renamed} 段对话，摘要重新生成中`;
+    flash.value = t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed);
     editing.value = "";
     await load();
   });
@@ -100,7 +105,7 @@ async function addAlias(alias: string, name: string) {
   await run(async () => {
     flash.value = "";
     await post("/api/aliases", { alias, name });
-    flash.value = `已记下「${alias}」是 ${name} 的别名`;
+    flash.value = t("speakers.aliasSaved", { alias, name: speakerLabel(name) });
     await load();
   });
 }
@@ -109,7 +114,7 @@ async function detach(g: Speaker, v: Voice) {
   await run(async () => {
     flash.value = "";
     await post("/api/speakers/detach", { conv: v.conv, label: v.label, group: g.name ?? g.id });
-    flash.value = `已把 ${day(v.start)} 那段从「${title(g)}」移出`;
+    flash.value = t("speakers.detached", { day: day(v.start), group: title(g) });
     members.value = members.value.filter((m) => m !== v);
     await load();
   });
@@ -119,13 +124,13 @@ async function detach(g: Speaker, v: Voice) {
 <template>
   <AppHeader />
   <main>
-    <h1>人物</h1>
+    <h1>{{ t("title.people") }}</h1>
     <div v-if="groups.length" class="tabs">
       <button class="chip" :class="{ on: filter === 'all' }" @click="filter = 'all'">
-        全部 {{ groups.length }}
+        {{ t("speakers.all", { n: groups.length }) }}
       </button>
       <button class="chip" :class="{ on: filter === 'unnamed' }" @click="filter = 'unnamed'">
-        待命名 {{ unnamed }}
+        {{ t("speakers.unnamed", { n: unnamed }) }}
       </button>
     </div>
     <p v-if="flash" class="flash">{{ flash }}</p>
@@ -136,10 +141,10 @@ async function detach(g: Speaker, v: Voice) {
     </div>
     <div v-else-if="!groups.length" class="empty">
       <Icon name="users" :size="48" />
-      <div>还没有认出说话人。录到对话以后，每个声音会列在这里，听一听再起名字</div>
-      <RouterLink class="btn btn-primary" to="/connect">连接手机</RouterLink>
+      <div>{{ t("speakers.none") }}</div>
+      <RouterLink class="btn btn-primary" to="/connect">{{ t("title.connect") }}</RouterLink>
     </div>
-    <p v-else-if="!list.length" class="empty">每个声音都有名字了</p>
+    <p v-else-if="!list.length" class="empty">{{ t("speakers.allNamed") }}</p>
 
     <section v-for="g in list.slice(0, shown)" :key="g.id" class="card">
       <div class="head">
@@ -153,8 +158,8 @@ async function detach(g: Speaker, v: Voice) {
           /></RouterLink>
           <span v-else class="name" :class="{ anon: !g.name }">{{ title(g) }}</span>
           <div class="meta">
-            <template v-if="g.last">最近 {{ heard(g.last) }} · </template>{{ g.count }} 段对话 ·
-            {{ mins(g.speech_s) }}
+            <template v-if="g.last">{{ t("speakers.last", { at: heard(g.last) }) }} · </template
+            >{{ t("speakers.convs", { n: g.count }, g.count) }} · {{ mins(g.speech_s) }}
           </div>
         </div>
       </div>
@@ -171,14 +176,15 @@ async function detach(g: Speaker, v: Voice) {
           <span>{{ v.clip_text || day(v.start) }}</span>
         </button>
       </div>
-      <p v-if="g.co.length" class="meta">常一起出现：{{ g.co.join("、") }}</p>
+      <p v-if="g.co.length" class="meta">
+        {{ t("speakers.co", { names: g.co.map(speakerLabel).join(t("common.list")) }) }}
+      </p>
       <p v-if="g.called.some((x) => x.name !== g.name)" class="meta called">
-        {{ g.name ? "也被叫作" : "被叫作" }}：<template
-          v-for="x in g.called.filter((x) => x.name !== g.name)"
-          :key="x.name"
-          >「{{ x.name }}」{{ x.convs.length }} 段
+        {{ g.name ? t("speakers.alsoCalled") : t("speakers.called")
+        }}<template v-for="x in g.called.filter((x) => x.name !== g.name)" :key="x.name"
+          >{{ t("speakers.calledIn", { name: x.name, n: x.convs.length }) }}
           <button v-if="!g.name" class="chip" :disabled="busy" @click="name(g, x.name, title(g))">
-            起名 {{ x.name }}
+            {{ t("speakers.nameAs", { name: x.name }) }}
           </button>
           <button
             v-else-if="g.name !== '我'"
@@ -186,7 +192,7 @@ async function detach(g: Speaker, v: Voice) {
             :disabled="busy"
             @click="addAlias(x.name, g.name)"
           >
-            记为别名
+            {{ t("speakers.asAlias") }}
           </button></template
         >
       </p>
@@ -200,18 +206,20 @@ async function detach(g: Speaker, v: Voice) {
         <template v-if="editing === g.id">
           <input
             v-model="newName"
-            placeholder="名字"
+            :placeholder="t('speakers.namePlaceholder')"
             list="names"
             @keyup.enter="name(g, newName, title(g))"
           />
-          <button :disabled="busy" @click="name(g, newName, title(g))">保存</button>
-          <button class="btn-ghost" @click="cancel">取消</button>
+          <button :disabled="busy" @click="name(g, newName, title(g))">
+            {{ t("speakers.save") }}
+          </button>
+          <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
         </template>
         <button v-else :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
-          {{ g.name ? "改名" : "起名" }}
+          {{ g.name ? t("speakers.rename") : t("speakers.giveName") }}
         </button>
         <button class="btn-ghost" @click="expand(g)">
-          {{ open === g.id ? "收起" : `对话列表（${g.count}）` }}
+          {{ open === g.id ? t("speakers.collapse") : t("speakers.list", { n: g.count }) }}
         </button>
       </div>
       <p v-if="error && errorAt === g.id" class="error" role="alert" :title="detail">
@@ -225,23 +233,31 @@ async function detach(g: Speaker, v: Voice) {
 
       <div v-for="(s, i) in g.suggested" :key="i" class="suggest">
         <span
-          >可能也是 {{ g.name }}（声音{{ likeness(s.score) }}）：{{ s.count }} 段对话<template
-            v-if="s.called.length"
-            >，被叫作{{ s.called.map((x) => `「${x.name}」`).join("") }}</template
-          ></span
+          >{{
+            t(
+              "speakers.maybe",
+              { name: speakerLabel(g.name), like: likeness(s.score), n: s.count },
+              s.count,
+            )
+          }}<template v-if="s.called.length">{{
+            t("speakers.calledAs", { names: quoted(s.called.map((x) => x.name)) })
+          }}</template></span
         >
         <button v-for="v in s.samples" :key="voiceId(v)" class="clip" @click="listen(v)">
           <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
           <span>{{ v.clip_text || day(v.start) }}</span>
         </button>
-        <button :disabled="busy" @click="name(g, g.name!, `${s.count} 段`, s.id)">
-          是 {{ g.name }}
+        <button
+          :disabled="busy"
+          @click="name(g, g.name!, t('speakers.nConvs', { n: s.count }, s.count), s.id)"
+        >
+          {{ t("speakers.isThem", { name: speakerLabel(g.name) }) }}
         </button>
       </div>
 
       <table v-if="open === g.id" class="members">
         <tr v-if="!members.length">
-          <td class="meta">加载中…</td>
+          <td class="meta">{{ t("speakers.loading") }}</td>
         </tr>
         <tr v-for="v in members" :key="voiceId(v)">
           <td class="when">
@@ -250,24 +266,36 @@ async function detach(g: Speaker, v: Voice) {
           <td>
             <button
               class="mini"
-              :title="player.playing === voiceId(v) ? '停止' : '播放'"
+              :title="player.playing === voiceId(v) ? t('speakers.stop') : t('speakers.play')"
               @click="listen(v)"
             >
               <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
             </button>
-            {{ v.title || "（无标题）" }}
+            {{ v.title || t("speakers.untitled") }}
             <span class="meta"
-              >· {{ speakerLabel(v.label) }} · {{ v.n }} 句 · 同场
-              {{ v.with.join("、") || "无" }}</span
+              >·
+              {{
+                t("speakers.member", {
+                  label: speakerLabel(v.label),
+                  n: v.n,
+                  with:
+                    v.with.map((w) => (w === "我" ? speakerLabel(w) : w)).join(t("common.list")) ||
+                    t("speakers.nobody"),
+                })
+              }}</span
             >
           </td>
           <td>
-            <button class="btn-ghost mini" :disabled="busy" @click="detach(g, v)">不是</button>
+            <button class="btn-ghost mini" :disabled="busy" @click="detach(g, v)">
+              {{ t("speakers.notThem") }}
+            </button>
           </td>
         </tr>
       </table>
     </section>
-    <button v-if="list.length > shown" class="more" @click="shown += 30">再显示 30 个</button>
+    <button v-if="list.length > shown" class="more" @click="shown += 30">
+      {{ t("speakers.more") }}
+    </button>
     <datalist id="names"><option v-for="n in names" :key="n" :value="n" /></datalist>
   </main>
 </template>

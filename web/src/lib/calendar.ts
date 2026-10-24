@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { intl, lang } from "../i18n";
 import { get } from "./api";
 
 export interface DayInfo {
@@ -34,5 +35,7 @@ export function neighbour(day: string, dir: -1 | 1) {
 
 export function dayLabel(day: string) {
   const t = new Date(day + "T12:00:00");
-  return `${t.getMonth() + 1}月${t.getDate()}日 周${"日一二三四五六"[t.getDay()]}`;
+  return lang() === "zh"
+    ? `${t.getMonth() + 1}月${t.getDate()}日 周${"日一二三四五六"[t.getDay()]}`
+    : t.toLocaleDateString(intl(), { weekday: "short", month: "short", day: "numeric" });
 }

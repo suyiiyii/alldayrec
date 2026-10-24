@@ -14,6 +14,7 @@ import PlayerBar from "../components/PlayerBar.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
+import { t } from "../i18n";
 import {
   fold,
   get,
@@ -126,7 +127,6 @@ function hear(label: string) {
       : `/api/audio?${new URLSearchParams({ start: v.clip_start!, end: v.clip_end!, ...(c.value?.device && { device: c.value.device }) })}`,
   );
 }
-const said = { addressed: "叫作", self: "自称", referred: "称为" } as const;
 const sugCount = computed(() =>
   sug.value
     ? sug.value.names.length + sug.value.merge.length + sug.value.like.length + sug.value.elsewhere.length
@@ -169,15 +169,17 @@ async function regen() {
   menu.value = false;
   await runRegen(async () => {
     await post(`/api/conversation/${props.id}/summarize`);
-    toast("摘要重新生成中");
+    toast(t("conv.regenerating"));
     await load();
   });
 }
 // who wrote the summary, when: on 重新生成's title, not on the page
 const made = computed(() =>
   s.value?.model
-    ? `AI 摘要 · ${(s.value.created_at ?? "").slice(5, 16).replace("T", " ")}，由 ${s.value.model} 生成` +
-      (s.value.via === "live" ? "，会中实时分析写的" : "")
+    ? t(s.value.via === "live" ? "conv.madeLive" : "conv.made", {
+        at: (s.value.created_at ?? "").slice(5, 16).replace("T", " "),
+        model: s.value.model,
+      })
     : "",
 );
 
@@ -191,11 +193,9 @@ async function sendNote() {
       text: note.value.trim(),
     });
     note.value = "";
-    toast("收到，会用来改进");
+    toast(t("conv.noteThanks"));
   });
 }
-// a todo marked 完成 or 不对 (TodoMarks) says how
-const MARKED = { done: "已完成", wrong: "已标不对" } as const;
 
 // renaming one speaker of this conversation; a plain rename can be undone (renamed back), a merge cannot: the two
 // labels' sentences are one label's after it
@@ -230,11 +230,11 @@ async function rename(from: string, to: string, undoing = false) {
       { from, to },
     );
     editing.value = "";
-    if (undoing) toast(`已改回 ${speakerLabel(to)}`);
-    else if (merge) toast(`已把 ${speakerLabel(from)} 合并到 ${speakerLabel(to)}`);
+    if (undoing) toast(t("conv.renamedBack", { to: speakerLabel(to) }));
+    else if (merge) toast(t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) }));
     else
       toast(
-        `已改名为 ${speakerLabel(to)}，改了 ${r.renamed} 句` + (r.voiceprints ? "，之后会自动认出" : ""),
+        t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
         // renamed back; S? cannot be a rename's target
         from === "S?" ? {} : { undo: () => void rename(to, from, true) },
       );
@@ -245,11 +245,11 @@ const save = () => rename(editing.value, newName.value.trim());
 async function alias(name: string, of: string) {
   await runSpeaker(async () => {
     await post("/api/aliases", { alias: name, name: of });
-    toast(`已记下「${name}」是 ${of} 的别名`, {
+    toast(t("conv.aliasSaved", { name, of }), {
       undo: () =>
         void runSpeaker(async () => {
           await post("/api/aliases", { alias: name, name: "" }); // no name drops it
-          toast(`已删除别名「${name}」`);
+          toast(t("conv.aliasRemoved", { name }));
           await loadSug();
         }),
     });
@@ -262,11 +262,11 @@ async function alias(name: string, of: string) {
   <AppHeader />
   <main :class="{ playing: tab === 'transcript' || track.playing }">
     <div class="top">
-      <RouterLink class="back" to="/"><Icon name="chevron-left" :size="18" />全部对话</RouterLink>
+      <RouterLink class="back" to="/"><Icon name="chevron-left" :size="18" />{{ t("conv.all") }}</RouterLink>
       <div v-if="c" class="more">
         <button
           class="btn-ghost"
-          aria-label="更多"
+          :aria-label="t('conv.more')"
           aria-haspopup="menu"
           :aria-expanded="menu"
           @click="menu = !menu"
@@ -277,29 +277,33 @@ async function alias(name: string, of: string) {
           <div class="scrim" @click="menu = false"></div>
           <div class="menu" role="menu">
             <button role="menuitem" :disabled="!labels.length" @click="open('rename')">
-              <Icon name="user" :size="18" />改名
+              <Icon name="user" :size="18" />{{ t("conv.rename") }}
             </button>
             <button role="menuitem" :disabled="!sugCount" @click="open('sug')">
-              <Icon name="users" :size="18" />说话人建议<span class="n">{{ sugCount || "暂无" }}</span>
+              <Icon name="users" :size="18" />{{ t("conv.sug")
+              }}<span class="n">{{ sugCount || t("conv.none") }}</span>
             </button>
             <button role="menuitem" :disabled="regenerating" :title="made" @click="regen">
-              <Icon name="sparkles" :size="18" />重新生成摘要
+              <Icon name="sparkles" :size="18" />{{ t("conv.regen") }}
             </button>
             <button role="menuitem" @click="open('note')">
-              <Icon name="alert-circle" :size="18" />哪里不对
+              <Icon name="alert-circle" :size="18" />{{ t("conv.note") }}
             </button>
           </div>
         </template>
       </div>
     </div>
     <div v-if="missing" class="empty">
-      <Icon name="message-circle" :size="48" />找不到这段对话
-      <RouterLink class="btn btn-primary" to="/">看全部对话</RouterLink>
+      <Icon name="message-circle" :size="48" />{{ t("conv.missing") }}
+      <RouterLink class="btn btn-primary" to="/">{{ t("conv.seeAll") }}</RouterLink>
     </div>
     <template v-else-if="c">
-      <h1>{{ s?.status === "done" ? s.title || "（无标题）" : "对话 " + hhmm(c.start) }}</h1>
+      <h1>
+        {{ s?.status === "done" ? s.title || t("conv.untitled") : t("conv.at", { t: hhmm(c.start) }) }}
+      </h1>
       <div class="muted meta">
-        {{ dayLabel(c.start.slice(0, 10)) }} {{ hhmm(c.start) }}–{{ hhmm(c.end) }} · {{ minutes(c) }} 分钟
+        {{ dayLabel(c.start.slice(0, 10)) }} {{ hhmm(c.start) }}–{{ hhmm(c.end) }} ·
+        {{ t("common.min", { n: minutes(c) }) }}
       </div>
       <div v-if="c.participants.length" class="people">
         <template v-for="p in people.shown" :key="p">
@@ -308,8 +312,12 @@ async function alias(name: string, of: string) {
           >
           <span v-else class="person"><Avatar :name="p" :size="32" />{{ speakerLabel(p) }}</span>
         </template>
-        <button v-if="people.more" class="btn-ghost more" @click="allPeople = true">还有 {{ people.more }} 位 ›</button>
-        <button v-else-if="allPeople" class="btn-ghost more" @click="allPeople = false">收起</button>
+        <button v-if="people.more" class="btn-ghost more" @click="allPeople = true">
+          {{ t("conv.morePeople", { n: people.more }) }}
+        </button>
+        <button v-else-if="allPeople" class="btn-ghost more" @click="allPeople = false">
+          {{ t("conv.less") }}
+        </button>
       </div>
       <div v-if="s?.tags?.length" class="tags">
         <RouterLink
@@ -323,23 +331,23 @@ async function alias(name: string, of: string) {
 
       <section v-if="panel === 'rename'" class="card panel">
         <div class="phead">
-          <h3>改名</h3>
-          <button class="btn-ghost x" aria-label="关闭" @click="panel = ''"><Icon name="x" /></button>
+          <h3>{{ t("conv.rename") }}</h3>
+          <button class="btn-ghost x" :aria-label="t('conv.close')" @click="panel = ''"><Icon name="x" /></button>
         </div>
         <div class="rename">
           <template v-if="!editing">
-            <span class="muted">改谁：</span>
+            <span class="muted">{{ t("conv.renameWho") }}</span>
             <button v-for="l in labels" :key="l" class="chip" @click="edit(l)">{{ speakerLabel(l) }}</button>
           </template>
           <template v-else>
             <input
               v-model="newName"
-              :placeholder="`${speakerLabel(editing)} 是谁`"
+              :placeholder="t('conv.whoIs', { who: speakerLabel(editing) })"
               autofocus
               @keydown.enter="save"
             />
-            <button :disabled="saving || !newName.trim()" @click="save">保存</button>
-            <button class="btn-ghost" @click="editing = ''">取消</button>
+            <button :disabled="saving || !newName.trim()" @click="save">{{ t("conv.save") }}</button>
+            <button class="btn-ghost" @click="editing = ''">{{ t("conv.cancel") }}</button>
             <button v-for="n in names" :key="n" class="chip" @click="newName = n">{{ n }}</button>
           </template>
         </div>
@@ -347,73 +355,91 @@ async function alias(name: string, of: string) {
 
       <section v-if="panel === 'sug' && sug" class="card panel sug">
         <div class="phead">
-          <h3>说话人建议 <span class="hint">点了才会改</span></h3>
-          <button class="btn-ghost x" aria-label="关闭" @click="panel = ''"><Icon name="x" /></button>
+          <h3>
+            {{ t("conv.sug") }} <span class="hint">{{ t("conv.sugHint") }}</span>
+          </h3>
+          <button class="btn-ghost x" :aria-label="t('conv.close')" @click="panel = ''"><Icon name="x" /></button>
         </div>
         <ul class="items">
           <li v-for="h in sug.names" :key="`n${h.who}${h.name}${h.at}`">
             <span class="who">{{ speakerLabel(h.who) }}</span
-            >{{ h.kind === "self" ? "" : `被 ${speakerLabel(h.by)} ` }}{{ said[h.kind] }}「{{ h.name }}」<template
+            >{{ t(`conv.hint.${h.kind}`, { by: speakerLabel(h.by), name: h.name }) }}<template
               v-if="h.canon !== h.name"
-              >（{{ h.name }} 是 {{ h.canon }} 的别名）</template
+              >{{ t("conv.aliasOf", { name: h.name, canon: h.canon }) }}</template
             >
             <a class="at" :href="'#' + h.at" @click.prevent="listen(h.at)"
               ><Icon name="play" :size="12" />{{ hhmmss(h.at) }}</a
             >
             <button v-if="anon(h.who)" :disabled="saving" @click="rename(h.who, h.canon)">
-              改名为 {{ h.canon }}
+              {{ t("conv.renameTo", { name: h.canon }) }}
             </button>
             <button v-else-if="h.canon === h.name" :disabled="saving" @click="alias(h.name, h.who)">
-              记为 {{ h.who }} 的别名
+              {{ t("conv.saveAlias", { who: h.who }) }}
             </button>
-            <div class="quote">「{{ h.quote }}」</div>
+            <div class="quote">{{ t("conv.quote", { q: h.quote }) }}</div>
           </li>
           <li v-for="l in sug.like" :key="`l${l.who}`">
-            <button v-if="sug.clips[l.who]" class="play" title="听一听" @click="hear(l.who)">
+            <button v-if="sug.clips[l.who]" class="play" :title="t('conv.hear')" @click="hear(l.who)">
               <Icon :name="player.playing === `${id}|${l.who}` ? 'square' : 'play'" :size="14" /></button
-            ><span class="who">{{ speakerLabel(l.who) }}</span>的声音{{ likeness(l.score) }} {{ l.name }}
-            <button :disabled="saving" @click="rename(l.who, l.name)">是 {{ l.name }}</button>
+            ><span class="who">{{ speakerLabel(l.who) }}</span
+            >{{ t("conv.like", { likeness: likeness(l.score), name: l.name }) }}
+            <button :disabled="saving" @click="rename(l.who, l.name)">
+              {{ t("conv.isName", { name: l.name }) }}
+            </button>
           </li>
           <li v-for="e in sug.elsewhere" :key="`e${e.who}${e.name}`">
-            <button v-if="sug.clips[e.who]" class="play" title="听一听" @click="hear(e.who)">
+            <button v-if="sug.clips[e.who]" class="play" :title="t('conv.hear')" @click="hear(e.who)">
               <Icon :name="player.playing === `${id}|${e.who}` ? 'square' : 'play'" :size="14" /></button
-            ><span class="who">{{ speakerLabel(e.who) }}</span>的声音在另外 {{ e.convs }} 段对话里被叫作「{{ e.name }}」
-            <button :disabled="saving" @click="rename(e.who, e.name)">改名为 {{ e.name }}</button>
+            ><span class="who">{{ speakerLabel(e.who) }}</span
+            >{{ t("conv.elsewhere", { n: e.convs, name: e.name }, e.convs) }}
+            <button :disabled="saving" @click="rename(e.who, e.name)">
+              {{ t("conv.renameTo", { name: e.name }) }}
+            </button>
           </li>
           <li v-for="m in allMerges ? sug.merge : sug.merge.slice(0, 5)" :key="`m${m.from}${m.to}`">
             <span class="who"
               ><template v-for="(l, j) in [m.from, m.to]" :key="l"
-                >{{ j ? " 和 " : "" }}<button
+                >{{ j ? t("conv.and") : "" }}<button
                   v-if="sug.clips[l]"
                   class="play"
-                  :title="`听 ${speakerLabel(l)}`"
+                  :title="t('conv.hearWho', { who: speakerLabel(l) })"
                   @click="hear(l)"
                 >
                   <Icon :name="player.playing === `${id}|${l}` ? 'square' : 'play'" :size="14" /></button
                 >{{ speakerLabel(l) }}</template
               ></span
-            >可能是同一个人：{{
-              m.name ? `都被叫作「${m.name}」` : `声音${likeness(m.score ?? 0)}`
+            >{{
+              t("conv.same", {
+                why: m.name
+                  ? t("conv.sameName", { name: m.name })
+                  : t("conv.sameVoice", { likeness: likeness(m.score ?? 0) }),
+              })
             }}
-            <button :disabled="saving" @click="rename(m.from, m.to)">合并到 {{ speakerLabel(m.to) }}</button>
+            <button :disabled="saving" @click="rename(m.from, m.to)">
+              {{ t("conv.mergeInto", { to: speakerLabel(m.to) }) }}
+            </button>
           </li>
           <li v-if="sug.merge.length > 5 && !allMerges">
-            <button class="btn-ghost" @click="allMerges = true">再显示 {{ sug.merge.length - 5 }} 条合并建议</button>
+            <button class="btn-ghost" @click="allMerges = true">
+              {{ t("conv.moreMerges", sug.merge.length - 5) }}
+            </button>
           </li>
         </ul>
       </section>
 
       <section v-if="panel === 'note'" class="card panel note">
         <div class="phead">
-          <h3>哪里不对</h3>
-          <button class="btn-ghost x" aria-label="关闭" @click="panel = ''"><Icon name="x" /></button>
+          <h3>{{ t("conv.note") }}</h3>
+          <button class="btn-ghost x" :aria-label="t('conv.close')" @click="panel = ''"><Icon name="x" /></button>
         </div>
         <textarea
           v-model="note"
           rows="3"
-          placeholder="哪里判断错了？比如：这段不是视频、说话人 2 其实是我、摘要漏了某件事"
+          :placeholder="t('conv.notePlaceholder')"
         ></textarea>
-        <button class="btn-primary" :disabled="sending || !note.trim()" @click="sendNote">提交纠正</button>
+        <button class="btn-primary" :disabled="sending || !note.trim()" @click="sendNote">
+          {{ t("conv.noteSend") }}
+        </button>
         <p v-if="noteError" class="bad" role="alert" :title="noteDetail">{{ noteError }}</p>
         <div v-for="(f, i) in c.feedback" :key="i" class="muted said">
           {{ f.at.slice(5, 16).replace("T", " ") }} {{ f.text }}
@@ -424,40 +450,44 @@ async function alias(name: string, of: string) {
       <p v-if="regenError" class="bad" role="alert" :title="regenDetail">{{ regenError }}</p>
 
       <div class="tabs" role="tablist">
-        <button role="tab" :aria-selected="tab === 'summary'" @click="setTab('summary')">摘要</button>
+        <button role="tab" :aria-selected="tab === 'summary'" @click="setTab('summary')">
+          {{ t("conv.summary") }}
+        </button>
         <button role="tab" :aria-selected="tab === 'transcript'" @click="setTab('transcript')">
-          原文<span class="n">{{ c.rows.length }} 句</span>
+          {{ t("conv.transcript")
+          }}<span class="n">{{ t("conv.sentences", c.rows.length) }}</span>
         </button>
       </div>
 
       <template v-if="tab === 'summary'">
         <template v-if="s?.status === 'done'">
           <div v-if="s.summary" class="card summary">{{ s.summary }}</div>
-          <div v-else-if="!s.model" class="card muted">语音不足 60 秒，没有生成摘要</div>
+          <div v-else-if="!s.model" class="card muted">{{ t("conv.tooShort") }}</div>
           <section v-if="s.todos?.length" class="card">
-            <h3>待办</h3>
+            <h3>{{ t("conv.todos") }}</h3>
             <ul class="items">
-              <li v-for="(t, i) in s.todos" :key="i" class="todo">
-                <TodoMarks v-if="t.id" :id="t.id" :mark="t.mark" />
+              <li v-for="(td, i) in s.todos" :key="i" class="todo">
+                <TodoMarks v-if="td.id" :id="td.id" :mark="td.mark" />
                 <div class="body">
-                  <div>{{ t.text }}</div>
+                  <div>{{ td.text }}</div>
                   <div class="sub">
                     <span class="who"
-                      ><Avatar :name="t.owner" :size="20" />{{ t.owner ? speakerLabel(t.owner) : "未知"
-                      }}{{ t.to ? ` → ${speakerLabel(t.to)}` : "" }}</span
-                    ><span v-if="t.due" class="due"
-                      >{{ t.due }}{{ t.due_date ? " · " + t.due_date.slice(5) : "" }}</span
-                    ><a v-if="t.at" class="at" :href="'#' + t.at" @click.prevent="listen(t.at)"
-                      ><Icon name="play" :size="12" />{{ hhmmss(t.at) }}</a
-                    ><span v-if="markOf(t)" class="done">{{ MARKED[markOf(t)!] }}</span>
+                      ><Avatar :name="td.owner" :size="20" />{{
+                        td.owner ? speakerLabel(td.owner) : t("common.unknown")
+                      }}{{ td.to ? ` → ${speakerLabel(td.to)}` : "" }}</span
+                    ><span v-if="td.due" class="due"
+                      >{{ td.due }}{{ td.due_date ? " · " + td.due_date.slice(5) : "" }}</span
+                    ><a v-if="td.at" class="at" :href="'#' + td.at" @click.prevent="listen(td.at)"
+                      ><Icon name="play" :size="12" />{{ hhmmss(td.at) }}</a
+                    ><span v-if="markOf(td)" class="done">{{ t(`conv.marked.${markOf(td)}`) }}</span>
                   </div>
-                  <div v-if="t.quote" class="quote">「{{ t.quote }}」</div>
+                  <div v-if="td.quote" class="quote">{{ t("conv.quote", { q: td.quote }) }}</div>
                 </div>
               </li>
             </ul>
           </section>
           <section v-if="s.ai_requests?.length" class="card">
-            <h3>让 AI 做的事</h3>
+            <h3>{{ t("conv.aiRequests") }}</h3>
             <ul class="items ai">
               <li v-for="(t, i) in s.ai_requests" :key="i">
                 {{ t.text
@@ -468,19 +498,19 @@ async function alias(name: string, of: string) {
             </ul>
           </section>
           <section v-if="s.decisions?.length" class="card">
-            <h3>决定</h3>
+            <h3>{{ t("conv.decisions") }}</h3>
             <ul class="items">
               <li v-for="(d, i) in s.decisions" :key="i">
                 {{ d.text
                 }}<a v-if="d.at" class="at" :href="'#' + d.at" @click.prevent="listen(d.at)"
                   ><Icon name="play" :size="12" />{{ hhmmss(d.at) }}</a
                 >
-                <div v-if="d.quote" class="quote">「{{ d.quote }}」</div>
+                <div v-if="d.quote" class="quote">{{ t("conv.quote", { q: d.quote }) }}</div>
               </li>
             </ul>
           </section>
           <section v-if="s.people?.length" class="card">
-            <h3>各人要点</h3>
+            <h3>{{ t("conv.people") }}</h3>
             <div v-for="p in s.people" :key="p.who" class="points-of">
               <div class="who">
                 <Avatar :name="p.who" />
@@ -493,7 +523,7 @@ async function alias(name: string, of: string) {
             </div>
           </section>
           <section v-if="s.topics?.length" class="card">
-            <h3>议题</h3>
+            <h3>{{ t("conv.topics") }}</h3>
             <div v-for="(t, i) in s.topics" :key="i" class="topic">
               <b>{{ t.title }}</b
               ><a v-if="t.at" class="at" :href="'#' + t.at" @click.prevent="listen(t.at)"
@@ -506,12 +536,12 @@ async function alias(name: string, of: string) {
           </section>
         </template>
         <div v-else-if="s?.status === 'failed'" class="card bad failed">
-          <span :title="s.error ?? ''">摘要没能生成</span>
-          <button :disabled="regenerating" @click="regen">重新生成</button>
+          <span :title="s.error ?? ''">{{ t("conv.failed") }}</span>
+          <button :disabled="regenerating" @click="regen">{{ t("conv.regenShort") }}</button>
         </div>
-        <div v-else class="card muted">摘要生成中…</div>
+        <div v-else class="card muted">{{ t("api.summaryPending") }}</div>
         <section v-if="c.timeline?.topics.length" class="card">
-          <h3>会中实时议题</h3>
+          <h3>{{ t("conv.liveTopics") }}</h3>
           <Timeline :topics="c.timeline.topics" @jump="listen" />
         </section>
       </template>

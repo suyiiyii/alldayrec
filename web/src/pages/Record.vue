@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { intl, t } from "../i18n";
 import { oggOpus } from "../lib/ogg";
 import { RecordStream } from "../lib/stream";
 
@@ -35,11 +36,19 @@ let rec: MediaRecorder | null = null,
 const queue: { blob: Blob; start: number; device: string }[] = [];
 const stat = computed(() =>
   recording.value
-    ? `录音中 · ${source.value === "ble" ? `收到 ${packets.value} 包 · ${hw.value ? hw.value + " · " : ""}` : ""}已传 ${sent.value} 块 · 待传 ${queued.value}`
-    : "已停止",
+    ? [
+        t("record.recording"),
+        source.value === "ble" && t("record.packets", packets.value),
+        source.value === "ble" && hw.value,
+        t("record.sent", sent.value),
+        t("record.queued", queued.value),
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : t("record.stopped"),
 );
 const note = (s: string) =>
-  (log.value = (new Date().toLocaleTimeString() + " " + s + "\n" + log.value).slice(0, 4000));
+  (log.value = (new Date().toLocaleTimeString(intl()) + " " + s + "\n" + log.value).slice(0, 4000));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function send(url: string, body?: Blob, type?: string): Promise<unknown> {
@@ -73,7 +82,7 @@ async function drain() {
       fails = 0;
     } catch (e) {
       fails++;
-      note(`上传失败 ${(e as Error).message}，${Math.min(fails, 6) * 5} 秒后重试`);
+      note(t("record.uploadFailed", { error: (e as Error).message, s: Math.min(fails, 6) * 5 }));
       await sleep(Math.min(fails, 6) * 5000);
     }
     queued.value = queue.length;
@@ -97,7 +106,7 @@ function piece(): MediaRecorder {
     }),
     start = Date.now();
   r.ondataavailable = (e) => e.data.size && enqueue(e.data, start);
-  r.onerror = (e) => note("录音出错：" + String((e as ErrorEvent).error ?? e));
+  r.onerror = (e) => note(t("record.error", { error: String((e as ErrorEvent).error ?? e) }));
   r.start();
   setTimeout(() => {
     if (rec === r) {
@@ -117,9 +126,9 @@ async function startMic() {
     },
   });
   const track = stream.getAudioTracks()[0];
-  track.onended = () => note("麦克风被系统收回，录音停了");
+  track.onended = () => note(t("record.micEnded"));
   rec = piece();
-  note(`开始 · ${track.label} · ${JSON.stringify(track.getSettings())}`);
+  note(t("record.started", { mic: track.label, settings: JSON.stringify(track.getSettings()) }));
 }
 
 // --- BLE recorder: the page follows its record stream (firmware src/lr_store.h, lib/stream.ts) from where it is when
@@ -144,7 +153,7 @@ async function reply(ops: number[], timeoutMs = 15000): Promise<Uint8Array> {
     const i = replies.findIndex((r) => ops.includes(r[0]));
     if (i >= 0) return replies.splice(i, 1)[0];
   }
-  throw new Error(`录音设备没有回应 0x${ops[0].toString(16)}`);
+  throw new Error(t("record.noReply", { op: ops[0].toString(16) }));
 }
 async function command(...b: number[]) {
   await ctrlCh!.writeValueWithResponse(new Uint8Array(b));
@@ -169,7 +178,7 @@ async function read() {
     const from = follower.end();
     await command(2, ...le32(follower.file), ...le32(from));
     await reply([0x82], 60000);
-    if (follower.end() === from) note(`补读 ${follower.file.toString(16)} 没有拿到数据`);
+    if (follower.end() === from) note(t("record.readEmpty", { file: follower.file.toString(16) }));
   } finally {
     reading = false;
   }
@@ -177,7 +186,8 @@ async function read() {
 function onLive(e: Event) {
   const b = bytes(e);
   packets.value++;
-  if (follower.put(u32(b, 0), u32(b, 4), b.subarray(8)) !== null) void read().catch((x) => note("补读失败 " + x));
+  if (follower.put(u32(b, 0), u32(b, 4), b.subarray(8)) !== null)
+    void read().catch((x) => note(t("record.readFailed", { error: String(x) })));
 }
 const onData = (e: Event) => {
   const b = bytes(e);
@@ -205,7 +215,7 @@ async function connect() {
   await recorderState(gatt);
   clearInterval(clockTimer);
   clockTimer = window.setInterval(() => void setClock(gatt).catch(() => {}), 10 * 60000);
-  note(`已连上 ${ble!.name}，跟读 ${open.toString(16)}，按设备名 ${target()} 上传`);
+  note(t("record.connected", { name: ble!.name ?? "", file: open.toString(16), device: target() }));
 }
 /** The page's clock into the board's stream: a 'T' record there, which dates the pieces. */
 async function setClock(gatt: BluetoothRemoteGATTServer) {
@@ -217,31 +227,31 @@ async function setClock(gatt: BluetoothRemoteGATTServer) {
 }
 /** Sets the board's clock, reads its battery and card, and tells the server, as the app does. */
 async function recorderState(gatt: BluetoothRemoteGATTServer) {
-  const t = await (await setClock(gatt)).readValue();
+  const v = await (await setClock(gatt)).readValue();
   const battery = (await (await (await gatt.getPrimaryService("battery_service")).getCharacteristic("battery_level")).readValue()).getUint8(0);
-  const st = { store: t.getInt16(6, true), free_kb: t.getUint32(8, true), total_kb: t.getUint32(12, true), battery };
+  const st = { store: v.getInt16(6, true), free_kb: v.getUint32(8, true), total_kb: v.getUint32(12, true), battery };
   const card =
     st.store === -28
-      ? "存储卡已满"
+      ? t("record.card.full")
       : st.store === -16
-        ? "存储卡在 U 盘模式"
+        ? t("record.card.usb")
         : st.store && !st.total_kb
-          ? "没插存储卡"
+          ? t("record.card.none")
           : st.store
-            ? "存储卡出错"
-            : `卡剩 ${(st.free_kb / 1048576).toFixed(1)} GB`;
-  hw.value = `电量 ${battery}% · ${card}`;
+            ? t("record.card.error")
+            : t("record.card.free", { gb: (st.free_kb / 1048576).toFixed(1) });
+  hw.value = t("record.hw", { battery, card });
   await send(`/api/device-status?device=${encodeURIComponent(target())}`, new Blob([JSON.stringify(st)], { type: "application/json" }), "application/json").catch(() => {});
 }
 async function onDrop() {
   clearInterval(clockTimer);
   if (!recording.value) return; // stopped on purpose
-  note("蓝牙断了，重连中");
+  note(t("record.dropped"));
   for (let i = 1; recording.value && !ble?.gatt?.connected; i++) {
     try {
       await connect();
     } catch (e) {
-      note(`重连失败 ${(e as Error).message}，${Math.min(i, 6) * 5} 秒后再试`);
+      note(t("record.reconnectFailed", { error: (e as Error).message, s: Math.min(i, 6) * 5 }));
       await sleep(Math.min(i, 6) * 5000);
     }
   }
@@ -282,18 +292,20 @@ async function stop() {
     ble = null;
     follower.cut();
   }
-  note("停止，等最后几块传完");
+  note(t("record.stopping"));
   await sleep(500);
   while (queue.length || sending) await sleep(500);
   if (upload.value)
     await send(`/api/chunks/end?device=${encodeURIComponent(dev)}&t=${at}`).catch((e) =>
-      note("结束信号失败 " + e.message),
+      note(t("record.endFailed", { error: e.message })),
     );
-  note("已停止");
+  note(t("record.stopped"));
 }
-const toggle = () => (recording.value ? stop() : start().catch((e) => note("启动失败 " + e)));
+const toggle = () =>
+  recording.value ? stop() : start().catch((e) => note(t("record.startFailed", { error: String(e) })));
 const onVisible = () =>
-  recording.value && note(`页面${document.hidden ? "进后台" : "回前台"}，已传 ${sent.value} 块`);
+  recording.value &&
+  note(t(document.hidden ? "record.hidden" : "record.visible", { n: sent.value }, sent.value));
 onMounted(() => document.addEventListener("visibilitychange", onVisible));
 onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
 </script>
@@ -302,24 +314,26 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
   <div class="page">
     <div class="top">
       <div class="ctl">
-        <input v-model="device" placeholder="设备名" />
+        <input v-model="device" :placeholder="t('record.device')" />
         <select v-model="source" :disabled="recording">
-          <option value="mic">本机麦克风</option>
-          <option value="ble">蓝牙录音硬件</option>
+          <option value="mic">{{ t("record.mic") }}</option>
+          <option value="ble">{{ t("record.ble") }}</option>
         </select>
-        <label><input v-model="upload" type="checkbox" :disabled="recording" />上传</label>
+        <label
+          ><input v-model="upload" type="checkbox" :disabled="recording" />{{ t("record.upload") }}</label
+        >
         <button class="btn-primary" :class="{ on: recording }" @click="toggle">
-          {{ recording ? "停止" : "开始录音" }}
+          {{ recording ? t("record.stop") : t("record.start") }}
         </button>
       </div>
       <p class="stat">{{ stat }}</p>
       <audio v-if="lastPiece" :src="lastPiece" controls></audio>
       <details>
-        <summary>日志</summary>
+        <summary>{{ t("record.log") }}</summary>
         <div class="log">{{ log }}</div>
       </details>
     </div>
-    <iframe src="/live" title="字幕"></iframe>
+    <iframe src="/live" :title="t('record.captions')"></iframe>
   </div>
 </template>
 

@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import QRCode from "qrcode";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { I18nT } from "vue-i18n";
 import { useRoute } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
+import { lang, t } from "../i18n";
 import { get, type Status } from "../lib/api";
 
 // Three steps for a new user: the app, the QR, the first caption. A step is ticked when the server can tell: a
 // device appears once an app uploads (so it is installed and logged in), /api/days once a sentence is in
 const REPO = "https://github.com/suyiiyii/alldayrec";
+const APP_README = { zh: "#手机-app", en: "/blob/main/README.en.md#phone-app" }; // the README's phone app section
 const apk = ref(false),
   phone = ref(false),
   heard = ref(false);
@@ -28,15 +31,14 @@ onMounted(async () => {
 // manual entry and the MCP snippets all use the one picked; remembered in localStorage (connect.address)
 type Addr = { ip: string; kind: "tailscale" | "lan" | "public" };
 type Addrs = { addresses: Addr[]; port: number; bind: string; in_container: boolean; proxied: boolean };
-const KIND = { tailscale: "Tailscale", lan: "局域网", public: "公网" };
 const here = location.origin;
 const loopback = /^(localhost|127\.|\[::1\])/.test(location.hostname);
 const found = ref<Addrs | null>(null);
 const options = computed(() => [
-  { url: here, label: "这个网页的地址" },
+  { url: here, label: t("connect.here") },
   ...(found.value?.addresses ?? []).map((a) => ({
     url: `http://${a.ip}:${found.value!.port}`,
-    label: KIND[a.kind],
+    label: t(`connect.kind.${a.kind}`),
   })),
 ]);
 const pick = ref(""), // an option's url, or "custom"
@@ -85,9 +87,9 @@ onMounted(async () => {
     error.value = (e as Error).message;
   }
 });
-watch([address, token], async ([a, t]) => {
+watch([address, token], async ([a, tok]) => {
   if (!a || error.value) return void (qr.value = "");
-  const url = `liverecord://setup?server=${encodeURIComponent(a)}&token=${encodeURIComponent(t)}`;
+  const url = `liverecord://setup?server=${encodeURIComponent(a)}&token=${encodeURIComponent(tok)}`;
   qr.value = await QRCode.toDataURL(url, { width: 320, margin: 2 });
 });
 const tokenCopied = ref(false);
@@ -98,32 +100,33 @@ async function copyToken() {
 }
 
 // 接入 AI: the agents that take a URL and a header (server mcp_server.py), with the same token as the app.
-// Shown with the token hidden; 复制 always copies the real one. Folded (few need it); /connect#ai opens it (/me links there)
+// Shown with the token hidden; 复制 always copies the real one. Folded (few need it); /connect#ai opens it (/me links there).
+// where: a key in locales/*.json
 const mcp = computed(() => `${address.value || here}/mcp`);
 const json = (server: object) => JSON.stringify({ mcpServers: { alldayrec: server } }, null, 2);
-const CLIENTS: { name: string; where: string; text: (t: string) => string }[] = [
+const CLIENTS: { name: string; where: string; text: (tok: string) => string }[] = [
   {
     name: "Claude Code",
-    where: "在终端里运行一次",
-    text: (t) =>
-      `claude mcp add --transport http alldayrec ${mcp.value} --header "Authorization: Bearer ${t}" --scope user`,
+    where: "connect.where.claude",
+    text: (tok) =>
+      `claude mcp add --transport http alldayrec ${mcp.value} --header "Authorization: Bearer ${tok}" --scope user`,
   },
   {
     name: "Codex",
-    where: "加进 ~/.codex/config.toml",
-    text: (t) =>
-      `[mcp_servers.alldayrec]\nurl = "${mcp.value}"\nhttp_headers = { "Authorization" = "Bearer ${t}" }`,
+    where: "connect.where.codex",
+    text: (tok) =>
+      `[mcp_servers.alldayrec]\nurl = "${mcp.value}"\nhttp_headers = { "Authorization" = "Bearer ${tok}" }`,
   },
   {
     name: "Cursor",
-    where: "加进 ~/.cursor/mcp.json",
-    text: (t) => json({ url: mcp.value, headers: { Authorization: `Bearer ${t}` } }),
+    where: "connect.where.cursor",
+    text: (tok) => json({ url: mcp.value, headers: { Authorization: `Bearer ${tok}` } }),
   },
   {
     name: "Cherry Studio",
-    where: "设置 › MCP › 添加 › 从 JSON 导入",
-    text: (t) =>
-      json({ type: "streamableHttp", url: mcp.value, headers: { Authorization: `Bearer ${t}` } }),
+    where: "connect.where.cherry",
+    text: (tok) =>
+      json({ type: "streamableHttp", url: mcp.value, headers: { Authorization: `Bearer ${tok}` } }),
   },
 ];
 const openAi = useRoute().hash === "#ai";
@@ -139,29 +142,32 @@ async function copy(c: (typeof CLIENTS)[number]) {
 <template>
   <AppHeader />
   <main>
-    <h1>连接手机</h1>
+    <h1>{{ t("title.connect") }}</h1>
     <ol class="steps">
       <li class="card step" :class="{ done: phone }">
         <span class="num"
           ><Icon v-if="phone" name="check" :size="16" /><template v-else>1</template></span
         >
         <div class="body">
-          <h2>安装 App</h2>
+          <h2>{{ t("connect.install") }}</h2>
           <p>
-            <a v-if="apk" class="btn btn-primary" href="/app.apk">下载安卓 App</a>
+            <a v-if="apk" class="btn btn-primary" href="/app.apk">{{ t("connect.apk") }}</a>
             <a
               v-else
               class="btn btn-primary"
               :href="REPO + '/releases'"
               target="_blank"
               rel="noopener"
-              >去 GitHub 下载安卓 App</a
+              >{{ t("connect.apkGithub") }}</a
             >
           </p>
-          <p class="muted">
-            iPhone：App 没有上架 App Store，要用 Xcode 从源码构建，步骤见
-            <a :href="REPO + '#手机-app'" target="_blank" rel="noopener">说明</a>。
-          </p>
+          <I18nT keypath="connect.ios" tag="p" class="muted" scope="global">
+            <template #link
+              ><a :href="REPO + APP_README[lang()]" target="_blank" rel="noopener">{{
+                t("connect.iosLink")
+              }}</a></template
+            >
+          </I18nT>
         </div>
       </li>
       <li class="card step" :class="{ done: phone }">
@@ -169,24 +175,22 @@ async function copy(c: (typeof CLIENTS)[number]) {
           ><Icon v-if="phone" name="check" :size="16" /><template v-else>2</template></span
         >
         <div class="body">
-          <h2>扫码登录</h2>
-          <p class="muted">
-            在 App 的「设置 › 扫码登录」里扫这个二维码，服务器地址和 Token 会自动填好
-          </p>
+          <h2>{{ t("connect.scan") }}</h2>
+          <p class="muted">{{ t("connect.scanHow") }}</p>
           <fieldset class="where" @change="remember">
-            <legend>手机用哪个地址</legend>
+            <legend>{{ t("connect.which") }}</legend>
             <label v-for="o in options" :key="o.url" class="opt">
               <input v-model="pick" type="radio" name="addr" :value="o.url" />
               <span class="what"
                 ><b>{{ o.label }}</b> <code>{{ o.url }}</code>
                 <span v-if="o.url === here && loopback" class="muted hint"
-                  >手机连不上这个地址</span
+                  >{{ t("connect.unreachable") }}</span
                 ></span
               >
             </label>
             <label class="opt">
               <input v-model="pick" type="radio" name="addr" value="custom" />
-              <span class="what"><b>自己填</b></span>
+              <span class="what"><b>{{ t("connect.custom") }}</b></span>
             </label>
             <template v-if="pick === 'custom'">
               <input
@@ -195,32 +199,32 @@ async function copy(c: (typeof CLIENTS)[number]) {
                 type="url"
                 inputmode="url"
                 placeholder="http://192.168.1.5:8770"
-                aria-label="服务器地址"
+                :aria-label="t('connect.server')"
                 @input="remember"
               />
-              <p v-if="custom && !address" class="bad">要写成 http://地址:端口 或 https://域名</p>
+              <p v-if="custom && !address" class="bad">{{ t("connect.badUrl") }}</p>
             </template>
-            <p v-if="found?.in_container" class="muted">
-              服务跑在 Docker 里，列不出这台电脑的地址：在电脑上用它的局域网或 Tailscale IP 打开这个网页（端口默认
-              8770），或者选「自己填」
-            </p>
+            <p v-if="found?.in_container" class="muted">{{ t("connect.docker") }}</p>
             <p v-else-if="found && !found.addresses.length && !['0.0.0.0', '::'].includes(found.bind)" class="muted">
-              服务只监听 {{ found.bind }}（.env 里的 HOST），别的机器连不进来：手机要直连，改成 HOST=0.0.0.0 再重启
+              {{ t("connect.bind", { bind: found.bind }) }}
             </p>
           </fieldset>
-          <p v-if="error" class="bad">二维码生成失败：{{ error }}</p>
+          <p v-if="error" class="bad">{{ t("connect.qrFailed", { error }) }}</p>
           <template v-else-if="address">
             <div class="frame">
-              <img v-if="qr" :src="qr" width="320" height="320" alt="登录二维码" />
+              <img v-if="qr" :src="qr" width="320" height="320" :alt="t('connect.qrAlt')" />
             </div>
             <p class="muted">
-              扫不了码：在 App 里手动填服务器 <code>{{ address }}</code> 和 Token
-              <button v-if="token" class="inline" @click="copyToken">
-                {{ tokenCopied ? "已复制" : "复制 Token" }}
+              <I18nT keypath="connect.manual" scope="global"
+                ><template #address
+                  ><code>{{ address }}</code></template
+                ></I18nT
+              > <button v-if="token" class="inline" @click="copyToken">
+                {{ tokenCopied ? t("connect.copied") : t("connect.copyToken") }}
               </button>
             </p>
           </template>
-          <p v-if="phone" class="ok">已经有手机连上了；换手机或多一台手机，再扫一次就行</p>
+          <p v-if="phone" class="ok">{{ t("connect.connected") }}</p>
         </div>
       </li>
       <li class="card step" :class="{ done: heard }">
@@ -228,58 +232,57 @@ async function copy(c: (typeof CLIENTS)[number]) {
           ><Icon v-if="heard" name="check" :size="16" /><template v-else>3</template></span
         >
         <div class="body">
-          <h2>戴上录音设备，看到第一句字幕</h2>
-          <p class="muted">
-            在 App
-            里连上录音设备（没有设备也可以直接用手机录），说一句话，几秒后字幕就会出现在「实时字幕」里
-          </p>
+          <h2>{{ t("connect.first") }}</h2>
+          <p class="muted">{{ t("connect.firstHow") }}</p>
           <p>
             <RouterLink class="btn" to="/live"
-              ><Icon name="mic" :size="16" />打开实时字幕</RouterLink
+              ><Icon name="mic" :size="16" />{{ t("connect.openLive") }}</RouterLink
             >
           </p>
-          <p class="muted">
-            还没有录音设备？可以自己做一个：开源的 <span class="nw">LR-P3</span>，零件、接线和外壳见
-            <a :href="REPO + '/blob/main/hardware/lr-p3/README.md'" target="_blank" rel="noopener"
-              >GitHub 上的说明</a
+          <I18nT keypath="connect.diy" tag="p" class="muted" scope="global">
+            <template #board><span class="nw">LR-P3</span></template>
+            <template #link
+              ><a
+                :href="REPO + '/blob/main/hardware/lr-p3/README.md'"
+                target="_blank"
+                rel="noopener"
+                >{{ t("connect.diyLink") }}</a
+              ></template
             >
-          </p>
+          </I18nT>
         </div>
       </li>
     </ol>
 
     <details v-if="token" id="ai" class="card ai" :open="openAi">
       <summary>
-        <Icon name="sparkles" :size="18" />高级：接入 AI<Icon
+        <Icon name="sparkles" :size="18" />{{ t("connect.ai") }}<Icon
           class="chev"
           name="chevron-down"
           :size="18"
         />
       </summary>
-      <p>
-        让 Claude Code、Codex、Cursor、Cherry Studio 这类 AI
-        助手直接查这里的对话、摘要和待办，也能把待办标成完成或不对。
-      </p>
-      <p>
-        地址是 <code>{{ mcp }}</code
-        >，用的是和 App 一样的 Token。
-      </p>
+      <p>{{ t("connect.aiWhat") }}</p>
+      <I18nT keypath="connect.aiUrl" tag="p" scope="global">
+        <template #url
+          ><code>{{ mcp }}</code></template
+        >
+      </I18nT>
       <ul class="warn">
-        <li>接入后，AI 查到的转写和摘要（包括别人说的话）会发给你自己选的 AI 厂商。</li>
-        <li>
-          用这个连接的会话里，别对联网和 Shell
-          工具开自动批准：录音里的话可能被当成指令，借这些工具把内容发出去。
-        </li>
-        <li>Token 能读写这里的全部数据，只放在自己的电脑上。</li>
+        <li>{{ t("connect.warnProvider") }}</li>
+        <li>{{ t("connect.warnTools") }}</li>
+        <li>{{ t("connect.warnToken") }}</li>
       </ul>
       <div class="bar">
-        <button @click="shown = !shown">{{ shown ? "隐藏 Token" : "显示 Token" }}</button>
+        <button @click="shown = !shown">
+          {{ shown ? t("connect.hideToken") : t("connect.showToken") }}
+        </button>
       </div>
       <div v-for="c in CLIENTS" :key="c.name" class="client">
         <div class="head">
           <b>{{ c.name }}</b>
-          <span class="muted">{{ c.where }}</span>
-          <button @click="copy(c)">{{ copied === c.name ? "已复制" : "复制" }}</button>
+          <span class="muted">{{ t(c.where) }}</span>
+          <button @click="copy(c)">{{ copied === c.name ? t("connect.copied") : t("connect.copy") }}</button>
         </div>
         <pre>{{ c.text(shown ? token : "••••••••••••") }}</pre>
       </div>

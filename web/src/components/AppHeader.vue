@@ -1,29 +1,30 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { t } from "../i18n";
 import Icon, { type IconName } from "./Icon.vue";
 
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
 defineProps<{ inApp?: boolean }>();
 
 // four places, each owning the pages under it (a conversation, the calendar and the todos are 时间线's; devices,
-// progress, connect are 我的); a phone shows 我的 as the fourth tab, a wide screen too
+// progress, connect are 我的); a phone shows 我的 as the fourth tab, a wide screen too. label: the page title's key
 const TABS: { to: string; label: string; icon: IconName; under: RegExp }[] = [
   {
     to: "/",
-    label: "时间线",
+    label: "title.timeline",
     icon: "list",
     under: /^\/($|conversations|c\/|calendar|todos)/,
   },
-  { to: "/live", label: "实时", icon: "captions", under: /^\/live/ },
-  { to: "/speakers", label: "人物", icon: "users", under: /^\/(speakers|p\/)/ },
-  { to: "/me", label: "我的", icon: "user", under: /^\/(me|connect|progress|device\/|record)/ },
+  { to: "/live", label: "title.live", icon: "captions", under: /^\/live/ },
+  { to: "/speakers", label: "title.people", icon: "users", under: /^\/(speakers|p\/)/ },
+  { to: "/me", label: "title.me", icon: "user", under: /^\/(me|connect|progress|device\/|record)/ },
 ];
 const route = useRoute();
 const router = useRouter();
 // inside the app a page under a tab (进度, a device, the calendar...) has no way back: the app hides this header's
 // navigation and has no back key on iOS, so such a page gets a 返回 row (CSS shows it in the app only)
-const under = computed(() => TABS.find((t) => t.under.test(route.path)));
+const under = computed(() => TABS.find((x) => x.under.test(route.path)));
 const sub = computed(() => !!under.value && route.path !== under.value.to);
 const back = () => (history.state?.back ? router.back() : router.push(under.value?.to ?? "/"));
 </script>
@@ -35,29 +36,35 @@ const back = () => (history.state?.back ? router.back() : router.push(under.valu
       <!-- a wide screen: 时间线 / 实时 / 人物 next to the name, 我的 apart on the right -->
       <nav class="nav-top">
         <RouterLink
-          v-for="t in TABS.slice(0, 3)"
-          :key="t.to"
-          :to="t.to"
-          :class="{ on: t.under.test(route.path) }"
-          ><Icon :name="t.icon" :size="18" />{{ t.label }}</RouterLink
+          v-for="tab in TABS.slice(0, 3)"
+          :key="tab.to"
+          :to="tab.to"
+          :class="{ on: tab.under.test(route.path) }"
+          ><Icon :name="tab.icon" :size="18" />{{ t(tab.label) }}</RouterLink
         >
       </nav>
       <slot />
       <nav class="nav-top me">
         <RouterLink :to="TABS[3].to" :class="{ on: TABS[3].under.test(route.path) }"
-          ><Icon :name="TABS[3].icon" :size="18" />{{ TABS[3].label }}</RouterLink
+          ><Icon :name="TABS[3].icon" :size="18" />{{ t(TABS[3].label) }}</RouterLink
         >
       </nav>
     </div>
   </header>
   <div v-if="sub" class="back-row">
-    <button class="btn-ghost" @click="back"><Icon name="chevron-left" :size="20" />返回</button>
-    <span class="where">{{ route.meta.title }}</span>
+    <button class="btn-ghost" @click="back">
+      <Icon name="chevron-left" :size="20" />{{ t("common.back") }}
+    </button>
+    <span class="where">{{ route.meta.title ? t(route.meta.title as string) : "" }}</span>
   </div>
   <!-- a phone: the same four as tabs at the bottom -->
   <nav class="nav-tabs">
-    <RouterLink v-for="t in TABS" :key="t.to" :to="t.to" :class="{ on: t.under.test(route.path) }"
-      ><Icon :name="t.icon" :size="22" />{{ t.label }}</RouterLink
+    <RouterLink
+      v-for="tab in TABS"
+      :key="tab.to"
+      :to="tab.to"
+      :class="{ on: tab.under.test(route.path) }"
+      ><Icon :name="tab.icon" :size="22" />{{ t(tab.label) }}</RouterLink
     >
   </nav>
 </template>

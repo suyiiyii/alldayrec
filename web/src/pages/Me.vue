@@ -3,9 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import DeviceCard from "../components/DeviceCard.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
-import { get, type Due, type Status } from "../lib/api";
+import { lang, setLang, t, type Lang } from "../i18n";
+import { get, post, type Due, type Status } from "../lib/api";
 import { useSocket } from "../lib/socket";
 import { open } from "../lib/todos";
+import { toast } from "../lib/toast";
 
 // 我的: each device as a status card (the details on its own page), then the pages that are not a daily read
 const status = ref<Status | null>(null);
@@ -19,39 +21,35 @@ const LINKS = computed<{ to: string; icon: IconName; title: string; sub: string 
   {
     to: "/todos",
     icon: "check",
-    title: "待办",
+    title: t("me.todos"),
     sub: !due.value
-      ? "到期的待办，过期太久的一键清掉"
+      ? t("me.todosSub")
       : open(due.value).length
-        ? `${open(due.value).length} 条到期未处理`
-        : "没有到期的待办",
+        ? t("me.todosDue", open(due.value).length)
+        : t("me.todosNone"),
   },
-  { to: "/connect", icon: "smartphone", title: "连接手机", sub: "用 App 扫码登录这台服务器" },
-  {
-    to: "/progress",
-    icon: "activity",
-    title: "处理进度",
-    sub: "转写和摘要做到哪了，AI 调用和系统日志",
-  },
-  {
-    to: "/connect#ai",
-    icon: "sparkles",
-    title: "接入 AI",
-    sub: "让 Claude Code、Codex、Cursor 查这里的对话和待办",
-  },
-  {
-    to: "/record",
-    icon: "mic",
-    title: "网页录音",
-    sub: "没有 App 时，用浏览器的麦克风或蓝牙录音设备录",
-  },
+  { to: "/connect", icon: "smartphone", title: t("me.connect"), sub: t("me.connectSub") },
+  { to: "/progress", icon: "activity", title: t("me.progress"), sub: t("me.progressSub") },
+  { to: "/connect#ai", icon: "sparkles", title: t("me.ai"), sub: t("me.aiSub") },
+  { to: "/record", icon: "mic", title: t("me.record"), sub: t("me.recordSub") },
 ]);
+
+// the page's language, kept in this browser; the server's too: the models write summaries, recaps and answers in it
+const LANGS: [Lang, string][] = [
+  ["zh", "中文"],
+  ["en", "English"],
+];
+function pick(l: Lang) {
+  localStorage.lang = l;
+  setLang(l);
+  post("/api/lang", { lang: l }, "PUT").catch((e: Error) => toast(e.message));
+}
 </script>
 
 <template>
   <AppHeader />
   <main>
-    <h1>我的</h1>
+    <h1>{{ t("title.me") }}</h1>
     <DeviceCard v-for="d in status?.devices ?? []" :key="d.device" :d="d" />
     <div class="card list">
       <RouterLink v-for="l in LINKS" :key="l.to" class="link" :to="l.to">
@@ -63,12 +61,30 @@ const LINKS = computed<{ to: string; icon: IconName; title: string; sub: string 
         <Icon name="chevron-right" :size="18" class="go" />
       </RouterLink>
       <div class="link">
+        <Icon name="globe" :size="22" />
+        <span class="text"
+          ><b>{{ t("me.lang") }}</b
+          ><span class="muted">{{ t("me.langSub") }}</span></span
+        >
+        <span class="langs">
+          <button
+            v-for="[l, name] in LANGS"
+            :key="l"
+            class="chip"
+            :class="{ on: lang() === l }"
+            @click="pick(l)"
+          >
+            {{ name }}
+          </button>
+        </span>
+      </div>
+      <div class="link">
         <Icon name="alert-circle" :size="22" />
         <span class="text"
-          ><b>关于</b
+          ><b>{{ t("me.about") }}</b
           ><span class="muted"
-            >alldayrec · 服务器版本 {{ status?.commit || "—"
-            }}{{ status?.engine ? " · 识别引擎 " + status.engine : "" }}</span
+            >alldayrec · {{ t("me.version", { commit: status?.commit || "—" })
+            }}{{ status?.engine ? " · " + t("me.engine", { engine: status.engine }) : "" }}</span
           ></span
         >
       </div>
@@ -110,5 +126,9 @@ a.link {
 }
 .go {
   color: var(--muted);
+}
+.langs {
+  display: flex;
+  gap: var(--space-2);
 }
 </style>

@@ -28,7 +28,7 @@ alldayrec is a self-hosted, all-day recorder and personal memory layer. Wear a r
 
 ![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
 
-Live captions while the page is open (the draft layer). Below, the web UI on a phone, filled with made-up data (the UI is in Chinese for now).
+Live captions while the page is open (the draft layer). Below, the web UI on a phone, filled with made-up data (the screenshots show the Chinese UI; on main the web UI can also be switched to English on the 「我的」 (Me) page).
 
 </div>
 

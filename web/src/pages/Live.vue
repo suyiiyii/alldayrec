@@ -18,6 +18,7 @@ import {
   type Conversation,
   type Row,
 } from "../lib/api";
+import { t } from "../i18n";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useLive } from "../lib/live";
 import { speakerLabel } from "../lib/speakers";
@@ -47,7 +48,7 @@ type Item =
   | { k: "fold"; key: string; rows: Row[] }
   | { k: "conv"; key: string; c: Conversation }
   | { k: "gap"; key: string; at: string }
-  | { k: "catchup"; key: string; device: string; from: string; to: string; tail: string };
+  | { k: "catchup"; key: string; text: string };
 // Per device, the time between its final rows and its drafts (or, with none, its newest audio): the drafts follow
 // what is said now while a backlog (a phone back after hours offline) is finalized in order, so this time is not lost.
 // Held: the phone still reads older audio off the recorder's card in the background; finals wait for it
@@ -61,19 +62,28 @@ const catchups = computed(() =>
         .reduce<string | null>((a, r) => (a && a < r.start ? a : r.start), null) ?? d.received_to;
     if (!to || (!d.hold && +new Date(to) - +new Date(from) <= CATCHUP_MS)) return [];
     const kb = d.hw?.backlog_kb,
-      eta = d.hold ? d.hw?.backlog_eta_s : d.eta_s,
-      mins = eta ? `，约 ${Math.ceil(eta / 60)} 分钟` : "";
+      eta = d.hold ? d.hw?.backlog_eta_s : d.eta_s;
+    const p = {
+      device: d.device,
+      from: hhmm(from),
+      to: hhmm(to),
+      eta: eta ? t("live.catchup.eta", { n: Math.ceil(eta / 60) }) : "",
+      hold: holdLeft(d),
+      mb: kb ? (kb / 1024).toFixed(kb >= 10240 ? 0 : 1) : "",
+    };
     const it: Item = {
       k: "catchup",
       key: "u" + d.device,
-      device: d.device,
-      from,
-      to,
-      tail: !d.hold
-        ? mins
-        : holdLeft(d) // the phone went away: what it said of the card's backlog then is out of date
-          ? `；等录音设备卡里更早的录音，${holdLeft(d)}，之后先定稿已有的录音`
-          : `；${kb ? `录音设备卡里还有 ${(kb / 1024).toFixed(kb >= 10240 ? 0 : 1)} MB 录音` : "手机还"}在后台补传${mins}，补完后定稿接上，实时字幕和分析照常`,
+      text: t(
+        !d.hold
+          ? "live.catchup.plain"
+          : p.hold // the phone went away: what it said of the card's backlog then is out of date
+            ? "live.catchup.held"
+            : kb
+              ? "live.catchup.card"
+              : "live.catchup.phone",
+        p,
+      ),
     };
     return [{ s: from, it }];
   }),
@@ -171,18 +181,20 @@ function jump(start: string) {
   <AppHeader in-app>
     <div class="head">
       <DayPicker :day="day" @pick="go">
-        <button v-if="!live" class="back" @click="go(today)">回到今天</button>
+        <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
       </DayPicker>
       <!-- recording or not, and how far behind the words come up; the rest is on the progress page -->
-      <RouterLink class="status" to="/progress" title="处理进度">
-        <template v-if="!connected">连接断开，重连中…</template>
+      <RouterLink class="status" to="/progress" :title="t('title.progress')">
+        <template v-if="!connected">{{ t("live.reconnecting") }}</template>
         <template v-else-if="status">
-          <span v-if="status.recording === false">未在录音</span>
-          <span v-else :class="{ bad: (status.latency_s ?? 0) > 60 }"
-            >录音中{{ status.latency_s == null ? "" : ` · 延迟 ${status.latency_s} 秒` }}</span
-          >
+          <span v-if="status.recording === false">{{ t("live.notRecording") }}</span>
+          <span v-else :class="{ bad: (status.latency_s ?? 0) > 60 }">{{
+            status.latency_s == null
+              ? t("live.recording")
+              : t("live.recordingLag", { n: status.latency_s })
+          }}</span>
         </template>
-        <template v-else>连接中…</template>
+        <template v-else>{{ t("live.connecting") }}</template>
       </RouterLink>
     </div>
   </AppHeader>
@@ -203,13 +215,21 @@ function jump(start: string) {
         />
         <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" />
         <div v-else-if="it.k === 'conv'" class="conv">
-          对话 {{ hhmmss(it.c.start) }}–{{ hhmmss(it.c.end) }} 结束 · 参与
-          {{ it.c.participants.map(speakerLabel).join("、") || "—" }} · {{ it.c.sentences }} 句 ·
+          {{
+            t(
+              "live.convEnd",
+              {
+                from: hhmmss(it.c.start),
+                to: hhmmss(it.c.end),
+                who: it.c.participants.map(speakerLabel).join(t("common.list")) || "—",
+                n: it.c.sentences,
+              },
+              it.c.sentences,
+            )
+          }}
           <RouterLink :to="'/c/' + it.c.id">{{ convLink(it.c) }}</RouterLink>
         </div>
-        <div v-else-if="it.k === 'catchup'" class="gap">
-          正在补齐 {{ it.device }} {{ hhmm(it.from) }}–{{ hhmm(it.to) }} 的录音{{ it.tail }}
-        </div>
+        <div v-else-if="it.k === 'catchup'" class="gap">{{ it.text }}</div>
         <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
       </template>
       <!-- nothing being said: where the next words will come up, under today's earlier ones -->
@@ -217,40 +237,36 @@ function jump(start: string) {
         <div class="none">
           <Icon name="mic" :size="28" />
           <div>
-            <b>现在没有进行中的对话</b>
+            <b>{{ t("live.idle") }}</b>
             <div class="muted">
-              {{
-                status?.devices?.length
-                  ? "戴上录音设备开口说话，字幕会实时出现在这里"
-                  : "连上手机和录音设备，说的话会实时出现在这里"
-              }}
+              {{ t(status?.devices?.length ? "live.idleWear" : "live.idleConnect") }}
             </div>
           </div>
         </div>
         <DeviceCard v-for="d in status?.devices ?? []" :key="d.device" :d="d" />
         <RouterLink v-if="last" class="card last" :to="'/c/' + last.id">
-          <span class="muted">上一段对话 结束于 {{ hhmm(last.end) }} ·</span>
+          <span class="muted">{{ t("live.last", { at: hhmm(last.end) }) }}</span>
           <b>{{ convLink(last) }}</b>
           <Icon name="chevron-right" :size="18" />
         </RouterLink>
         <!-- the app records from its own top bar: no page recorder inside it -->
         <RouterLink class="btn btn-primary rec" to="/record"
-          ><Icon name="mic" :size="18" />用手机开始录音</RouterLink
+          ><Icon name="mic" :size="18" />{{ t("live.recordHere") }}</RouterLink
         >
-        <p class="in-app-hint muted">点顶栏的录音状态开始录音</p>
+        <p class="in-app-hint muted">{{ t("live.inAppHint") }}</p>
         <RouterLink v-if="!status?.devices?.length" class="card last" to="/connect">
           <Icon name="smartphone" :size="20" />
-          <b>连接录音设备</b>
+          <b>{{ t("live.connectRecorder") }}</b>
           <Icon name="chevron-right" :size="18" />
         </RouterLink>
       </section>
       <div v-else-if="ready && !rows.length && !live" class="empty">
-        <Icon name="calendar" :size="48" />这一天没有转写内容
+        <Icon name="calendar" :size="48" />{{ t("live.empty") }}
       </div>
     </div>
   </main>
   <button v-show="live && !follow" class="jump" @click="toBottom">
-    <Icon name="chevron-down" :size="16" />回到最新
+    <Icon name="chevron-down" :size="16" />{{ t("live.toLatest") }}
   </button>
 </template>
 

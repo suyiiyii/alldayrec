@@ -10,6 +10,7 @@ import LiveCard from "../components/LiveCard.vue";
 import RecapCard from "../components/RecapCard.vue";
 import SelfVoice from "../components/SelfVoice.vue";
 import Skeleton from "../components/Skeleton.vue";
+import { t } from "../i18n";
 import {
   errorTitle,
   get,
@@ -96,12 +97,16 @@ const answer = computed(() => {
   const by = new Map((reply.value?.sources ?? []).map((s) => [s.id, s]));
   return (reply.value?.answer ?? "")
     .split(/(c\d{14}(?:-[A-Za-z0-9_]+)?)/)
-    .map((t) => ({ t, s: by.get(t) ?? by.get(t.split("-")[0]) }));
+    .map((x) => ({ t: x, s: by.get(x) ?? by.get(x.split("-")[0]) }));
 });
 
 // a phone (and inside the app): asking is a round button that opens a sheet (a modal <dialog>); the answer comes up
 // on top of the page
-const SUGGEST = ["今天答应了谁什么", "昨天的回顾", "帮我写跟进消息"];
+const SUGGEST = computed(() => [
+  t("timeline.suggestPromises"),
+  t("timeline.suggestRecap"),
+  t("timeline.suggestFollowUp"),
+]);
 const sq = ref("");
 const sheet = ref<HTMLDialogElement>(),
   input = ref<HTMLInputElement>(),
@@ -206,7 +211,7 @@ onMounted(async () => {
   window.addEventListener("scroll", spy, { passive: true });
   get<Due[]>("/api/todos/due").then((d) => (due.value = d));
   get<Record<string, number>>("/api/tags").then(
-    (t) => (tags.value = Object.entries(t).slice(0, 40)),
+    (ts) => (tags.value = Object.entries(ts).slice(0, 40)),
   );
   const [st] = await Promise.all([get<Status>("/api/status"), loadCalendar(true), restart()]);
   status.value = st;
@@ -233,18 +238,22 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   <main>
     <Skeleton v-if="!ready" />
     <div v-else-if="empty" class="card start">
-      <h2>三步开始</h2>
+      <h2>{{ t("timeline.start") }}</h2>
       <ol>
-        <li><b>装 App</b><span class="muted">在手机上装好 alldayrec App</span></li>
         <li>
-          <b>扫码</b><span class="muted">在 App 的「设置 › 扫码登录」里扫连接页上的二维码</span>
+          <b>{{ t("timeline.install") }}</b
+          ><span class="muted">{{ t("timeline.installSub") }}</span>
         </li>
         <li>
-          <b>戴上设备</b
-          ><span class="muted">打开录音设备戴在身上，说的话会实时出现，聊完整理成对话</span>
+          <b>{{ t("timeline.scan") }}</b
+          ><span class="muted">{{ t("timeline.scanSub") }}</span>
+        </li>
+        <li>
+          <b>{{ t("timeline.wear") }}</b
+          ><span class="muted">{{ t("timeline.wearSub") }}</span>
         </li>
       </ol>
-      <RouterLink class="btn btn-primary" to="/connect">去连接手机</RouterLink>
+      <RouterLink class="btn btn-primary" to="/connect">{{ t("timeline.goConnect") }}</RouterLink>
     </div>
     <template v-else>
       <template v-if="top">
@@ -253,32 +262,36 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
       </template>
       <div ref="find" class="find">
         <DayPicker :day="seen || day || today()" @pick="pick">
-          <RouterLink class="cal" to="/calendar">日历</RouterLink>
+          <RouterLink class="cal" to="/calendar">{{ t("title.calendar") }}</RouterLink>
         </DayPicker>
         <div class="q">
-          <input v-model.trim="q" type="search" placeholder="搜索标题、摘要、待办、原文" />
-          <button :disabled="!q || asking" @click="askAI(q)">问 AI</button>
+          <input v-model.trim="q" type="search" :placeholder="t('timeline.search')" />
+          <button :disabled="!q || asking" @click="askAI(q)">{{ t("timeline.ask") }}</button>
         </div>
         <div class="tags">
           <button
-            v-for="[t, n] in tags"
-            :key="t"
+            v-for="[tg, n] in tags"
+            :key="tg"
             class="tag"
-            :class="{ on: tag === t }"
-            @click="tag = tag === t ? '' : t"
+            :class="{ on: tag === tg }"
+            @click="tag = tag === tg ? '' : tg"
           >
-            {{ t }} {{ n }}
+            {{ tg }} {{ n }}
           </button>
         </div>
       </div>
       <div v-if="asking || reply || askErr" class="card ask">
         <div class="meta">
-          问 AI<template v-if="!asking && reply">
-            · 查了 {{ reply.calls.length }} 次 · {{ reply.secs }} 秒</template
-          >
+          {{ t("timeline.ask")
+          }}{{
+            !asking && reply
+              ? " · " +
+                t("timeline.askStats", { n: reply.calls.length, s: reply.secs }, reply.calls.length)
+              : ""
+          }}
           <button
             class="x btn-ghost"
-            title="关掉"
+            :title="t('timeline.close')"
             @click="
               reply = null;
               askErr = '';
@@ -287,7 +300,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             <Icon name="x" :size="18" />
           </button>
         </div>
-        <div v-if="asking" class="muted">正在查……一般要 10~30 秒</div>
+        <div v-if="asking" class="muted">{{ t("timeline.asking") }}</div>
         <div v-else-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</div>
         <div v-else class="answer">
           <template v-for="(p, i) in answer" :key="i"
@@ -301,7 +314,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
       <SelfVoice v-if="top" ref="selfCard" />
       <section v-for="g in days" :key="g.day">
         <h2 class="day" :data-day="g.day">
-          {{ dayLabel(g.day) }} · {{ g.convs.length }} 段对话
+          {{ t("timeline.dayConversations", { day: dayLabel(g.day) }, g.convs.length) }}
         </h2>
         <RecapCard
           v-if="!q && !tag && recaps[g.day]"
@@ -312,21 +325,21 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
       </section>
       <template v-if="done && !items.length && !reply && !asking">
         <div v-if="q || tag || day" class="empty">
-          <Icon name="search" :size="48" />没有匹配的对话
+          <Icon name="search" :size="48" />{{ t("timeline.noMatch") }}
         </div>
         <div v-else-if="!going" class="empty">
           <Icon name="message-circle" :size="48" />
-          <div>还没有聊完的对话。戴上录音设备聊过的话，会在这里整理成一段段对话</div>
+          <div>{{ t("timeline.none") }}</div>
         </div>
       </template>
       <button v-show="!done" ref="more" class="more" @click="page">
-        {{ loading ? "加载中…" : "更早" }}
+        {{ loading ? t("timeline.loading") : t("timeline.earlier") }}
       </button>
       <!-- 问 AI on a phone: a sheet from the bottom; a tap on the dim backdrop (the dialog itself) or Escape closes it -->
       <dialog
         ref="sheet"
         class="sheet"
-        aria-label="问 AI"
+        :aria-label="t('timeline.ask')"
         @click.self="sheet?.close()"
         @close="fab?.focus()"
       >
@@ -342,15 +355,15 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
               v-model.trim="sq"
               type="search"
               enterkeyhint="send"
-              placeholder="问问今天…"
+              :placeholder="t('timeline.askToday')"
             />
-            <button class="btn-primary" :disabled="!sq" aria-label="问 AI">
+            <button class="btn-primary" :disabled="!sq" :aria-label="t('timeline.ask')">
               <Icon name="sparkles" :size="18" />
             </button>
           </div>
         </form>
       </dialog>
-      <button ref="fab" class="fab btn-primary" aria-label="问 AI" @click="openSheet">
+      <button ref="fab" class="fab btn-primary" :aria-label="t('timeline.ask')" @click="openSheet">
         <Icon name="sparkles" :size="24" />
       </button>
     </template>

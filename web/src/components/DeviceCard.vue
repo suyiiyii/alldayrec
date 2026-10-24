@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { card, caughtUp, CHARGE, hhmm, type DeviceStatus } from "../lib/api";
+import { t } from "../i18n";
+import { card, caughtUp, chargeText, hhmm, type DeviceStatus } from "../lib/api";
 import { today } from "../lib/calendar";
 
 // A device as a status card (我的, and 实时 with nothing going on); a tap opens its own page. The third tile: how far
@@ -9,10 +10,10 @@ const { d } = defineProps<{ d: DeviceStatus }>();
 // behind: its finals are short of its audio; offline: no audio in the last 2 min
 const badge = (d: DeviceStatus) =>
   !caughtUp(d)
-    ? { text: `落后 ${Math.max(1, Math.round(d.left_s / 60))} 分钟`, cls: "warn" }
+    ? { text: t("deviceCard.behind", { n: Math.max(1, Math.round(d.left_s / 60)) }), cls: "warn" }
     : d.recording
-      ? { text: "已追上", cls: "ok" }
-      : { text: "离线", cls: "off" };
+      ? { text: t("deviceCard.caughtUp"), cls: "ok" }
+      : { text: t("deviceCard.offline"), cls: "off" };
 // the card's free space when it records to it, else what is wrong with it
 const cardTile = (d: DeviceStatus) =>
   !d.hw
@@ -24,7 +25,7 @@ const cardTile = (d: DeviceStatus) =>
 const seen = (iso: string | null) => {
   if (!iso) return "—";
   const days = Math.round((+new Date(today()) - +new Date(iso.slice(0, 10))) / 86400000);
-  return days < 1 ? hhmm(iso) : days === 1 ? "昨天" : `${days} 天前`;
+  return days < 1 ? hhmm(iso) : days === 1 ? t("common.yesterday") : t("common.daysAgo", days);
 };
 </script>
 
@@ -37,21 +38,26 @@ const seen = (iso: string | null) => {
     <div class="tiles">
       <div>
         <span class="v">{{ d.hw?.battery != null ? d.hw.battery + "%" : "—" }}</span>
-        <span class="k">电量{{ d.hw?.charge ? " · " + CHARGE[d.hw.charge] : "" }}</span>
+        <span class="k"
+          >{{ t("deviceCard.battery")
+          }}{{ d.hw?.charge ? " · " + chargeText(d.hw.charge) : "" }}</span
+        >
       </div>
       <div>
         <span class="v" :class="{ long: cardTile(d).length > 8, bad: d.hw?.store }">{{
           cardTile(d)
         }}</span>
-        <span class="k">存储卡{{ !d.hw?.store && d.hw?.total_kb ? "剩余" : "" }}</span>
+        <span class="k">{{
+          t(!d.hw?.store && d.hw?.total_kb ? "deviceCard.cardFree" : "deviceCard.card")
+        }}</span>
       </div>
       <div v-if="d.recording">
-        <span class="v">{{ d.latency_s != null ? d.latency_s + " 秒" : "—" }}</span>
-        <span class="k">延迟</span>
+        <span class="v">{{ d.latency_s != null ? t("common.sec", { n: d.latency_s }) : "—" }}</span>
+        <span class="k">{{ t("deviceCard.lag") }}</span>
       </div>
       <div v-else>
         <span class="v">{{ seen(d.audio_end) }}</span>
-        <span class="k">最后录音</span>
+        <span class="k">{{ t("deviceCard.lastAudio") }}</span>
       </div>
     </div>
   </RouterLink>

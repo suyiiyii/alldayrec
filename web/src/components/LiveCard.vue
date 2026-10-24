@@ -4,6 +4,7 @@ import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 import LivePanel from "./LivePanel.vue";
 import type { Row } from "../lib/api";
+import { t } from "../i18n";
 import { today } from "../lib/calendar";
 import { useLive } from "../lib/live";
 
@@ -33,23 +34,25 @@ const isNow = (r: Row) => Object.values(partials.value).includes(r);
 <template>
   <section class="card live">
     <div class="head">
-      <span class="pulse rec" />进行中的对话
-      <RouterLink class="more" to="/live">全屏<Icon name="chevron-right" :size="16" /></RouterLink>
+      <span class="pulse rec" />{{ t("liveCard.going") }}
+      <RouterLink class="more" to="/live"
+        >{{ t("liveCard.full") }}<Icon name="chevron-right" :size="16"
+      /></RouterLink>
     </div>
-    <RouterLink class="lines" to="/live" aria-label="实时字幕">
+    <RouterLink class="lines" to="/live" :aria-label="t('liveCard.captions')">
       <p
         v-for="r in lines"
         :key="r.id"
         class="line"
         :class="{ draft: r.state === 'draft', now: isNow(r) }"
-        :title="r.state === 'draft' ? '实时初稿，稍后定稿' : undefined"
+        :title="r.state === 'draft' ? t('liveCard.draft') : undefined"
       >
         <Avatar v-if="r.speaker" :name="r.speaker" :size="20" /><span v-else class="who"
           ><span class="pulse"
         /></span>
         <span class="text">{{ r.text }}</span>
       </p>
-      <p v-if="!lines.length" class="line muted">字幕马上出来…</p>
+      <p v-if="!lines.length" class="line muted">{{ t("liveCard.soon") }}</p>
     </RouterLink>
     <LivePanel class="foot" mini :status="status" :lives="lives" />
   </section>

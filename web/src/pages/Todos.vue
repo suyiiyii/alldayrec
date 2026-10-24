@@ -6,6 +6,7 @@ import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
 import Skeleton from "../components/Skeleton.vue";
 import TodoItem from "../components/TodoItem.vue";
+import { t } from "../i18n";
 import { get, type Due } from "../lib/api";
 import { useMutation } from "../lib/mutation";
 import { markWithUndo, open } from "../lib/todos";
@@ -21,17 +22,21 @@ const latest = (ts: Due[]) => [...ts].sort((a, b) => b.due_date.localeCompare(a.
 const groups = computed(() => {
   const ts = open(due.value ?? []);
   return [
-    { key: "today", title: "今天", items: ts.filter((t) => !t.age_days) },
-    { key: "week", title: "本周", items: latest(ts.filter((t) => t.age_days && !t.stale)) },
-    { key: "old", title: "更早", items: latest(ts.filter((t) => t.stale)) },
+    { key: "today", title: t("common.today"), items: ts.filter((x) => !x.age_days) },
+    {
+      key: "week",
+      title: t("todos.week"),
+      items: latest(ts.filter((x) => x.age_days && !x.stale)),
+    },
+    { key: "old", title: t("todos.old"), items: latest(ts.filter((x) => x.stale)) },
   ].filter((g) => g.items.length);
 });
 const clear = (ts: Due[]) =>
   run(() =>
     markWithUndo(
-      ts.map((t) => t.id),
+      ts.map((x) => x.id),
       "done",
-      `已把 ${ts.length} 条标为已处理`,
+      t("todos.cleared", ts.length),
     ),
   );
 </script>
@@ -39,13 +44,15 @@ const clear = (ts: Due[]) =>
 <template>
   <AppHeader />
   <main>
-    <RouterLink class="back" to="/"><Icon name="chevron-left" :size="18" />今天</RouterLink>
-    <h1>待办</h1>
+    <RouterLink class="back" to="/"
+      ><Icon name="chevron-left" :size="18" />{{ t("common.today") }}</RouterLink
+    >
+    <h1>{{ t("title.todos") }}</h1>
     <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
     <Skeleton v-if="!due && !error" />
     <div v-else-if="due && !groups.length" class="card empty">
       <Icon name="check" :size="48" />
-      <p>没有到期的待办</p>
+      <p>{{ t("todos.none") }}</p>
     </div>
     <section v-for="g in groups" :key="g.key" class="card" :class="g.key">
       <div class="head">
@@ -53,12 +60,12 @@ const clear = (ts: Due[]) =>
           {{ g.title }}<span class="n">{{ g.items.length }}</span>
         </h2>
         <button v-if="g.key === 'old'" class="btn" :disabled="busy" @click="clear(g.items)">
-          全部标为已处理
+          {{ t("todos.clearAll") }}
         </button>
       </div>
-      <p v-if="g.key === 'old'" class="hint">过期一周以上，说「待会儿」「明天」的过期三天以上</p>
+      <p v-if="g.key === 'old'" class="hint">{{ t("todos.oldHint") }}</p>
       <ul>
-        <TodoItem v-for="t in g.items" :key="t.id" :t="t" />
+        <TodoItem v-for="x in g.items" :key="x.id" :t="x" />
       </ul>
     </section>
   </main>

@@ -3,6 +3,7 @@
 // opens it again), 不对 sits in the ⋯ menu, 撤销 there once marked (few clicks per todo: Bee's users turned off
 // review that asked for one on every line)
 import { computed, ref } from "vue";
+import { t } from "../i18n";
 import { type Mark } from "../lib/api";
 import { useMutation } from "../lib/mutation";
 import { markOf, markWithUndo, setMarks } from "../lib/todos";
@@ -19,8 +20,12 @@ async function mark(m: Mark | null) {
   if (menu.value) menu.value.open = false;
   await run(() =>
     m
-      ? markWithUndo([props.id], m, m === "done" ? "已完成" : "已标为不对")
-      : setMarks([props.id], null).then(() => toast("已撤销")),
+      ? markWithUndo(
+          [props.id],
+          m,
+          t(m === "done" ? "todoMarks.doneToast" : "todoMarks.wrongToast"),
+        )
+      : setMarks([props.id], null).then(() => toast(t("common.undone"))),
   );
 }
 defineExpose({ mark }); // TodoItem's swipe
@@ -32,24 +37,26 @@ defineExpose({ mark }); // TodoItem's swipe
       class="check"
       :class="{ on: now === 'done', wrong: now === 'wrong' }"
       :disabled="busy"
-      :title="now ? '撤销' : '完成'"
-      :aria-label="now ? '撤销' : '标为完成'"
+      :title="now ? t('common.undo') : t('todoMarks.done')"
+      :aria-label="now ? t('common.undo') : t('todoMarks.markDone')"
       @click="mark(now ? null : 'done')"
     >
       <Icon :name="now === 'wrong' ? 'x' : 'check'" :size="16" />
     </button>
     <details ref="menu" class="more">
       <summary
-        title="更多"
-        aria-label="更多"
+        :title="t('todoMarks.more')"
+        :aria-label="t('todoMarks.more')"
         @click="left = menu!.getBoundingClientRect().left < half()"
       >
         <Icon name="more-horizontal" :size="18" />
       </summary>
       <div class="menu" :class="{ left }">
-        <button v-if="now" class="btn-ghost" :disabled="busy" @click="mark(null)">撤销</button>
+        <button v-if="now" class="btn-ghost" :disabled="busy" @click="mark(null)">
+          {{ t("common.undo") }}
+        </button>
         <button v-else class="btn-ghost wrong" :disabled="busy" @click="mark('wrong')">
-          不对，不是待办
+          {{ t("todoMarks.notTodo") }}
         </button>
       </div>
     </details>

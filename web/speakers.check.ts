@@ -1,5 +1,6 @@
-// node --experimental-strip-types speakers.check.ts: speakerColor and initial (src/lib/speakers.ts)
+// node --experimental-strip-types speakers.check.ts: speakerColor and initial (src/lib/speakers.ts), in both languages
 import assert from "node:assert/strict";
+import { i18n } from "./src/i18n.ts";
 import { initial, likeness, speakerColor, speakerLabel } from "./src/lib/speakers.ts";
 
 assert.equal(speakerColor("我"), "var(--accent)");
@@ -27,4 +28,13 @@ assert.deepEqual(["S2", "S12", "S?", "我", "同事A", null].map(speakerLabel), 
   "—",
 ]);
 assert.deepEqual([0.72, 0.7, 0.69].map(likeness), ["很像", "很像", "有点像"]);
+i18n.global.locale.value = "en"; // 我 stays the key in the data, the page says Me
+assert.deepEqual(["S2", "S?", "我", "同事A"].map(speakerLabel), [
+  "Speaker 2",
+  "Unidentified",
+  "Me",
+  "同事A",
+]);
+assert.deepEqual(["我", "alice"].map(initial), ["M", "A"]);
+assert.equal(speakerColor("我"), "var(--accent)");
 console.log("speakers ok");

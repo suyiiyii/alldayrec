@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { hhmm, minutes, MOSTLY_MEDIA, type Conversation } from "../lib/api";
+import { t } from "../i18n";
 import { speakerColor, speakerLabel } from "../lib/speakers";
 
 // one conversation in a list: a card on a time line down the left, its dot the colour of its first tag (the same
@@ -15,11 +16,12 @@ const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
     <span class="dot" :style="{ background: dot }" />
     <RouterLink class="card" :class="{ media }" :to="'/c/' + c.id">
       <div class="meta">
-        {{ media ? "媒体 · " : "" }}{{ hhmm(c.start) }}–{{
-          hhmm(c.end)
-        }}
-        · {{ minutes(c) }} 分钟 · {{ (c.participants || []).map(speakerLabel).join("、") || "—" }}
-        <template v-if="c.summary?.todos?.length"> · {{ c.summary.todos.length }} 条待办</template>
+        {{ media ? t("convItem.media") : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }} ·
+        {{ t("common.min", { n: minutes(c) }) }} ·
+        {{ (c.participants || []).map(speakerLabel).join(t("common.list")) || "—" }}
+        <template v-if="c.summary?.todos?.length">
+          · {{ t("convItem.todos", c.summary.todos.length) }}</template
+        >
       </div>
       <div
         class="title"
@@ -30,16 +32,16 @@ const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
       >
         {{
           c.summary?.status === "done"
-            ? c.summary.title || "（无标题）"
+            ? c.summary.title || t("convItem.untitled")
             : c.summary?.status === "failed"
-              ? "摘要生成失败"
-              : "摘要生成中…"
+              ? t("api.summaryFailed")
+              : t("api.summaryPending")
         }}
       </div>
       <template v-if="!media">
         <div v-if="c.summary?.summary" class="gist">{{ c.summary.summary }}</div>
         <div v-if="c.summary?.tags?.length" class="tagline">
-          <span v-for="t in c.summary.tags" :key="t" class="tag">{{ t }}</span>
+          <span v-for="tg in c.summary.tags" :key="tg" class="tag">{{ tg }}</span>
         </div>
       </template>
     </RouterLink>

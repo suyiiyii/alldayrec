@@ -1,5 +1,7 @@
 // One colour per speaker, the same on every page: 我 the accent, an unnamed label (S1, S?) grey, a name one of
-// PALETTE by a hash of it. No Vue here: speakers.check.ts runs it under plain node
+// PALETTE by a hash of it. speakers.check.ts runs it under plain node (i18n.ts is fine there)
+import { t } from "../i18n.ts";
+
 const PALETTE = [
   "#c0392b",
   "#d35400",
@@ -20,13 +22,24 @@ export function speakerColor(name?: string | null): string {
   return PALETTE[h % PALETTE.length];
 }
 
-// what the avatar shows: a name's first character (a letter in capitals), an unnamed label's number, S? a ?
+// what the avatar shows: a name's first character (a letter in capitals; 我's as the page says it), an unnamed label's
+// number, S? a ?
 export const initial = (name?: string | null) =>
-  !name ? "?" : anonymous(name) ? name.slice(1) : [...name][0].toUpperCase();
+  !name ? "?" : anonymous(name) ? name.slice(1) : [...speakerLabel(name)][0].toUpperCase();
 
-// a label as the page says it: S2 is 说话人 2, S? 未识别; names as they are (the API keeps the labels)
+// a label as the page says it: S2 is 说话人 2, S? 未识别, 我 (the wearer, a key in the data) Me in English; names as
+// they are (the API keeps the labels)
 export const speakerLabel = (name?: string | null) =>
-  !name ? "—" : name === "S?" ? "未识别" : /^S\d+$/.test(name) ? `说话人 ${name.slice(1)}` : name;
+  !name
+    ? "—"
+    : name === "S?"
+      ? t("speaker.unknown")
+      : name === "我"
+        ? t("speaker.me")
+        : /^S\d+$/.test(name)
+          ? t("speaker.n", { n: name.slice(1) })
+          : name;
 
 // a voiceprint score in words: no numbers on the page
-export const likeness = (score: number) => (score >= 0.7 ? "很像" : "有点像");
+export const likeness = (score: number) =>
+  t(score >= 0.7 ? "speaker.veryLike" : "speaker.someLike");

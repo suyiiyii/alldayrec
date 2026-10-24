@@ -1,6 +1,7 @@
 // Check of src/lib/recorderLog.ts against lr_log.h's packed events (the same values as lr_sync.py's selftest), and
 // firmware updates in a line (the server's upgrades() as test_device_log.py has them):
 //   node --experimental-strip-types web/recorderLog.check.ts
+import { i18n } from "./src/i18n.ts";
 import { cardBusy, describe, millivolts, upgradeText } from "./src/lib/recorderLog.ts";
 
 const said = (code: number, x: number, a: number, b: number) =>
@@ -85,4 +86,16 @@ check(String([1, 22, 29].map((c) => millivolts(rec(c, 195)))), "3900,3900,3900")
 check(String(millivolts(rec(29, 0, 1))), "0"); // the power-fail warning: not measured
 check(String(cardBusy(rec(25, 0, 84_000 | (713 << 20)))), "14"); // 84 s of 10 min (LR-P1, 10-05)
 check(String(cardBusy(rec(22, 195))), "null");
+
+i18n.global.locale.value = "en"; // the same records in English
+check(said(3, 2, -116 >>> 0, 0), "try 2: -116 -ETIMEDOUT (no card, or not seated)");
+check(said(30, 1, 3, 1100), "3 records (1100 B) not sent live (Bluetooth disconnected); kept on the card, the phone catches up from it");
+check(describe({ boot: 1, t: 2500, code: 1 | 0x80, x: 195, a: 0b10, b: 0x1751f88 }).text,
+  "last run ended by watchdog DOG, battery 3900 mV, firmware 1751f88 (2.5 s after boot)");
+check(describe({ boot: 1, t: 0, code: 99, x: 1, a: 2, b: 3 }).label, "Unknown event");
+check(
+  upgradeText({ ...up, ms: 60_000, ok: false, why: "Device disconnected", stage: "send", pct: 40, back_ms: 30_000 }),
+  "1751f88 → c95516b, took 1 min 0 s, failed (at 40% of the transfer): Device disconnected, reconnected 30 s later",
+);
+check(upgradeText({ ...up, from: null, ms: null, ok: null }), "? → c95516b, no result yet");
 console.log("recorderLog check ok");

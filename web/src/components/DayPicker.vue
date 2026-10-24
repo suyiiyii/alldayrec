@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, useTemplateRef, watch } from "vue";
 import Icon from "./Icon.vue";
 import MonthGrid from "./MonthGrid.vue";
+import { intl, lang, t } from "../i18n";
 import { calendar, dayLabel, loadCalendar, neighbour, today } from "../lib/calendar";
 
 // < 10月1日 周三 >: the arrows go to the nearest day with sentences, the date opens a month of them
@@ -32,9 +33,13 @@ const next = computed(() => neighbour(props.day, 1) ?? (props.day < today() ? to
 const info = computed(() => calendar.value[props.day]);
 function shiftMonth(n: number) {
   const [y, m] = month.value.split("-").map(Number);
-  const t = new Date(y, m - 1 + n, 1);
-  month.value = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+  const d = new Date(y, m - 1 + n, 1);
+  month.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
+const monthLabel = (m: string) =>
+  lang() === "zh"
+    ? m.replace("-", " 年 ") + " 月"
+    : new Date(m + "-01T12:00:00").toLocaleDateString(intl(), { year: "numeric", month: "long" });
 function pick(d: string) {
   open.value = false;
   emit("pick", d);
@@ -43,27 +48,37 @@ function pick(d: string) {
 
 <template>
   <div ref="root" class="picker">
-    <button class="arrow" :disabled="!prev" title="前一天" @click="prev && pick(prev)">
+    <button
+      class="arrow"
+      :disabled="!prev"
+      :title="t('dayPicker.prev')"
+      @click="prev && pick(prev)"
+    >
       <Icon name="chevron-left" />
     </button>
     <button class="label" @click="toggle">
-      {{ day === today() ? "今天" : dayLabel(day) }}
-      <span v-if="info" class="sub">{{ info.conversations }} 段对话</span>
+      {{ day === today() ? t("common.today") : dayLabel(day) }}
+      <span v-if="info" class="sub">{{ t("calendar.convs", info.conversations) }}</span>
     </button>
-    <button class="arrow" :disabled="!next" title="后一天" @click="next && pick(next)">
+    <button
+      class="arrow"
+      :disabled="!next"
+      :title="t('dayPicker.next')"
+      @click="next && pick(next)"
+    >
       <Icon name="chevron-right" />
     </button>
     <slot />
     <div v-if="open" class="pop" :style="at">
       <div class="head">
-        <button class="arrow" title="上个月" @click="shiftMonth(-1)">
+        <button class="arrow" :title="t('dayPicker.prevMonth')" @click="shiftMonth(-1)">
           <Icon name="chevron-left" />
         </button>
-        <span>{{ month.replace("-", " 年 ") }} 月</span>
-        <button class="arrow" title="下个月" @click="shiftMonth(1)">
+        <span>{{ monthLabel(month) }}</span>
+        <button class="arrow" :title="t('dayPicker.nextMonth')" @click="shiftMonth(1)">
           <Icon name="chevron-right" />
         </button>
-        <button class="today" @click="pick(today())">今天</button>
+        <button class="today" @click="pick(today())">{{ t("common.today") }}</button>
       </div>
       <MonthGrid :month="month" :selected="day" @pick="pick" />
     </div>

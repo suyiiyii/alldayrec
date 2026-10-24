@@ -4,7 +4,7 @@ type: reference
 
 # Web pages and app settings
 
-The web pages and the app are in Chinese only for now, and both follow the system's dark mode. What the LLM writes can be switched to English: see `UI_LANG` in [Configuration](./configuration.md).
+The web pages come in Chinese and English: pick one under **语言 · Language** on the 「我的」 (Me) page. The choice is kept in that browser, and it also switches the language the LLM writes in (summaries, recaps, "ask AI" answers and more) to match; see `lang` in [Configuration](./configuration.md). A browser that hasn't picked one uses the server's language setting. The web pages and the app both follow the system's dark mode.
 
 ## Web pages
 
@@ -20,7 +20,7 @@ The server serves the web pages (`web/` builds into `server/static/dist`). The t
 | `/calendar` | 日历 (Calendar) | How many conversations each day has |
 | `/speakers` | 人物 (People) | Recognized speakers |
 | `/p/<name>` | 人物 (Person) | One person's conversations, points and to-dos |
-| `/me` | 我的 (Me) | Each recorder's battery, free card space and lag, plus links to the to-dos and the pages below |
+| `/me` | 我的 (Me) | Each recorder's battery, free card space and lag, links to the to-dos and the pages below, and the page language |
 | `/progress` | 处理进度 (Progress) | How far along transcription and summaries are, AI calls and the system log |
 | `/device/<name>` | 设备日志 (Device log) | One device's events and status history |
 | `/connect` | 连接手机 (Connect a phone) | The Android app download, the QR code to sign in by scanning, and the settings for connecting AI (MCP) |

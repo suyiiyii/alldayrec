@@ -9,6 +9,7 @@ let stopOther = () => {}; // the card listening now
 // upload + the poll + LEAD_S. Started by a tap (iOS plays nothing otherwise); a page that goes to the background
 // stops (iOS suspends it anyway). One per device card on the progress page; one listening on the page at a time.
 import { onUnmounted, ref } from "vue";
+import { intl, t } from "../i18n";
 
 const { device } = defineProps<{ device: string }>();
 const LEAD_S = 1; // played this far behind the newest piece's arrival: pieces come late by their upload's jitter
@@ -29,7 +30,7 @@ function start() {
   stopOther();
   stopOther = stop;
   on.value = true;
-  note.value = "连接中…";
+  note.value = t("listen.connecting");
   // inside the tap: iOS lets only a gesture start audio; "playback" plays with the ring switch on silent (Safari 16.4+)
   const session = (navigator as { audioSession?: { type: string } }).audioSession;
   if (session) session.type = "playback";
@@ -94,14 +95,20 @@ async function poll(me: number, device: string) {
         next += buf.duration;
         got = Date.now();
         dur = buf.duration;
-        note.value = `播放中 · ${new Date(t0).toLocaleTimeString("zh-CN", { hour12: false })} 录的 · 延迟约 ${lag.toFixed(1)} 秒`;
+        note.value = t("listen.playing", {
+          at: new Date(t0).toLocaleTimeString(intl(), { hour12: false }),
+          lag: lag.toFixed(1),
+        });
       } else if (r.status === 204) {
-        if (!got) note.value = "这台设备还没有音频";
+        if (!got) note.value = t("listen.noAudio");
         else if (ctx.currentTime > next)
-          note.value = `等待新音频 · 上一块 ${dur.toFixed(0)} 秒长，${((Date.now() - got) / 1000).toFixed(0)} 秒前收到`;
-      } else note.value = `出错：HTTP ${r.status}，重试中…`;
+          note.value = t("listen.waiting", {
+            dur: dur.toFixed(0),
+            ago: ((Date.now() - got) / 1000).toFixed(0),
+          });
+      } else note.value = t("listen.httpError", { status: r.status });
     } catch {
-      if (me === run) note.value = "网络断开，重试中…";
+      if (me === run) note.value = t("listen.offline");
     }
     await new Promise((ok) => setTimeout(ok, 1000));
   }
@@ -164,8 +171,7 @@ function draw() {
   g.fillText(`${rms.toFixed(0)} dBFS`, w - 52 * devicePixelRatio, 14 * devicePixelRatio);
 }
 
-const onHidden = () =>
-  document.hidden && on.value && stop("页面到后台或锁屏，已停止；点「收听」重新开始");
+const onHidden = () => document.hidden && on.value && stop(t("listen.hidden"));
 document.addEventListener("visibilitychange", onHidden);
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", onHidden);
@@ -175,13 +181,11 @@ onUnmounted(() => {
 
 <template>
   <div class="listen">
-    <button :class="{ on }" @click="on ? stop() : start()">{{ on ? "停止" : "收听" }}</button>
+    <button :class="{ on }" @click="on ? stop() : start()">
+      {{ on ? t("listen.stop") : t("listen.listen") }}
+    </button>
     <span v-if="note" class="note">{{ note }}</span>
-    <canvas
-      v-if="on"
-      ref="canvas"
-      title="频谱：灰色是此刻，蓝线是约 5 秒平均；浅色带是 1–3 kHz"
-    ></canvas>
+    <canvas v-if="on" ref="canvas" :title="t('listen.spectrum')"></canvas>
   </div>
 </template>
 

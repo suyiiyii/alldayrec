@@ -1,4 +1,6 @@
+import { watch } from "vue";
 import { createRouter, createWebHistory } from "vue-router";
+import { i18n, t } from "./i18n";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -9,56 +11,64 @@ export const router = createRouter({
       path: "/",
       alias: "/conversations",
       component: () => import("./pages/Timeline.vue"),
-      meta: { title: "时间线" },
+      meta: { title: "title.timeline" },
     },
-    { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "实时" } },
-    { path: "/me", component: () => import("./pages/Me.vue"), meta: { title: "我的" } },
-    { path: "/todos", component: () => import("./pages/Todos.vue"), meta: { title: "待办" } },
+    { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "title.live" } },
+    { path: "/me", component: () => import("./pages/Me.vue"), meta: { title: "title.me" } },
+    {
+      path: "/todos",
+      component: () => import("./pages/Todos.vue"),
+      meta: { title: "title.todos" },
+    },
     {
       path: "/c/:id",
       component: () => import("./pages/Conversation.vue"),
       props: true,
-      meta: { title: "对话" },
+      meta: { title: "title.conversation" },
     },
     {
       path: "/calendar",
       component: () => import("./pages/Calendar.vue"),
-      meta: { title: "日历" },
+      meta: { title: "title.calendar" },
     },
     {
       path: "/progress",
       component: () => import("./pages/Progress.vue"),
-      meta: { title: "处理进度" },
+      meta: { title: "title.progress" },
     },
     {
       path: "/speakers",
       component: () => import("./pages/Speakers.vue"),
-      meta: { title: "人物" },
+      meta: { title: "title.people" },
     },
     {
       path: "/p/:name",
       component: () => import("./pages/Person.vue"),
       props: true,
-      meta: { title: "人物" },
+      meta: { title: "title.person" },
     },
     {
       path: "/device/:name",
       component: () => import("./pages/Device.vue"),
       props: true,
-      meta: { title: "设备日志" },
+      meta: { title: "title.device" },
     },
     {
       path: "/record",
       component: () => import("./pages/Record.vue"),
-      meta: { title: "alldayrec 录音" },
+      meta: { title: "title.record" },
     },
     {
       path: "/connect",
       component: () => import("./pages/Connect.vue"),
-      meta: { title: "连接手机" },
+      meta: { title: "title.connect" },
     },
   ],
 });
-router.afterEach((to) => {
-  document.title = (to.meta.title as string | undefined) ?? "alldayrec";
-});
+// meta.title: the page's title in locales/*.json, again when the language changes
+const title = () => {
+  const k = router.currentRoute.value.meta.title as string | undefined;
+  document.title = k ? t(k) : "alldayrec";
+};
+router.afterEach(title);
+watch(i18n.global.locale, title);

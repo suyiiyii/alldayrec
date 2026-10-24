@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { dismiss, toasted } from "../lib/toast";
 
 function undo() {
@@ -11,7 +12,7 @@ function undo() {
 <template>
   <div v-if="toasted.msg" :key="toasted.n" class="toast" role="status">
     <span>{{ toasted.msg }}</span>
-    <button v-if="toasted.undo" class="btn-ghost" @click="undo">撤销</button>
+    <button v-if="toasted.undo" class="btn-ghost" @click="undo">{{ t("common.undo") }}</button>
   </div>
 </template>
 

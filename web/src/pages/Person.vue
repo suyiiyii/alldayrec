@@ -3,6 +3,7 @@ import { ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
+import { t } from "../i18n";
 import { errorTitle, get, hhmm, post, type Person, type Profile } from "../lib/api";
 import { shiftDay, today } from "../lib/calendar";
 import { speakerLabel } from "../lib/speakers";
@@ -30,9 +31,9 @@ watch(
 const day = (iso: string) => iso.slice(0, 10);
 const heard = (iso: string) =>
   iso.startsWith(today())
-    ? `今天 ${hhmm(iso)}`
+    ? t("common.todayAt", { t: hhmm(iso) })
     : iso.startsWith(shiftDay(today(), -1))
-      ? `昨天 ${hhmm(iso)}`
+      ? t("common.yesterdayAt", { t: hhmm(iso) })
       : iso.slice(5, 10);
 
 // the profile: made on a click, then kept up to date as conversations with them close
@@ -52,12 +53,8 @@ async function makeProfile() {
     making.value = false;
   }
 }
-const sections = [
-  { k: "facts", title: "关于 TA" },
-  { k: "recent", title: "最近" },
-  { k: "mentions", title: "别人提到 TA" },
-  { k: "open", title: "没了结的事" },
-] as const;
+// title: person.section.<k>, with {name}
+const sections = ["facts", "recent", "mentions", "open"] as const;
 
 // other ways this person is called (A哥 for A): a hint with one of them suggests this name
 const newAlias = ref(""),
@@ -81,8 +78,10 @@ const link = (id: string, at: string | null) =>
 <template>
   <AppHeader />
   <main>
-    <RouterLink class="back" to="/speakers"><Icon name="chevron-left" :size="18" />人物</RouterLink>
-    <div v-if="missing" class="empty">没有带「{{ name }}」的对话</div>
+    <RouterLink class="back" to="/speakers"
+      ><Icon name="chevron-left" :size="18" />{{ t("title.people") }}</RouterLink
+    >
+    <div v-if="missing" class="empty">{{ t("person.missing", { name }) }}</div>
     <template v-else-if="p">
       <!-- a card for the person: who, when last heard, and what is open between us (我答应 TA 的 first) -->
       <section class="card head">
@@ -91,70 +90,80 @@ const link = (id: string, at: string | null) =>
           <div class="who">
             <h1>{{ p.name }}</h1>
             <div class="muted">
-              最近 {{ heard(p.last) }} · {{ p.count }} 段对话 · {{ day(p.first).slice(5) }} 起
+              {{
+                t(
+                  "person.meta",
+                  { at: heard(p.last), n: p.count, since: day(p.first).slice(5) },
+                  p.count,
+                )
+              }}
             </div>
           </div>
         </div>
         <div class="stats">
           <a class="stat" :href="p.mine.length ? '#mine' : undefined"
             ><b>{{ p.mine.length }}</b
-            >我答应 TA 的</a
+            >{{ t("person.mine") }}</a
           >
           <a class="stat" :href="p.theirs.length ? '#theirs' : undefined"
             ><b>{{ p.theirs.length }}</b
-            >TA 的待办</a
+            >{{ t("person.theirs") }}</a
           >
         </div>
         <div class="aliases muted">
-          别名：<span v-for="a in p.aliases" :key="a" class="tag"
+          {{ t("person.aliases")
+          }}<span v-for="a in p.aliases" :key="a" class="tag"
             >{{ a }}
-            <button class="x" title="删掉这个别名" @click="setAlias(a, '')">
+            <button class="x" :title="t('person.removeAlias')" @click="setAlias(a, '')">
               <Icon name="x" :size="14" /></button></span
           ><input
             v-model="newAlias"
-            placeholder="添加别名，回车"
+            :placeholder="t('person.addAlias')"
             @keydown.enter="newAlias.trim() && setAlias(newAlias.trim(), p.name)"
           /><span class="bad" :title="aliasTitle">{{ aliasError }}</span>
         </div>
         <div v-if="p.with.length" class="muted">
-          常一起：<template v-for="(w, i) in p.with" :key="w"
-            >{{ i ? "、" : ""
+          {{ t("person.with")
+          }}<template v-for="(w, i) in p.with" :key="w"
+            >{{ i ? t("common.list") : ""
             }}<RouterLink v-if="w !== '我'" :to="`/p/${encodeURIComponent(w)}`">{{ w }}</RouterLink
-            ><template v-else>{{ w }}</template></template
+            ><template v-else>{{ speakerLabel(w) }}</template></template
           >
         </div>
         <div v-if="p.tags.length" class="tags">
           <RouterLink
-            v-for="t in p.tags"
-            :key="t"
+            v-for="tag in p.tags"
+            :key="tag"
             class="tag"
-            :to="{ path: '/', query: { tag: t } }"
-            >{{ t }}</RouterLink
+            :to="{ path: '/', query: { tag } }"
+            >{{ tag }}</RouterLink
           >
         </div>
       </section>
 
       <section v-if="p.mine.length" id="mine" class="card">
-        <h2>我答应 {{ p.name }} 的</h2>
+        <h2>{{ t("person.mineTitle", { name: p.name }) }}</h2>
         <ul class="items">
-          <li v-for="(t, i) in allMine ? p.mine : p.mine.slice(0, 8)" :key="i">
-            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
-            <RouterLink class="from" :to="link(t.conversation, t.at)">{{
-              t.title || "对话"
+          <li v-for="(x, i) in allMine ? p.mine : p.mine.slice(0, 8)" :key="i">
+            {{ x.text
+            }}<span v-if="x.due" class="muted">{{ t("person.due", { due: x.due }) }}</span>
+            <RouterLink class="from" :to="link(x.conversation, x.at)">{{
+              x.title || t("title.conversation")
             }}</RouterLink>
           </li>
         </ul>
         <button v-if="p.mine.length > 8 && !allMine" class="btn-ghost" @click="allMine = true">
-          全部 {{ p.mine.length }} 条
+          {{ t("person.allMine", { n: p.mine.length }) }}
         </button>
       </section>
       <section v-if="p.theirs.length" id="theirs" class="card">
-        <h2>{{ p.name }} 的待办</h2>
+        <h2>{{ t("person.theirsTitle", { name: p.name }) }}</h2>
         <ul class="items">
-          <li v-for="(t, i) in p.theirs" :key="i">
-            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
-            <RouterLink class="from" :to="link(t.conversation, t.at)">{{
-              t.title || "对话"
+          <li v-for="(x, i) in p.theirs" :key="i">
+            {{ x.text
+            }}<span v-if="x.due" class="muted">{{ t("person.due", { due: x.due }) }}</span>
+            <RouterLink class="from" :to="link(x.conversation, x.at)">{{
+              x.title || t("title.conversation")
             }}</RouterLink>
           </li>
         </ul>
@@ -163,11 +172,11 @@ const link = (id: string, at: string | null) =>
       <section class="profile">
         <template v-if="p.profile">
           <p v-if="p.profile.who" class="whois">{{ p.profile.who }}</p>
-          <template v-for="sec in sections" :key="sec.k">
-            <template v-if="p.profile[sec.k].length">
-              <h3>{{ sec.title.replace("TA", p.name) }}</h3>
+          <template v-for="k in sections" :key="k">
+            <template v-if="p.profile[k].length">
+              <h3>{{ t(`person.section.${k}`, { name: p.name }) }}</h3>
               <ul class="items">
-                <li v-for="(x, i) in p.profile[sec.k]" :key="i">
+                <li v-for="(x, i) in p.profile[k]" :key="i">
                   {{ x.text }}
                   <RouterLink
                     v-for="s in x.src"
@@ -182,30 +191,43 @@ const link = (id: string, at: string | null) =>
             </template>
           </template>
           <div class="muted foot">
-            <span :title="p.profile.model ? `由 ${p.profile.model} 生成` : ''"
-              >AI 档案 · 根据 {{ p.profile.inputs.conversations }} 段对话、{{
-                p.profile.inputs.mentions
-              }}
-              处提及 · {{ p.profile.at.slice(5, 16).replace("T", " ") }}</span
-            >
-            <template v-if="p.profile_newer">· 之后又有 {{ p.profile_newer }} 段对话</template>
+            <span :title="p.profile.model ? t('person.madeBy', { model: p.profile.model }) : ''">{{
+              t("person.profileFoot", {
+                convs: t(
+                  "person.nConvs",
+                  { n: p.profile.inputs.conversations },
+                  p.profile.inputs.conversations,
+                ),
+                mentions: t(
+                  "person.nMentions",
+                  { n: p.profile.inputs.mentions },
+                  p.profile.inputs.mentions,
+                ),
+                at: p.profile.at.slice(5, 16).replace("T", " "),
+              })
+            }}</span>
+            <template v-if="p.profile_newer">{{
+              t("person.newer", { n: p.profile_newer }, p.profile_newer)
+            }}</template>
             <button :disabled="making" @click="makeProfile">
-              {{ making ? "生成中…" : "更新档案" }}
+              {{ making ? t("person.making") : t("person.update") }}
             </button>
           </div>
         </template>
         <button v-else :disabled="making" @click="makeProfile">
-          {{ making ? "生成中…（几十秒）" : "生成档案" }}
+          {{ making ? t("person.makingLong") : t("person.make") }}
         </button>
         <span class="bad" :title="profileTitle">{{ profileError }}</span>
       </section>
 
-      <h3>对话</h3>
+      <h3>{{ t("person.conversations") }}</h3>
       <section v-for="c in p.conversations.slice(0, shown)" :key="c.id" class="conv">
-        <RouterLink :to="`/c/${c.id}`" class="title">{{ c.title || "（无标题）" }}</RouterLink>
+        <RouterLink :to="`/c/${c.id}`" class="title">{{
+          c.title || t("person.untitled")
+        }}</RouterLink>
         <span class="muted">
           · {{ day(c.start) }} {{ hhmm(c.start) }} ·
-          {{ c.participants.map(speakerLabel).join("、") }}</span
+          {{ c.participants.map(speakerLabel).join(t("common.list")) }}</span
         >
         <ul v-if="c.points.length" class="points">
           <li v-for="x in c.points" :key="x">{{ x }}</li>
@@ -213,7 +235,7 @@ const link = (id: string, at: string | null) =>
         <p v-else-if="c.summary" class="summary">{{ c.summary }}</p>
       </section>
       <button v-if="p.conversations.length > shown" class="more" @click="shown += 20">
-        再显示 20 段
+        {{ t("person.more") }}
       </button>
     </template>
   </main>

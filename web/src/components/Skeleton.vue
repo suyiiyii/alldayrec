@@ -1,6 +1,6 @@
 <template>
   <!-- loading: three grey bars where the content will be -->
-  <div class="skeleton" role="status" aria-label="加载中"><i /><i /><i /></div>
+  <div class="skeleton" role="status" :aria-label="$t('common.loading')"><i /><i /><i /></div>
 </template>
 
 <style scoped>

@@ -2,6 +2,7 @@
 // The conversation player (lib/audio.ts track) as a bar on the screen's bottom: play / pause, where it is on a
 // slider, the time in and the length, the speed (1× → 1.5× → 2×)
 import { ref } from "vue";
+import { t } from "../i18n";
 import { track, trackRate, trackSeek, trackToggle } from "../lib/audio";
 import { clock } from "../lib/track";
 import Icon from "./Icon.vue";
@@ -15,9 +16,13 @@ function seek(e: Event) {
 </script>
 
 <template>
-  <div class="player" role="region" aria-label="播放器">
+  <div class="player" role="region" :aria-label="t('playerBar.player')">
     <div class="in">
-      <button class="pp" :aria-label="track.playing ? '暂停' : '播放'" @click="trackToggle">
+      <button
+        class="pp"
+        :aria-label="track.playing ? t('playerBar.pause') : t('playerBar.play')"
+        @click="trackToggle"
+      >
         <Icon :name="track.playing ? 'pause' : 'play'" :size="22" />
       </button>
       <span class="t">{{ clock((drag ?? track.at) - track.from) }}</span>
@@ -27,14 +32,16 @@ function seek(e: Event) {
         :max="track.to"
         step="1000"
         :value="drag ?? track.at"
-        aria-label="播放位置"
+        :aria-label="t('playerBar.position')"
         @input="drag = value($event)"
         @change="seek"
       />
       <span class="t">{{ clock(track.to - track.from) }}</span>
-      <button class="rate" title="播放速度" @click="trackRate">{{ track.rate }}×</button>
+      <button class="rate" :title="t('playerBar.speed')" @click="trackRate">
+        {{ track.rate }}×
+      </button>
     </div>
-    <p v-if="track.failed" class="bad">这段录音取不出来</p>
+    <p v-if="track.failed" class="bad">{{ t("playerBar.failed") }}</p>
   </div>
 </template>
 

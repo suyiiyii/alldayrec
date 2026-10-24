@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import Icon from "./Icon.vue";
 import Timeline from "./Timeline.vue";
+import { t } from "../i18n";
 import {
   errorTitle,
   hhmm,
@@ -51,24 +52,28 @@ const current = computed(() => {
     null
   );
 });
-const said = (s: number) => (s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`);
+const said = (s: number) =>
+  s < 60 ? t("common.sec", { n: s }) : t("common.minSec", { m: Math.floor(s / 60), s: s % 60 });
 // the head: what it is (label), the newest topic or how long the conversation has gone before there is one (headline)
 const sub = computed(() =>
-  [current.value && `更新于 ${hhmm(current.value.at)}`, barDev.value?.analyzing && "分析中…"]
+  [
+    current.value && t("livePanel.updated", { at: hhmm(current.value.at) }),
+    barDev.value?.analyzing && t("livePanel.analyzing"),
+  ]
     .filter(Boolean)
     .join(" · "),
 );
-const label = computed(() => "AI 实时摘要" + (sub.value && " · " + sub.value));
+const label = computed(() => t("livePanel.label") + (sub.value && " · " + sub.value));
 const headline = computed(() => {
   const c = talk.value,
     l = current.value;
-  if (l) return l.topics.at(-1)?.title || "正在总结";
+  if (l) return l.topics.at(-1)?.title || t("livePanel.summarizing");
   if (c)
-    return (
-      `对话进行中 · 已说 ${said(c.speech_s)}` +
-      (c.speech_s < MIN_SPEECH_S ? `，满 ${MIN_SPEECH_S / 60} 分钟自动总结` : "")
-    );
-  return "对话开始后，AI 会边听边总结要点";
+    return t(c.speech_s < MIN_SPEECH_S ? "livePanel.goingAuto" : "livePanel.going", {
+      said: said(c.speech_s),
+      n: MIN_SPEECH_S / 60,
+    });
+  return t("livePanel.waiting");
 });
 // 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
 const asking = ref(false),
@@ -129,10 +134,10 @@ watch(
       v-if="talk"
       class="ask"
       :disabled="asking || barDev?.analyzing || !fresh"
-      :title="fresh ? '' : '没有新的语音'"
+      :title="fresh ? '' : t('livePanel.noNew')"
       @click="askNow"
     >
-      {{ current ? "立即更新" : "立即总结" }}
+      {{ current ? t("livePanel.update") : t("livePanel.summarize") }}
     </button>
   </div>
   <section v-else-if="status" class="card sum" :class="{ shut: !paneOpen }">
@@ -151,10 +156,10 @@ watch(
         v-if="talk"
         class="ask"
         :disabled="asking || barDev?.analyzing || !fresh"
-        :title="fresh ? '' : '没有新的语音'"
+        :title="fresh ? '' : t('livePanel.noNew')"
         @click="askNow"
       >
-        {{ current ? "立即更新" : "立即总结" }}
+        {{ current ? t("livePanel.update") : t("livePanel.summarize") }}
       </button>
       <Icon
         v-if="current"
@@ -166,9 +171,13 @@ watch(
     </div>
     <div v-if="current" ref="paneBox" class="body">
       <div class="meta">
-        {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
-        {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
-        {{ current.sentences }} 句
+        {{
+          t(
+            current.start > doneTo(current.device) ? "livePanel.metaDraft" : "livePanel.meta",
+            { from: hhmmss(current.start), upto: hhmmss(current.upto), n: current.sentences },
+            current.sentences,
+          )
+        }}
       </div>
       <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
     </div>

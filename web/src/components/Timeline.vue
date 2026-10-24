@@ -19,15 +19,23 @@ defineEmits<{ jump: [start: string] }>();
         hhmmss(t.start)
       }}</a>
       <b>{{ t.title }}</b>
-      <span v-if="open && i === topics.length - 1" class="badge">进行中</span>
+      <span v-if="open && i === topics.length - 1" class="badge">{{
+        $t("topicTimeline.now")
+      }}</span>
     </div>
     <ul>
       <li v-for="p in t.points" :key="p">{{ p }}</li>
-      <li v-for="d in t.decisions" :key="'d' + d" class="dec">定：{{ d }}</li>
-      <li v-for="(x, j) in t.todos" :key="'t' + j" class="todo">
-        待办：<span class="who">{{ x.who ? speakerLabel(x.who) : "未知" }}</span> {{ x.what }}
+      <li v-for="d in t.decisions" :key="'d' + d" class="dec">
+        {{ $t("topicTimeline.decided", { d }) }}
       </li>
-      <li v-for="q in t.open_questions" :key="'q' + q" class="q">待定：{{ q }}</li>
+      <li v-for="(x, j) in t.todos" :key="'t' + j" class="todo">
+        {{ $t("topicTimeline.todo")
+        }}<span class="who">{{ x.who ? speakerLabel(x.who) : $t("common.unknown") }}</span>
+        {{ x.what }}
+      </li>
+      <li v-for="q in t.open_questions" :key="'q' + q" class="q">
+        {{ $t("topicTimeline.open", { q }) }}
+      </li>
     </ul>
   </div>
 </template>

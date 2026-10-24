@@ -3,6 +3,7 @@
 // recur most, a few sentences of each to play. None is preselected (a whole first day with one person can put them
 // first) and there is no %: a tier word. The pick is 我 from the next conversation on; the ones before stay as they are
 import { onMounted, ref } from "vue";
+import { t } from "../i18n";
 import { get, post } from "../lib/api";
 import { play, player } from "../lib/audio";
 import Avatar from "./Avatar.vue";
@@ -31,7 +32,7 @@ const card = ref<Card | null>(null),
   chosen = ref<number | null>(null),
   busy = ref(false),
   err = ref(""),
-  done = ref("");
+  done = ref(""); // its words' key
 
 async function load() {
   card.value = (await get<{ card: Card | null }>("/api/self")).card;
@@ -43,7 +44,9 @@ onMounted(load);
 const clipId = (c: Clip) => "self" + c.start;
 const src = (c: Clip) =>
   `/api/audio?${new URLSearchParams({ start: c.start, end: c.end, ...(c.device && { device: c.device }) })}`;
-const tierText = (t: string) => (t === "不确定" ? "不确定" : t + "是你");
+// the server's tier words (data) as the page says them
+const TIERS: Record<string, string> = { 很可能: "likely", 可能: "maybe", 不确定: "unsure" };
+const tierText = (tier: string) => (TIERS[tier] ? t(`selfVoice.tier.${TIERS[tier]}`) : tier);
 
 async function answer(a: number | "none" | "later") {
   busy.value = true;
@@ -52,10 +55,10 @@ async function answer(a: number | "none" | "later") {
     await post("/api/self", { answer: a });
     done.value =
       typeof a === "number"
-        ? "记住了：之后的新对话里，你说的话会显示为「我」；已有的对话不变。"
+        ? "selfVoice.picked"
         : a === "later"
-          ? "好的，明天再问。"
-          : "好的，等录得更多以后再问。";
+          ? "selfVoice.later"
+          : "selfVoice.none";
     card.value = null;
   } catch (e) {
     err.value = String((e as Error).message ?? e);
@@ -66,16 +69,19 @@ async function answer(a: number | "none" | "later") {
 
 <template>
   <div v-if="card" class="card self">
-    <div class="title">哪个是你？</div>
-    <p class="hint">
-      这几个声音在你的录音里出现得最多。逐个听一听，选出你自己的声音。确认后，之后的新对话里你说的话会显示为「我」，已有的对话不变。
-    </p>
+    <div class="title">{{ t("selfVoice.title") }}</div>
+    <p class="hint">{{ t("selfVoice.hint") }}</p>
     <div v-for="(c, i) in card.candidates" :key="i" class="cand">
       <div class="head">
         <Avatar :name="'S' + (i + 1)" :size="32" />
         <div class="meta">
-          <b>声音 {{ i + 1 }}</b> · {{ tierText(c.tier) }}<br />出现在 {{ c.convs }} 段对话 · 共
-          {{ Math.max(1, Math.round(c.speech_s / 60)) }} 分钟
+          <b>{{ t("speakers.voice", { n: i + 1 }) }}</b> · {{ tierText(c.tier) }}<br />{{
+            t(
+              "selfVoice.seen",
+              { n: c.convs, min: Math.max(1, Math.round(c.speech_s / 60)) },
+              c.convs,
+            )
+          }}
         </div>
       </div>
       <button
@@ -87,25 +93,27 @@ async function answer(a: number | "none" | "later") {
         @click="play(clipId(cl), src(cl))"
       >
         <Icon :name="player.playing === clipId(cl) ? 'square' : 'play'" :size="14" />
-        <span>{{ cl.text || "（无文字）" }}</span>
+        <span>{{ cl.text || t("selfVoice.noText") }}</span>
       </button>
-      <div v-if="!c.clips.length" class="muted">没有合适的试听句子</div>
+      <div v-if="!c.clips.length" class="muted">{{ t("selfVoice.noClips") }}</div>
       <div class="acts">
         <template v-if="chosen === i">
-          <span>确认声音 {{ i + 1 }} 是你？</span>
-          <button class="btn-primary" :disabled="busy" @click="answer(i)">确认</button>
-          <button :disabled="busy" @click="chosen = null">取消</button>
+          <span>{{ t("selfVoice.confirmQ", { n: i + 1 }) }}</span>
+          <button class="btn-primary" :disabled="busy" @click="answer(i)">
+            {{ t("selfVoice.confirm") }}
+          </button>
+          <button :disabled="busy" @click="chosen = null">{{ t("selfVoice.cancel") }}</button>
         </template>
-        <button v-else :disabled="busy" @click="chosen = i">这是我</button>
+        <button v-else :disabled="busy" @click="chosen = i">{{ t("selfVoice.isMe") }}</button>
       </div>
     </div>
     <div class="acts">
-      <button :disabled="busy" @click="answer('none')">都不是我</button>
-      <button :disabled="busy" @click="answer('later')">以后再说</button>
+      <button :disabled="busy" @click="answer('none')">{{ t("selfVoice.noneMe") }}</button>
+      <button :disabled="busy" @click="answer('later')">{{ t("selfVoice.notNow") }}</button>
       <span v-if="err" class="bad">{{ err }}</span>
     </div>
   </div>
-  <div v-else-if="done" class="card self muted">{{ done }}</div>
+  <div v-else-if="done" class="card self muted">{{ t(done) }}</div>
 </template>
 
 <style scoped>

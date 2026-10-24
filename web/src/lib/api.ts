@@ -1,3 +1,5 @@
+import { i18n, t } from "../i18n";
+
 export interface Row {
   id: string;
   start: string;
@@ -134,14 +136,15 @@ export interface DeviceStatus {
   sound?: { s: number; zero_s: number; full: number } | null; // its last 10 min of audio: s of it, s in zero runs, full-scale samples
 }
 
-export const CHARGE = { battery: "用电池", charging: "充电中", full: "已充满" };
+export type Charge = "battery" | "charging" | "full";
+export const chargeText = (c: Charge) => t(`api.charge.${c}`);
 
 export interface RecorderStatus {
   at: string;
   model?: string;
   fw?: string;
   battery?: number;
-  charge?: keyof typeof CHARGE; // what it runs on (firmware lr_power.h); none from an older firmware
+  charge?: Charge; // what it runs on (firmware lr_power.h); none from an older firmware
   store?: number; // 0 recording to the card; an errno otherwise: with total_kb 0 no card (-19, -116), -28 full, -16 lent
   free_kb?: number;
   total_kb?: number;
@@ -166,15 +169,15 @@ export interface RecorderStatus {
 }
 
 // the system's heat levels that slow or end apps, both platforms' words
-const THERMAL: Record<string, string> = {
-  light: "微热",
-  fair: "微热",
-  moderate: "发热",
-  serious: "发热",
-  severe: "过热",
-  critical: "过热",
-  emergency: "过热",
-  shutdown: "过热",
+const THERMAL: Record<string, "warm" | "hot" | "overheated"> = {
+  light: "warm",
+  fair: "warm",
+  moderate: "hot",
+  serious: "hot",
+  severe: "overheated",
+  critical: "overheated",
+  emergency: "overheated",
+  shutdown: "overheated",
 };
 export const build = (app?: string) => Number(app?.split("+")[1] ?? 0);
 const clock = (h: RecorderStatus, s: number) =>
@@ -185,10 +188,10 @@ export const phoneLine = (h: RecorderStatus) =>
 export const phoneState = (h: RecorderStatus) =>
   [
     h.phone_battery != null &&
-      `手机电量 ${h.phone_battery}%${h.phone_charging ? "（充电中）" : ""}`,
-    h.low_power && "省电模式",
-    h.thermal && THERMAL[h.thermal],
-    h.app_mb != null && `App 内存 ${h.app_mb} MB`,
+      t(h.phone_charging ? "api.phoneBatteryCharging" : "api.phoneBattery", { n: h.phone_battery }),
+    h.low_power && t("api.lowPower"),
+    h.thermal && THERMAL[h.thermal] && t(`api.thermal.${THERMAL[h.thermal]}`),
+    h.app_mb != null && t("api.appMemory", { n: h.app_mb }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -198,10 +201,14 @@ export const hot = (h: RecorderStatus) => !!h.low_power || !!(h.thermal && THERM
 export const queueLine = (h: RecorderStatus) =>
   [
     h.queue_n && (h.queue_age_s ?? 0) > 120
-      ? `待传 ${h.queue_n} 块（${((h.queue_kb ?? 0) / 1024).toFixed(1)} MB），最早一块 ${clock(h, h.queue_age_s ?? 0)} 录的`
-      : "无积压",
-    h.upload_fails && `连续失败 ${h.upload_fails} 次`,
-    h.upload_ok_s != null && `上次成功 ${clock(h, h.upload_ok_s)}`,
+      ? t("api.queued", {
+          n: h.queue_n,
+          mb: ((h.queue_kb ?? 0) / 1024).toFixed(1),
+          at: clock(h, h.queue_age_s ?? 0),
+        })
+      : t("api.noBacklog"),
+    h.upload_fails && t("api.uploadFails", { n: h.upload_fails }, h.upload_fails),
+    h.upload_ok_s != null && t("api.lastUpload", { at: clock(h, h.upload_ok_s) }),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -326,15 +333,18 @@ export const caughtUp = (d: DeviceStatus) => d.left_s < 30;
 // -116: a mount that timed out), as the app's cardState says it
 export const card = (h: RecorderStatus) =>
   h.store === -28
-    ? "已满，停止离线录音"
+    ? t("api.card.full")
     : h.store === -16
-      ? "U 盘模式，离线录音暂停"
+      ? t("api.card.usb")
       : h.store && !h.total_kb
-        ? "没插卡或没插好，只能实时上传"
+        ? t("api.card.none")
         : h.store
-          ? "出错，重插或换卡"
+          ? t("api.card.error")
           : h.total_kb
-            ? `剩 ${((h.free_kb ?? 0) / 1048576).toFixed(1)} / ${(h.total_kb / 1048576).toFixed(1)} GB`
+            ? t("api.card.free", {
+                free: ((h.free_kb ?? 0) / 1048576).toFixed(1),
+                total: (h.total_kb / 1048576).toFixed(1),
+              })
             : "—";
 
 export interface LogEvent {
@@ -345,7 +355,8 @@ export interface LogEvent {
 
 // A failed request in words for the page (401, 5xx and no network said plainly; another refusal says the server's
 // own detail when that is Chinese, many are English for scripts); what actually came back is in `detail`, for a title.
-// A detail may start with a stable code, "[no_summaries] 那天没有摘要": the message leaves it out, `code` keeps it
+// A detail may start with a stable code, "[no_summaries] 那天没有摘要": the message leaves it out, `code` keeps it, and
+// a code locales/*.json know (err.code.*) is said in the page's language
 export class ApiError extends Error {
   detail: string;
   code: string;
@@ -362,7 +373,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     r = await fetch(path, init);
   } catch (e) {
-    throw new ApiError("连不上服务器", `${path}: ${e}`);
+    throw new ApiError(t("err.network"), `${path}: ${e}`);
   }
   const j = await r.json().catch(() => ({}));
   if (r.ok) return j;
@@ -371,12 +382,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const said = code ? raw.slice(code.length + 3) : raw;
   throw new ApiError(
     r.status === 401
-      ? "登录已失效，请重新扫码"
+      ? t("err.auth")
       : r.status >= 500
-        ? "服务器出错了，稍后再试"
-        : /\p{Script=Han}/u.test(said)
-          ? said
-          : `请求没有成功（${r.status}）`,
+        ? t("err.server")
+        : code && i18n.global.te(`err.code.${code}`)
+          ? t(`err.code.${code}`)
+          : /\p{Script=Han}/u.test(said)
+            ? said
+            : t("err.http", { status: r.status }),
     `${path}: HTTP ${r.status}${raw && " " + raw}`,
     code,
   );
@@ -400,16 +413,16 @@ export const hhmm = (iso: string) => iso.slice(11, 16);
 // (10-07: LR-P3-116C, unbound at 17:58); the queue waits for it until hold_until, then finalizes what it has
 export const holdLeft = (d: DeviceStatus) =>
   d.hold && d.hold_seen && Date.now() - +new Date(d.hold_seen) > 5 * 60_000
-    ? `手机 ${hhmm(d.hold_seen)} 后没再联系，最晚 ${hhmm(d.hold_until ?? "")} 不再等`
+    ? t("api.holdLeft", { seen: hhmm(d.hold_seen), until: hhmm(d.hold_until ?? "") })
     : "";
 export const hhmmss = (iso: string) => iso.slice(11, 19);
 // a closed conversation's link text: its summary's title, or how the summary is going
 export const convLink = (c: Conversation) =>
   c.summary?.status === "done"
-    ? c.summary.title || "查看"
+    ? c.summary.title || t("api.view")
     : c.summary?.status === "failed"
-      ? "摘要生成失败"
-      : "摘要生成中…";
+      ? t("api.summaryFailed")
+      : t("api.summaryPending");
 export const minutes = (c: Conversation) =>
   Math.max(1, Math.round((+new Date(c.end) - +new Date(c.start)) / 60000));
 

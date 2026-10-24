@@ -5,6 +5,7 @@
 import { computed } from "vue";
 import { type Due } from "../lib/api";
 import { open } from "../lib/todos";
+import { t } from "../i18n";
 import Icon from "./Icon.vue";
 import TodoItem from "./TodoItem.vue";
 
@@ -12,9 +13,9 @@ const props = defineProps<{ due: Due[] }>();
 const left = computed(() => open(props.due));
 const shown = computed(() =>
   [
-    ...left.value.filter((t) => !t.age_days),
+    ...left.value.filter((x) => !x.age_days),
     ...left.value
-      .filter((t) => t.age_days && !t.stale)
+      .filter((x) => x.age_days && !x.stale)
       .sort((a, b) => b.due_date.localeCompare(a.due_date)),
   ].slice(0, 3),
 );
@@ -23,13 +24,13 @@ const shown = computed(() =>
 <template>
   <div v-if="left.length" class="card due">
     <RouterLink class="meta" to="/todos"
-      >到期的待办<Icon name="chevron-right" :size="14"
+      >{{ t("dueTodos.title") }}<Icon name="chevron-right" :size="14"
     /></RouterLink>
     <ul>
-      <TodoItem v-for="t in shown" :key="t.id" :t="t" />
+      <TodoItem v-for="x in shown" :key="x.id" :t="x" />
     </ul>
     <RouterLink v-if="left.length > shown.length" class="rest" to="/todos"
-      >还有 {{ left.length - shown.length }} 条更早的待办<Icon name="chevron-right" :size="14"
+      >{{ t("dueTodos.more", left.length - shown.length) }}<Icon name="chevron-right" :size="14"
     /></RouterLink>
   </div>
 </template>

@@ -28,7 +28,7 @@
 
 ![实时字幕](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
 
-页面开着时的实时字幕（初稿层）。下面是网页在手机上的样子，示例数据都是编的（界面目前只有中文）。
+页面开着时的实时字幕（初稿层）。下面是网页在手机上的样子，示例数据都是编的（截图是中文界面；main 上的网页也可以在「我的」页换成英文）。
 
 </div>
 
