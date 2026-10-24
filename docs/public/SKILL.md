@@ -50,7 +50,7 @@ If it stops instead, the log names the cause: `not set: ...` (a required `.env` 
 `others can read it ... chmod 600` (the mode of `data/tenants.json`), or the `ENGINE` value.
 
 `docker compose up -d` does not pull a newer image; to update, run `docker compose pull && docker compose up -d`.
-The `latest` tag is the newest release (v0.1.0); the `main` tag follows the main branch and has the newer pages.
+The `latest` tag is the newest release tag (`v*`); the `main` tag follows the main branch.
 Details: [Deploy with Docker](en/how-to/deploy-docker.md).
 
 ## 3. Hand the token to the user
