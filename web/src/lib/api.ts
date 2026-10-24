@@ -60,7 +60,7 @@ export interface Summary {
   error?: string | null;
   title?: string;
   summary?: string;
-  people?: { who: string; points: string[] }[];
+  people?: { who: string; points: string[]; points_at?: (string | null)[] }[]; // points_at: each point's sentence, from prompt v9 on
   tags?: string[];
   topics?: (At & { title: string; points?: string[] })[];
   todos?: (At & {
@@ -90,6 +90,7 @@ export interface Conversation {
   state?: "open" | "closed";
   participants: string[];
   sentences: number;
+  speech_s?: number; // seconds of speech in it
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
 }

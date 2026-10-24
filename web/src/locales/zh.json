@@ -203,7 +203,10 @@
     "topics": "议题",
     "failed": "摘要没能生成",
     "regenShort": "重新生成",
-    "liveTopics": "会中实时议题"
+    "liveTopics": "会中实时议题",
+    "origin": "原音 {min} 分钟 · 原文 {n} 句",
+    "hearQuote": "听原话",
+    "toTranscript": "在原文里看这句"
   },
   "convItem": {
     "media": "媒体 · ",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// One conversation: its title, time and people, then two tabs. 摘要 (the default): the summary, todos, decisions,
-// each person's points, topics; every time on them plays the transcript from that sentence. 原文: who spoke how
+// One conversation: its title, time and people, then two tabs. 摘要 (the default): how much recording it rests on, the
+// summary, todos, decisions, each person's points, topics; ▶ on them plays about 10 s of the sentence they cite, its
+// time opens 原文 there (QuoteAt). 原文: who spoke how
 // much, the sentences, a player at the bottom that keeps the sentence playing lit and in view. The tab is in the
 // query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from another page opens 原文 there.
 // Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu
@@ -11,6 +12,7 @@ import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
 import MediaFold from "../components/MediaFold.vue";
 import PlayerBar from "../components/PlayerBar.vue";
+import QuoteAt from "../components/QuoteAt.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
@@ -67,24 +69,28 @@ const tab = computed<Tab>(() =>
 const setTab = (t: Tab) =>
   t === tab.value ? Promise.resolve() : router.push({ query: t === "transcript" ? { tab: t } : {} });
 
-// the sentence the player is at (lit): once it has played or been moved
+// the sentence the player is at (lit): once it has played or been moved, or jumped to (the first one too, where the
+// player starts)
 const starts = computed(() => (c.value?.rows ?? []).map((r) => Date.parse(r.start)));
+const jumped = ref(false);
 const hit = computed(() =>
-  track.playing || track.at !== track.from
+  track.playing || track.at !== track.from || jumped.value
     ? (c.value?.rows[Math.max(0, rowAt(starts.value, track.at))]?.start ?? "")
     : "",
 );
 const rowEl = (start: string) => document.querySelector(`[data-start="${CSS.escape(start)}"]`);
 const seekRow = (r: Row) => trackSeek(Date.parse(r.start), true);
-// a time on the summary (or a suggestion): 原文 at that sentence, playing from it (a link from another page: only
-// standing there)
+// a time on the summary (or a suggestion): 原文 at that sentence, playing from it (a summary item's, or a link from
+// another page: only standing there, lit)
 async function listen(at: string | null, start = true) {
   if (!at) return;
   trackSeek(Date.parse(at), start); // first: inside the tap, where iOS lets the audio start
+  jumped.value = true;
   await setTab("transcript");
   await nextTick();
   if (hit.value) rowEl(hit.value)?.scrollIntoView({ block: "center", behavior: start ? "smooth" : "auto" });
 }
+const jump = (at: string) => listen(at, false);
 watch(hit, async (h) => {
   if (!h || !track.playing || !track.follow || tab.value !== "transcript") return;
   await nextTick();
@@ -146,6 +152,7 @@ watch(
   () => props.id,
   async () => {
     c.value = null;
+    jumped.value = false;
     sug.value = null;
     allMerges.value = false;
     panel.value = "";
@@ -460,6 +467,11 @@ async function alias(name: string, of: string) {
       </div>
 
       <template v-if="tab === 'summary'">
+        <button v-if="c.speech_s != null" class="chip origin" @click="setTab('transcript')">
+          <Icon name="volume-2" :size="14" />{{
+            t("conv.origin", { min: Math.max(1, Math.round(c.speech_s / 60)), n: c.sentences }, c.sentences)
+          }}
+        </button>
         <template v-if="s?.status === 'done'">
           <div v-if="s.summary" class="card summary">{{ s.summary }}</div>
           <div v-else-if="!s.model" class="card muted">{{ t("conv.tooShort") }}</div>
@@ -477,9 +489,7 @@ async function alias(name: string, of: string) {
                       }}{{ td.to ? ` → ${speakerLabel(td.to)}` : "" }}</span
                     ><span v-if="td.due" class="due"
                       >{{ td.due }}{{ td.due_date ? " · " + td.due_date.slice(5) : "" }}</span
-                    ><a v-if="td.at" class="at" :href="'#' + td.at" @click.prevent="listen(td.at)"
-                      ><Icon name="play" :size="12" />{{ hhmmss(td.at) }}</a
-                    ><span v-if="markOf(td)" class="done">{{ t(`conv.marked.${markOf(td)}`) }}</span>
+                    ><QuoteAt :at="td.at" :c="c" @jump="jump" /><span v-if="markOf(td)" class="done">{{ t(`conv.marked.${markOf(td)}`) }}</span>
                   </div>
                   <div v-if="td.quote" class="quote">{{ t("conv.quote", { q: td.quote }) }}</div>
                 </div>
@@ -490,10 +500,7 @@ async function alias(name: string, of: string) {
             <h3>{{ t("conv.aiRequests") }}</h3>
             <ul class="items ai">
               <li v-for="(t, i) in s.ai_requests" :key="i">
-                {{ t.text
-                }}<a v-if="t.at" class="at" :href="'#' + t.at" @click.prevent="listen(t.at)"
-                  ><Icon name="play" :size="12" />{{ hhmmss(t.at) }}</a
-                >
+                {{ t.text }}<QuoteAt :at="t.at" :c="c" @jump="jump" />
               </li>
             </ul>
           </section>
@@ -501,10 +508,7 @@ async function alias(name: string, of: string) {
             <h3>{{ t("conv.decisions") }}</h3>
             <ul class="items">
               <li v-for="(d, i) in s.decisions" :key="i">
-                {{ d.text
-                }}<a v-if="d.at" class="at" :href="'#' + d.at" @click.prevent="listen(d.at)"
-                  ><Icon name="play" :size="12" />{{ hhmmss(d.at) }}</a
-                >
+                {{ d.text }}<QuoteAt :at="d.at" :c="c" @jump="jump" />
                 <div v-if="d.quote" class="quote">{{ t("conv.quote", { q: d.quote }) }}</div>
               </li>
             </ul>
@@ -518,17 +522,16 @@ async function alias(name: string, of: string) {
                 <span v-else>{{ speakerLabel(p.who) }}</span>
               </div>
               <ul class="points">
-                <li v-for="x in p.points" :key="x">{{ x }}</li>
+                <li v-for="(x, i) in p.points" :key="x">
+                  {{ x }}<QuoteAt :at="p.points_at?.[i]" :c="c" @jump="jump" />
+                </li>
               </ul>
             </div>
           </section>
           <section v-if="s.topics?.length" class="card">
             <h3>{{ t("conv.topics") }}</h3>
             <div v-for="(t, i) in s.topics" :key="i" class="topic">
-              <b>{{ t.title }}</b
-              ><a v-if="t.at" class="at" :href="'#' + t.at" @click.prevent="listen(t.at)"
-                ><Icon name="play" :size="12" />{{ hhmmss(t.at) }}</a
-              >
+              <b>{{ t.title }}</b><QuoteAt :at="t.at" :c="c" @jump="jump" />
               <ul class="points">
                 <li v-for="p in t.points" :key="p">{{ p }}</li>
               </ul>
@@ -829,6 +832,10 @@ ul.items > li:last-child {
 .items .at,
 .topic .at {
   margin-left: var(--space-1);
+}
+.origin {
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
 }
 .points-of + .points-of {
   margin-top: var(--space-3);

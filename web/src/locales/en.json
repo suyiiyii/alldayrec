@@ -203,7 +203,10 @@
     "topics": "Topics",
     "failed": "The summary couldn't be written",
     "regenShort": "Regenerate",
-    "liveTopics": "Topics tracked live"
+    "liveTopics": "Topics tracked live",
+    "origin": "{min} min of audio · {n} sentence | {min} min of audio · {n} sentences",
+    "hearQuote": "Hear what was said",
+    "toTranscript": "See this sentence in the transcript"
   },
   "convItem": {
     "media": "Media · ",
