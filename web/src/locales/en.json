@@ -347,7 +347,8 @@
     "update": "Update now",
     "summarize": "Summarize now",
     "meta": "Conversation from {from} · {n} sentence up to {upto} | Conversation from {from} · {n} sentences up to {upto}",
-    "metaDraft": "Includes sentences not final yet · from {from} · {n} sentence up to {upto} | Includes sentences not final yet · from {from} · {n} sentences up to {upto}"
+    "metaDraft": "Includes sentences not final yet · from {from} · {n} sentence up to {upto} | Includes sentences not final yet · from {from} · {n} sentences up to {upto}",
+    "resize": "Drag to resize, double-tap to reset"
   },
   "me": {
     "todos": "To-dos",

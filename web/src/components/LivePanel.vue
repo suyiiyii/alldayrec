@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import Icon from "./Icon.vue";
 import Timeline from "./Timeline.vue";
 import { t } from "../i18n";
@@ -113,6 +113,57 @@ function toggle() {
   } catch {}
 }
 const paneBox = ref<HTMLElement | null>(null);
+// the topics' height, dragged by the grip under them (a phone; a wide screen gives the column the screen's height), kept
+// per orientation; none: the default (28vh). A double tap on the grip goes back to it
+const MIN_H = 56; // about two lines
+// under it the grip and the page's newest caption stay in sight: grip 20 + gap 8 + a one-line row 81 + main's padding 60
+const BELOW = 170;
+const portrait = matchMedia("(orientation: portrait)");
+const hKey = () => "livePaneH-" + (portrait.matches ? "portrait" : "landscape");
+function readH() {
+  try {
+    return Number(localStorage.getItem(hKey())) || 0;
+  } catch {
+    return 0;
+  }
+}
+const paneH = ref(readH());
+const turned = () => (paneH.value = readH());
+portrait.addEventListener("change", turned);
+onUnmounted(() => portrait.removeEventListener("change", turned));
+let drag: { y: number; h: number; max: number; moved: boolean } | null = null,
+  tapAt = 0;
+function dragStart(e: PointerEvent) {
+  const b = paneBox.value!,
+    tabs = parseFloat(getComputedStyle(document.body).paddingBottom); // the bottom tab bar
+  drag = {
+    y: e.clientY,
+    h: b.offsetHeight,
+    max: innerHeight - tabs - b.getBoundingClientRect().top - BELOW,
+    moved: false,
+  };
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+}
+function dragMove(e: PointerEvent) {
+  if (!drag) return;
+  const dy = e.clientY - drag.y;
+  drag.moved ||= Math.abs(dy) > 4;
+  if (drag.moved) paneH.value = Math.round(Math.min(Math.max(drag.h + dy, MIN_H), drag.max));
+}
+function dragEnd() {
+  if (!drag) return;
+  const moved = drag.moved;
+  drag = null;
+  if (!moved) {
+    // a tap (no dblclick: iOS does not fire it for a finger)
+    if (performance.now() - tapAt < 300) paneH.value = 0;
+    tapAt = performance.now();
+  }
+  try {
+    if (paneH.value) localStorage.setItem(hKey(), String(paneH.value));
+    else localStorage.removeItem(hKey());
+  } catch {}
+}
 watch(
   () => [current.value?.at, paneOpen.value],
   async () => {
@@ -169,7 +220,12 @@ watch(
         @click="toggle"
       />
     </div>
-    <div v-if="current" ref="paneBox" class="body">
+    <div
+      v-if="current"
+      ref="paneBox"
+      class="body"
+      :style="paneH ? { '--pane-h': paneH + 'px' } : undefined"
+    >
       <div class="meta">
         {{
           t(
@@ -180,6 +236,20 @@ watch(
         }}
       </div>
       <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
+    </div>
+    <div
+      v-if="current && paneOpen"
+      class="grip"
+      role="separator"
+      aria-orientation="horizontal"
+      :aria-label="t('livePanel.resize')"
+      :title="t('livePanel.resize')"
+      @pointerdown="dragStart"
+      @pointermove="dragMove"
+      @pointerup="dragEnd"
+      @pointercancel="dragEnd"
+    >
+      <Icon name="grip-horizontal" :size="20" />
     </div>
   </section>
 </template>
@@ -263,7 +333,8 @@ watch(
 .body {
   overflow-y: auto;
   overscroll-behavior: contain;
-  max-height: 28vh;
+  height: var(--pane-h, auto);
+  max-height: var(--pane-h, 28vh);
   margin-top: var(--space-2);
   border-top: 1px solid var(--line);
 }
@@ -272,6 +343,25 @@ watch(
   color: var(--muted);
   padding-top: var(--space-2);
 }
+/* the grip on the card's bottom edge (in its padding); the strip a finger takes reaches 44 px over the edges */
+.grip {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  margin-bottom: calc(-1 * var(--space-3));
+  color: var(--muted);
+  cursor: ns-resize;
+  touch-action: none; /* the drag moves the grip, not the page */
+}
+.grip::before {
+  content: "";
+  position: absolute;
+  inset: -12px 0;
+}
+.grip:hover,
+.grip:active {
+  color: var(--accent);
+}
 @media (max-width: 899px) {
   .shut .body {
     display: none;
@@ -279,7 +369,8 @@ watch(
 }
 /* a wide screen: the card is a column of its own, always open, as tall as the screen allows */
 @media (min-width: 900px) {
-  .caret {
+  .caret,
+  .grip {
     display: none;
   }
   .fold {
@@ -291,6 +382,7 @@ watch(
   .body {
     flex: 1;
     min-height: 0; /* a flex item: without it the topics push the card past the screen instead of scrolling */
+    height: auto;
     max-height: none;
   }
 }
