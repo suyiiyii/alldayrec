@@ -1,13 +1,19 @@
 """metrics() is Prometheus text VictoriaMetrics takes (names, escaped labels, numbers), names no phone and says nothing
-said; metrics_loop pushes it with basic auth, and sends nothing without VM_INGEST_URL."""
+said; metrics_loop pushes it with basic auth, and sends nothing without VM_INGEST_URL. loop_stalls logs a route that
+blocks the event loop."""
 import base64
+import contextlib
 import datetime as dt
+import logging
 import re
 import tempfile
+import time
 from pathlib import Path
 
 import anyio
 import pytest
+from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 import asr
 import audio
@@ -83,3 +89,29 @@ def test_metrics(monkeypatch):
     (url, data, headers), = sent
     assert url == "http://vm/api/v1/import/prometheus" and data.startswith(b"lr_up{")
     assert headers["Authorization"] == "Basic " + base64.b64encode(b"lr:pw").decode()
+
+
+def test_loop_stalls(monkeypatch, caplog):
+    """LOOP_STALL_MS set: a route that holds the event loop 0.3 s is one line, how long and where (its own frame)."""
+    monkeypatch.setenv("LOOP_STALL_MS", "100")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(monitor.loop_stalls)
+            yield
+            tg.cancel_scope.cancel()
+    app = FastAPI(lifespan=lifespan)
+
+    @app.get("/slow")
+    async def slow():
+        time.sleep(0.3)
+        return {}
+    with caplog.at_level(logging.WARNING, "live"), TestClient(app) as c:
+        for _ in range(2):  # a line a second: another stall just before (the start, a busy runner) would hide one
+            time.sleep(1.1)
+            assert c.get("/slow").status_code == 200
+        time.sleep(0.2)  # written once the loop beats again
+    lines = [r.getMessage() for r in caplog.records if " slow" in r.getMessage()]
+    assert lines and all(re.search(r"held up \d+ ms.*: .*test_metrics.py:\d+ slow$", x) for x in lines), lines
+    assert all(270 <= int(re.search(r"held up (\d+) ms", x)[1]) < 3000 for x in lines), lines

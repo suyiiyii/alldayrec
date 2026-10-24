@@ -118,3 +118,4 @@ type: reference
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `DIAR_TH`、`DIAR_JOIN`、`DIAR_GUARD`、`PEOPLE_MIN` | `0.5`、`0.35`、`0.6`、`0.7` | 一段对话内区分说话人的阈值 | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | 「哪个是你的声音」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |
+| `LOOP_STALL_MS` | 不检测 | 事件循环被卡住超过这么多毫秒时，日志里记一行卡了多久、卡在哪个函数（每秒最多一行，其间的次数一并记上）；排查卡顿时设，比如 `100` | `monitor.py` |

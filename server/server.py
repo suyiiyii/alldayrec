@@ -42,7 +42,7 @@ import threads
 import ws
 from core import state
 from device_pipeline import pipeline
-from monitor import balance_loop, metrics_loop, status_loop
+from monitor import balance_loop, loop_stalls, metrics_loop, status_loop
 from routes_speakers import voices_loop
 from summaries import RECAP_AT, recap_loop, summary_worker
 from tenant import T
@@ -61,6 +61,8 @@ async def lifespan(app):
         tg.start_soon(supervised, "metrics", metrics_loop, name="metrics")
         if os.environ.get("STEPFUN_API_KEY"):
             tg.start_soon(supervised, "balance", balance_loop, name="balance")
+        if os.environ.get("LOOP_STALL_MS"):
+            tg.start_soon(supervised, "stalls", loop_stalls, name="stalls")
         for t in core.TENANTS:
             tg.start_soon(run_tenant, t, name=f"tenant:{t.id}")
         yield

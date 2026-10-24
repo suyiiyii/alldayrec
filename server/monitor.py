@@ -1,11 +1,15 @@
 """What the pages and the metrics read about the pipelines: each device's status, the status line pushed to the pages,
-the Prometheus numbers pushed every minute, and the StepFun balance."""
+the Prometheus numbers pushed every minute, and the StepFun balance; and, when asked for, the event loop's stalls."""
 import base64
 import datetime as dt
 import hashlib
 import logging
 import os
+import sys
+import threading
 import time
+import traceback
+from pathlib import Path
 
 import anyio
 
@@ -22,6 +26,7 @@ from pipeline_state import PipelineState
 from tenant import T
 
 log = logging.getLogger("live")
+HERE = Path(__file__).resolve().parent
 
 
 def device_status(device: str, st: PipelineState) -> dict:
@@ -151,3 +156,43 @@ async def metrics_loop():
             except Exception as e:
                 log.warning("metrics push: %s", asr.failure(e))  # the class and code, never the URL or credentials
         await anyio.sleep(60)
+
+
+BEAT_S = 0.02  # how often loop_stalls' task beats, and its thread looks
+
+
+async def loop_stalls():
+    """LOOP_STALL_MS (unset: off): the event loop held up longer than that (a blocking call in a route or a task, a
+    long computation on it) is one log line with how long and where the loop was when the thread watching its beat
+    caught it (the frames of this directory's files, and the innermost one); at most a line a second, the stalls in
+    between counted. Cheap enough to leave on, unlike asyncio's debug mode."""
+    beat = {"at": time.monotonic(), "loop": threading.get_ident(), "stop": False}
+    threading.Thread(target=watch, args=(beat, float(os.environ["LOOP_STALL_MS"]) / 1000), daemon=True, name="loop-stalls").start()
+    try:
+        while True:
+            beat["at"] = time.monotonic()
+            await anyio.sleep(BEAT_S)
+    finally:
+        beat["stop"] = True  # its thread with it
+
+
+def watch(beat: dict, limit: float):
+    # ponytail: a C call that keeps the GIL (one huge json.loads) is seen only once it returns: the length is right, the
+    # stack is where the loop went on to; py-spy dump --native when that matters
+    shown, quiet = 0.0, 0
+    while not beat["stop"]:
+        time.sleep(BEAT_S)
+        at = beat["at"]
+        if time.monotonic() - at - BEAT_S < limit:
+            continue
+        frame = sys._current_frames().get(beat["loop"])
+        fs = traceback.extract_stack(frame) if frame else []
+        while beat["at"] == at and not beat["stop"]:
+            time.sleep(BEAT_S)
+        if time.monotonic() - shown < 1:
+            quiet += 1
+            continue
+        where = [f for f in fs if Path(f.filename).resolve().parent == HERE] + [f for f in fs[-1:] if Path(f.filename).resolve().parent != HERE]
+        log.warning("event loop held up %d ms%s: %s", (beat["at"] - at - BEAT_S) * 1000, f" (+{quiet} more since the last line)" if quiet else "",
+                    " > ".join(f"{Path(f.filename).name}:{f.lineno} {f.name}" for f in where))
+        shown, quiet = time.monotonic(), 0

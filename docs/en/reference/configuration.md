@@ -118,3 +118,4 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `routes_speakers.py` |
 | `DIAR_TH`, `DIAR_JOIN`, `DIAR_GUARD`, `PEOPLE_MIN` | `0.5`, `0.35`, `0.6`, `0.7` | Thresholds for telling speakers apart within a conversation | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你的声音」 (Which one is your voice) card pops up by itself | `selfvoice.py` |
+| `LOOP_STALL_MS` | no check | When the event loop is held up longer than this many milliseconds, the log gets one line with how long and in which function (at most a line a second, the ones in between counted); set it, e.g. `100`, when looking into slowness | `monitor.py` |
