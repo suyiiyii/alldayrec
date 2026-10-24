@@ -204,6 +204,15 @@ const editing = ref(""),
   names = ref<string[]>([]);
 const { busy: saving, error, detail, run: runSpeaker } = useMutation();
 const named = (p: string) => p !== "我" && !anon(p);
+// A bad recording splits into dozens of speakers: past 8 the row folds to the named ones and the first few
+const FOLD = 8;
+const allPeople = ref(false);
+const people = computed(() => {
+  const all = c.value?.participants ?? [];
+  if (all.length <= FOLD || allPeople.value) return { shown: all, more: 0 };
+  const shown = [...all.filter(named), ...all.filter((p) => !named(p))].slice(0, 6);
+  return { shown, more: all.length - shown.length };
+});
 const labels = computed(() =>
   (c.value?.participants ?? []).filter((p) => p !== "我" && p !== "S?"),
 );
@@ -293,12 +302,14 @@ async function alias(name: string, of: string) {
         {{ dayLabel(c.start.slice(0, 10)) }} {{ hhmm(c.start) }}–{{ hhmm(c.end) }} · {{ minutes(c) }} 分钟
       </div>
       <div v-if="c.participants.length" class="people">
-        <template v-for="p in c.participants" :key="p">
+        <template v-for="p in people.shown" :key="p">
           <RouterLink v-if="named(p)" class="person" :to="`/p/${encodeURIComponent(p)}`"
             ><Avatar :name="p" :size="32" />{{ p }}</RouterLink
           >
           <span v-else class="person"><Avatar :name="p" :size="32" />{{ speakerLabel(p) }}</span>
         </template>
+        <button v-if="people.more" class="btn-ghost more" @click="allPeople = true">还有 {{ people.more }} 位 ›</button>
+        <button v-else-if="allPeople" class="btn-ghost more" @click="allPeople = false">收起</button>
       </div>
       <div v-if="s?.tags?.length" class="tags">
         <RouterLink
@@ -627,6 +638,11 @@ h1 {
 }
 a.person {
   color: var(--fg);
+}
+.people .more {
+  font-size: var(--fs-sm);
+  padding: 0 var(--space-2);
+  min-height: 32px;
 }
 .tags {
   display: flex;
