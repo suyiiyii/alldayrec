@@ -5,9 +5,9 @@ import Icon, { type IconName } from "./Icon.vue";
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
 defineProps<{ inApp?: boolean }>();
 
-// four places, each owning the pages under it (the live page is today's; devices, progress, connect are 我的)
+// four places, each owning the pages under it (the live and todos pages are today's; devices, progress, connect are 我的)
 const TABS: { to: string; label: string; icon: IconName; under: RegExp }[] = [
-  { to: "/", label: "今天", icon: "home", under: /^\/(live)?$/ },
+  { to: "/", label: "今天", icon: "home", under: /^\/(live|todos)?$/ },
   {
     to: "/conversations",
     label: "对话",
