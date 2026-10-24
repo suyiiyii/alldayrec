@@ -1,39 +1,51 @@
 <script setup lang="ts">
-import TodoMarks from "./TodoMarks.vue";
+// The due card: today's todos and the 3 latest past due that are not stale (a 待会儿 from last week is not today's
+// business); the rest behind one line to /todos, where they can be cleared. A marked todo leaves at once
+import { computed } from "vue";
 import { type Due } from "../lib/api";
-import { today } from "../lib/calendar";
+import { open } from "../lib/todos";
+import Icon from "./Icon.vue";
+import TodoItem from "./TodoItem.vue";
 
-// my todos due today or before; one marked 完成 or 不对 is closed (the page drops it here and from the recap)
-defineProps<{ due: Due[] }>();
-defineEmits<{ closed: [conv: string, text: string] }>();
+const props = defineProps<{ due: Due[] }>();
+const left = computed(() => open(props.due));
+const shown = computed(() => [
+  ...left.value.filter((t) => !t.age_days),
+  ...left.value
+    .filter((t) => t.age_days && !t.stale)
+    .sort((a, b) => b.due_date.localeCompare(a.due_date))
+    .slice(0, 3),
+]);
 </script>
 
 <template>
-  <div v-if="due.length" class="card due">
-    <div class="meta">到期的待办 · {{ due.length }} 条</div>
+  <div v-if="left.length" class="card due">
+    <RouterLink class="meta" to="/todos"
+      >到期的待办<Icon name="chevron-right" :size="14"
+    /></RouterLink>
     <ul>
-      <li v-for="t in due" :key="t.conv + t.text">
-        <TodoMarks :conv="t.conv" :text="t.text" @marked="$emit('closed', t.conv, t.text)" />
-        <RouterLink :to="'/c/' + t.conv + (t.at ? '#' + t.at : '')">{{ t.text }}</RouterLink
-        ><span class="muted">
-          · {{ t.due_date === today() ? "今天" : "已过期 " + t.due_date.slice(5)
-          }}{{ t.to ? " · 答应" + t.to : "" }}</span
-        >
-      </li>
+      <TodoItem v-for="t in shown" :key="t.id" :t="t" />
     </ul>
+    <RouterLink v-if="left.length > shown.length" class="rest" to="/todos"
+      >还有 {{ left.length - shown.length }} 条更早的待办<Icon name="chevron-right" :size="14"
+    /></RouterLink>
   </div>
 </template>
 
 <style scoped>
-.meta {
+.meta,
+.rest {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-size: var(--fs-xs);
   color: var(--muted);
 }
-/* each line starts with its tick box, no bullet */
+.rest {
+  margin-top: var(--space-1);
+}
 ul {
-  list-style: none;
-  margin: 6px 0 0;
+  margin: var(--space-1) 0 0;
   padding-left: 0;
-  font-size: var(--fs-sm);
 }
 </style>

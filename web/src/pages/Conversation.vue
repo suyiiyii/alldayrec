@@ -2,7 +2,7 @@
 // One conversation: its title, time and people, then two tabs. 摘要 (the default): the summary, todos, decisions,
 // each person's points, topics; every time on them plays the transcript from that sentence. 原文: who spoke how
 // much, the sentences, a player at the bottom that keeps the sentence playing lit and in view. The tab is in the
-// query (?tab=transcript) so back and forward step through it; a #<time> from another page opens 原文 there.
+// query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from another page opens 原文 there.
 // Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -22,7 +22,6 @@ import {
   hhmmss,
   minutes,
   post,
-  TODO_MARK,
   type Conversation,
   type Feedback,
   type LabelSuggestions,
@@ -35,6 +34,7 @@ import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerColor, speakerLabel } from "../lib/speakers";
 import { toast } from "../lib/toast";
+import { markOf } from "../lib/todos";
 import { rowAt, talkShare } from "../lib/track";
 
 const props = defineProps<{ id: string }>();
@@ -152,7 +152,8 @@ watch(
     void loadSug();
     await load();
     await nextTick();
-    if (route.hash) void listen(decodeURIComponent(route.hash.slice(1)), false);
+    const at = route.query.at || decodeURIComponent(route.hash.slice(1)); // ?at= (a todo's sentence) or #<time>
+    if (typeof at === "string" && at) void listen(at, false);
   },
   { immediate: true },
 );
@@ -193,13 +194,8 @@ async function sendNote() {
     toast("收到，会用来改进");
   });
 }
-// a todo marked 完成 or 不对 (TodoMarks) shows how instead of the buttons
-const marked = (text: string) =>
-  c.value?.feedback.some((f) => f.text === TODO_MARK.done + text)
-    ? "已完成"
-    : c.value?.feedback.some((f) => f.text === TODO_MARK.wrong + text)
-      ? "已标不对"
-      : "";
+// a todo marked 完成 or 不对 (TodoMarks) says how
+const MARKED = { done: "已完成", wrong: "已标不对" } as const;
 
 // renaming one speaker of this conversation; a plain rename can be undone (renamed back), a merge cannot: the two
 // labels' sentences are one label's after it
@@ -431,10 +427,7 @@ async function alias(name: string, of: string) {
             <h3>待办</h3>
             <ul class="items">
               <li v-for="(t, i) in s.todos" :key="i" class="todo">
-                <TodoMarks v-if="!marked(t.text)" :conv="id" :text="t.text" @marked="(f) => (c!.feedback = f)" />
-                <span v-else class="check" :class="{ on: marked(t.text) === '已完成' }" aria-hidden="true"
-                  ><Icon :name="marked(t.text) === '已完成' ? 'check' : 'x'" :size="16"
-                /></span>
+                <TodoMarks v-if="t.id" :id="t.id" :mark="t.mark" />
                 <div class="body">
                   <div>{{ t.text }}</div>
                   <div class="sub">
@@ -445,7 +438,7 @@ async function alias(name: string, of: string) {
                       >{{ t.due }}{{ t.due_date ? " · " + t.due_date.slice(5) : "" }}</span
                     ><a v-if="t.at" class="at" :href="'#' + t.at" @click.prevent="listen(t.at)"
                       ><Icon name="play" :size="12" />{{ hhmmss(t.at) }}</a
-                    ><span v-if="marked(t.text)" class="done">{{ marked(t.text) }}</span>
+                    ><span v-if="markOf(t)" class="done">{{ MARKED[markOf(t)!] }}</span>
                   </div>
                   <div v-if="t.quote" class="quote">「{{ t.quote }}」</div>
                 </div>
@@ -741,9 +734,6 @@ ul.items > li:last-child {
 }
 .todo > .marks {
   margin: -3px 0 0;
-}
-.todo > .check {
-  margin: 1px 36px 0 0; /* where TodoMarks' tick is, its ⋯ beside */
 }
 .todo .body {
   flex: 1;

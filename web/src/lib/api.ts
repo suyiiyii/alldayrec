@@ -46,8 +46,8 @@ export interface Feedback {
   at: string;
   text: string;
 }
-// 完成 / 不对 on a todo is a feedback line: the mark, then the todo's text (server db.TODO_MARKS)
-export const TODO_MARK = { done: "待办完成：", wrong: "待办不对：" } as const;
+// 完成 / 不对 on a todo (lib/todos.ts)
+export type Mark = "done" | "wrong";
 
 export interface At {
   at: string | null;
@@ -68,6 +68,8 @@ export interface Summary {
     due?: string | null;
     due_date?: string | null; // the due on the calendar (YYYY-MM-DD), from summary prompt v8 on
     quote?: string;
+    id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
+    mark?: Mark | null;
   })[];
   ai_requests?: (At & { text: string })[];
   ai_spans?: Span[];
@@ -289,19 +291,34 @@ export interface Recap {
   conversations: number;
   headline: string;
   highlights: { text: string; conv: string | null }[];
-  // text: the summary's (完成 / 不对 name it by it), short: the recap's wording (a recap written before there was a
-  // short holds the wording in text: no buttons, they would name no todo); due: as said that day
-  todos: { conv: string; text: string; short?: string; to?: string | null; due?: string | null }[];
+  todos: TodoView[];
   people: { who: string; note: string }[];
 }
-// GET /api/todos/due: my todos due today or before (summary prompt v8 dates them), not marked done or wrong
-export interface Due {
+// One of my todos with where it came from (server db.todo_view): GET /api/todos/due, a recap's todos
+export interface TodoView {
+  id?: string; // none: a recap's todo from before ids whose text names no todo of a summary (no marks then)
+  mark?: Mark | null;
   conv: string;
-  text: string;
+  text: string; // the summary's
+  short?: string; // a recap's wording
   to?: string | null;
-  due?: string | null;
+  due?: string | null; // as said
+  due_date?: string | null;
+  at?: string | null; // when it was said
+  quote?: string | null; // the sentence
+  title?: string | null; // the conversation's, and its start
+  start?: string;
+  with?: string[]; // whom it is to, else the others in the conversation
+  age_days?: number; // in the due list (Due)
+  stale?: boolean;
+}
+// GET /api/todos/due: my todos due today or before (summary prompt v8 dates them), not marked done or wrong; age_days
+// past due, stale: over 7 days, over 3 for one said as 待会儿, 晚上, 明天… (server db.SAME_DAY)
+export interface Due extends TodoView {
+  id: string;
   due_date: string;
-  at?: string | null;
+  age_days: number;
+  stale: boolean;
 }
 
 // a device's finals are within 30 s of its newest audio
@@ -371,9 +388,9 @@ export function get<T>(path: string, params: Record<string, string> = {}): Promi
   return call<T>(path + (q ? "?" + q : ""));
 }
 
-export function post<T>(path: string, body?: unknown): Promise<T> {
+export function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {
   return call<T>(path, {
-    method: "POST",
+    method,
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

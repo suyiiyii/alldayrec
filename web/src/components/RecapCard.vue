@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import TodoMarks from "./TodoMarks.vue";
+import { computed } from "vue";
+import TodoItem from "./TodoItem.vue";
 import { type Recap } from "../lib/api";
 import { shiftDay, today } from "../lib/calendar";
+import { open as unmarked } from "../lib/todos";
 
-// the newest daily recap, folded to its headline unless open; a todo marked 完成 or 不对 is closed like a due one
-defineProps<{ recap: Recap; open?: boolean }>();
-defineEmits<{ closed: [conv: string, text: string] }>();
+// the newest daily recap, folded to its headline unless open; a todo marked 完成 or 不对 leaves it at once
+const props = defineProps<{ recap: Recap; open?: boolean }>();
+const todos = computed(() => unmarked(props.recap.todos));
 </script>
 
 <template>
@@ -13,8 +15,8 @@ defineEmits<{ closed: [conv: string, text: string] }>();
     <summary>
       <span class="meta"
         >{{ recap.date === shiftDay(today(), -1) ? "昨天" : recap.date.slice(5) }}的回顾 ·
-        {{ recap.conversations }} 段对话<template v-if="recap.todos.length">
-          · {{ recap.todos.length }} 条待办</template
+        {{ recap.conversations }} 段对话<template v-if="todos.length">
+          · {{ todos.length }} 条待办</template
         ></span
       >
       <div class="title">{{ recap.headline }}</div>
@@ -25,21 +27,10 @@ defineEmits<{ closed: [conv: string, text: string] }>();
         ><template v-else>{{ h.text }}</template>
       </li>
     </ul>
-    <template v-if="recap.todos.length">
+    <template v-if="todos.length">
       <div class="sub">我要做的</div>
       <ul class="todos">
-        <li v-for="t in recap.todos" :key="t.conv + t.text">
-          <TodoMarks
-            v-if="t.short"
-            :conv="t.conv"
-            :text="t.text"
-            @marked="$emit('closed', t.conv, t.text)"
-          />
-          <RouterLink :to="'/c/' + t.conv">{{ t.short ?? t.text }}</RouterLink
-          ><span v-if="t.to || t.due" class="muted">
-            · {{ [t.to && "答应" + t.to, t.due].filter(Boolean).join(" · ") }}</span
-          >
-        </li>
+        <TodoItem v-for="t in todos" :key="t.id ?? t.text" :t="t" />
       </ul>
     </template>
     <template v-if="recap.people.length">

@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
-import { card, caughtUp, CHARGE, get, type DeviceStatus, type Status } from "../lib/api";
+import { card, caughtUp, CHARGE, get, type Due, type DeviceStatus, type Status } from "../lib/api";
 import { useSocket } from "../lib/socket";
+import { open } from "../lib/todos";
 
 // 我的: each device as a status card (the details on its own page), then the pages that are not a daily read
 const status = ref<Status | null>(null);
+const due = ref<Due[] | null>(null);
 const load = async () => (status.value = await get<Status>("/api/status"));
 onMounted(load);
+onMounted(async () => (due.value = await get<Due[]>("/api/todos/due").catch(() => null)));
 useSocket((m) => m.type === "status" && (status.value = m), load);
 
 // behind: its finals are short of its audio; offline: no audio in the last 2 min
@@ -26,7 +29,17 @@ const cardTile = (d: DeviceStatus) =>
       ? `${((d.hw.free_kb ?? 0) / 1048576).toFixed(1)} GB`
       : card(d.hw);
 
-const LINKS: { to: string; icon: IconName; title: string; sub: string }[] = [
+const LINKS = computed<{ to: string; icon: IconName; title: string; sub: string }[]>(() => [
+  {
+    to: "/todos",
+    icon: "check",
+    title: "待办",
+    sub: !due.value
+      ? "到期的待办，过期太久的一键清掉"
+      : open(due.value).length
+        ? `${open(due.value).length} 条到期未处理`
+        : "没有到期的待办",
+  },
   { to: "/connect", icon: "smartphone", title: "连接手机", sub: "用 App 扫码登录这台服务器" },
   {
     to: "/progress",
@@ -46,7 +59,7 @@ const LINKS: { to: string; icon: IconName; title: string; sub: string }[] = [
     title: "网页录音",
     sub: "没有 App 时，用浏览器的麦克风或蓝牙录音设备录",
   },
-];
+]);
 </script>
 
 <template>

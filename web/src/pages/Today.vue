@@ -54,12 +54,6 @@ async function load() {
   ready.value = true;
 }
 onMounted(load);
-// a todo marked 完成 or 不对 leaves both cards at once (the server leaves it out from now on)
-function closed(conv: string, text: string) {
-  due.value = due.value.filter((t) => t.conv !== conv || t.text !== text);
-  if (recap.value)
-    recap.value.todos = recap.value.todos.filter((t) => t.conv !== conv || t.text !== text);
-}
 
 const { connected, send } = useSocket((m) => {
   if (m.type === "status") status.value = m;
@@ -134,8 +128,8 @@ function openSheet() {
       <RouterLink class="btn btn-primary" to="/connect">去连接手机</RouterLink>
     </div>
     <template v-else>
-      <DueTodos :due="due" @closed="closed" />
-      <RecapCard v-if="recap" :recap="recap" open @closed="closed" />
+      <DueTodos :due="due" />
+      <RecapCard v-if="recap" :recap="recap" open />
       <section v-if="going" class="card live">
         <RouterLink class="live-head" to="/live">
           <span class="rec" />进行中的对话<span class="more"

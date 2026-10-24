@@ -91,12 +91,6 @@ const answer = computed(() => {
 // the newest daily recap, folded to its headline; my todos due today or before
 const recap = ref<Recap | null>(null);
 const due = ref<Due[]>([]);
-// a todo marked 完成 or 不对 leaves both cards at once (the server leaves it out from now on)
-function closed(conv: string, text: string) {
-  due.value = due.value.filter((t) => t.conv !== conv || t.text !== text);
-  if (recap.value)
-    recap.value.todos = recap.value.todos.filter((t) => t.conv !== conv || t.text !== text);
-}
 
 const search = (before: string) =>
   get<Conversation[]>("/api/search", {
@@ -262,8 +256,8 @@ useSocket((m) => {
     </div>
     <SelfVoice v-show="!q && !tag && !day" ref="selfCard" />
     <template v-if="!q && !tag && !day">
-      <DueTodos :due="due" @closed="closed" />
-      <RecapCard v-if="recap" :recap="recap" @closed="closed" />
+      <DueTodos :due="due" />
+      <RecapCard v-if="recap" :recap="recap" />
     </template>
     <div v-if="open" class="card open">
       <div class="meta">{{ hhmm(open.start) }} 开始 · 进行中 · {{ open.sentences }} 句</div>

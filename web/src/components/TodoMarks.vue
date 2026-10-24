@@ -1,47 +1,42 @@
 <script setup lang="ts">
-// 完成 / 不对 on one todo: a feedback line naming it (TODO_MARK, then its text); a marked todo leaves the due list
-// and the recaps. 完成 is the round tick, 不对 sits in the ⋯ menu (few clicks per todo: Bee's users turned off
-// review that asked for one on every line). No undo: the server keeps feedback lines, it has no way to drop one
-import { ref } from "vue";
+// 完成 / 不对 on one todo by its id (lib/todos.ts), each with 撤销 in its toast. 完成 is the round tick (ticked: a tap
+// opens it again), 不对 sits in the ⋯ menu, 撤销 there once marked (few clicks per todo: Bee's users turned off
+// review that asked for one on every line)
+import { computed, ref } from "vue";
+import { type Mark } from "../lib/api";
 import { useMutation } from "../lib/mutation";
-import { post, TODO_MARK, type Feedback } from "../lib/api";
+import { markOf, markWithUndo, setMarks } from "../lib/todos";
 import { toast } from "../lib/toast";
 import Icon from "./Icon.vue";
 
-const props = defineProps<{ conv: string; text: string }>();
-const emit = defineEmits<{ marked: [feedback: Feedback[]] }>();
+const props = defineProps<{ id: string; mark?: Mark | null }>();
 const { busy, error, detail, run } = useMutation();
-const done = ref(false),
-  menu = ref<HTMLDetailsElement>(),
+const now = computed(() => markOf(props));
+const menu = ref<HTMLDetailsElement>(),
   left = ref(false); // the menu opens rightwards from a ⋯ in the screen's left half, else leftwards: on screen either way
 const half = () => window.innerWidth / 2;
-async function mark(m: keyof typeof TODO_MARK) {
-  menu.value!.open = false;
-  if (m === "done") done.value = true;
-  await run(async () => {
-    emit(
-      "marked",
-      await post<Feedback[]>(`/api/conversation/${props.conv}/feedback`, {
-        text: TODO_MARK[m] + props.text,
-      }),
-    );
-    toast(m === "done" ? "已完成" : "已标为不对");
-  });
-  if (error.value) done.value = false;
+async function mark(m: Mark | null) {
+  if (menu.value) menu.value.open = false;
+  await run(() =>
+    m
+      ? markWithUndo([props.id], m, m === "done" ? "已完成" : "已标为不对")
+      : setMarks([props.id], null).then(() => toast("已撤销")),
+  );
 }
+defineExpose({ mark }); // TodoItem's swipe
 </script>
 
 <template>
   <span class="marks">
     <button
       class="check"
-      :class="{ on: done }"
+      :class="{ on: now === 'done', wrong: now === 'wrong' }"
       :disabled="busy"
-      title="完成"
-      aria-label="标为完成"
-      @click="mark('done')"
+      :title="now ? '撤销' : '完成'"
+      :aria-label="now ? '撤销' : '标为完成'"
+      @click="mark(now ? null : 'done')"
     >
-      <Icon name="check" :size="16" />
+      <Icon :name="now === 'wrong' ? 'x' : 'check'" :size="16" />
     </button>
     <details ref="menu" class="more">
       <summary
@@ -52,7 +47,10 @@ async function mark(m: keyof typeof TODO_MARK) {
         <Icon name="more-horizontal" :size="18" />
       </summary>
       <div class="menu" :class="{ left }">
-        <button class="btn-ghost" :disabled="busy" @click="mark('wrong')">不对，不是待办</button>
+        <button v-if="now" class="btn-ghost" :disabled="busy" @click="mark(null)">撤销</button>
+        <button v-else class="btn-ghost wrong" :disabled="busy" @click="mark('wrong')">
+          不对，不是待办
+        </button>
       </div>
     </details>
     <span v-if="error" class="bad" role="alert" :title="detail">{{ error }}</span>
@@ -79,6 +77,9 @@ async function mark(m: keyof typeof TODO_MARK) {
 }
 .check.on {
   color: var(--surface);
+}
+.check.wrong {
+  color: var(--muted);
 }
 .more {
   position: relative;
@@ -120,7 +121,7 @@ async function mark(m: keyof typeof TODO_MARK) {
   right: auto;
   left: 0;
 }
-.menu button {
+.menu button.wrong {
   color: var(--err);
 }
 /* an error wraps inside the page instead of running off a phone's edge */

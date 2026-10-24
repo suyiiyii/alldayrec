@@ -6,6 +6,7 @@ export const router = createRouter({
     { path: "/", component: () => import("./pages/Today.vue"), meta: { title: "今天" } },
     { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "实时字幕" } },
     { path: "/me", component: () => import("./pages/Me.vue"), meta: { title: "我的" } },
+    { path: "/todos", component: () => import("./pages/Todos.vue"), meta: { title: "待办" } },
     {
       path: "/conversations",
       component: () => import("./pages/Conversations.vue"),
