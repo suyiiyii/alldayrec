@@ -147,7 +147,7 @@ def shortlist(rows: list[dict], label: str, per: int = 3) -> list[dict]:
     out = []
     for i, r in enumerate(rows):
         d = a1[i] - a0[i]
-        if who[i] != label or len(r.get("text") or "") < CLIP_CHARS or d > CLIP_S:
+        if who[i] != label or len(r.get("text") or "") < CLIP_CHARS or d > CLIP_S or r.get("music"):
             continue
         o = who != label
         gap = float(np.maximum(a0[o] - a1[i], a0[i] - a1[o]).min()) if o.any() else 99.0  # < 0: they overlap

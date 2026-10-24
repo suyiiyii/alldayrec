@@ -4,18 +4,19 @@ type: reference
 
 # Model files
 
-The server runs two models on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
+The server runs three models on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
 
 | File | Model | Use | License | Downloaded from |
 |---|---|---|---|---|
 | `fireredvad-stream-vad.onnx`, `fireredvad-cmvn.ark` | [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) | Speech detection | Apache-2.0 | FireRedVAD's upstream repository |
 | `redimnet2-b6.onnx` | [ReDimNet2](https://github.com/PalabraAI/redimnet2) B6 | Voiceprints | MIT (training data below) | This repository's [`models-v1`](https://github.com/suyiiyii/alldayrec/releases/tag/models-v1) release |
+| `yamnet.onnx` | [YAMNet](https://github.com/tensorflow/models/tree/master/research/audioset/yamnet) | Hearing music: songs played aloud get no voiceprint (`MUSIC_DETECT`) | Apache-2.0 | This repository's `models-v1` release |
 
-With `ENGINE=local` there is a third one: sherpa-onnx's X-ASR zh-en model (`x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03/`). At its first use, the server downloads the model tarball, about 136 MB, from the k2-fsa/sherpa-onnx GitHub Release (or `LOCAL_ASR_URL`) and unpacks it into the same directory.
+With `ENGINE=local` there is a fourth one: sherpa-onnx's X-ASR zh-en model (`x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03/`). At its first use, the server downloads the model tarball, about 136 MB, from the k2-fsa/sherpa-onnx GitHub Release (or `LOCAL_ASR_URL`) and unpacks it into the same directory.
 
 ## Download and verification
 
-- At startup the server downloads the missing files, about 55 MB at the first start.
+- At startup the server downloads the missing files, about 70 MB at the first start.
 - The sha256 of each file is pinned in [`server/alldayrec/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/infer.py) and [`server/alldayrec/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/local_asr.py), and the server accepts only matching files. When a file doesn't match or is missing, the server refuses to start.
 - A file that is already there is never downloaded again.
 - `server/alldayrec/export_onnx.py` is how maintainers make new release files from the upstream weights. ReDimNet2's export differs byte for byte between machines, so the server refuses a file you export yourself.

@@ -42,7 +42,7 @@ This page runs alldayrec long-term with Docker Compose on a Linux or macOS machi
    docker compose logs -f
    ```
 
-   Once the log shows `ready on 0.0.0.0:8770`, the server is ready. The first start downloads the model files first (about 55 MB).
+   Once the log shows `ready on 0.0.0.0:8770`, the server is ready. The first start downloads the model files first (about 70 MB).
 
 5. Open `http://<server IP>:8770/?token=<your token>` in a browser: `127.0.0.1` on this machine, this machine's LAN or Tailscale address from another computer. A cookie keeps you signed in after that.
 

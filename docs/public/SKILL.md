@@ -39,7 +39,7 @@ mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "da
 docker compose up -d
 ```
 
-The first start downloads about 55 MB of model files. Wait until `docker compose logs --tail 20` shows
+The first start downloads about 70 MB of model files. Wait until `docker compose logs --tail 20` shows
 `ready on 0.0.0.0:8770` (don't use `logs -f` in a non-interactive shell: it never returns), then check:
 
 ```bash

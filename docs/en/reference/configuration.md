@@ -114,6 +114,7 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | `QWEN_ASR_MODEL` | `qwen-audio-3.1-asr-flash-filetrans` | The Bailian model the `qwen` engine uses | `qwen_asr.py` |
 | `ASR_CALLS`, `INFER_CALLS`, `DB_CALLS`, `MEDIA_CALLS` | `1`, `2`, `8`, `16` | How many local ASR runs, voiceprint computations, whole-database queries and audio encodes or decodes run at once | `threads.py` |
 | `INFER_THREADS` | `4` | onnxruntime threads per voiceprint computation | `infer.py` |
+| `MUSIC_DETECT` | `1` | At finalization, a sentence heard as music (a song played aloud, the voice about as loud as its accompaniment) gets no voiceprint: its speaker is `S?` and it never reaches the People page. It is still transcribed, with a music-note icon on its row. 0 turns it off | `music.py` |
 | `VAD_GAIN_MAX_DB` | `16` | The most dB the VAD's features are raised (this affects only speech detection, not the audio sent to the engine or played back); 0 turns it off | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | The most dB the audio sent to the engine is raised; 0 sends it as is | `squeeze.py` |
 | `DEHUM` | `1` | Removes the recorder's 10 ms periodic hum when its audio is read; 0 turns it off | `audio.py` |

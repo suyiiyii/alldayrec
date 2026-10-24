@@ -38,6 +38,7 @@ from alldayrec import firmware
 from alldayrec import infer
 from alldayrec import local_asr
 from alldayrec import monitor
+from alldayrec import music
 from alldayrec import perf
 from alldayrec import routes_api
 from alldayrec import routes_audio
@@ -86,6 +87,7 @@ MODEL = anyio.Event()  # the model is loaded
 async def load_model():
     from alldayrec.diarist import load_embedder
     state["embed"] = await anyio.to_thread.run_sync(load_embedder, limiter=threads.INFER)
+    state["music"] = music.heard if music.ON else None
     MODEL.set()
 
 

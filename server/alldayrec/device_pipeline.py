@@ -342,8 +342,8 @@ async def pipeline(device: str):
             with perf.timed(fcost, "asr_ms"):
                 segs = await asr.engine_segs(x, speech_in(seg, a0, len(x)), device=device)
             engine = segs[0]["engine"] if segs else None
-            with perf.timed(fcost, "embed_ms"):
-                marks = await anyio.to_thread.run_sync(label_sentences, dia, embed, segs, x, limiter=threads.INFER)
+            with perf.timed(fcost, "embed_ms"):  # with music.py's YAMNet when on
+                marks = await anyio.to_thread.run_sync(label_sentences, dia, embed, segs, x, state["music"], limiter=threads.INFER)
         except Exception as e:
             dia.rollback(m0)
             log.warning("%s final piece failed: %r", device, e)
@@ -356,7 +356,8 @@ async def pipeline(device: str):
             by_label[g["speaker"]] = max(by_label.get(g["speaker"], 0.0), g["confidence"])
         lo, hi, rows = final_rows(segs, {g["speaker"]: g["speaker"] for g in segs}, base, len(x) / SR, by_label, 0.0, at, 0.0)
         st.voiced += [{"start": iso(at(g["start_ms"] / 1000)), "dur": (g["end_ms"] - g["start_ms"]) / 1000,
-                          "e": dia.E[m[0] - 1] if m else None, "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") else None}
+                          "e": dia.E[m[0] - 1] if m else None,  # music: no turn mates, so relabel keeps it S?
+                          "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") and not g.get("music") else None}
                          for g, m in zip(segs, marks)]
         with open(T().data / f"{lo.date()}.passes.jsonl", "a") as f:  # every piece's raw engine output, for tracing lost rows
             f.write(json.dumps({"at": dt.datetime.now().isoformat(timespec="seconds"), "layer": "final", "t0": iso(base), "since": 0.0,

@@ -212,11 +212,13 @@ async def enroll_soon(to: str, rows: list[dict]):
 
 
 async def enroll(to: str, rows: list[dict]):
-    """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists. A
-    failure is logged: it must not end the tenant's tasks beside it."""
+    """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists; a
+    row heard as music (music.py) teaches nothing. A failure is logged: it must not end the tenant's tasks beside it."""
     try:
         es = []
         for r in rows:
+            if r.get("music"):
+                continue
             try:
                 x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
             except HTTPException:  # history conversations have no recording here
@@ -565,7 +567,7 @@ async def voices_loop():
             media = summary.media_labels(rows, s.get("media_spans") or [])
             by = {}
             for r in rows:
-                if r.get("speaker") and r["speaker"] != "S?" and r["speaker"] not in media:
+                if r.get("speaker") and r["speaker"] != "S?" and r["speaker"] not in media and not r.get("music"):
                     by.setdefault(r["speaker"], []).append(r)
             out = []
             for label, rs in by.items():

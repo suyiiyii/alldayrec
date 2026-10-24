@@ -32,7 +32,7 @@ The server is published on PyPI as `alldayrec`, with the web pages packed in: no
    uvx --env-file .env alldayrec
    ```
 
-   The first start downloads the model files (about 55 MB) and makes `tenants.json`. The log has a line like this:
+   The first start downloads the model files (about 70 MB) and makes `tenants.json`. The log has a line like this:
 
    ```text
    ... live INFO first start: /home/you/.local/share/alldayrec/tenants.json made, one tenant; on this machine open http://127.0.0.1:8770/connect?token=<token>

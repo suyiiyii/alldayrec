@@ -13,7 +13,8 @@ TENANTS: list[tenant.Tenant] = []  # every tenant of this process (tenant.load a
                                    # firmware, the APK and the StepFun balance, shared by all
 
 
-state = {"commit": "", "embed": None}  # the process's: what runs, and the voiceprint model every tenant uses
+state = {"commit": "", "embed": None, "music": None}  # the process's: what runs, the voiceprint model every tenant uses
+                                                     # and music.heard (None: MUSIC_DETECT=0)
 
 
 NO_CACHE = {"Cache-Control": "no-cache"}  # pages change with deploys; revalidate by etag instead of heuristic caching

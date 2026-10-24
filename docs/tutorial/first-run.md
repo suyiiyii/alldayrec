@@ -56,7 +56,7 @@ docker compose up -d
 docker compose logs -f
 ```
 
-第一次启动时，服务器会下载 3 个模型文件（约 55 MB）并校验，然后开始监听。日志的最后几行类似这样：
+第一次启动时，服务器会下载 4 个模型文件（约 70 MB）并校验，然后开始监听。日志的最后几行类似这样：
 
 ```text
 alldayrec-1  | ... infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...

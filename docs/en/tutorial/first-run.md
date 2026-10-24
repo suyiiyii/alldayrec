@@ -56,7 +56,7 @@ docker compose up -d
 docker compose logs -f
 ```
 
-At the first start, the server downloads 3 model files (about 55 MB), checks them, and then starts listening. The last lines of the log look like this:
+At the first start, the server downloads 4 model files (about 70 MB), checks them, and then starts listening. The last lines of the log look like this:
 
 ```text
 alldayrec-1  | ... infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...

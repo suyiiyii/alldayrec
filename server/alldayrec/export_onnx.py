@@ -13,6 +13,12 @@ sha256 infer.MODELS pins. Needs torch, only here: the export dependency group.
   with the torch model on noise of several lengths. The models-v1 release file the server fetches when it is missing
   (infer.SOURCES) is this export, made with torch 2.5.1; its training data VoxBlink2 is CC BY-NC-SA 4.0
   (THIRD_PARTY_NOTICES).
+- yamnet.onnx: YAMNet (music.py), Apache-2.0: tensorflow/models research/audioset/yamnet at c14bf9a (yamnet.py, params.py,
+  features.py) with its weights yamnet.h5 (sha256 13c3308955bbfaef262f175ac9c40e47b134573a93984f009220dd7cc12a1744).
+  The Keras yamnet_frames_model's first output (521 class scores per 0.96 s frame, every 0.48 s; input "wav": the
+  samples, float32 in [-1, 1], 16 kHz, any length) through tf2onnx 1.16.1 from_keras, opset 17, with TensorFlow and
+  tf_keras 2.15.1 on Python 3.11 in a venv of its own (TensorFlow is not in the export group); its scores are
+  TensorFlow's within 2e-6. main() downloads the models-v1 release's file (infer.SOURCES).
 """
 import hashlib
 import os
@@ -60,7 +66,7 @@ def redimnet(out: Path):
 def main():
     d = Path(sys.argv[1]) if sys.argv[1:] else infer.DIR
     d.mkdir(parents=True, exist_ok=True)
-    for name in (infer.VAD, infer.CMVN):
+    for name in (infer.VAD, infer.CMVN, infer.YAMNET):
         urllib.request.urlretrieve(infer.SOURCES[name], d / name)
     redimnet(d / infer.EMB)
     for name, want in infer.MODELS.items():

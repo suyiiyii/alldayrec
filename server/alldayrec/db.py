@@ -18,7 +18,8 @@ from alldayrec import tenant
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentences (       -- final rows; a finalization pass replaces the ones starting in [from, to)
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
-    source TEXT, engine TEXT, shown_at TEXT, dictation TEXT);  -- dictation: the app dictated into (history rows)
+    source TEXT, engine TEXT, shown_at TEXT, dictation TEXT,  -- dictation: the app dictated into (history rows)
+    music INTEGER);  -- music: 1 when music.py heard music (no voiceprint taken: its speaker is S?)
 CREATE INDEX IF NOT EXISTS sentences_start ON sentences(start);
 CREATE TABLE IF NOT EXISTS drafts (          -- the draft layer's rows (only while a page watches); kept after final rows cover their time
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
@@ -125,6 +126,8 @@ def init():
     if "received_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-07: when each came, how it sounds
         for col in ("received_ms INTEGER", "rms REAL", "hum REAL", "zero_ms INTEGER", "full INTEGER"):
             conn().execute(f"ALTER TABLE pieces ADD COLUMN {col}")
+    if "music" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:  # 10-25: songs kept out of voiceprints
+        conn().execute("ALTER TABLE sentences ADD COLUMN music INTEGER")
     if "level" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 10-14: how loud each voice is
         conn().execute("ALTER TABLE voices ADD COLUMN level REAL")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
@@ -183,7 +186,7 @@ def blob(e) -> bytes:
 
 # sentences
 
-S_COLS = ("id", "start", "end", "speaker", "speaker_confidence", "text", "source", "engine", "shown_at", "dictation")
+S_COLS = ("id", "start", "end", "speaker", "speaker_confidence", "text", "source", "engine", "shown_at", "dictation", "music")
 
 
 def _sentence(r: sqlite3.Row) -> dict:
@@ -208,7 +211,7 @@ def insert_sentences(c: sqlite3.Connection, rows: list[dict]):
                   [tuple(r.get(k) for k in S_COLS) for r in rows])
 
 
-D_COLS = S_COLS[:-1]  # a draft has no dictation
+D_COLS = S_COLS[:-2]  # a draft has no dictation, no music
 
 
 def drafts(lo: str, hi: str | None = None, source: str | None = None) -> list[dict]:

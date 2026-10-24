@@ -114,6 +114,7 @@ type: reference
 | `QWEN_ASR_MODEL` | `qwen-audio-3.1-asr-flash-filetrans` | `qwen` 引擎用的百炼模型 | `qwen_asr.py` |
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
+| `MUSIC_DETECT` | `1` | 定稿时听出是音乐（外放的歌、伴奏和人声差不多一样响）的句子不取声纹，说话人记为 `S?`，不会进人物页；仍然转写，转写行上有音符图标。0 关闭 | `music.py` |
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |

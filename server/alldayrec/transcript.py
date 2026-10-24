@@ -30,18 +30,22 @@ def clip_turns(segs: list[dict], since_s: float) -> list[dict]:
     return out
 
 
-def label_sentences(dia, embed, segs: list[dict], x: np.ndarray) -> list:
+def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> list:
     """Speaker labels from the conversation clustering, in time order; returns the diarist mark after each
-    sentence (None when too short to embed) so a pass can take back the sentences it leaves open."""
+    sentence (None when too short to embed) so a pass can take back the sentences it leaves open. music (music.heard,
+    the final layer's): a sentence it hears as music gets music 1 and S?, and no voiceprint."""
     marks = []
     for g in segs:
         a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
         g["engine_speaker"] = g.get("speaker")
-        if b - a < 0.3:
+        y = x[int(a * SR):int(min(b, a + 15) * SR)]
+        if b - a >= 0.3 and music and music(y):
+            g["music"] = 1
+        if b - a < 0.3 or g.get("music"):
             g["speaker"], g["confidence"] = "S?", 0.0
             marks.append(None)
             continue
-        g["speaker"], g["confidence"] = dia.add(embed(x[int(a * SR):int(min(b, a + 15) * SR)]), b - a)
+        g["speaker"], g["confidence"] = dia.add(embed(y), b - a)
         marks.append(dia.mark())
     return marks
 
@@ -62,10 +66,10 @@ def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, con
     rows = []
     for g in sorted(segs, key=lambda g: g["start_ms"]):
         a, b, who = g["start_ms"] / 1000, g["end_ms"] / 1000, names[g["speaker"]]
-        if rows and rows[-1]["speaker"] == who and a - rows[-1]["b"] < TURN_GAP_S:
+        if rows and rows[-1]["speaker"] == who and rows[-1]["music"] == g.get("music") and a - rows[-1]["b"] < TURN_GAP_S:
             rows[-1]["b"], rows[-1]["text"] = b, rows[-1]["text"] + g["text"]
         else:
-            rows.append(dict(a=a, b=b, speaker=who, text=g["text"]))
+            rows.append(dict(a=a, b=b, speaker=who, text=g["text"], music=g.get("music")))
     lo, hi = since, win_s - edge
     keep = [r for r in rows if r["a"] >= lo - 0.05]  # turns are clipped to `since` by the caller
     cut = next((i for i, r in enumerate(keep) if r["b"] > hi), len(keep))
@@ -73,7 +77,7 @@ def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, con
     at = at or (lambda s: t0 + dt.timedelta(seconds=s))
     out = [dict(id="f" + at(r["a"]).strftime("%Y%m%d%H%M%S%f")[:17], start=at(r["a"]).isoformat(timespec="milliseconds"),
                 end=at(r["b"]).isoformat(timespec="milliseconds"), speaker=r["speaker"], text=r["text"].strip(),
-                speaker_confidence=(conf or {}).get(r["speaker"]), state="final")
+                speaker_confidence=(conf or {}).get(r["speaker"]), state="final") | ({"music": 1} if r["music"] else {})
            for r in keep[:cut] if r["text"].strip()]
     return at(lo), at(to), out
 

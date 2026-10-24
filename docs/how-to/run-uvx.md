@@ -32,7 +32,7 @@ PyPI 上的 `alldayrec` 从 v0.1.0 之后的第一个版本标签起发布；v0.
    uvx --env-file .env alldayrec
    ```
 
-   第一次启动会下载模型文件（约 55 MB）并生成 `tenants.json`，日志里有这样一行：
+   第一次启动会下载模型文件（约 70 MB）并生成 `tenants.json`，日志里有这样一行：
 
    ```text
    ... live INFO first start: /home/you/.local/share/alldayrec/tenants.json made, one tenant; on this machine open http://127.0.0.1:8770/connect?token=<token>

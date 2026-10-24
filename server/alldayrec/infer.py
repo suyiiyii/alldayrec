@@ -29,17 +29,19 @@ THREADS = int(os.environ.get("INFER_THREADS", "4"))  # onnxruntime threads per v
 VAD_TARGET_DB = -42.0
 VAD_GAIN_MAX_DB = float(os.environ.get("VAD_GAIN_MAX_DB", "16"))  # 0: off, the VAD as before
 LEVEL_FRAMES = 1000  # 10 s of frames
-VAD, CMVN, EMB = "fireredvad-stream-vad.onnx", "fireredvad-cmvn.ark", "redimnet2-b6.onnx"
+VAD, CMVN, EMB, YAMNET = "fireredvad-stream-vad.onnx", "fireredvad-cmvn.ark", "redimnet2-b6.onnx", "yamnet.onnx"  # YAMNET: music.py
 MODELS = {  # file: sha256 (sources and licenses: export_onnx.py)
     VAD: "b3c97836130dc34fc32d56fab551e88cf9454511de2b3c250a5e6578dee74b93",
     CMVN: "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473",
     EMB: "0a17d6472e4e7a31ffe254858574f6f1203acd5a5fa9a153a12556f4aaa72d81",
+    YAMNET: "c114cb542a267e797c0d49cd3ad4ec7ede55d4328dc605f815d4474cec099d87",
 }
 FIRERED = "https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/71352f2c93c110410189e0ed98ab85ea24e8ad1c/pretrained_models/onnx_models/"
 SOURCES = {  # file: where fetch() downloads it from when it is missing
     VAD: FIRERED + "fireredvad_stream_vad_with_cache.onnx",
     CMVN: FIRERED + "cmvn.ark",
     EMB: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx",  # export_onnx.py's export
+    YAMNET: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/yamnet.onnx",  # made as export_onnx.py says
 }
 # export_onnx.py's ReDimNet2 differs byte for byte from machine to machine: only the release's file has the pinned sha256
 FIX = ("only the file at its URL is accepted: delete a wrong one and restart to download it again, or put it in {d} "
