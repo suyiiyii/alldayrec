@@ -1,14 +1,18 @@
 """Name hints and speaker suggestions: only names the rows bear out are kept, a merge keeps the target's voice and
-carries the hints, and a conversation's suggestions come from voices, names and aliases without changing anything."""
+carries the hints, a conversation's suggestions come from voices, names and aliases without changing anything, and a
+rename answers before its voice is learnt."""
 import tempfile
 from pathlib import Path
 
 import anyio
 import numpy as np
 
+import core
 import db
 import hints
-from routes_speakers import alias_set, apply_rename, label_suggestions, person
+import routes_audio
+import tenant
+from routes_speakers import alias_set, apply_rename, label_suggestions, person, rename
 
 T = "2026-10-05T10:00:"
 ROWS = [dict(start=T + "01.000", end=T + "02.000", speaker="S1", text="老张，你来一下"),
@@ -68,14 +72,44 @@ def test_rename_merges_and_suggestions():
     assert sug["like"] == [{"who": "S3", "name": "张三", "score": 0.7}]
     assert sug["elsewhere"] == [{"who": "S3", "name": "李四", "convs": 2}]
 
-    r = anyio.run(apply_rename, c["id"], "S1", "S2")  # the merge, as the page asks it
+    r, _ = apply_rename(c["id"], "S1", "S2")  # the merge, as the page asks it
     assert r["participants"] == ["S2", "S3", "我"]
     assert [v[0] for v in db.conn().execute("SELECT label FROM voices ORDER BY label")] == ["S2", "S3"]
     assert db.vec(db.conn().execute("SELECT e FROM voices WHERE label = 'S2'").fetchone()[0])[0] == 1.0, "S2's own voice stays"
     assert {x["by"] for x in db.name_hints(c["id"])[c["id"]]["names"]} == {"S2", "S3"}, "the caller S1 is S2 now"
 
-    anyio.run(apply_rename, c["id"], "S2", "张三")
+    apply_rename(c["id"], "S2", "张三")
     sug = label_suggestions(db.conversation(c["id"]), groups, vec, db.name_hints(c["id"])[c["id"]], db.aliases())
     assert [x["who"] for x in sug["names"]] == ["S3"], "老张 is 张三's alias: nothing left to offer for 张三"
     assert anyio.run(person, "张三")["aliases"] == ["老张"]
     assert anyio.run(alias_set, {"alias": "老张", "name": ""}) == {}
+
+
+def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):
+    """The answer comes once the store has the name; the diarist learns the voice after it, in the tenant's tasks
+    (10-24: a group of 10 conversations took 40 s, and the speakers page sat locked meanwhile)."""
+    db.open_db(tmp_path / "t.db")
+    rows = [dict(id=str(i), start=f"{T}{i * 3:02}.000", end=f"{T}{i * 3 + 2:02}.000", speaker="S1", text="嗯") for i in range(3)]
+    c = {"id": "c20261005100000", "start": rows[0]["start"], "end": rows[-1]["end"], "participants": ["S1"], "sentences": 3, "speech_s": 6.0}
+    with db.tx() as t:
+        db.insert_sentences(t, rows)
+        db.insert_conversation(t, c)
+    gate, cut = anyio.Event(), []
+
+    async def audio(start, end, fmt, device=None):
+        await gate.wait()
+        cut.append(start)
+        return np.zeros(1600, np.int16).tobytes()
+    monkeypatch.setattr(routes_audio, "cut", audio)
+    monkeypatch.setitem(core.state, "embed", lambda x: np.array([0.0, 1, 0, 0]))
+
+    async def run():
+        async with anyio.create_task_group() as tenant.T().tg:
+            with anyio.fail_after(5):  # learning first would wait for the gate for good
+                assert await rename(c["id"], {"from": "S1", "to": "张三"}) == {"participants": ["张三"], "renamed": 3, "voiceprints": 3}
+            assert db.conversation(c["id"])["participants"] == ["张三"] and "张三" not in db.people() and not cut, "nothing learnt yet"
+            gate.set()
+        assert len(cut) == 3
+        n, e = db.people()["张三"]
+        assert n == 3 and list(e) == [0, 1, 0, 0]
+    anyio.run(run)

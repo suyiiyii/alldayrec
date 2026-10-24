@@ -37,13 +37,15 @@ async def names():
 @router.post("/api/conversation/{conv_id}/rename")
 async def rename(conv_id: str, body: dict):
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
-    return await apply_rename(conv_id, frm, to)
+    r, rows = apply_rename(conv_id, frm, to)
+    await enroll_soon(to, rows)
+    return r
 
 
-async def apply_rename(conv_id: str, frm: str, to: str) -> dict:
+def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict]]:
     """One label of one conversation becomes a name: its rows, the participants, its voice and pins change in one
-    transaction, the summary is redone, and when the recording is still here up to ENROLL sentences of it teach the
-    diarist that voice for later conversations."""
+    transaction, and the summary is redone. Also returns up to ENROLL of its sentences to teach the diarist that voice
+    for later conversations (enroll_soon: seconds of audio work per sentence, after the answer)."""
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
@@ -66,30 +68,50 @@ async def apply_rename(conv_id: str, frm: str, to: str) -> dict:
             db.put_name_hints(h, t)
     T().speakers["at"] = 0.0
     queue_summary(c, keep=True)
-    learnt = 0
+    long = []
     if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):  # S<n> means "not known": nothing to learn
         long = sorted((r for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5),
                       key=lambda r: r["start"])[:ENROLL]
+    ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
+    # voiceprints: the sentences queued to learn from (a history conversation without its recording here gives none)
+    return {"participants": c["participants"], "renamed": len(hit), "voiceprints": len(long)}, long
+
+
+ENROLL = 20
+
+
+async def enroll_soon(to: str, rows: list[dict]):
+    """rows (apply_rename's) teach the diarist to's voice in the tenant's tasks, one after another, after the rename's
+    answer: a group of 10 conversations took 40 s, and the page waited on all of it (10-24). Without the tenant's tasks
+    (a test) here and now."""
+    if rows:
+        if T().tg:
+            T().tg.start_soon(enroll, to, rows, name=f"enroll:{to}")
+        else:
+            await enroll(to, rows)
+
+
+async def enroll(to: str, rows: list[dict]):
+    """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists. A
+    failure is logged: it must not end the tenant's tasks beside it."""
+    try:
         es = []
-        for r in long:
+        for r in rows:
             try:
                 x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
             except HTTPException:  # history conversations have no recording here
                 continue
             es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
-        if es:
+        if es:  # no await from the read to the write: two of these for one name never lose one's sentences
             n0, e0 = db.people().get(to, (0, np.zeros(len(es[0]))))
             n = n0 + len(es)
             mean = (e0 * n0 + np.sum(es, 0)) / n
             db.conn().execute("INSERT OR REPLACE INTO people VALUES (?, ?, ?)", (to, n, db.blob(mean)))
             for dia in T().dias:
                 dia.people[to] = mean / np.linalg.norm(mean)
-            learnt = len(es)
-    ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}" + (f"，记住了 {learnt} 句的声纹" if learnt else ""), "state")
-    return {"participants": c["participants"], "renamed": len(hit), "voiceprints": learnt}
-
-
-ENROLL = 20
+            ws.note(f"{to}：记住了 {len(es)} 句的声纹", "state")
+    except Exception:
+        log.exception("enroll %s", to)
 
 # speakers page: one voiceprint per conversation x label (history ones computed from the old recorder's audio and
 # uploaded with a clip each; live ones computed here), grouped across conversations by speakers.py
@@ -179,19 +201,21 @@ def check_name(to: str):
 
 @router.post("/api/speakers/name")
 async def speaker_name(body: dict):
-    """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations."""
+    """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations. The
+    answer comes when the store has it; the voice is learnt after (enroll_soon)."""
     to = (body.get("name") or "").strip()
     check_name(to)
-    done = 0
+    done, rows = 0, []
     for m in (await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB))["members"]:
         if m["label"] == to:
             continue
         try:
-            await apply_rename(m["conv"], m["label"], to)
+            rows += apply_rename(m["conv"], m["label"], to)[1]
         except HTTPException as e:  # the conversation changed since the page loaded
             log.warning("speaker name %s %s: %s", m["conv"], m["label"], e.detail)
             continue
         done += 1
+    await enroll_soon(to, rows)
     return {"renamed": done}
 
 
@@ -207,7 +231,7 @@ async def speaker_detach(body: dict):
             raise HTTPException(404, "no such conversation")
         used = {int(p[1:]) for p in c["participants"] if re.fullmatch(r"S\d+", p)}
         new = f"S{max(used, default=0) + 1}"
-        await apply_rename(conv, label, new)
+        apply_rename(conv, label, new)  # S<n>: nothing to learn
         key = f"{conv}|{new}"
     db.conn().execute("INSERT OR IGNORE INTO apart VALUES (?, ?)", (key, group))
     T().speakers["at"] = 0.0
