@@ -5,6 +5,7 @@
 import { computed, ref } from "vue";
 import { t } from "../i18n";
 import { type Mark } from "../lib/api";
+import { useDismiss } from "../lib/dismiss";
 import { useMutation } from "../lib/mutation";
 import { markOf, markWithUndo, setMarks } from "../lib/todos";
 import { toast } from "../lib/toast";
@@ -14,10 +15,12 @@ const props = defineProps<{ id: string; mark?: Mark | null }>();
 const { busy, error, detail, run } = useMutation();
 const now = computed(() => markOf(props));
 const menu = ref<HTMLDetailsElement>(),
+  opened = ref(false),
   left = ref(false); // the menu opens rightwards from a ⋯ in the screen's left half, else leftwards: on screen either way
+useDismiss(opened, menu);
 const half = () => window.innerWidth / 2;
 async function mark(m: Mark | null) {
-  if (menu.value) menu.value.open = false;
+  opened.value = false;
   await run(() =>
     m
       ? markWithUndo(
@@ -43,7 +46,7 @@ defineExpose({ mark }); // TodoItem's swipe
     >
       <Icon :name="now === 'wrong' ? 'x' : 'check'" :size="16" />
     </button>
-    <details ref="menu" class="more">
+    <details ref="menu" class="more" :open="opened" @toggle="opened = menu!.open">
       <summary
         :title="t('todoMarks.more')"
         :aria-label="t('todoMarks.more')"

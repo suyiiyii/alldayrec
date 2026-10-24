@@ -4,7 +4,7 @@
 // much, the sentences, a player at the bottom that keeps the sentence playing lit and in view. The tab is in the
 // query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from another page opens 原文 there.
 // Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import Avatar from "../components/Avatar.vue";
@@ -31,6 +31,7 @@ import {
 } from "../lib/api";
 import { play, player, track, trackClose, trackOpen, trackSeek } from "../lib/audio";
 import { dayLabel } from "../lib/calendar";
+import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerColor, speakerLabel } from "../lib/speakers";
@@ -136,6 +137,7 @@ const sugCount = computed(() =>
 // the ⋯ menu and the panel it opened
 const menu = ref(false),
   panel = ref<"" | "rename" | "sug" | "note">("");
+useDismiss(menu, useTemplateRef("more"));
 function open(p: typeof panel.value) {
   menu.value = false;
   panel.value = p;
@@ -263,7 +265,7 @@ async function alias(name: string, of: string) {
   <main :class="{ playing: tab === 'transcript' || track.playing }">
     <div class="top">
       <RouterLink class="back" to="/"><Icon name="chevron-left" :size="18" />{{ t("conv.all") }}</RouterLink>
-      <div v-if="c" class="more">
+      <div v-if="c" ref="more" class="more">
         <button
           class="btn-ghost"
           :aria-label="t('conv.more')"
@@ -273,24 +275,21 @@ async function alias(name: string, of: string) {
         >
           <Icon name="more-horizontal" />
         </button>
-        <template v-if="menu">
-          <div class="scrim" @click="menu = false"></div>
-          <div class="menu" role="menu">
-            <button role="menuitem" :disabled="!labels.length" @click="open('rename')">
-              <Icon name="user" :size="18" />{{ t("conv.rename") }}
-            </button>
-            <button role="menuitem" :disabled="!sugCount" @click="open('sug')">
-              <Icon name="users" :size="18" />{{ t("conv.sug")
-              }}<span class="n">{{ sugCount || t("conv.none") }}</span>
-            </button>
-            <button role="menuitem" :disabled="regenerating" :title="made" @click="regen">
-              <Icon name="sparkles" :size="18" />{{ t("conv.regen") }}
-            </button>
-            <button role="menuitem" @click="open('note')">
-              <Icon name="alert-circle" :size="18" />{{ t("conv.note") }}
-            </button>
-          </div>
-        </template>
+        <div v-if="menu" class="menu" role="menu">
+          <button role="menuitem" :disabled="!labels.length" @click="open('rename')">
+            <Icon name="user" :size="18" />{{ t("conv.rename") }}
+          </button>
+          <button role="menuitem" :disabled="!sugCount" @click="open('sug')">
+            <Icon name="users" :size="18" />{{ t("conv.sug")
+            }}<span class="n">{{ sugCount || t("conv.none") }}</span>
+          </button>
+          <button role="menuitem" :disabled="regenerating" :title="made" @click="regen">
+            <Icon name="sparkles" :size="18" />{{ t("conv.regen") }}
+          </button>
+          <button role="menuitem" @click="open('note')">
+            <Icon name="alert-circle" :size="18" />{{ t("conv.note") }}
+          </button>
+        </div>
       </div>
     </div>
     <div v-if="missing" class="empty">
@@ -607,11 +606,6 @@ main.playing {
   padding: 0;
   margin-right: -10px;
   color: var(--fg-2);
-}
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 4;
 }
 .menu {
   position: absolute;
