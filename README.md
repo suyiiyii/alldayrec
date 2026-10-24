@@ -16,6 +16,8 @@
 
 [快速开始](#快速开始docker) · [和市面产品比](#和市面产品比) · [导入已有录音](#已有录音怎么导入) · [硬件](hardware/lr-p3/README.md) · [路线图](#路线图)
 
+**文档：** [suyiiyii.github.io/alldayrec](https://suyiiyii.github.io/alldayrec/) · 让 AI Agent 帮你部署：[SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
+
 `#自部署` `#全天录音` `#说话人识别` `#MCP` `#Plaud替代` `#开源硬件`
 
 </div>
@@ -110,6 +112,7 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 
 **更多文档**
 
+- [文档站](https://suyiiyii.github.io/alldayrec/)：教程、操作指南、配置和 API 参考，有中英文
 - [Docker 部署细节](#docker-部署细节)：key 的限制、`ENGINE=local`、时区、镜像、公网访问的 HTTPS 反向代理
 - [不用 Docker](#快速开始不用-docker)
 - [配置](#配置)：所有环境变量和语音识别引擎

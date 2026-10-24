@@ -16,6 +16,8 @@ Wear it all day: what you say becomes transcripts, summaries and to-dos, with th
 
 [Quickstart](#quickstart-docker) · [How it compares](#how-it-compares) · [Import recordings](#importing-recordings-you-already-have) · [Hardware](hardware/lr-p3/README.md) · [Roadmap](#roadmap)
 
+**Docs:** [suyiiyii.github.io/alldayrec](https://suyiiyii.github.io/alldayrec/en/) · Let an AI agent deploy it for you: [SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
+
 `#self-hosted` `#lifelog` `#speaker-diarization` `#MCP` `#plaud-alternative` `#open-hardware`
 
 </div>
@@ -110,6 +112,7 @@ Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.
 
 **More docs**
 
+- [Docs site](https://suyiiyii.github.io/alldayrec/en/): tutorial, how-to guides, configuration and API reference, in English and Chinese
 - [Docker details](#docker-details): key restrictions, `ENGINE=local`, time zone, the image, an HTTPS reverse proxy for public access
 - [Without Docker](#quickstart-without-docker)
 - [Configuration](#configuration): every environment variable and the ASR engines

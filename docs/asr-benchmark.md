@@ -1,3 +1,7 @@
+---
+type: explanation
+---
+
 # ASR benchmark: local engines vs cloud
 
 > 中文摘要：2026-10-23 在 5 段真实录音（共 1.77 小时）上，比较了能在 CPU 上跑的开源语音识别模型和几家云端引擎。

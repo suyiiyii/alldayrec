@@ -1,0 +1,61 @@
+name: docs
+on:
+  push:  # main: build and publish the site on GitHub Pages
+    branches: [main]
+    paths: &paths ['docs/**', 'server/*.py', 'server/pyproject.toml', 'server/uv.lock', '.github/workflows/docs.yml']
+  pull_request:  # PRs: build only (dead links fail it)
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:  # a new push to a PR cancels its run; a Pages deploy is never cut off
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: read  # configure-pages reads where the site is served
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # each page's "last updated" comes from git
+      - id: pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+      - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
+      - run: uv run --locked --project server python docs/gen-api.py  # the API reference and MCP tools from this commit's server
+      - run: npm install -g pnpm@12.8.1  # docs/package.json's devEngines; the image's Node is 22
+      - run: pnpm install --frozen-lockfile
+        working-directory: docs
+      - run: |  # on Pages: the base path and origin the site is served at (an org or custom-domain site has base /)
+          if [ -n "$ORIGIN" ]; then export DOCS_BASE="$BASE_PATH/" DOCS_HOST="$ORIGIN"; fi
+          pnpm docs:build
+        working-directory: docs
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          ORIGIN: ${{ steps.pages.outputs.origin }}
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
