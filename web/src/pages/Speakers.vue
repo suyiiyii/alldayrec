@@ -386,8 +386,9 @@ input {
   padding: 4px 8px;
   min-height: 36px;
 }
-/* inside the app the native bar already says 人物 */
-:global(.in-app) main > h1 {
+/* inside the app the native bar already says 人物. Scoped CSS marks only the last part (h1), so .in-app stays the
+   html's class; :global(.in-app) would make the whole rule `.in-app {display: none}` and hide the page */
+.in-app main > h1 {
   display: none;
 }
 </style>
