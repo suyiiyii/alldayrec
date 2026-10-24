@@ -15,22 +15,24 @@
 # Mac asks to pair with LR-P1 (kicked), click Pair. Afterwards: forget LR-P1 in this Mac's Bluetooth settings (LR-P1
 # forgets the Mac in readd, the Mac keeps stale keys). `away` turns the iPhone's Bluetooth off for
 # 2 min: the real app loses its recorder meanwhile (the recorder records to its card, the app catches up after).
-# Env: LR_DEVICE (the iPhone), LR_NAME (the recorder, default LR-P1-BDAE), LOCK=1 (background: the lock button instead
-# of home; the phone then needs a second unlock). Needs Xcode, flutter, ffmpeg, cloudflared, uv; LR-P1 not held by
-# another phone, its card backlog cleared, this Mac without a bond to it. The UI tests build and run with XCODE_UI
-# (default Xcode 27: the iPhone runs iOS 27, which Xcode 26.6's XCTest cannot drive, 10-05); everything else uses the
-# selected Xcode.
+# Env: LR_DEVICE (the iPhone: its identifier in xcrun devicectl list devices), LR_NAME (the recorder's BLE name; not
+# with --fake), LR_DAILY (the recorder the real app uses: --fake's listed step looks for it, forget never touches it),
+# LOCK=1 (background: the lock button instead of home; the phone then needs a second unlock). Needs Xcode, flutter,
+# ffmpeg, cloudflared, uv; LR-P1 not held by another phone, its card backlog cleared, this Mac without a bond to it.
+# The UI tests build and run with XCODE_UI (default Xcode 27: the iPhone runs iOS 27, which Xcode 26.6's XCTest cannot
+# drive, 10-05); everything else uses the selected Xcode.
 set -uo pipefail
 XCODE_UI=${XCODE_UI:-/Applications/Xcode-27.app/Contents/Developer}
 cd "$(dirname "$0")"
 E=$PWD
 W=${TMPDIR:-/tmp}/lr-uitest; R=$W/$(date +%m%d-%H%M); mkdir -p "$R"
 APP=com.suyiiyii.liverecord.uitest
-DEV=${LR_DEVICE:-73D21723-EAD4-543D-A190-746CA7BCD76A}  # SuPhone17
-NAME=${LR_NAME:-LR-P1-BDAE} FAKE= BUILD=
+DEV=${LR_DEVICE:?the iPhone: its identifier in xcrun devicectl list devices}
+NAME=${LR_NAME:-} FAKE= BUILD=
 while [ "${1:-}" = --build ] || [ "${1:-}" = --fake ]; do
   [ "$1" = --build ] && BUILD=1; [ "$1" = --fake ] && { FAKE=1; NAME=LR-MAC-BEEF; }; shift
 done
+[ -n "$NAME" ] || { echo "LR_NAME: the recorder's BLE name (or --fake)" >&2; exit 2; }
 STEPS=${*:-setup add listed live pause away background quit kill kicked readd unbind finish}
 
 log() { echo "$(date +%T) $*" | tee -a "$R/run.log"; }
@@ -47,7 +49,8 @@ unlocked() {
 }
 N=0
 ui() {  # one test of RunnerUITests (testLaunch: ui Launch), VAR=value for it; its LRUI lines into run.log
-  local t=$1; shift; local vars=(TEST_RUNNER_LR_NAME="$NAME" TEST_RUNNER_LR_REAL="$([ -z "$FAKE" ] && echo 1)")
+  local t=$1; shift; local vars=(TEST_RUNNER_LR_NAME="$NAME" TEST_RUNNER_LR_REAL="$([ -z "$FAKE" ] && echo 1)"
+    TEST_RUNNER_LR_DAILY="${LR_DAILY:-}")
   for v in "$@"; do vars+=("TEST_RUNNER_$v"); done
   local try rc
   for try in 1 2 3; do
@@ -174,7 +177,8 @@ fake_bind() {  # the fake by its identifier, as run.sh: the app logs what it see
 
 step_listed() {  # Settings › Bluetooth lists it (the 忽略此设备 advice needs that)
   if [ -n "$FAKE" ]; then  # the screens only, read-only: the real recorder paired for the real app
-    NAME=LR-X1-567E ui Listed && verdict listed SKIP "fake: Settings › Bluetooth read (LR-X1-567E listed)" \
+    [ -n "${LR_DAILY:-}" ] || { verdict listed SKIP "fake: no LR_DAILY to look for"; return; }
+    NAME=$LR_DAILY ui Listed && verdict listed SKIP "fake: Settings › Bluetooth read ($LR_DAILY listed)" \
       || verdict listed SKIP "fake: Settings › Bluetooth not read (ui log)"
     return
   fi

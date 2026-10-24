@@ -1,9 +1,9 @@
-# The relay's key (README.md): 64 hex digits in a file outside the repository, the one relay.py reads. Written into a
+# The relay's key (README.md): 64 hex digits in the file RELAY_KEY_FILE names, the one relay.py reads. Written into a
 # header in the build directory, so it shows up in no command line or log.
 if(NOT CMAKE_BUILD_EARLY_EXPANSION)
     set(key_file "$ENV{RELAY_KEY_FILE}")
     if(NOT key_file)
-        set(key_file "$ENV{HOME}/code/lr-swd/relay/relay.key")
+        message(FATAL_ERROR "set RELAY_KEY_FILE to the relay's key file (README.md)")
     endif()
     file(READ "${key_file}" key)
     string(STRIP "${key}" key)

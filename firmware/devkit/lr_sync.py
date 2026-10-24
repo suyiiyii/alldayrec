@@ -3,9 +3,9 @@ too), optionally follow the stream (LIVE) for a while and check what came that w
 back on the wall clock, write one WAV per continuous run; with --server, send the dated runs as Ogg pieces to
 /api/chunks under the recorder's name, as the phone app does. --delete removes what was kept (sent, or written here
 when undated) from the card; the open file stays. `log` prints the recorder's event log (src/lr_log.h) as a timeline.
-    uv run --no-project --with bleak python lr_sync.py OUT_DIR [--follow SECONDS] [--delete] [--name LR-X1-567E]
+    uv run --no-project --with bleak python lr_sync.py OUT_DIR [--follow SECONDS] [--delete] [--name LR-P3-XXXX]
         [--server URL --token T]
-    uv run --no-project --with bleak python lr_sync.py log [--name LR-X1-567E] [--from SEQ]
+    uv run --no-project --with bleak python lr_sync.py log [--name LR-P3-XXXX] [--from SEQ]
 """
 import asyncio
 import ctypes

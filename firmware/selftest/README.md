@@ -4,8 +4,8 @@
 
 ```bash
 python3 firmware/selftest/selftest.py build                   # 编译，NCS v2.7.0，和 lr.sh 一样
-uv run firmware/selftest/selftest.py flash 1F8D7E0D3B8EFBD5   # 只刷这一块板
-uv run firmware/selftest/selftest.py run 1F8D7E0D3B8EFBD5     # 跑全部检查，打印 PASS/FAIL 报告；有 FAIL 时退出码为 1
+uv run firmware/selftest/selftest.py flash SERIAL             # 只刷这一块板
+uv run firmware/selftest/selftest.py run SERIAL               # 跑全部检查，打印 PASS/FAIL 报告；有 FAIL 时退出码为 1
 ```
 
 - **板子用 USB 序列号指定**：就是芯片的 DEVICEID，bootloader 和自检固件里都一样，`ioreg -p IOUSB -l -w0` 能看到。

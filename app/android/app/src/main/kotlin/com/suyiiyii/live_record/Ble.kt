@@ -63,7 +63,7 @@ object Ble {
         setByteBuffer("csd-2", le(8) { putLong(80_000_000) })
     }
 
-    /** A unit's full name (LR-P1-BDAE: board and address); the advertisement alone carries only LR-P1. */
+    /** A unit's full name (LR-P1-XXXX: board and address); the advertisement alone carries only LR-P1. */
     fun fullName(n: String?) = n != null && Regex("LR-[A-Z0-9]+-[0-9A-F]{4}").matches(n)
 
     /** A unit's full name without its scan response: the board name in the advertisement (LR-P1) and the last two

@@ -87,7 +87,7 @@ cc ... test/store_check.c
 在 Mac 上实时听一台录音设备：`lr_listen.py` 只连 `--name` 指定的那一台（蓝牙名完全一致，且广播可连接，也就是没有手机连着），订阅 LIVE，边解码边播放，延迟约 0.4 s。每秒打印一行：RMS、50 Hz 哼声（50–250 Hz 谐波合计）、≥10 ms 全 0 的毫秒数、满幅样本数、链路丢的毫秒数、从麦克风到喇叭的延迟。只写 TIME，不发 CTRL 命令：
 
 ```bash
-uv run --no-project --with bleak --with sounddevice python lr_listen.py --name LR-P3-92D2 [--seconds 60]
+uv run --no-project --with bleak --with sounddevice python lr_listen.py --name LR-P3-XXXX [--seconds 60]
 uv run --no-project --with bleak python lr_listen.py --selftest
 ```
 

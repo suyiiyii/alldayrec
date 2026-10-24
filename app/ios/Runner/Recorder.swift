@@ -498,7 +498,7 @@ final class Uploader: Thread {
   init(dir: URL) { self.dir = dir }
 
   /// A queued file's start (unix ms) and sample count: <start>_<n>.ogg, or <start>.ogg for a piece a kill cut short;
-  /// the BLE recorder's carry its name instead: <start>@LR-P1-BDAE.ogg, uploaded as that device.
+  /// the BLE recorder's carry its name instead: <start>@LR-P1-XXXX.ogg, uploaded as that device.
   static func piece(_ f: URL) -> (start: Int64, n: Int64?, device: String?)? {
     let at = f.deletingPathExtension().lastPathComponent.split(separator: "@", maxSplits: 1)
     let p = at[0].split(separator: "_").map { Int64($0) }

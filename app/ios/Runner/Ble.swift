@@ -1,7 +1,7 @@
 // The BLE recorder (LR-X1 / LR-P1, our firmware) on iOS: port of the Android app's Ble.kt over CoreBluetooth. The
 // record stream itself (mirror, dated Ogg pieces) is Store.swift. Where iOS differs:
 //  - no Bluetooth address: a recorder is its peripheral identifier (stable on this phone), and its full name
-//    (LR-P1-BDAE) comes only with the scan response (the advertisement has LR-P1)
+//    (LR-P1-XXXX) comes only with the scan response (the advertisement has LR-P1)
 //  - no bond API: iOS pairs by itself when the recorder asks for encryption (its own dialog) and keeps the keys until
 //    the person forgets the recorder in Settings › Bluetooth. A recorder that has forgotten this phone fails the
 //    encryption ("peer removed pairing information") and iOS does not pair again until then: binding it again needs
@@ -19,7 +19,7 @@ enum Ble {
   static let dis = CBUUID(string: "180A"), model = CBUUID(string: "2A24"), fwRev = CBUUID(string: "2A26")
   static let timeEveryMs: Int64 = 10 * 60_000  // the phone's clock into the stream again: the board's drifts
 
-  /// A unit's full name (LR-P1-BDAE: board and address).
+  /// A unit's full name (LR-P1-XXXX: board and address).
   static func isFull(_ n: String?) -> Bool { n?.range(of: "^LR-[A-Z0-9]+-[0-9A-F]{4}$", options: .regularExpression) != nil }
 
   /// The best name of `names` (advertisement or scan response, iOS's name cache): a full one, else the board name.

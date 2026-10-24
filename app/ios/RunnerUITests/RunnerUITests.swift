@@ -3,9 +3,9 @@
 // never open), in iOS's dialogs (SpringBoard: Bluetooth permission, pairing) and in Settings › Bluetooth. uitest.sh runs
 // them one at a time and judges each step from the test server and LR-P1's adverts; a test passing only means the taps
 // went through and the screen said what was expected. Lines "LRUI <what>" in the output are read by uitest.sh.
-// Parameters come from uitest.sh's environment with TEST_RUNNER_ in front: LR_NAME (the recorder), LR_E2E (testLaunch:
-// the app's settings, Recorder.launch()), LR_E2E_KILL (testLaunch: the app ends itself after that many seconds),
-// LR_PAUSE_S (testPause), LR_WAIT_S (how long to wait for the link).
+// Parameters come from uitest.sh's environment with TEST_RUNNER_ in front: LR_NAME (the recorder), LR_DAILY (the real
+// app's recorder, never forgotten), LR_E2E (testLaunch: the app's settings, Recorder.launch()), LR_E2E_KILL (testLaunch:
+// the app ends itself after that many seconds), LR_PAUSE_S (testPause), LR_WAIT_S (how long to wait for the link).
 import XCTest
 
 final class Flow: XCTestCase {
@@ -13,7 +13,7 @@ final class Flow: XCTestCase {
   let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
   let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
   let env = ProcessInfo.processInfo.environment
-  var recorder: String { env["LR_NAME"] ?? "LR-P1-BDAE" }
+  var recorder: String { env["LR_NAME"] ?? "LR-MAC-BEEF" }
   var waitS: Double { Double(env["LR_WAIT_S"] ?? "") ?? 180 }
 
   override func setUp() { continueAfterFailure = false }
@@ -236,8 +236,8 @@ final class Flow: XCTestCase {
 
   /// Settings › Bluetooth › the recorder ⓘ › 忽略此设备 (nothing to do when it is not listed).
   func forget() {
-    // only the Mac's fake, unless uitest.sh runs with a real board (LR_REAL=1); never the owner's daily recorder
-    XCTAssert(recorder.hasPrefix("LR-MAC-") || (env["LR_REAL"] == "1" && recorder != "LR-X1-567E"), "not forgetting \(recorder)")
+    // only the Mac's fake, unless uitest.sh runs with a real board (LR_REAL=1); never the real app's (LR_DAILY)
+    XCTAssert(recorder.hasPrefix("LR-MAC-") || (env["LR_REAL"] == "1" && recorder != env["LR_DAILY"]), "not forgetting \(recorder)")
     bluetooth()
     let cell = row(recorder)
     guard cell.waitForExistence(timeout: 10) else { return say("forget: \(recorder) not listed") }

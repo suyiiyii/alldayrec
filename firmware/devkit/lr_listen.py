@@ -6,7 +6,7 @@ clock (the stream's 'T' record): RMS, 50 Hz hum (the 50..250 Hz harmonics togeth
 Connects only to the recorder named exactly --name, and only once it advertises connectable: one a phone holds is
 reported, not fought for. Read-only: it writes TIME, as every phone connection does (and pairs, the first time).
 Ends on Ctrl-C or after --seconds; a link that goes is found again.
-    uv run --no-project --with bleak --with sounddevice python lr_listen.py --name LR-P3-92D2 [--seconds N]
+    uv run --no-project --with bleak --with sounddevice python lr_listen.py --name LR-P3-XXXX [--seconds N]
     uv run --no-project --with bleak python lr_listen.py --selftest      (no recorder, no speakers)
 """
 import array

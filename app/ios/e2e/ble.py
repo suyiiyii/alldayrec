@@ -1,8 +1,8 @@
 """This Mac as a second phone near a real recorder, for uitest.sh (bleak): its adverts, and taking it over. Exit 0: done,
 1: failed, 2: not found.
-    uv run --no-project --with bleak python ble.py watch LR-P1-BDAE SECS OUT.jsonl   every advert: state byte, connectable
-    uv run --no-project --with bleak python ble.py forget LR-P1-BDAE    pair (the Mac may ask to) and FORGET the other phones
-    uv run --no-project --with bleak python ble.py enc LR-P1-BDAE       exit 0 if an encrypted read works (a bond it knows)
+    uv run --no-project --with bleak python ble.py watch LR-P3-XXXX SECS OUT.jsonl   every advert: state byte, connectable
+    uv run --no-project --with bleak python ble.py forget LR-P3-XXXX    pair (the Mac may ask to) and FORGET the other phones
+    uv run --no-project --with bleak python ble.py enc LR-P3-XXXX       exit 0 if an encrypted read works (a bond it knows)
 State byte (scan response, company 0xFFFF): bit0 bound, bit1 connected, bit2 paused (firmware transport.c lr_status)."""
 import asyncio
 import json

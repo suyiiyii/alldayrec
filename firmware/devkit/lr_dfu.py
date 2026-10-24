@@ -2,7 +2,7 @@
 nRF52 bootloader, Nordic legacy DFU), then a package made by `lr.sh pkg` is sent. The phone app does the same with
 Nordic's DFU library. If a transfer fails midway, do not reset the bootloader (CP 0x06): with no valid app it comes
 back in USB-only DFU mode (10-03) and needs `lr.sh flash` over USB.
-    uv run --no-project --with bleak python lr_dfu.py PACKAGE.zip --name LR-P1-BDAE
+    uv run --no-project --with bleak python lr_dfu.py PACKAGE.zip --name LR-P3-XXXX
 """
 import asyncio
 import json

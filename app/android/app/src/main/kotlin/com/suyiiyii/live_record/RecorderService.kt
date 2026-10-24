@@ -267,7 +267,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         const val BATCH_GAP_MS = 1500L  // starts further apart than this are not one stretch (only 1 s pieces get batched)
         /** The pieces waiting, oldest first: the directory is the queue. */
         fun queue(dir: File) = dir.listFiles { f -> f.name.endsWith(".ogg") }?.sortedBy { it.name } ?: emptyList()
-        /** A piece's file name is its start (ms) and, for the BLE recorder, @ its name: start@LR-P1-BDAE.ogg */
+        /** A piece's file name is its start (ms) and, for the BLE recorder, @ its name: start@LR-P1-XXXX.ogg */
         fun startMs(f: File) = f.nameWithoutExtension.substringBefore('@').toLong()
         fun deviceOf(f: File) = f.nameWithoutExtension.substringAfter('@', "")
 

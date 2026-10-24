@@ -6,7 +6,7 @@ with none of them and lends no USB port. find() and client() take the place of b
 BleakScanner.find_device_by_filter() and BleakClient(), with the calls our test scripts make:
 
     async with Relay() as r:
-        dev = await r.find(lambda d, a: a.local_name == "LR-P2-6279", 15, prefix="LR-P2")
+        dev = await r.find(lambda d, a: a.local_name == "LR-P3-XXXX", 15, prefix="LR-P3")
         async with r.client(dev) as c:
             await c.read_gatt_char(FW_REV)
 
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from bleak import BleakClient, BleakScanner
 
 SVC, CMD, EVT = (f"5aaa000{i}-610b-45d5-850b-509657eef28d" for i in (1, 2, 3))
-KEY_FILE = os.environ.get("RELAY_KEY_FILE", os.path.expanduser("~/code/lr-swd/relay/relay.key"))
+KEY_FILE = os.environ.get("RELAY_KEY_FILE")  # the relay's key, 64 hex digits in a file outside the repository
 HELLO, AUTH, SCAN, CONNECT, DISCONNECT, READ, WRITE, PAIR = 0x01, 0x02, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15
 EV_HELLO, EV_AUTH, EV_ADV, EV_SCAN_END, EV_CONNECTED, EV_ATTR, EV_ATTRS_END, EV_DISCONNECTED = (
     0x81, 0x82, 0x90, 0x91, 0x92, 0x93, 0x94, 0x95)
@@ -57,6 +57,8 @@ class Relay:
     """One session with the relay. Its link to a board ends with this session (the relay drops it)."""
 
     async def __aenter__(self):
+        if not KEY_FILE:
+            raise RelayError("set RELAY_KEY_FILE to the relay's key file (README.md)")
         dev = await BleakScanner.find_device_by_filter(lambda d, a: SVC in a.service_uuids, 20)
         if not dev:
             raise RelayError("relay not found (is it powered?)")

@@ -253,10 +253,10 @@ class StoreTest {
 /** The list names a recorder without its scan response (10-04: a recorder busy with another phone gave none). */
 class NameTest {
     @Test fun name() {
-        assertEquals("LR-X1-567E", Ble.fullName(listOf("LR-X1-567E", null), "ED:AF:08:75:56:7E"))  // scan response
-        assertEquals("LR-X1-567E", Ble.fullName(listOf("LR-X1", null), "ED:AF:08:75:56:7E"))       // advertisement only
-        assertEquals("LR-P1-BDAE", Ble.fullName(listOf(null, "LR-P1-BDAE"), "D6:07:F3:A3:BD:AE"))  // the name cache
-        assertEquals(null, Ble.fullName(listOf("Omi", null), "D6:07:F3:A3:BD:AE"))
+        assertEquals("LR-X1-3F2A", Ble.fullName(listOf("LR-X1-3F2A", null), "C0:FF:EE:00:3F:2A"))  // scan response
+        assertEquals("LR-X1-3F2A", Ble.fullName(listOf("LR-X1", null), "C0:FF:EE:00:3F:2A"))       // advertisement only
+        assertEquals("LR-P1-1A2B", Ble.fullName(listOf(null, "LR-P1-1A2B"), "C0:FF:EE:00:1A:2B"))  // the name cache
+        assertEquals(null, Ble.fullName(listOf("Omi", null), "C0:FF:EE:00:1A:2B"))
     }
 }
 

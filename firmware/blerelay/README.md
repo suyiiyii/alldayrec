@@ -10,12 +10,12 @@ git clone --depth 1 --recursive --shallow-submodules -b v5.5.5 https://github.co
 ~/esp/esp-idf-v5.5.5/install.sh esp32s3
 . ~/esp/esp-idf-v5.5.5/export.sh
 idf.py -C firmware/blerelay build
-idf.py -C firmware/blerelay -p PORT flash           # PORT：序列号是这块 ESP32 的 MAC（94:A9:90:D0:32:D0）的那个口，见 uvx --from pyserial pyserial-ports -v
+idf.py -C firmware/blerelay -p PORT flash           # PORT：序列号是这块 ESP32 的 MAC 的那个口，见 uvx --from pyserial pyserial-ports -v
 uv run firmware/blerelay/relay.py scan LR-          # 中继听到的设备
 uv run firmware/blerelay/relay.py info <测试板的蓝牙名>   # 连上板子，列出特征，读设备信息，配对
 ```
 
-- **密钥**：Mac 连上中继后要先过 HMAC-SHA256 挑战应答（每次连接一个新的随机数），不然中继什么都不做，免得旁边的人借它去连、去刷我们的板子。密钥是 64 位十六进制，放在仓库外的 `~/code/lr-swd/relay/relay.key`（权限 600；`RELAY_KEY_FILE` 可以改路径）。编译时把它写进构建目录里的头文件，不出现在命令行和日志里；`relay.py` 读同一个文件。换密钥就重新编译、重新刷。
+- **密钥**：Mac 连上中继后要先过 HMAC-SHA256 挑战应答（每次连接一个新的随机数），不然中继什么都不做，免得旁边的人借它去连、去刷我们的板子。密钥是 64 位十六进制，放在仓库外的一个文件里（权限 600），路径由环境变量 `RELAY_KEY_FILE` 给出，编译和 `relay.py` 都要设。编译时把它写进构建目录里的头文件，不出现在命令行和日志里；`relay.py` 读同一个文件。换密钥就重新编译、重新刷。
 - **脚本怎么改用中继**：`relay.py` 的 `Relay.find()` 和 `Relay.client()` 对应 bleak 的 `BleakScanner.find_device_by_filter()` 和 `BleakClient()`，`client()` 上有 `read_gatt_char`、`write_gatt_char`、`start_notify`，另外多一个 `pair()`。整个测试放在一个 `async with Relay() as r:` 里。
 - **一次只连一块板**。Mac 断开时，中继会同时断开被测板：录音设备只接受一个连接，中继一直占着，手机就连不上了。
 - **扫描只转发名字匹配前缀的广播包**（广播包或扫描响应，哪个里有名字就转发哪个）。校园里设备很多，全部转发会把 Mac 那条链路挤满。
