@@ -90,10 +90,23 @@ const hello =
           ? "下午好"
           : "晚上好";
 
-// 问问今天: the question goes to the conversations page, which asks the AI with it
+// 问问今天: the question goes to the conversations page, which asks the AI with it.
+// On a phone (and inside the app) the box is a round button that opens it as a sheet (a modal <dialog>).
 const SUGGEST = ["今天答应了谁什么", "昨天的回顾", "帮我写跟进消息"];
 const q = ref("");
-const ask = (text: string) => text && router.push({ path: "/conversations", query: { ask: text } });
+const sheet = ref<HTMLDialogElement>(),
+  input = ref<HTMLInputElement>(),
+  fab = ref<HTMLButtonElement>();
+function ask(text: string) {
+  if (!text) return;
+  sheet.value?.close();
+  router.push({ path: "/conversations", query: { ask: text } });
+}
+// focus inside the tap itself: iOS raises the keyboard only for a focus() in the user's gesture
+function openSheet() {
+  sheet.value?.showModal();
+  input.value?.focus();
+}
 </script>
 
 <template>
@@ -147,6 +160,37 @@ const ask = (text: string) => text && router.push({ path: "/conversations", quer
           </button>
         </div>
       </form>
+      <!-- the same box as a sheet; a tap on the dim backdrop (the dialog itself) or Escape closes it -->
+      <dialog
+        ref="sheet"
+        class="sheet"
+        aria-label="问 AI"
+        @click.self="sheet?.close()"
+        @close="fab?.focus()"
+      >
+        <form @submit.prevent="ask(q)">
+          <div class="chips">
+            <button v-for="s in SUGGEST" :key="s" type="button" class="chip" @click="ask(s)">
+              {{ s }}
+            </button>
+          </div>
+          <div class="row">
+            <input
+              ref="input"
+              v-model.trim="q"
+              type="search"
+              enterkeyhint="send"
+              placeholder="问问今天…"
+            />
+            <button class="btn-primary" :disabled="!q" aria-label="问 AI">
+              <Icon name="sparkles" :size="18" />
+            </button>
+          </div>
+        </form>
+      </dialog>
+      <button ref="fab" class="fab btn-primary" aria-label="问 AI" @click="openSheet">
+        <Icon name="sparkles" :size="24" />
+      </button>
     </template>
   </main>
 </template>
@@ -264,5 +308,68 @@ h1 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+/* a phone, and inside the app: the box folds into a round button over the bottom right */
+.fab {
+  display: none;
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--space-4) + var(--tabbar));
+  z-index: 3;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 600px) {
+  .ask {
+    display: none;
+  }
+  .fab {
+    display: inline-flex;
+  }
+  main {
+    padding-bottom: 88px; /* the last conversation scrolls clear of the button */
+  }
+}
+html.in-app .ask {
+  display: none;
+}
+html.in-app .fab {
+  display: inline-flex;
+}
+html.in-app main {
+  padding-bottom: 88px;
+}
+.sheet[open] + .fab {
+  display: none;
+}
+/* the sheet: from the bottom edge, full width; the form fills it, so a tap on the dialog itself is the backdrop */
+.sheet {
+  width: 100%;
+  max-width: none;
+  margin: auto 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  color: var(--fg);
+}
+.sheet[open] {
+  animation: up 0.2s ease-out;
+}
+@keyframes up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+.sheet form {
+  padding: var(--space-4) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
 }
 </style>
