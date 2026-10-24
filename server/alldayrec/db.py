@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; 
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
     UNIQUE (conv, label));
 CREATE TABLE IF NOT EXISTS apart (voice TEXT NOT NULL, grp TEXT NOT NULL, PRIMARY KEY (voice, grp));
-CREATE TABLE IF NOT EXISTS people (name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS people (name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);  -- bank.py: the mean of enrolled
+CREATE TABLE IF NOT EXISTS enrolled (          -- bank.py: what taught each people row: a sentence (row: its rowid in sentences,
+    name TEXT NOT NULL, conv TEXT, row INTEGER, n INTEGER NOT NULL, e BLOB NOT NULL);  -- n 1, e its voiceprint), or with row
+CREATE INDEX IF NOT EXISTS enrolled_name ON enrolled(name);  -- NULL the people row as it was before this table (n its sentences)
 CREATE TABLE IF NOT EXISTS aliases (alias TEXT PRIMARY KEY, name TEXT NOT NULL);  -- another way a person is called (A哥 = A)
 CREATE TABLE IF NOT EXISTS name_hints (conv TEXT PRIMARY KEY, body TEXT NOT NULL);  -- hints.py: what each label was called; suggestions only
 CREATE TABLE IF NOT EXISTS profiles (name TEXT PRIMARY KEY, body TEXT NOT NULL);  -- profiles.py: a named person's profile, every line with its sources
@@ -109,7 +112,10 @@ def init():
     too (a first start: an empty volume)."""
     tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
     marks_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_marks'").fetchone() is None
+    enrolled_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'enrolled'").fetchone() is None
     conn().executescript(SCHEMA)
+    if enrolled_new:  # 10-25: the people bank was a running mean; what it learnt before stays, as one row each
+        conn().execute("INSERT INTO enrolled SELECT name, NULL, NULL, n, e FROM people")
     if marks_new:  # 10-24: marks were feedback lines (TODO_MARKS) keyed by the todo's text; the lines stay, the log for the prompt
         with tx() as c:
             for conv, at, text in c.execute("SELECT conv, at, text FROM feedback").fetchall():

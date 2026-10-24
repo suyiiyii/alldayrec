@@ -6,7 +6,9 @@ import re
 
 from fastapi import APIRouter, HTTPException
 
+from alldayrec import bank
 from alldayrec import db
+from alldayrec import speakers
 from alldayrec import ws
 from alldayrec.conversations import IGNORE
 from alldayrec.core import conversation_rows, find_conversation, queue_summary, state
@@ -75,11 +77,14 @@ async def sentence_speaker(sid: str, body: dict):
                       "apart": [tuple(v) for v in t.execute("SELECT voice, grp FROM apart WHERE voice IN (?, ?)", keys)]}
             t.execute("UPDATE sentences SET speaker = ? WHERE rowid = ?", (to, r["rowid"]))
             t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(after, ensure_ascii=False), c["id"]))
+            if frm != "我" and not speakers.ANON.fullmatch(frm):  # what it taught the people bank as frm (bank.py)
+                before["enrolled"] = bank.forget(t, frm, [r["rowid"]])
+        bank.sync(frm)
         if after != c["participants"]:
             T().speakers["at"] = 0.0
             queue_summary(c, keep=True)
         learn = to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed")
-        rows = [r] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
+        rows = [{**r, "conv": c["id"]}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
         ws.note(f"对话 {c['start'][11:19]}：{r['start'][11:19]} 这一句 {frm} 改为 {to}", "state")
     await enroll_soon(to, rows)
     return {"speaker": to, "participants": after, "voiceprints": len(rows), "undo": keep_undo([before])}

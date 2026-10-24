@@ -300,7 +300,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, the centroid a 「这是我」 added to 我's voiceprint dropped. | body: JSON object |
+| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, what the renamed sentences taught the people bank (the ledger, bank.py) both ways, the centroid a 「这是我」 added to 我's voiceprint dropped. 409 when the id is unknown (taken back already, too old, the server restarted) or a conversation changed since. | body: JSON object |
 
 ### `/api/speakers`
 
@@ -375,3 +375,22 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | Method | Description | Parameters |
 |---|---|---|
 | `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start; 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
+
+### `/api/stars`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start and title. ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list. | — |
+
+### `/api/sentences/{sid}/star`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `PUT` | (no docstring) | `sid` (path, string)<br>body: JSON object |
+| `DELETE` | (no docstring) | `sid` (path, string) |
+
+### `/api/sentences/{sid}/speaker`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | This sentence was said by `to`. | `sid` (path, string)<br>body: JSON object |

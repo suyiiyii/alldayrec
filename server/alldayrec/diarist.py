@@ -1,7 +1,8 @@
 """Conversation-level speaker labels. Every new sentence re-clusters the open conversation's voiceprints
 (ReDimNet2, average-link cosine) and takes its cluster's label: 我 when that cluster's mean voiceprint is
 close to the owner bank (>= OWNER_MIN; a split owner stays 我 in every piece), else a person's name when that
-close to a voiceprint named by hand on the conversation page (>= PEOPLE_MIN; closer than the bank wins when both pass), else the S<n> most of the cluster's earlier sentences
+close to a voiceprint named by hand on the conversation page (>= PEOPLE_MIN; closer than the bank wins when both pass;
+by PEOPLE_MARGIN over the next name and 我, else no name), else the S<n> most of the cluster's earlier sentences
 carry, so ids follow membership as clusters grow and merge. Only the new sentence is labelled; earlier
 rows are never rewritten. Case replays 09-29: see artifacts/record/voiceprint.
 
@@ -17,6 +18,9 @@ MIN_DUR = 1.0     # shorter sentences are not clustered: they join the nearest l
 JOIN = float(os.environ.get("DIAR_JOIN", "0.35"))  # ... when at least this close, else S?; also for a lone long sentence
 MIN_ME = 3        # a cluster needs this many sentences before it can be 我 or a name
 PEOPLE_MIN = float(os.environ.get("PEOPLE_MIN", "0.7"))  # same evidence as OWNER_MIN: other people score <= 0.63 against one person's voiceprint
+# a name also beats the next name and 我 by this much: on one instance 25 voices of others passed PEOPLE_MIN against a
+# person's voiceprint, 5 of them the owner's own (#295)
+PEOPLE_MARGIN = 0.05
 KEEP = 1500       # clustering is O(n^2): a four-hour conversation keeps its latest sentences
 SR = 16000
 
@@ -33,6 +37,16 @@ def _unit(v):
 
 def _closest(m: np.ndarray, people: dict[str, np.ndarray]) -> tuple[float, str | None]:
     return max(((float(m @ v), k) for k, v in people.items()), default=(0.0, None))
+
+
+def _name(m: np.ndarray, owner: float, people: dict[str, np.ndarray]) -> str | None:
+    """The name of a cluster with mean voiceprint m scoring `owner` against the bank: the closest named voice when it
+    passes PEOPLE_MIN and is PEOPLE_MARGIN closer than both the next one and the bank (as _me lets a closer name win,
+    a name close to 我 or to another name is no name: S<n>, named by hand when it is someone)."""
+    s = sorted(((float(m @ v), k) for k, v in people.items()), reverse=True)
+    if s and s[0][0] >= PEOPLE_MIN and s[0][0] - max(s[1][0] if len(s) > 1 else 0.0, owner) >= PEOPLE_MARGIN:
+        return s[0][1]
+    return None
 
 
 def _me(owner: float, near: tuple[float, str | None]) -> bool:
@@ -85,9 +99,9 @@ class Diarist:
         if c in me:
             self.ids[i] = "我"
             return "我", round(owner[c], 3)
-        if (lab == c).sum() >= MIN_ME and near[c][0] >= PEOPLE_MIN:
-            self.ids[i] = near[c][1]
-            return near[c][1], round(near[c][0], 3)
+        if (lab == c).sum() >= MIN_ME and (who := _name(mean[c], owner[c], self.people)):
+            self.ids[i] = who
+            return who, round(near[c][0], 3)
         clusters = sorted(set(lab) - me)
         known = sorted({v for v in self.ids if v not in (None, "S?", "我")})
         cmap = {}
@@ -156,11 +170,11 @@ def relabel(E: list, dur: list[float], bank: dict[str, np.ndarray], groups: list
         for c in sorted(set(lab), key=lambda c: min(min(units[k]) for k, l in zip(ks, lab) if l == c)):
             members = [i for k, l in zip(ks, lab) if l == c for i in units[k]]
             m = _unit(np.mean([E[i] for i in members if dur[i] >= MIN_DUR], 0))
-            near = _closest(m, people)
-            if len(members) >= MIN_ME and _me(max((float(m @ o) for o in bank_v), default=0), near):
+            owner = max((float(m @ o) for o in bank_v), default=0)
+            if len(members) >= MIN_ME and _me(owner, _closest(m, people)):
                 names[c] = "我"
-            elif len(members) >= MIN_ME and near[0] >= PEOPLE_MIN:
-                names[c] = near[1]
+            elif len(members) >= MIN_ME and (who := _name(m, owner, people)):
+                names[c] = who
             else:
                 n_s += 1
                 names[c] = f"S{n_s}"
@@ -220,4 +234,11 @@ if __name__ == "__main__":
     d = Diarist({"mic": me}, people={"王五": f})
     on = [d.add(e, 2.0)[0] for e in E2]
     assert set(l for l, v in zip(on[8:], seq2[8:]) if v is f) == {"王五"} and set(l for l, v in zip(on[8:], seq2[8:]) if v is me) == {"我"}, on
+    # 王五 and 赵六 sound alike: a cluster close to both by less than PEOPLE_MARGIN is no name, either side
+    g = _unit(f + 0.01 * rng.normal(size=192))
+    near2 = {"王五": f, "赵六": g}
+    assert _name(f, 0.5, {"王五": f}) == "王五" and abs(float(f @ g) - 1) < PEOPLE_MARGIN, float(f @ g)
+    assert _name(_unit(f + g), 0.5, near2) is None and _name(f, 0.98, {"王五": f}) is None, "a name close to 我: none"
+    lab3 = relabel(E2, [2.0] * len(E2), {"mic": me}, people=near2)
+    assert "王五" not in lab3 and "赵六" not in lab3 and [l for l, v in zip(lab3, seq2) if v is me] == ["我"] * 16, lab3
     print("ok", out, named)

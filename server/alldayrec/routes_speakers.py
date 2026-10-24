@@ -14,6 +14,7 @@ import numpy as np
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from alldayrec import bank
 from alldayrec import db
 from alldayrec import hints
 from alldayrec import profiles
@@ -78,12 +79,16 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
         if h := db.name_hints(conv_id).get(conv_id):  # the names it was called go with it
             h["names"] = [{**x, **{k: to for k in ("who", "by") if x.get(k) == frm}} for x in h["names"]]
             db.put_name_hints(h, t)
+        if frm != "我" and not speakers.ANON.fullmatch(frm):  # what these sentences taught the people bank as frm
+            before["enrolled"] = bank.forget(t, frm, before["rows"])
+    if before.get("enrolled"):
+        bank.sync(frm)
     T().speakers["at"] = 0.0
     queue_summary(c, keep=True)
     long = []
     # S<n> means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank
     if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):
-        long = sorted((r for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5),
+        long = sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5),
                       key=lambda r: r["start"])[:ENROLL]
     ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
     # voiceprints: the sentences queued to learn from (a history conversation without its recording here gives none)
@@ -168,10 +173,10 @@ def keep_undo(befores: list[dict]) -> str:
 
 @router.post("/api/speakers/undo")
 async def speaker_undo(body: dict):
-    """Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and
-    name hints as they were, the summaries redone, the centroid a 「这是我」 added to 我's voiceprint dropped. Not a voice
-    learnt otherwise (enroll: a running mean in the people bank). 409 when the id is unknown (taken back already, too
-    old, the server restarted) or a conversation changed since."""
+    """Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins
+    and name hints as they were, the summaries redone, what the renamed sentences taught the people bank (the ledger,
+    bank.py) both ways, the centroid a 「这是我」 added to 我's voiceprint dropped. 409 when the id is unknown (taken back
+    already, too old, the server restarted) or a conversation changed since."""
     bs = T().undo.pop(body.get("undo"), None)
     if not bs:
         raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
@@ -190,7 +195,10 @@ async def speaker_undo(body: dict):
             t.executemany("INSERT INTO apart VALUES (?, ?)", b["apart"])
             if b["hints"]:
                 db.put_name_hints(b["hints"], t)
+            bank.forget(t, b["to"], b["rows"])  # learnt already (enroll); a later one skips sentences no longer to's
+            bank.restore(t, b.get("enrolled") or [])
     T().speakers["at"] = 0.0
+    bank.sync(*{x for b in bs for x in (b["from"], b["to"])})
     if k := bs[0].get("me"):  # 「这是我」's centroid
         forget_me(key=k)
     for cid in dict.fromkeys(b["conv"] for b in bs):
@@ -212,10 +220,12 @@ async def enroll_soon(to: str, rows: list[dict]):
 
 
 async def enroll(to: str, rows: list[dict]):
-    """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists; a
-    row heard as music (music.py) teaches nothing. A failure is logged: it must not end the tenant's tasks beside it."""
+    """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists: those
+    bank.pick keeps (alike within their label and to what to sounds like already, at most CAP a click), recorded each in
+    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py) teaches nothing.
+    A failure is logged: it must not end the tenant's tasks beside it."""
     try:
-        es = []
+        labels = {}  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
         for r in rows:
             if r.get("music"):
                 continue
@@ -223,15 +233,15 @@ async def enroll(to: str, rows: list[dict]):
                 x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
             except HTTPException:  # history conversations have no recording here
                 continue
-            es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
-        if es:  # no await from the read to the write: two of these for one name never lose one's sentences
-            n0, e0 = db.people().get(to, (0, np.zeros(len(es[0]))))
-            n = n0 + len(es)
-            mean = (e0 * n0 + np.sum(es, 0)) / n
-            db.conn().execute("INSERT OR REPLACE INTO people VALUES (?, ?, ?)", (to, n, db.blob(mean)))
-            for dia in T().dias:
-                dia.people[to] = mean / np.linalg.norm(mean)
-            ws.note(f"{to}：记住了 {len(es)} 句的声纹", "state")
+            labels.setdefault(r.get("conv"), []).append((r, await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)))
+        if labels:
+            ls = list(labels.items())
+            had = db.people().get(to)
+            keep = bank.pick([[e for _, e in l] for _, l in ls], had and had[1])
+            with db.tx() as t:
+                n = sum(bank.learn(t, to, conv, [l[j] for i2, j in keep if i2 == i]) for i, (conv, l) in enumerate(ls))
+            bank.sync(to)
+            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else ""), "state")
     except Exception:
         log.exception("enroll %s", to)
 

@@ -118,6 +118,8 @@ def test_enroll_skips_music(tmp_path, monkeypatch):
         return np.zeros(SR, np.int16).tobytes()
     monkeypatch.setattr(routes_speakers.routes_audio, "cut", fake_cut)
     monkeypatch.setitem(core.state, "embed", lambda x: np.ones(4) / 2)
-    row = lambda s, **k: dict(start=f"2026-10-25T10:00:0{s}", end=f"2026-10-25T10:00:0{s + 2}", **k)
+    row = lambda s, **k: dict(id=str(s), start=f"2026-10-25T10:00:0{s}", end=f"2026-10-25T10:00:0{s + 2}", speaker="甲", **k)
+    with db.tx() as t:  # learnt only while the sentence bears the name (bank.learn)
+        db.insert_sentences(t, [row(1), row(4)])
     anyio.run(routes_speakers.enroll, "甲", [row(1, music=1), row(4)])
     assert cut == ["2026-10-25T10:00:04"] and db.people()["甲"][0] == 1
