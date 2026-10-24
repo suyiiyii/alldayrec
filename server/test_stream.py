@@ -8,11 +8,11 @@ import time
 import anyio
 import numpy as np
 
-import asr
-import db
-import device_pipeline
-import qwen_stream
-import ws
+from alldayrec import asr
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec import qwen_stream
+from alldayrec import ws
 from test_backlog import DEVICE, SR, flac, heard, rig, save, st, tone
 
 

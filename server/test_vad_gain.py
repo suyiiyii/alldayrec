@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import scipy.signal as ss
 
-import infer
+from alldayrec import infer
 
 SR = 16000
 

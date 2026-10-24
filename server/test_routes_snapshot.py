@@ -1,7 +1,7 @@
 """The app's routes in the order they are matched, each with its handler's name, and its middleware: moving handlers
 between modules must leave both as they are (a route lost, added, moved ahead of another or answered by another function
 shows here). A change on purpose (a new route) updates ROUTES with it."""
-import server
+from alldayrec import server
 
 ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET,HEAD", "/openapi.json", "openapi"),

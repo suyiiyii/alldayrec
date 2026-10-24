@@ -13,10 +13,10 @@ import httpx2
 import numpy as np
 import pytest
 
-import asr
-import db
-import net
-import summary
+from alldayrec import asr
+from alldayrec import db
+from alldayrec import net
+from alldayrec import summary
 
 
 def test_calls(monkeypatch):

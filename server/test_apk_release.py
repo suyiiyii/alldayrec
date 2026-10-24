@@ -15,7 +15,8 @@ def instance(tmp: Path, name: str, apk: str | None = None) -> str:
     py = d / "server/.venv/bin/python"
     py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
     py.chmod(0o755)
-    (d / "server/apk.py").write_text("import sys; print(open(sys.argv[1]).read())")  # these APKs are their version
+    (d / "server/alldayrec").mkdir()
+    (d / "server/alldayrec/apk.py").write_text("import sys; print(open(sys.argv[1]).read())")  # these APKs are their version
     (d / "data").mkdir()
     if apk:
         (d / "data/live-record.apk").write_text(apk)

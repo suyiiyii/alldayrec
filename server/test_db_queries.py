@@ -5,8 +5,8 @@ import sqlite3
 
 import pytest
 
-import db
-import tenant
+from alldayrec import db
+from alldayrec import tenant
 
 
 def add(i, *, participants=None, summary=None, device=None):

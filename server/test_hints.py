@@ -9,13 +9,13 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-import core
-import db
-import hints
-import routes_audio
-import routes_speakers
-import tenant
-from routes_speakers import alias_set, apply_rename, keep_undo, label_suggestions, person, rename, speaker_undo
+from alldayrec import core
+from alldayrec import db
+from alldayrec import hints
+from alldayrec import routes_audio
+from alldayrec import routes_speakers
+from alldayrec import tenant
+from alldayrec.routes_speakers import alias_set, apply_rename, keep_undo, label_suggestions, person, rename, speaker_undo
 
 T = "2026-10-05T10:00:"
 ROWS = [dict(start=T + "01.000", end=T + "02.000", speaker="S1", text="老张，你来一下"),

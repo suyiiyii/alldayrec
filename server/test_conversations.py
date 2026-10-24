@@ -1,6 +1,6 @@
 """Conversation grouping: a sentence nobody could be named for (S?) still opens a conversation, but stays out of
 its participants and speech time."""
-from conversations import split
+from alldayrec.conversations import split
 
 T = "2026-10-05T10:00:"
 

@@ -5,9 +5,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import audio
-import db
-import pack_pieces
+from alldayrec import audio
+from alldayrec import db
+from alldayrec import pack_pieces
 
 
 def test_pack():

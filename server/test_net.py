@@ -14,13 +14,13 @@ import httpx2
 import numpy as np
 import pytest
 
-import ask
-import asr
-import db
-import net
-import qwen_asr
-import stepfun_asr
-import summary
+from alldayrec import ask
+from alldayrec import asr
+from alldayrec import db
+from alldayrec import net
+from alldayrec import qwen_asr
+from alldayrec import stepfun_asr
+from alldayrec import summary
 
 
 def mock(monkeypatch, handler):

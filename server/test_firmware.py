@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import firmware
+from alldayrec import firmware
 
 C1, C2 = "a" * 40, "b" * 40
 

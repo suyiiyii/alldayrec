@@ -20,7 +20,7 @@ export default defineConfig({
     __VUE_I18N_LEGACY_API__: false,
     __INTLIFY_PROD_DEVTOOLS__: false,
   },
-  build: { outDir: "../server/static/dist", emptyOutDir: true },
+  build: { outDir: "../server/alldayrec/static/dist", emptyOutDir: true },
   server: {
     proxy: {
       "/api": { target, changeOrigin: true, headers },

@@ -24,7 +24,7 @@ def instance(tmp: Path, name: str, tenants: str | None = None, mode: int = 0o600
 
 def deploy(tmp: Path, *instances: str, disabled: str = "") -> subprocess.CompletedProcess:
     tgz = tmp / "release.tgz"  # as deploy.sh packs it
-    subprocess.run(["tar", "-czf", tgz, "-C", HERE, "./tenant.py"], check=True)
+    subprocess.run(["tar", "-czf", tgz, "-C", HERE, "alldayrec/tenant.py"], check=True)
     (tmp / "bin").mkdir(exist_ok=True)  # systemctl: every unit enabled but those in $DISABLED
     (tmp / "bin/systemctl").write_text('#!/bin/sh\ncase " $DISABLED " in *" $2 "*) echo disabled; exit 1;; esac; echo enabled\n')
     (tmp / "bin/systemctl").chmod(0o755)

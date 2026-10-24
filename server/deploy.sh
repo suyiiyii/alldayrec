@@ -1,5 +1,5 @@
 #!/bin/bash
-# Put the server (server/*.py and the web app built into static/dist) live on the deploy host and check it, on every
+# Put the server (the alldayrec package, the web app built into it) live on the deploy host and check it, on every
 # instance LR_INSTANCES names (dir:unit, space separated; default /opt/alldayrec:alldayrec; test before production).
 #   server/deploy.sh            # HEAD (a clean origin/main): build, back up, install, restart, check
 #   server/deploy.sh check      # check what runs now (read only)
@@ -8,9 +8,10 @@
 # `bash -s`) is the remote command this script is piped into; it must run as root (systemctl, the instance dirs):
 # `sudo bash -s`, `wsl -u root -e bash -s`, ... scp puts the release in the login's home as lr-deploy.tgz; a remote shell
 # whose $HOME is another one is told where: LR_TGZ (`wsl -u root -e env LR_TGZ=/mnt/c/Users/me/lr-deploy.tgz bash -s`).
-# Each instance serves the tenants in its <dir>/tenants.json (server/tenant.py; made from its .env once by
-# server/tenants.sh), asked as them; a deploy installs nothing anywhere unless the new server reads every instance's
-# tenants.json (a server without one stops at its start).
+# An instance: <dir>/server/alldayrec (the package), <dir>/server/.venv, its unit running
+# <dir>/server/.venv/bin/python -m alldayrec in <dir>/server. It serves the tenants in <dir>/tenants.json
+# (server/alldayrec/tenant.py; made from its .env once by server/tenants.sh), asked as them; a deploy installs nothing
+# anywhere unless the new server reads every instance's tenants.json (a server without one stops at its start).
 # Each deploy keeps a backup with a copy of every tenant's live.db in <dir>/backup-deploy-<time>, <dir>/backup-last points
 # at it; a deploy that passes its check keeps only its own and the one before. An instance whose unit is disabled is
 # left alone: another one serves its tenants (server/tenants.sh merge).
@@ -29,10 +30,11 @@ if [ "${1:-}" != remote ]; then  # on this machine
     fi
     (cd "$root/web" && pnpm install --frozen-lockfile && pnpm exec vp run build)
     tmp=$(mktemp -d)
-    git -C "$root" rev-parse --short HEAD > "$tmp/COMMIT"
+    mkdir "$tmp/alldayrec"
+    git -C "$root" rev-parse --short HEAD > "$tmp/alldayrec/COMMIT"
     # explicit list, no excludes: bsdtar's * crosses /, an exclude once dropped dist/index.html; no ._ files
-    (cd "$root/server" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$tmp/release.tgz" ./*.py pyproject.toml uv.lock static/dist -C "$tmp" COMMIT)
-    tar -tzf "$tmp/release.tgz" | grep -qx static/dist/index.html || { echo "static/dist/index.html is not in the release" >&2; exit 1; }
+    (cd "$root/server" && COPYFILE_DISABLE=1 tar --no-xattrs -czf "$tmp/release.tgz" alldayrec/*.py alldayrec/static/dist pyproject.toml uv.lock -C "$tmp" alldayrec/COMMIT)
+    tar -tzf "$tmp/release.tgz" | grep -qx alldayrec/static/dist/index.html || { echo "alldayrec/static/dist/index.html is not in the release" >&2; exit 1; }
     scp -q "$tmp/release.tgz" "$HOST:lr-deploy.tgz"
   fi
   ssh "$HOST" "${LR_DEPLOY_SHELL:-bash -s} -- remote $mode $INSTANCES" < "$0"
@@ -75,8 +77,8 @@ started() {  # dir unit log-offset (after a restart): answering within 3 min, no
 }
 
 check() {  # dir unit: active, running the commit in its COMMIT, serving the pages, each asset index.html names, every tenant's API
-  local d=$1 u=$2 dist=$1/server/static/dist want got a p t n=0 bad= id data
-  want=$(cat "$d/server/COMMIT" 2> /dev/null || true)
+  local d=$1 u=$2 dist=$1/server/alldayrec/static/dist want got a p t n=0 bad= id data
+  want=$(cat "$d/server/alldayrec/COMMIT" 2> /dev/null || true)
   t=$(first "$d")
   [ "$(systemctl is-active "$u")" = active ] || bad+=" $u-not-active"
   got=$(get "$d" "$t" /api/status | python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"])') || got="(no /api/status)"
@@ -98,13 +100,11 @@ deploy() {  # dir unit: back up, install the release, restart, check
   b=$d/backup-deploy-$RUN
   mkdir -p "$b/old" "$b/new"
   tar -xzf "$TGZ" -C "$b/new" --no-same-owner
-  cp -a "$d"/server/*.py "$b/old/"
-  [ ! -f "$d/server/COMMIT" ] || cp -a "$d/server/COMMIT" "$b/old/"
   # the release's packages (its uv.lock) into the instance's venv first: added or changed, none removed (--inexact), so
   # the code running now and a rollback's run on them too; a failure stops here, nothing installed, nothing restarted
   (cd "$b/new" && UV_PROJECT_ENVIRONMENT="$d/server/.venv" "$UV" sync --frozen --inexact -q)
   # and every model file the release pins (infer.MODELS) in the instance's MODELS_DIR, or stop here the same way (a restart without them would fail)
-  (cd "$b/new" && MODELS_DIR="$(env_of "$d" MODELS_DIR)" "$d/server/.venv/bin/python" -c "import infer; infer.check()")
+  (cd "$b/new" && MODELS_DIR="$(env_of "$d" MODELS_DIR)" "$d/server/.venv/bin/python" -c "from alldayrec import infer; infer.check()")
   for f in pyproject.toml uv.lock; do [ ! -f "$d/server/$f" ] || cp -a "$d/server/$f" "$b/old/"; done
   # per tenant, the columns now (rollback drops those a release adds: old code inserts whole rows) and an online copy of the db
   while read -r id data; do
@@ -118,14 +118,16 @@ c.backup(sqlite3.connect(f"{sys.argv[2]}/live.db"))
 PY
   done < <(tenants "$d")
   INSTALLED+=" $d"
-  ln -sfn "$b" "$d/backup-last"  # once the backup is whole; rollback goes by it and by COMMIT, so COMMIT goes in first
-  cp "$b/new/COMMIT" "$d/server/"
-  cp "$b/new/"*.py "$b/new/pyproject.toml" "$b/new/uv.lock" "$d/server/"
-  mv "$d/server/static/dist" "$b/old/dist"
-  cp -a "$b/new/static/dist" "$d/server/static/dist"
+  ln -sfn "$b" "$d/backup-last"  # once the backup is whole; rollback goes by it and by the package's COMMIT
+  # the package (code, web app, COMMIT) swapped whole, the old one into the backup: copied beside it, then two renames
+  rm -rf "$d/server/alldayrec.new"
+  cp -a "$b/new/alldayrec" "$d/server/alldayrec.new"
+  [ ! -d "$d/server/alldayrec" ] || mv "$d/server/alldayrec" "$b/old/alldayrec"
+  mv "$d/server/alldayrec.new" "$d/server/alldayrec"
+  cp "$b/new/pyproject.toml" "$b/new/uv.lock" "$d/server/"
   off=$(stat -c %s "$d/data/server.log")
   systemctl restart "$u"
-  echo "  $d: $(cat "$b/old/COMMIT" 2> /dev/null || echo '(no COMMIT)') -> $(cat "$b/new/COMMIT"), backup $b"
+  echo "  $d: $(cat "$b/old/alldayrec/COMMIT" 2> /dev/null || echo '(no COMMIT)') -> $(cat "$b/new/alldayrec/COMMIT"), backup $b"
   started "$d" "$u" "$off" && check "$d" "$u" || return 1
   for o in $(printf '%s\n' "$d"/backup-deploy-* | head -n -2); do rm -rf -- "$o"; echo "  removed ${o##*/}"; done  # time-named: sorted
 }
@@ -133,12 +135,11 @@ PY
 rollback() {  # dir unit: undo the newest deploy run, where it got to installing and is still what is installed
   local d=$1 u=$2 b off
   b=$(readlink "$d/backup-last" || true)
-  if [ "${b##*/}" != "$NEWEST" ] || ! cmp -s "$b/new/COMMIT" "$d/server/COMMIT"; then
+  if [ "${b##*/}" != "$NEWEST" ] || ! cmp -s "$b/new/alldayrec/COMMIT" "$d/server/alldayrec/COMMIT"; then
     echo "  skip $d: not on the release of ${NEWEST:-any deploy}"; return 0
   fi
-  if [ ! -f "$b/old/tenant.py" ] && [ -z "$(env_of "$d" AUTH_TOKEN)" ]; then  # back to a server from before tenants.json
-    echo "  stop $d: the server it goes back to takes its token from .env, which has none (it would run without auth):"
-    echo "  server/tenants.sh rollback first"; return 1
+  if [ ! -d "$b/old/alldayrec" ]; then  # the first deploy of the package (a new instance, or one that ran server/*.py)
+    echo "  stop $d: that deploy replaced no alldayrec package, there is none to put back"; return 1
   fi
   off=$(stat -c %s "$d/data/server.log")
   systemctl stop "$u"
@@ -153,15 +154,11 @@ for t, cols in before.items():
             c.execute(f"ALTER TABLE {t} DROP COLUMN {col}")
 PY
   done < <(tenants "$d")
-  cp -a "$b/old/"*.py "$d/server/"
+  mv "$d/server/alldayrec" "$b/rolled-back-alldayrec"
+  cp -a "$b/old/alldayrec" "$d/server/alldayrec"
   for f in pyproject.toml uv.lock; do [ ! -f "$b/old/$f" ] || cp -a "$b/old/$f" "$d/server/"; done  # the venv keeps what came
-  if [ -f "$b/old/COMMIT" ]; then cp -a "$b/old/COMMIT" "$d/server/"; else mv "$d/server/COMMIT" "$b/rolled-back-COMMIT"; fi
-  if [ -d "$b/old/dist" ]; then  # the deploy got as far as replacing it
-    mv "$d/server/static/dist" "$b/rolled-back-dist"
-    cp -a "$b/old/dist" "$d/server/static/dist"
-  fi
   systemctl start "$u"
-  echo "  $d: back to $(cat "$b/old/COMMIT" 2> /dev/null || echo '(no COMMIT)') from $b"
+  echo "  $d: back to $(cat "$b/old/alldayrec/COMMIT" 2> /dev/null || echo '(no COMMIT)') from $b"
   started "$d" "$u" "$off" && check "$d" "$u"
 }
 
@@ -173,7 +170,7 @@ stopped() {  # on exit: what a failed deploy left
 trap 'stopped $?' EXIT
 if [ "$mode" = deploy ]; then  # every instance's tenants.json as its new server reads it: the release's tenant.py, then load()
   for i in "$@"; do
-    { tar -xOzf "$TGZ" ./tenant.py; echo 'import sys; load(Path(sys.argv[1]))'; } | "${i%%:*}/server/.venv/bin/python" - "${i%%:*}/tenants.json" ||
+    { tar -xOzf "$TGZ" alldayrec/tenant.py; echo 'import sys; load(Path(sys.argv[1]))'; } | "${i%%:*}/server/.venv/bin/python" - "${i%%:*}/tenants.json" ||
       { echo "  stop: the new server cannot read ${i%%:*}/tenants.json (server/tenants.sh migrate first)"; exit 1; }
   done
 fi

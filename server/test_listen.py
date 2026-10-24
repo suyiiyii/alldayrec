@@ -10,10 +10,10 @@ from pathlib import Path
 
 import anyio
 
-import audio
-import core
-import db
-import server
+from alldayrec import audio
+from alldayrec import core
+from alldayrec import db
+from alldayrec import server
 
 T = int(dt.datetime(2026, 10, 6, 10, 0).timestamp() * 1000)
 tone = lambda s, fmt="ogg", codec="libopus": subprocess.run(

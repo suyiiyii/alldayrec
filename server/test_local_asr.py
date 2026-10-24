@@ -8,9 +8,9 @@ import tarfile
 import numpy as np
 import pytest
 
-import infer
-import local_asr
-from local_asr import SR
+from alldayrec import infer
+from alldayrec import local_asr
+from alldayrec.local_asr import SR
 
 
 class Rec:

@@ -3,7 +3,7 @@
 __pycache__/
 *.pyc
 data/
-server/static/dist/
+server/alldayrec/static/dist/
 dist/apk/
 firmware-artifacts/
 tenants.json

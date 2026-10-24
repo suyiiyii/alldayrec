@@ -9,15 +9,15 @@ import anyio
 import pytest
 from fastapi import HTTPException
 
-import ask
-import db
-import live
-import profiles
-import recap
-import routes_api
-import summary
-import tenant
-from tenant import T
+from alldayrec import ask
+from alldayrec import db
+from alldayrec import live
+from alldayrec import profiles
+from alldayrec import recap
+from alldayrec import routes_api
+from alldayrec import summary
+from alldayrec import tenant
+from alldayrec.tenant import T
 
 
 def tenants(tmp: Path, ts: list[dict]) -> Path:

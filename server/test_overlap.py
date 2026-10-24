@@ -7,11 +7,11 @@ import time
 import anyio
 import numpy as np
 
-import audio
-import core
-import db
-import device_pipeline
-from tenant import T
+from alldayrec import audio
+from alldayrec import core
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec.tenant import T
 from test_backlog import DEVICE, SR, flac, hear, rig, save, tone
 
 N, SLOT = 28, 20  # tones, one 10 s into each 20 s slot, then silence: 607 s

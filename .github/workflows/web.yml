@@ -19,5 +19,5 @@ jobs:
       - run: npm install -g pnpm@12.8.1  # package.json's devEngines; the image's Node is 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vue-tsc -b  # types
-      - run: pnpm exec vp build    # the pages server/static/dist serves
+      - run: pnpm exec vp build    # the pages server/alldayrec/static/dist serves
       - run: for f in *.check.ts; do node --experimental-strip-types "$f" || exit 1; done  # recorderLog.ts, stream.ts

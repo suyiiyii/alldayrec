@@ -42,7 +42,7 @@ def uses(src: str) -> list[tuple[int, str]]:
 
 
 def test_one_way():
-    found = {f.name: uses(f.read_text()) for f in sorted(HERE.glob("*.py"))}
+    found = {f.name: uses(f.read_text()) for f in sorted((HERE / "alldayrec").glob("*.py"))}
     bad = [f"{name}:{n}: {line}" for name, us in found.items() for n, line in us if line not in ALLOWED.get(name, {})]
     assert not bad, "use anyio (see threads.py):\n" + "\n".join(bad)
     stale = [f"{name}: {line}" for name, lines in ALLOWED.items() for line in lines if line not in {x for _, x in found.get(name, [])}]
@@ -58,7 +58,7 @@ def test_uses():
 def test_one_blas_thread():
     """numpy's and scipy's OpenBLAS pools in the server process: 1 thread each unless the env says otherwise (server.py)."""
     env = {k: v for k, v in os.environ.items() if k != "OPENBLAS_NUM_THREADS"}
-    out = subprocess.run([sys.executable, "-c", "import server, scipy.linalg, threadpoolctl, json; print(json.dumps("
+    out = subprocess.run([sys.executable, "-c", "from alldayrec import server; import scipy.linalg, threadpoolctl, json; print(json.dumps("
                           "[i['num_threads'] for i in threadpoolctl.threadpool_info() if i['internal_api'] == 'openblas']))"],
                          cwd=HERE, env=env, capture_output=True, text=True, check=True).stdout
     assert json.loads(out) and set(json.loads(out)) == {1}

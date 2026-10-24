@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import websockets
 
-import volc_asr as asr
+from alldayrec import volc_asr as asr
 
 
 def answer(payload, seq=1):

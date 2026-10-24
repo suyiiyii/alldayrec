@@ -1,6 +1,6 @@
 """addresses.py: the 连接手机 page's phone-reachable addresses from `ip` / `ifconfig` output, tagged, filtered by the
 bind address; and whether a request came through a proxy."""
-from addresses import parse_ifconfig, parse_ip_addr, pick, proxied, tag
+from alldayrec.addresses import parse_ifconfig, parse_ip_addr, pick, proxied, tag
 
 IP_ADDR = """1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever preferred_lft forever
 2: eth0    inet 192.168.1.20/24 brd 192.168.1.255 scope global dynamic eth0\\       valid_lft 86000sec

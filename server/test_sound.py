@@ -11,11 +11,11 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-import audio
-import db
-from monitor import sound
-from routes_upload import chunk, device_log
-from tenant import T
+from alldayrec import audio
+from alldayrec import db
+from alldayrec.monitor import sound
+from alldayrec.routes_upload import chunk, device_log
+from alldayrec.tenant import T
 
 
 def test_sound(caplog):

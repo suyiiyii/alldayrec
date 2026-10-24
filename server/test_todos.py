@@ -7,8 +7,8 @@ import anyio
 import pytest
 from fastapi import HTTPException
 
-import db
-from routes_api import conversation, recap_get, todo_mark, todo_marks, todo_unmark, todos_due
+from alldayrec import db
+from alldayrec.routes_api import conversation, recap_get, todo_mark, todo_marks, todo_unmark, todos_due
 
 C1, C2 = "c20261001100000", "c20261001110000"
 

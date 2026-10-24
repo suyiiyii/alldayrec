@@ -7,8 +7,8 @@ import subprocess
 
 import numpy as np
 
-import audio
-import db
+from alldayrec import audio
+from alldayrec import db
 
 T = int(dt.datetime(2026, 10, 8, 1, 13).timestamp() * 1000)
 lvl = lambda v: 10 * np.log10(np.mean(v.astype(np.float64) ** 2))

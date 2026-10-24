@@ -21,8 +21,11 @@ def tenants_sh(tmp, mode, arg, *instances):
 
 def setup(tmp, name, ts):
     i = instance(tmp, name, json.dumps(ts))
-    (tmp / name / "server/tenant.py").symlink_to(HERE / "tenant.py")
-    (tmp / name / "server/COMMIT").write_text("x\n")
+    pkg = tmp / name / "server/alldayrec"
+    pkg.mkdir()
+    for f in ("__init__.py", "tenant.py"):
+        (pkg / f).symlink_to(HERE / "alldayrec" / f)
+    (pkg / "COMMIT").write_text("x\n")
     return i
 
 

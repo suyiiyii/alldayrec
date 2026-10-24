@@ -11,7 +11,7 @@ INSTANCES=${LR_INSTANCES:-/opt/alldayrec:alldayrec}
 if [ "${1:-}" != remote ]; then  # on this machine
   [ -f "${1:-}" ] || { sed -n 4p "$0" >&2; exit 2; }
   HOST=${LR_DEPLOY_HOST:?set LR_DEPLOY_HOST=user@host (the comment at the top of deploy.sh)}
-  new=$(uv run --no-project python "$(dirname "$0")/apk.py" "$1")
+  new=$(uv run --no-project python "$(dirname "$0")/alldayrec/apk.py" "$1")
   echo "$1: $new"
   scp -q "$1" "$HOST:lr-app.apk"
   ssh "$HOST" "${LR_DEPLOY_SHELL:-bash -s} -- remote $new $INSTANCES" < "$0"
@@ -28,7 +28,7 @@ for i in "$@"; do
   d=${i%%:*} old=
   apk=$(first data)/live-record.apk
   if [ -f "$apk" ]; then
-    old=$("$d/server/.venv/bin/python" "$d/server/apk.py" "$apk")
+    old=$("$d/server/.venv/bin/python" "$d/server/alldayrec/apk.py" "$apk")
     [ "${old#*+}" -lt "${new#*+}" ] || { echo "$d has $old: $new is not newer, nothing changed there" >&2; exit 1; }
     cp -a "$apk" "$apk.prev-$old"
   fi

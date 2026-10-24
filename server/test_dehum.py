@@ -6,8 +6,8 @@ import subprocess
 
 import numpy as np
 
-import audio
-import db
+from alldayrec import audio
+from alldayrec import db
 
 T = int(dt.datetime(2026, 10, 15, 3, 0).timestamp() * 1000)
 rng = np.random.default_rng(1)

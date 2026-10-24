@@ -7,10 +7,10 @@ from pathlib import Path
 
 import anyio
 
-import core
-import db
-import mcp_server as m
-import server
+from alldayrec import core
+from alldayrec import db
+from alldayrec import mcp_server as m
+from alldayrec import server
 
 TODAY = dt.date.today().isoformat()
 CID = "c20261001100000"

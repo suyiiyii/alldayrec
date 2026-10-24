@@ -9,14 +9,14 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-import core
-import db
-import device_pipeline
-import routes_audio
-import routes_speakers
-import selfvoice as sv
-import tenant
-import ws
+from alldayrec import core
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec import routes_audio
+from alldayrec import routes_speakers
+from alldayrec import selfvoice as sv
+from alldayrec import tenant
+from alldayrec import ws
 from test_backlog import DEVICE, PIECE_S, SR, flac, hear, rig, save, tone
 
 rng = np.random.default_rng(0)

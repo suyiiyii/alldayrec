@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import audio
-import db
-from tenant import T
+from alldayrec import audio
+from alldayrec import db
+from alldayrec.tenant import T
 
 
 def test_resend():

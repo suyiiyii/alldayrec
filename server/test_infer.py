@@ -4,7 +4,7 @@ import struct
 import numpy as np
 import pytest
 
-import infer
+from alldayrec import infer
 
 
 def test_cmvn_and_check(tmp_path):

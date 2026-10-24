@@ -3,7 +3,7 @@
 !server/
 !web/
 server/.venv*
-server/static/dist
+server/alldayrec/static/dist
 **/__pycache__
 web/node_modules
 web/dist

@@ -18,17 +18,17 @@ import numpy as np
 import pytest
 from starlette.testclient import TestClient
 
-import asr
-import audio
-import core
-import db
-import device_pipeline
-import monitor
-import pipeline_state
-import server
-import summary
-import tenant
-import ws
+from alldayrec import asr
+from alldayrec import audio
+from alldayrec import core
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec import monitor
+from alldayrec import pipeline_state
+from alldayrec import server
+from alldayrec import summary
+from alldayrec import tenant
+from alldayrec import ws
 from test_backlog import PIECE_S, SR, flac, hear, rig, tone
 
 DEV = "iPhone"  # both tenants have one
@@ -339,8 +339,9 @@ def test_nothing_per_person_in_a_module():
     found = {}
     for name, m in sys.modules.items():
         f = Path(getattr(m, "__file__", "") or "")
-        if f.parent != here or f.name.startswith("test_"):
+        if f.parent != here or f.name == "__init__.py":
             continue
+        name = name.removeprefix("alldayrec.")
         tree = ast.parse(f.read_text())
         for node in tree.body:
             if isinstance(node, (ast.Assign, ast.AnnAssign)):

@@ -4,7 +4,7 @@ import zipfile
 
 import pytest
 
-import apk
+from alldayrec import apk
 
 # aapt2 link of <manifest package="x.y" android:versionCode="18" android:versionName="1.4.3"/>
 MANIFEST = base64.b64decode(

@@ -7,10 +7,10 @@ import time
 import anyio
 import numpy as np
 
-import core
-import db
-import server
-from tenant import T
+from alldayrec import core
+from alldayrec import db
+from alldayrec import server
+from alldayrec.tenant import T
 from test_backlog import DEVICE, PIECE_S, SR, flac, hear, rig, save, tone
 
 

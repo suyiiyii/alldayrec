@@ -7,8 +7,8 @@ import subprocess
 import anyio
 import numpy as np
 
-from segmenter import CHUNK_S, QUIET_S, SR, Segmenter, next_cut, speech_in
-from transcript import clip_turns, final_rows, merge_drafts, overlaps
+from alldayrec.segmenter import CHUNK_S, QUIET_S, SR, Segmenter, next_cut, speech_in
+from alldayrec.transcript import clip_turns, final_rows, merge_drafts, overlaps
 
 CLIP = os.environ.get("TEST_CLIP", "")  # any recorder file with speech; the test skips the audio part without it
 
@@ -33,8 +33,8 @@ def run(sizes):
 
 
 def test_final_rows():
-    import transcript
-    from transcript import final_rows
+    from alldayrec import transcript
+    from alldayrec.transcript import final_rows
     transcript.TURN_GAP_S = 1.0  # the merge case below assumes the default, whatever .env says
     t0 = dt.datetime(2026, 9, 28, 22, 0)
     ms = lambda s: int(s * 1000)
@@ -134,8 +134,9 @@ def test_engine_squeeze(monkeypatch):
     import sys
     import types
 
-    import asr
-    import squeeze
+    import alldayrec
+    from alldayrec import asr
+    from alldayrec import squeeze
     squeeze.check()
     sent = []
 
@@ -145,7 +146,9 @@ def test_engine_squeeze(monkeypatch):
         if partial:
             partial(us[:1])
         return us, {}
-    monkeypatch.setitem(sys.modules, "volc_asr", types.SimpleNamespace(transcribe=transcribe))
+    fake = types.SimpleNamespace(transcribe=transcribe)
+    monkeypatch.setitem(sys.modules, "alldayrec.volc_asr", fake)
+    monkeypatch.setattr(alldayrec, "volc_asr", fake, raising=False)  # asr.py: from alldayrec import volc_asr
     got = []
     segs = anyio.run(asr.engine_segs, np.zeros(60 * SR, np.int16), [(10, 12), (30, 31.5)], got.append, "volc")  # kept: 8.5-13.5, 28.5-33
     assert sent == [9.5]
@@ -163,8 +166,8 @@ def test_engine_fallback(monkeypatch):
 
     import pytest
 
-    import asr
-    import stepfun_asr
+    from alldayrec import asr
+    from alldayrec import stepfun_asr
     stepfun_asr.check()
     calls, x = [], np.zeros(SR, np.int16)
 
@@ -235,9 +238,9 @@ def test_main_settings(monkeypatch):
 
     import pytest
 
-    import asr
-    import infer
-    import server
+    from alldayrec import asr
+    from alldayrec import infer
+    from alldayrec import server
 
     class Started(Exception):
         pass
@@ -245,7 +248,7 @@ def test_main_settings(monkeypatch):
     def started(d=None):
         raise Started
     monkeypatch.setattr(infer, "fetch", started)  # past the settings, before any model download
-    monkeypatch.setattr(sys, "argv", ["server.py"])
+    monkeypatch.setattr(sys, "argv", ["alldayrec"])
     for k in ("ASR_UPLOAD_BRIDGE_URL", "ASR_UPLOAD_BRIDGE_TOKEN", "ASR_SERVICE_URL", "ASR_SERVICE_BASIC_AUTH", "STEPFUN_API_KEY",
               "VOLC_ASR_KEY"):
         monkeypatch.delenv(k, raising=False)

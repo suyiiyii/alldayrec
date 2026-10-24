@@ -10,8 +10,8 @@ import anyio
 import httpx2
 import numpy as np
 
-import net
-import stepfun_asr
+from alldayrec import net
+from alldayrec import stepfun_asr
 
 # the deltas' times (ms of the sent audio), run-length coded: (start_time, end_time, deltas)
 TIMES = [(56120, 56200, 1), (56200, 56280, 1), (56440, 56520, 1), (62644, 62644, 460), (180660, 180820, 1),

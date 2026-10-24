@@ -8,12 +8,12 @@ import sys
 import wave
 
 
-SCRIPT = Path(__file__).with_name("migrate.py")
+HERE = Path(__file__).resolve().parent
 
 
 def run_migration(data, recordings):
     return subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True,
+        [sys.executable, "-m", "alldayrec.migrate"], cwd=HERE, capture_output=True, text=True,
         env={**os.environ, "LIVE_DATA": str(data), "RECORDINGS_DIR": str(recordings)},
     )
 

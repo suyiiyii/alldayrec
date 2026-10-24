@@ -1,5 +1,5 @@
 #!/bin/bash
-# Each instance's tenants.json (who a server serves, server/tenant.py), made once from its .env around the first
+# Each instance's tenants.json (who a server serves, server/alldayrec/tenant.py), made once from its .env around the first
 # deploy of a server that reads it. In order:
 #   server/tenants.sh migrate    # before that deploy: <dir>/tenants.json (600) with the instance's own tenant, from its
 #                                # .env: id LR_INSTANCE (else friend or main by its LIVE_DATA path, as the metrics had it),
@@ -55,7 +55,7 @@ os.write(fd, (json.dumps(ts, indent=1) + "\n").encode())
 os.close(fd)
 print(f"  {f}.new: " + ", ".join(x["id"] for x in ts))
 PY
-  (cd "$(dirname "$2")/server" && .venv/bin/python -c 'import sys, tenant; from pathlib import Path; tenant.load(Path(sys.argv[1]))' "$2.new") ||
+  (cd "$(dirname "$2")/server" && .venv/bin/python -c 'import sys; from pathlib import Path; from alldayrec import tenant; tenant.load(Path(sys.argv[1]))' "$2.new") ||
     { echo "  stop: the server would not start with $2.new (look, then remove it); nothing changed"; exit 1; }
 }
 
@@ -95,8 +95,8 @@ case $mode in merge | unmerge | add)
       for i in "$@"; do
         d=${i%%:*}
         [ -e "$d/tenants.json" ] || { echo "  stop: $d has no tenants.json (server/tenants.sh migrate first)"; exit 1; }
-        [ "$(cat "$d/server/COMMIT")" = "$(cat "$t/server/COMMIT")" ] ||
-          { echo "  stop: $d runs $(cat "$d/server/COMMIT"), $t $(cat "$t/server/COMMIT"): server/deploy.sh one commit to all first"; exit 1; }
+        [ "$(cat "$d/server/alldayrec/COMMIT")" = "$(cat "$t/server/alldayrec/COMMIT")" ] ||
+          { echo "  stop: $d runs $(cat "$d/server/alldayrec/COMMIT"), $t $(cat "$t/server/alldayrec/COMMIT"): server/deploy.sh one commit to all first"; exit 1; }
       done
       changed merge "$t/tenants.json" "${@%%:*}"
       for i in "$@"; do  # before the restart: never two processes on one store
@@ -115,8 +115,8 @@ case $mode in merge | unmerge | add)
           "systemctl enable --now ${i#*:} once it is fixed, or server/tenants.sh merge to serve them from $t again"; exit 1; }
         echo "  $d: ${i#*:} enabled and started"
         answers "$d"
-        [ "$(cat "$d/server/COMMIT")" = "$(cat "$t/server/COMMIT")" ] ||
-          echo "  $d runs $(cat "$d/server/COMMIT"), $t $(cat "$t/server/COMMIT"): LR_INSTANCES=$i server/deploy.sh"
+        [ "$(cat "$d/server/alldayrec/COMMIT")" = "$(cat "$t/server/alldayrec/COMMIT")" ] ||
+          echo "  $d runs $(cat "$d/server/alldayrec/COMMIT"), $t $(cat "$t/server/alldayrec/COMMIT"): LR_INSTANCES=$i server/deploy.sh"
       done
       ;;
     add)

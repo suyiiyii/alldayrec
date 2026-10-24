@@ -2,7 +2,7 @@ name: docs
 on:
   push:  # main: build and publish the site on GitHub Pages
     branches: [main]
-    paths: &paths ['docs/**', 'server/*.py', 'server/pyproject.toml', 'server/uv.lock', '.github/workflows/docs.yml']
+    paths: &paths ['docs/**', 'server/alldayrec/*.py', 'server/pyproject.toml', 'server/uv.lock', '.github/workflows/docs.yml']
   pull_request:  # PRs: build only (dead links fail it)
     paths: *paths
   workflow_dispatch:

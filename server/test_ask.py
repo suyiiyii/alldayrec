@@ -14,17 +14,17 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
-import asr
-import core
-import db
-import device_pipeline
-import live
-import monitor
-import pipeline_state
-import routes_api
-import summaries
-import summary
-from tenant import T
+from alldayrec import asr
+from alldayrec import core
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec import live
+from alldayrec import monitor
+from alldayrec import pipeline_state
+from alldayrec import routes_api
+from alldayrec import summaries
+from alldayrec import summary
+from alldayrec.tenant import T
 from test_backlog import DEVICE, SR, flac, hear, rig, save, st, tone
 
 

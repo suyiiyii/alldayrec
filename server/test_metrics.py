@@ -15,13 +15,13 @@ import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-import asr
-import audio
-import core
-import db
-import monitor
-import pipeline_state
-from tenant import T
+from alldayrec import asr
+from alldayrec import audio
+from alldayrec import core
+from alldayrec import db
+from alldayrec import monitor
+from alldayrec import pipeline_state
+from alldayrec.tenant import T
 
 LINE = re.compile(r'[a-zA-Z_:][a-zA-Z0-9_:]*\{[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*"(?:,[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*")*\} '
                   r'-?\d+(?:\.\d+)?(?:e[-+]?\d+)?')

@@ -16,21 +16,21 @@ import anyio.to_thread
 import numpy as np
 import sklearn.cluster  # noqa: F401  Diarist.add imports it on its first sentence: ~30 s in a new venv (bytecode), inside the waits below
 
-import asr
-import audio
-import core
-import db
-import device_pipeline
-import infer
-import live
-import monitor
-import pipeline_state
-import routes_api
-import routes_upload
-import squeeze
-import summary
-import ws
-from tenant import T
+from alldayrec import asr
+from alldayrec import audio
+from alldayrec import core
+from alldayrec import db
+from alldayrec import device_pipeline
+from alldayrec import infer
+from alldayrec import live
+from alldayrec import monitor
+from alldayrec import pipeline_state
+from alldayrec import routes_api
+from alldayrec import routes_upload
+from alldayrec import squeeze
+from alldayrec import summary
+from alldayrec import ws
+from alldayrec.tenant import T
 
 SR, DEVICE = 16000, "LR-TEST"
 BACKLOG_S, PIECE_S, LIVE_S = 3 * 3600, 60, 15  # the backlog in pieces of PIECE_S, a tone 10 s into each; then LIVE_S of now

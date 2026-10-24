@@ -6,10 +6,10 @@ from pathlib import Path
 
 import anyio
 
-import db
-import profiles
-import summary
-from routes_speakers import alias_set, make_profile, mentions, person
+from alldayrec import db
+from alldayrec import profiles
+from alldayrec import summary
+from alldayrec.routes_speakers import alias_set, make_profile, mentions, person
 
 T = "2026-10-05T10:00:"
 

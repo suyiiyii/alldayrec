@@ -5,4 +5,4 @@ from pathlib import Path
 
 
 def test_selfcheck():
-    runpy.run_path(str(Path(__file__).with_name("diarist.py")), run_name="__main__")
+    runpy.run_path(str(Path(__file__).with_name("alldayrec") / "diarist.py"), run_name="__main__")

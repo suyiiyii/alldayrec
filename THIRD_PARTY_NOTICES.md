@@ -10,13 +10,13 @@ alldayrec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 | `firmware/devkit/src/lib/opus-1.2.1/` | [Opus](https://opus-codec.org/) 1.2.1, Copyright 2001-2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo | BSD-3-Clause, [`COPYING`](firmware/devkit/src/lib/opus-1.2.1/COPYING) |
 | `firmware/devkit/src/lib/battery/` | Battery driver, Copyright 2024 Marcus Alexander Tjomsaas | Apache-2.0 (below) |
 | `firmware/devkit/src/sdhc_spi.c` | Zephyr's `drivers/sdhc/sdhc_spi.c` from nRF Connect SDK v2.7.0, Copyright 2022,2024 NXP; changed, each change marked `LR:` | Apache-2.0 (below) |
-| `server/vad_postprocessor.py` | [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) 0.0.2 `fireredvad/core/stream_vad_postprocessor.py`, unchanged, Copyright 2026 Xiaohongshu | Apache-2.0 (below) |
+| `server/alldayrec/vad_postprocessor.py` | [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) 0.0.2 `fireredvad/core/stream_vad_postprocessor.py`, unchanged, Copyright 2026 Xiaohongshu | Apache-2.0 (below) |
 | `web/src/components/Icon.vue` | The SVG paths of 24 [Lucide](https://lucide.dev) icons, lucide-static 0.460.0, unchanged | ISC (below) |
 
-## Model files (not in the repository; the server downloads them, `server/infer.py`)
+## Model files (not in the repository; the server downloads them, `server/alldayrec/infer.py`)
 
 - **FireRedVAD** Stream-VAD ONNX and its CMVN stats, by FireRedTeam, downloaded from the FireRedVAD repository: Apache-2.0.
-- **ReDimNet2 B6** (`redimnet2-b6.onnx`), the voiceprint model, by [PalabraAI](https://github.com/PalabraAI/redimnet2): code and weights MIT. Exported to ONNX by `server/export_onnx.py` from the release weights `b6-vb2+vox2+cnc2_v0-lm.pt`; the server downloads that export from this repository's `models-v1` release, which carries this same notice. **Its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0** (non-commercial, share-alike); the other training sets are VoxCeleb2 and CN-Celeb. Check whether that fits your use; you can always make the file yourself with `export_onnx.py`.
+- **ReDimNet2 B6** (`redimnet2-b6.onnx`), the voiceprint model, by [PalabraAI](https://github.com/PalabraAI/redimnet2): code and weights MIT. Exported to ONNX by `server/alldayrec/export_onnx.py` from the release weights `b6-vb2+vox2+cnc2_v0-lm.pt`; the server downloads that export from this repository's `models-v1` release, which carries this same notice. **Its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0** (non-commercial, share-alike); the other training sets are VoxCeleb2 and CN-Celeb. Check whether that fits your use; you can always make the file yourself with `export_onnx.py`.
 
 ## Fetched at build time (not in the repository)
 
