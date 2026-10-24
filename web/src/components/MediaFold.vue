@@ -4,8 +4,8 @@ import { hhmmss, type Row } from "../lib/api";
 import Icon from "./Icon.vue";
 import TranscriptRow from "./TranscriptRow.vue";
 
-// A run of media rows as one grey line; opens to the rows, still greyed
-defineProps<{ rows: Row[]; hit?: string }>();
+// A run of media rows as one grey line; opens to the rows, still greyed. seek: TranscriptRow's
+defineProps<{ rows: Row[]; hit?: string; seek?: (r: Row) => void }>();
 const open = ref(false);
 </script>
 
@@ -15,7 +15,14 @@ const open = ref(false);
     {{ hhmmss(rows[0].start) }}–{{ hhmmss(rows.at(-1)!.end) }} · {{ rows.length }} 句
   </button>
   <template v-if="open">
-    <TranscriptRow v-for="r in rows" :key="r.id" :row="r" media :hit="hit === r.start" />
+    <TranscriptRow
+      v-for="r in rows"
+      :key="r.id"
+      :row="r"
+      media
+      :hit="hit === r.start"
+      :seek="seek"
+    />
   </template>
 </template>
 

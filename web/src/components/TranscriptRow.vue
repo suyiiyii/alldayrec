@@ -5,18 +5,26 @@ import { speakerLabel } from "../lib/speakers";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
-defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played aloud, not said in the room
+// media: played aloud, not said in the room. seek: the page has a player (the conversation page): ▶ and a tap on
+// the row play from this sentence on; without it ▶ plays the sentence alone
+const { row, seek } = defineProps<{ row: Row; hit?: boolean; media?: boolean; seek?: (r: Row) => void }>();
+// a tap, not the end of selecting text to copy
+const tap = () => seek && !getSelection()?.toString() && seek(row);
 </script>
 
 <template>
   <div
     class="row"
-    :class="{ pending: row.state && row.state !== 'final', hit, media }"
+    :class="{ pending: row.state && row.state !== 'final', hit, media, seekable: seek }"
     :data-start="row.start"
     :title="row.state === 'draft' ? '实时初稿，稍后定稿' : undefined"
+    @click="tap"
   >
     <div class="t">
-      <button
+      <button v-if="seek" class="play" title="从这一句开始播放" @click.stop="seek(row)">
+        <Icon name="play" :size="14" /></button
+      ><button
+        v-else
         class="play"
         :disabled="player.failed.has(row.id)"
         :title="player.failed.has(row.id) ? '这段录音取不出来' : '播放这一句'"
@@ -48,8 +56,13 @@ defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played al
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--line);
 }
+/* the sentence jumped to, or playing */
 .row.hit {
-  background: var(--warn-soft);
+  background: var(--accent-soft);
+  box-shadow: -8px 0 0 var(--accent-soft), 8px 0 0 var(--accent-soft);
+}
+.row.seekable {
+  cursor: pointer;
 }
 .t,
 .spk {
