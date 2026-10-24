@@ -138,6 +138,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final p = c.platform;
     if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
     if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
+    if (p is WebKitWebViewController) p.setAllowsBackForwardNavigationGestures(true);  // iOS: swipe from the left edge = back
     return c
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..clearCache()  // the page changes with server deploys
