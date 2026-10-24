@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 
 import anyio.to_thread
@@ -36,16 +37,19 @@ async def names():
 
 @router.post("/api/conversation/{conv_id}/rename")
 async def rename(conv_id: str, body: dict):
+    """One label renamed; with a name the conversation has already, a merge. The answer's undo takes it back
+    (POST /api/speakers/undo)."""
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
-    r, rows = apply_rename(conv_id, frm, to)
+    r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
-    return r
+    return {**r, "undo": keep_undo([before])}
 
 
-def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict]]:
+def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dict]:
     """One label of one conversation becomes a name: its rows, the participants, its voice and pins change in one
     transaction, and the summary is redone. Also returns up to ENROLL of its sentences to teach the diarist that voice
-    for later conversations (enroll_soon: seconds of audio work per sentence, after the answer)."""
+    for later conversations (enroll_soon: seconds of audio work per sentence, after the answer), and what it changed as
+    it was before (undo_rename)."""
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
@@ -54,15 +58,21 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict]]:
     hit = [r for r in conversation_rows(c) if r.get("speaker") == frm]
     if not hit:
         raise HTTPException(400, f"no sentence of {frm}")
+    before = {"conv": conv_id, "from": frm, "participants": c["participants"]}
     c["participants"] = list(dict.fromkeys(to if p == frm else p for p in c["participants"]))
     with db.tx() as t:
+        keys = (f"{conv_id}|{frm}", f"{conv_id}|{to}")
+        before |= {"to": to, "after": c["participants"], "hints": db.name_hints(conv_id).get(conv_id),
+                   "rows": [r[0] for r in t.execute("SELECT rowid FROM sentences WHERE start >= ? AND start <= ? AND speaker = ?", (c["start"], c["end"], frm))],
+                   "voices": [tuple(r) for r in t.execute("SELECT * FROM voices WHERE conv = ? AND label IN (?, ?)", (conv_id, frm, to))],
+                   "apart": [tuple(r) for r in t.execute("SELECT voice, grp FROM apart WHERE voice IN (?, ?)", keys)]}
         t.execute("UPDATE sentences SET speaker = ? WHERE start >= ? AND start <= ? AND speaker = ?", (to, c["start"], c["end"], frm))
         t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(c["participants"], ensure_ascii=False), conv_id))
         if t.execute("SELECT 1 FROM voices WHERE conv = ? AND label = ?", (conv_id, to)).fetchone():
             t.execute("DELETE FROM voices WHERE conv = ? AND label = ?", (conv_id, frm))  # a merge: the label's own voice stays
         else:
             t.execute("UPDATE voices SET label = ? WHERE conv = ? AND label = ?", (to, conv_id, frm))  # voices and pins follow
-        t.execute("UPDATE OR REPLACE apart SET voice = ? WHERE voice = ?", (f"{conv_id}|{to}", f"{conv_id}|{frm}"))
+        t.execute("UPDATE OR REPLACE apart SET voice = ? WHERE voice = ?", keys[::-1])
         if h := db.name_hints(conv_id).get(conv_id):  # the names it was called go with it
             h["names"] = [{**x, **{k: to for k in ("who", "by") if x.get(k) == frm}} for x in h["names"]]
             db.put_name_hints(h, t)
@@ -74,10 +84,52 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict]]:
                       key=lambda r: r["start"])[:ENROLL]
     ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
     # voiceprints: the sentences queued to learn from (a history conversation without its recording here gives none)
-    return {"participants": c["participants"], "renamed": len(hit), "voiceprints": len(long)}, long
+    return {"participants": c["participants"], "renamed": len(hit), "voiceprints": len(long)}, long, before
 
 
 ENROLL = 20
+UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not after a restart
+
+
+def keep_undo(befores: list[dict]) -> str:
+    """The id that takes back the renames (apply_rename's befores) of one click."""
+    u = T().undo
+    u[k := secrets.token_hex(8)] = befores
+    while len(u) > UNDO_KEEP:
+        del u[next(iter(u))]
+    return k
+
+
+@router.post("/api/speakers/undo")
+async def speaker_undo(body: dict):
+    """Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and
+    name hints as they were, the summaries redone. Not the voice learnt from it (enroll: a running mean in the people
+    bank). 409 when the id is unknown (taken back already, too old, the server restarted) or a conversation changed
+    since."""
+    bs = T().undo.pop(body.get("undo"), None)
+    if not bs:
+        raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
+    with db.tx() as t:
+        for b in reversed(bs):  # one conversation's renames in a row: the last first
+            now = t.execute("SELECT participants FROM conversations WHERE id = ?", (b["conv"],)).fetchone()
+            if not now or json.loads(now[0]) != b["after"]:
+                raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
+            t.execute(f"UPDATE sentences SET speaker = ? WHERE speaker = ? AND rowid IN ({','.join('?' * len(b['rows']))})",
+                      (b["from"], b["to"], *b["rows"]))
+            t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(b["participants"], ensure_ascii=False), b["conv"]))
+            t.execute("DELETE FROM voices WHERE conv = ? AND label IN (?, ?)", (b["conv"], b["from"], b["to"]))
+            for v in b["voices"]:
+                t.execute(f"INSERT INTO voices VALUES ({','.join('?' * len(v))})", v)
+            t.execute("DELETE FROM apart WHERE voice IN (?, ?)", (f"{b['conv']}|{b['from']}", f"{b['conv']}|{b['to']}"))
+            t.executemany("INSERT INTO apart VALUES (?, ?)", b["apart"])
+            if b["hints"]:
+                db.put_name_hints(b["hints"], t)
+    T().speakers["at"] = 0.0
+    for cid in dict.fromkeys(b["conv"] for b in bs):
+        queue_summary(find_conversation(cid), keep=True)
+    b = bs[0]
+    ws.note(f"撤销改名：{b['to']} 改回 {b['from']}" if len(bs) == 1 else f"撤销改名：{len(bs)} 段对话的 {b['to']} 改回原来的说话人", "state")
+    return {"undone": len(bs)}
 
 
 async def enroll_soon(to: str, rows: list[dict]):
@@ -205,18 +257,19 @@ async def speaker_name(body: dict):
     answer comes when the store has it; the voice is learnt after (enroll_soon)."""
     to = (body.get("name") or "").strip()
     check_name(to)
-    done, rows = 0, []
+    rows, befores = [], []
     for m in (await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB))["members"]:
         if m["label"] == to:
             continue
         try:
-            rows += apply_rename(m["conv"], m["label"], to)[1]
+            _, more, before = apply_rename(m["conv"], m["label"], to)
         except HTTPException as e:  # the conversation changed since the page loaded
             log.warning("speaker name %s %s: %s", m["conv"], m["label"], e.detail)
             continue
-        done += 1
+        rows += more
+        befores.append(before)
     await enroll_soon(to, rows)
-    return {"renamed": done}
+    return {"renamed": len(befores), "undo": keep_undo(befores) if befores else None}
 
 
 @router.post("/api/speakers/detach")

@@ -139,6 +139,7 @@ REQUESTS = {
     ("GET", "/api/speakers/{gid}"): ("GET", "/api/speakers/{gid}", {}),  # gid: the first group a's /api/speakers lists
     ("POST", "/api/speakers/name"): ("POST", "/api/speakers/name", dict(json={"group": "{gid}", "name": "老王"})),
     ("POST", "/api/speakers/detach"): ("POST", "/api/speakers/detach", dict(json={"conv": CID, "label": "老王", "group": "{gid}"})),
+    ("POST", "/api/speakers/undo"): ("POST", "/api/speakers/undo", dict(json={"undo": "x"})),  # none of a's: 409
     ("GET", "/api/conversation/{conv_id}/speakers"): ("GET", f"/api/conversation/{CID}/speakers", {}),
     ("GET", "/api/aliases"): ("GET", "/api/aliases", {}),
     ("POST", "/api/aliases"): ("POST", "/api/aliases", dict(json={"alias": "王哥", "name": "老王"})),

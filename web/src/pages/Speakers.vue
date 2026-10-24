@@ -10,6 +10,7 @@ import { play, player } from "../lib/audio";
 import { shiftDay, today } from "../lib/calendar";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerLabel } from "../lib/speakers";
+import { toast } from "../lib/toast";
 
 const groups = ref<Speaker[]>([]),
   names = ref<string[]>([]),
@@ -90,15 +91,28 @@ async function name(g: Speaker, to: string, what: string, suggestion?: string) {
   if (!to) return;
   await card(g.id).run(async () => {
     flash.value = "";
-    const r = await post<{ renamed: number }>("/api/speakers/name", {
+    const r = await post<{ renamed: number; undo: string | null }>("/api/speakers/name", {
       name: to,
       group: g.id,
       suggestion,
     });
-    flash.value = t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed);
+    // 撤销 for 10 s: every conversation of it back as it was (the server keeps what it changed)
+    toast(
+      t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed),
+      r.undo ? { undo: () => void undo(r.undo!), ms: 10_000 } : {},
+    );
     if (editing.value === g.id) editing.value = ""; // another card's box opened meanwhile stays
     await load();
   });
+}
+async function undo(id: string) {
+  try {
+    await post("/api/speakers/undo", { undo: id });
+    toast(t("common.undone"));
+    await load();
+  } catch (e) {
+    toast((e as Error).message);
+  }
 }
 async function addAlias(g: Speaker, alias: string, name: string) {
   await card(g.id).run(async () => {

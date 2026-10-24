@@ -6,13 +6,15 @@ from pathlib import Path
 
 import anyio
 import numpy as np
+import pytest
+from fastapi import HTTPException
 
 import core
 import db
 import hints
 import routes_audio
 import tenant
-from routes_speakers import alias_set, apply_rename, label_suggestions, person, rename
+from routes_speakers import alias_set, apply_rename, keep_undo, label_suggestions, person, rename, speaker_undo
 
 T = "2026-10-05T10:00:"
 ROWS = [dict(start=T + "01.000", end=T + "02.000", speaker="S1", text="老张，你来一下"),
@@ -72,7 +74,7 @@ def test_rename_merges_and_suggestions():
     assert sug["like"] == [{"who": "S3", "name": "张三", "score": 0.7}]
     assert sug["elsewhere"] == [{"who": "S3", "name": "李四", "convs": 2}]
 
-    r, _ = apply_rename(c["id"], "S1", "S2")  # the merge, as the page asks it
+    r, _, _ = apply_rename(c["id"], "S1", "S2")  # the merge, as the page asks it
     assert r["participants"] == ["S2", "S3", "我"]
     assert [v[0] for v in db.conn().execute("SELECT label FROM voices ORDER BY label")] == ["S2", "S3"]
     assert db.vec(db.conn().execute("SELECT e FROM voices WHERE label = 'S2'").fetchone()[0])[0] == 1.0, "S2's own voice stays"
@@ -106,10 +108,47 @@ def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):
     async def run():
         async with anyio.create_task_group() as tenant.T().tg:
             with anyio.fail_after(5):  # learning first would wait for the gate for good
-                assert await rename(c["id"], {"from": "S1", "to": "张三"}) == {"participants": ["张三"], "renamed": 3, "voiceprints": 3}
+                r = await rename(c["id"], {"from": "S1", "to": "张三"})
+                assert {**r, "undo": None} == {"participants": ["张三"], "renamed": 3, "voiceprints": 3, "undo": None}
             assert db.conversation(c["id"])["participants"] == ["张三"] and "张三" not in db.people() and not cut, "nothing learnt yet"
             gate.set()
         assert len(cut) == 3
         n, e = db.people()["张三"]
         assert n == 3 and list(e) == [0, 1, 0, 0]
     anyio.run(run)
+
+
+def test_undo_takes_a_merge_back(tmp_path):
+    """A merge taken back by the undo id its answer gave: the rows, the participants, both voices, the pins and the
+    hints as they were, once. Two labels of one conversation named in one click (the speakers page) go back the last
+    first; a conversation changed since is refused whole."""
+    db.open_db(tmp_path / "t.db")
+    cid = "c20261005100001"
+    with db.tx() as t:
+        db.insert_sentences(t, [{**r, "id": str(i)} for i, r in enumerate(ROWS)])
+        db.insert_conversation(t, {"id": cid, "start": ROWS[0]["start"], "end": ROWS[-1]["end"], "participants": ["S1", "S2", "S3", "我"],
+                                   "sentences": len(ROWS), "speech_s": 70.0})
+        db.insert_voices(t, [{"conv": cid, "label": l, "device": "mic", "n": 3, "e": np.ones(4) * i} for i, l in enumerate(("S1", "S2", "S3"))])
+        t.executemany("INSERT INTO apart VALUES (?, ?)", [(f"{cid}|S1", "张三"), (f"{cid}|S2", "张三")])  # the merge's OR REPLACE drops one
+    db.put_name_hints({"conv": cid, "names": hints.check({"names": [{"who": "S2", "name": "老张", "kind": "addressed", "at": "10:00:01"}]}, ROWS)})
+    dump = lambda: [sorted(map(tuple, db.conn().execute(f"SELECT * FROM {n}"))) for n in ("sentences", "conversations", "voices", "apart", "name_hints")]
+    was = dump()
+
+    r = anyio.run(rename, cid, {"from": "S1", "to": "S2"})
+    assert r["participants"] == ["S2", "S3", "我"] and dump() != was
+    assert anyio.run(speaker_undo, {"undo": r["undo"]}) == {"undone": 1}
+    assert dump() == was
+    with pytest.raises(HTTPException) as e:
+        anyio.run(speaker_undo, {"undo": r["undo"]})
+    assert e.value.status_code == 409 and e.value.detail.startswith("[undo_gone] ")
+
+    k = keep_undo([apply_rename(cid, "S1", "张三")[2], apply_rename(cid, "S3", "张三")[2]])
+    assert db.conversation(cid)["participants"] == ["张三", "S2", "我"]
+    assert anyio.run(speaker_undo, {"undo": k}) == {"undone": 2} and dump() == was
+
+    k = keep_undo([apply_rename(cid, "S1", "S2")[2]])
+    apply_rename(cid, "S3", "S2")
+    changed = dump()
+    with pytest.raises(HTTPException):
+        anyio.run(speaker_undo, {"undo": k})
+    assert dump() == changed

@@ -68,6 +68,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("POST", "/api/conversation/{conv_id}/summarize", "resummarize"),
     ("GET", "/api/names", "names"),
     ("POST", "/api/conversation/{conv_id}/rename", "rename"),
+    ("POST", "/api/speakers/undo", "speaker_undo"),
     ("GET", "/api/speakers", "speaker_list"),
     ("GET", "/api/speakers/{gid}", "speaker_one"),
     ("POST", "/api/speakers/name", "speaker_name"),

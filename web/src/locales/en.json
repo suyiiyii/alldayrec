@@ -38,6 +38,7 @@
     "http": "The request didn't go through ({status})",
     "code": {
       "speakers_changed": "The speaker groups have changed. Refresh the page and try again",
+      "undo_gone": "This rename can no longer be undone",
       "no_pending_voice": "No voice is waiting to be confirmed. Refresh the page and try again",
       "no_pipeline": "This device has no processing pipeline",
       "no_summaries": "No summaries that day",

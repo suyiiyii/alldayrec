@@ -281,7 +281,13 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | （无说明） | `conv_id` (path, string)<br>body: JSON object |
+| `POST` | One label renamed; with a name the conversation has already, a merge. | `conv_id` (path, string)<br>body: JSON object |
+
+### `/api/speakers/undo`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone. | body: JSON object |
 
 ### `/api/speakers`
 

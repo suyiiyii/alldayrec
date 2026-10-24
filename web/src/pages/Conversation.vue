@@ -204,8 +204,8 @@ async function sendNote() {
   });
 }
 
-// renaming one speaker of this conversation; a plain rename can be undone (renamed back), a merge cannot: the two
-// labels' sentences are one label's after it
+// renaming one speaker of this conversation, or merging it into another one; either can be undone for 10 s (the
+// server keeps what it changed: POST /api/speakers/undo)
 const editing = ref(""),
   newName = ref(""),
   names = ref<string[]>([]);
@@ -229,22 +229,27 @@ async function edit(label: string) {
   error.value = "";
   names.value = (await get<string[]>("/api/names")).slice(0, 12);
 }
-async function rename(from: string, to: string, undoing = false) {
+async function rename(from: string, to: string) {
   const merge = !!c.value && (c.value.participants.includes(to) || c.value.rows.some((r) => r.speaker === to));
   await runSpeaker(async () => {
-    const r = await post<{ renamed: number; voiceprints: number }>(
+    const r = await post<{ renamed: number; voiceprints: number; undo: string }>(
       `/api/conversation/${props.id}/rename`,
       { from, to },
     );
     editing.value = "";
-    if (undoing) toast(t("conv.renamedBack", { to: speakerLabel(to) }));
-    else if (merge) toast(t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) }));
-    else
-      toast(
-        t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
-        // renamed back; S? cannot be a rename's target
-        from === "S?" ? {} : { undo: () => void rename(to, from, true) },
-      );
+    toast(
+      merge
+        ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
+        : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
+      { undo: () => void undo(r.undo, from), ms: 10_000 },
+    );
+    await Promise.all([load(), loadSug()]);
+  });
+}
+async function undo(id: string, from: string) {
+  await runSpeaker(async () => {
+    await post("/api/speakers/undo", { undo: id });
+    toast(t("conv.renamedBack", { to: speakerLabel(from) }));
     await Promise.all([load(), loadSug()]);
   });
 }

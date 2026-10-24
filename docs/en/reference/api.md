@@ -282,7 +282,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | (no docstring) | `conv_id` (path, string)<br>body: JSON object |
+| `POST` | One label renamed; with a name the conversation has already, a merge. | `conv_id` (path, string)<br>body: JSON object |
+
+### `/api/speakers/undo`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone. | body: JSON object |
 
 ### `/api/speakers`
 

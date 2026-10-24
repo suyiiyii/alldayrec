@@ -38,6 +38,7 @@
     "http": "请求没有成功（{status}）",
     "code": {
       "speakers_changed": "说话人分组已经变了，刷新页面再试",
+      "undo_gone": "这次改名已经不能撤销了",
       "no_pending_voice": "没有待确认的声音，刷新页面再试",
       "no_pipeline": "没有这台设备的处理流程",
       "no_summaries": "那天没有摘要",
