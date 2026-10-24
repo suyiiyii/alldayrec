@@ -1,7 +1,7 @@
 """The server's outbound HTTP (the ASR providers, the LLM, the upload bridge, the metrics push), async on httpx2.
 
 One client, so one connection, a request, as urllib made them. Failures raise what urllib raised, so the calls table
-(server.failure), the Grafana result labels and the callers' handling (ask's Retry-After) read as before: an HTTP error
+(asr.failure), the Grafana result labels and the callers' handling (ask's Retry-After) read as before: an HTTP error
 status urllib's HTTPError (code, reason, headers, body), a timeout TimeoutError, any other transport failure URLError.
 """
 import contextlib

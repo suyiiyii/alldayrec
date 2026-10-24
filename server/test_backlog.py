@@ -16,10 +16,19 @@ import anyio.to_thread
 import numpy as np
 import sklearn.cluster  # noqa: F401  Diarist.add imports it on its first sentence: ~30 s in a new venv (bytecode), inside the waits below
 
+import asr
 import audio
+import core
 import db
+import device_pipeline
 import infer
-import server
+import live
+import monitor
+import pipeline_state
+import routes_upload
+import squeeze
+import summary
+import ws
 from tenant import T
 
 SR, DEVICE = 16000, "LR-TEST"
@@ -61,27 +70,27 @@ def rig(tmp_path, monkeypatch, final_engine):
     """A pipeline's world: the energy VAD, fake engines and LLM, a page watching; returns what the draft engine was
     sent (seconds) and what the live analysis was fed (tone numbers per turn)."""
     monkeypatch.setattr(infer, "StreamVad", EnergyVad)
-    monkeypatch.setattr(server.squeeze, "LIFT_MAX_DB", 0.0)  # the fake engines read the tones' amplitudes: sent as they are
-    monkeypatch.setattr(server, "DRAFT_ENGINE", "stepfun-sse")
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "")
-    monkeypatch.setattr(server.summary, "MIN_SPEECH_S", 3)
-    monkeypatch.setattr(server, "LIVE_EVERY_S", 1)
+    monkeypatch.setattr(squeeze, "LIFT_MAX_DB", 0.0)  # the fake engines read the tones' amplitudes: sent as they are
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "stepfun-sse")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
+    monkeypatch.setattr(summary, "MIN_SPEECH_S", 3)
+    monkeypatch.setattr(device_pipeline, "LIVE_EVERY_S", 1)
     sent, fed = {"draft": 0.0}, []
 
     async def llm(messages, timeout=None, kind=None):  # each turn's new sentences (their tone numbers), one topic added
         new = [int(t) for t in re.findall(r"^\[[\d:]{8}\] [^:]+: (\d+)$", messages[-1]["content"], re.M)]
         fed.append(new)
         return {"ops": [{"op": "add", "title": f"t{new[0]}"}]}, {"choices": [{"message": {"content": "{}"}}]}
-    monkeypatch.setattr(server.live, "complete", llm)
+    monkeypatch.setattr(live, "complete", llm)
 
     async def draft_engine(x, partial=None):
         sent["draft"] += len(x) / SR
         return heard(x)
-    monkeypatch.setitem(server.PROVIDERS, server.ENGINE, final_engine)
-    monkeypatch.setitem(server.PROVIDERS, "stepfun-sse", draft_engine)
+    monkeypatch.setitem(asr.PROVIDERS, asr.ENGINE, final_engine)
+    monkeypatch.setitem(asr.PROVIDERS, "stepfun-sse", draft_engine)
     np.savez(tmp_path / "owner-redimnet2.npz", owner=np.array([1.0, 0, 0, 0]))
     db.open_db(tmp_path / "live.db").watch_until = time.time() + 3600  # the tenant; a page of it watches
-    monkeypatch.setitem(server.state, "embed", lambda x: np.array([0.0, 1, 0, 0]))
+    monkeypatch.setitem(core.state, "embed", lambda x: np.array([0.0, 1, 0, 0]))
     return sent, fed
 
 
@@ -110,7 +119,7 @@ def test_backlog_does_not_hold_drafts(tmp_path, monkeypatch):
     async def run():
         save(t0, backlog[0])  # the pipeline has started; the phone goes offline, then comes back with the rest at once
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             await anyio.sleep(1)
             async with anyio.create_task_group() as rest:
                 rest.start_soon(anyio.to_thread.run_sync, lambda: [save(t0 + dt.timedelta(seconds=PIECE_S * i), b) for i, b in enumerate(backlog) if i])
@@ -124,19 +133,19 @@ def test_backlog_does_not_hold_drafts(tmp_path, monkeypatch):
             drafts = db.drafts("", None, DEVICE)
             assert [r["text"] for r in drafts if int(r["text"]) >= N] == [str(N + j) for j in range(LIVE_S // 5)], drafts
             assert st().done_to is None or st().done_to < t0 + dt.timedelta(seconds=PIECE_S), "the final layer was to be busy"
-            edge = live0 - dt.timedelta(seconds=PIECE_S + server.DRAFT_BACK_S)
-            assert all(r["start"] >= server.iso(edge) for r in drafts), "the backlog is not drafted"
-            assert sent["draft"] < server.DRAFT_BACK_S + LIVE_S, sent
+            edge = live0 - dt.timedelta(seconds=PIECE_S + device_pipeline.DRAFT_BACK_S)
+            assert all(r["start"] >= core.iso(edge) for r in drafts), "the backlog is not drafted"
+            assert sent["draft"] < device_pipeline.DRAFT_BACK_S + LIVE_S, sent
             for _ in range(20):  # the analysis of the last pause's drafts
                 if fed and fed[-1] and fed[-1][-1] == N + LIVE_S // 5 - 1:
                     break
                 await anyio.sleep(0.5)
             lv = st().live
-            assert lv and lv["start"] >= server.iso(edge) and lv["topics"], lv and server.live.public(lv)
-            assert fed and fed[-1][-1] == N + LIVE_S // 5 - 1 and min(min(f) for f in fed) >= N - server.DRAFT_BACK_S // PIECE_S - 1, fed
+            assert lv and lv["start"] >= core.iso(edge) and lv["topics"], lv and live.public(lv)
+            assert fed and fed[-1][-1] == N + LIVE_S // 5 - 1 and min(min(f) for f in fed) >= N - device_pipeline.DRAFT_BACK_S // PIECE_S - 1, fed
 
             busy.set()
-            finals = lambda: db.sentences(server.iso(t0), server.iso(live0), source=DEVICE)
+            finals = lambda: db.sentences(core.iso(t0), core.iso(live0), source=DEVICE)
             for _ in range(240):
                 if len(finals()) >= N:
                     break
@@ -163,12 +172,12 @@ def test_hold_keeps_backlog_final(tmp_path, monkeypatch):
     live0 = dt.datetime.fromtimestamp(round(time.time()) + 2)
     t0 = live0 - dt.timedelta(seconds=PIECE_S * (n + 1))
     h = int(live0.timestamp() * 1000)
-    finals = lambda: [r["text"] for r in db.sentences(server.iso(t0), server.iso(live0 + dt.timedelta(seconds=LIVE_S)), source=DEVICE)]
+    finals = lambda: [r["text"] for r in db.sentences(core.iso(t0), core.iso(live0 + dt.timedelta(seconds=LIVE_S)), source=DEVICE)]
 
     async def run():
         save(t0, backlog[0])  # final up to here before the phone went away
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             await anyio.sleep(1)
             late = []
 
@@ -194,13 +203,13 @@ def test_hold_keeps_backlog_final(tmp_path, monkeypatch):
             assert not late, f"backlog pieces behind the queue: {late}"
             assert finals() == [str(i) for i in range(n)], finals()
             assert {str(n + j) for j in range(LIVE_S // 5)} <= {r["text"] for r in st().drafts}, "drafts follow now meanwhile"
-            assert sent["draft"] < server.DRAFT_BACK_S + LIVE_S, sent
-            assert server.device_status(DEVICE, st())["hold"] == live0.isoformat(timespec="seconds")
+            assert sent["draft"] < device_pipeline.DRAFT_BACK_S + LIVE_S, sent
+            assert monitor.device_status(DEVICE, st())["hold"] == live0.isoformat(timespec="seconds")
             await anyio.sleep(3)
             assert finals() == [str(i) for i in range(n)], "now waits at the hold"
 
             audio.hold(DEVICE, None)  # the next upload says nothing older is coming
-            db.put_kv(f"end_at:{DEVICE}", server.iso(live0 + dt.timedelta(seconds=LIVE_S)))  # and the recorder stops
+            db.put_kv(f"end_at:{DEVICE}", core.iso(live0 + dt.timedelta(seconds=LIVE_S)))  # and the recorder stops
             want = [str(i) for i in range(n + LIVE_S // 5)]
             for _ in range(60):
                 if finals() == want:
@@ -256,8 +265,8 @@ def test_final_goes_on_after_a_gap(tmp_path, monkeypatch):
     rig(tmp_path, monkeypatch, hear)
     t0 = dt.datetime.fromtimestamp(round(time.time()) - 900)
     at = lambda k: t0 + dt.timedelta(seconds=180 * k)  # a recording every 3 min
-    finals = lambda: [r["text"] for r in db.sentences(server.iso(t0), server.iso(at(5)), source=DEVICE)]
-    stop = lambda t: db.put_kv(f"end_at:{DEVICE}", server.iso(t))
+    finals = lambda: [r["text"] for r in db.sentences(core.iso(t0), core.iso(at(5)), source=DEVICE)]
+    stop = lambda t: db.put_kv(f"end_at:{DEVICE}", core.iso(t))
 
     async def until(want):
         for _ in range(60):
@@ -270,7 +279,7 @@ def test_final_goes_on_after_a_gap(tmp_path, monkeypatch):
         save(at(0), flac(np.concatenate([tone(0, 2), np.zeros(3 * SR, np.int16)])))  # 5 s, then stopped
         stop(at(0) + dt.timedelta(seconds=5))
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             await until(["0"])
             assert st().done_to == at(0) + dt.timedelta(seconds=5), "finalized to the very end of the recording"
             # 45 s in 1 s pieces, quiet at first (the VAD pads an utterance's start back: across the pause into the
@@ -289,7 +298,7 @@ def test_final_goes_on_after_a_gap(tmp_path, monkeypatch):
         save(at(2), flac(np.concatenate([tone(2, 2), np.zeros(3 * SR, np.int16)])))  # while the server restarts
         stop(at(2) + dt.timedelta(seconds=5))
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)  # resumes at the end of a recording, the next after a pause
+            tg.start_soon(device_pipeline.pipeline, DEVICE)  # resumes at the end of a recording, the next after a pause
             await until(["0", "1", "2"])
             tg.cancel_scope.cancel()
 
@@ -301,20 +310,20 @@ def test_hold_release(tmp_path, monkeypatch):
     the phone last said it (10-07: LR-P3-116C's 261 pieces waited from 17:47 to 05:47). Meanwhile the status says when
     the phone last said it and until when the queue waits without it, and whether the device is recording now."""
     db.open_db(tmp_path / "live.db")
-    monkeypatch.setattr(server, "note", lambda *a, **k: None)
+    monkeypatch.setattr(ws, "note", lambda *a, **k: None)
     t = dt.datetime(2026, 10, 7, 17, 36)
     save(t, flac(tone(0, 3)))  # it came just now: the device records
     audio.hold(DEVICE, int(t.timestamp() * 1000))
-    st = server.PipelineState()
-    d = server.device_status(DEVICE, st)
+    st = pipeline_state.PipelineState()
+    d = monitor.device_status(DEVICE, st)
     assert d["hold"] == "2026-10-07T17:36:00" and d["recording"], d
     seen, until = dt.datetime.fromisoformat(d["hold_seen"]), dt.datetime.fromisoformat(d["hold_until"])
     assert abs((seen - dt.datetime.now()).total_seconds()) < 5 and (until - seen).total_seconds() == audio.HOLD_MAX_S
-    monkeypatch.setattr(server, "LIVE_AUDIO_S", 0)
-    assert not server.device_status(DEVICE, st)["recording"], "no audio came in LIVE_AUDIO_S: not recording"
+    monkeypatch.setattr(device_pipeline, "LIVE_AUDIO_S", 0)
+    assert not monitor.device_status(DEVICE, st)["recording"], "no audio came in LIVE_AUDIO_S: not recording"
 
-    anyio.run(server.hold_release, DEVICE)
-    d = server.device_status(DEVICE, st)
+    anyio.run(routes_upload.hold_release, DEVICE)
+    d = monitor.device_status(DEVICE, st)
     assert d["hold"] is None and d["hold_seen"] is None and audio.held(DEVICE) is None
 
 
@@ -322,7 +331,7 @@ def test_pipeline_cursors_and_pause_notifications_are_independent():
     """Final commits do not advance drafts; a pause during a draft wakes the next pass."""
     async def run():
         t = dt.datetime(2026, 10, 7, 17, 36)
-        a, b = server.PipelineState(draft_to=t), server.PipelineState()
+        a, b = pipeline_state.PipelineState(draft_to=t), pipeline_state.PipelineState()
         a.progress = [(0.0, t), (599.0, t)]
         a.finalized(t + dt.timedelta(seconds=300), 600.0)
         assert a.done_to == t + dt.timedelta(seconds=300) and a.draft_to == t

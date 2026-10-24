@@ -9,7 +9,7 @@ import anyio
 import db
 import profiles
 import summary
-from server import alias_set, make_profile, mentions, person
+from routes_speakers import alias_set, make_profile, mentions, person
 
 T = "2026-10-05T10:00:"
 

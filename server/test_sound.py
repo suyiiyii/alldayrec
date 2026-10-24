@@ -13,7 +13,8 @@ from starlette.requests import Request
 
 import audio
 import db
-from server import chunk, device_log, sound
+from monitor import sound
+from routes_upload import chunk, device_log
 from tenant import T
 
 

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import anyio
 
 if TYPE_CHECKING:
-    from server import Segmenter
+    from segmenter import Segmenter
 
 
 @dataclass

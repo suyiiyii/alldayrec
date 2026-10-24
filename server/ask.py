@@ -23,7 +23,7 @@ ROUNDS = 8          # tool rounds; the next call must answer
 DIGEST_DAYS = 7     # today and the 6 days before it, by their summaries
 TRANSCRIPT_CHARS = 8000
 TOOL_CHARS = 20000  # one tool result sent back, at most
-ID = re.compile(r"c\d{14}(?:-[A-Za-z0-9_]+)?")  # server.py record(): c<start to the second>[-<device>]
+ID = re.compile(r"c\d{14}(?:-[A-Za-z0-9_]+)?")  # device_pipeline.py record(): c<start to the second>[-<device>]
 
 SYSTEM = """你在帮我回答关于我自己过去生活的问题。资料来自我随身录音的转写和每段对话的摘要：「我」是录音者本人，S1、S2… 是没认出名字的其他人，转写有错别字和同音误识别。
 下面先给你最近 {days} 天每段对话的摘要，近期的问题先看这里；更早的、或者要核对原文细节时，调用工具查。

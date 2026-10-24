@@ -9,12 +9,12 @@ Candidates
   volc-window    same windows through Volcengine seed-asr-2.0 (streaming API, speaker ids), cached in work/volc/
   volc-sentence  the live pipeline since 09-29 21:40: no context, Volcengine sentences, conversation clustering (diarist)
   volc-stream    one Volcengine two-pass streaming session per stretch of VAD speech, definite sentences, diarist labels
-  final-pieces   the live final layer: server.next_cut pieces (<= CHUNK_S, cut in pauses) as the
+  final-pieces   the live final layer: segmenter.next_cut pieces (<= CHUNK_S, cut in pauses) as the
                  audio arrives in 5 s pieces, each piece once to Volcengine, diarist labels; FINAL_LABELS=online (as
                  each piece comes) | offline (diarist.relabel at the end) | engine (the engine's ids per piece as
                  units) | guarded (engine units split when their voices disagree: the server's relabel at a close)
   engine-pieces  final-pieces as the server sends them now: its Segmenter's utterances cut the pieces, each goes
-                 through server.sent_audio (squeezed on the loose VAD's speech, lifted) to PROVIDERS[ENGINE], cached in
+                 through asr.sent_audio (squeezed on the loose VAD's speech, lifted) to PROVIDERS[ENGINE], cached in
                  work/engine-<ENGINE>/ by what was sent (ASR_GAIN_MAX_DB=0: not lifted)
   cloud-window   every 30 s, last 240 s to StepFun file diarization (via the file-mode ASR service), cluster mean vs owner,
                  final_rows replace the window (the live second layer as designed)
@@ -28,6 +28,7 @@ import concurrent.futures as cf
 import datetime as dt
 import functools
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -39,7 +40,12 @@ import anyio.to_thread
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from server import SR, REFINE_EVERY_S, REFINE_WINDOW_S, Segmenter, clip_turns, diarize, final_rows, log  # noqa: E402
+from asr import diarize  # noqa: E402
+from device_pipeline import REFINE_EVERY_S, REFINE_WINDOW_S  # noqa: E402
+from segmenter import SR, Segmenter  # noqa: E402
+from transcript import clip_turns, final_rows  # noqa: E402
+
+log = logging.getLogger("live")
 
 DATA = Path(os.environ.get("LIVE_DATA", "."))  # the store whose voiceprints the old candidates read (server.DATA before tenants)
 
@@ -397,7 +403,7 @@ def rows_streamed(case: Case, dia, embed) -> list[dict]:
     """A streaming session per stretch of speech: our VAD utterances closer than STREAM_GAP_S share one, sent from
     STREAM_PRE_S before to STREAM_POST_S after; the server's definite sentences are final as they come, labelled by
     the conversation clustering like volc-sentence."""
-    from server import label_sentences
+    from transcript import label_sentences
     total = len(case.x) / SR
     sessions = []
     for a, b in vad_utterances(case):
@@ -416,10 +422,11 @@ def rows_streamed(case: Case, dia, embed) -> list[dict]:
 
 
 def rows_final_pieces(case: Case, dia, embed, utts=None, window=None) -> list[dict]:
-    """The final layer as the server runs it: audio arrives PIECE_S at a time; whenever server.next_cut finds a cut, the
+    """The final layer as the server runs it: audio arrives PIECE_S at a time; whenever segmenter.next_cut finds a cut, the
     piece from the finalized time to it goes whole to the engine (window(a, e), Volcengine by default) and every
     sentence of it is final."""
-    from server import MERGE_GAP_S, label_sentences, next_cut
+    from segmenter import MERGE_GAP_S, next_cut
+    from transcript import label_sentences
     total, utts, piece, window = len(case.x) / SR, utts or vad_utterances(case), 5.0, window or case.volc_window
     rows, pieces, base, end = [], [], 0.0, piece
     while base < total - 0.05:
@@ -466,10 +473,10 @@ def engine_vad(case: Case) -> tuple[list[tuple[float, float]], list[tuple[float,
 
 
 def engine_window(case: Case, loose: list[tuple[float, float]], a: float, e: float) -> list[dict]:
-    """[a, e) as the server sends a final piece: server.sent_audio to PROVIDERS[ENGINE], cached by what was sent."""
+    """[a, e) as the server sends a final piece: asr.sent_audio to PROVIDERS[ENGINE], cached by what was sent."""
     import hashlib
     import squeeze
-    from server import ENGINE, PROVIDERS, sent_audio
+    from asr import ENGINE, PROVIDERS, sent_audio
     xs, spans = sent_audio(case.x[int(a * SR):int(e * SR)], [(max(0.0, s - a), min(e, t) - a) for s, t in loose if t > a and s < e])
     p = case.work / f"engine-{ENGINE}" / f"{hashlib.sha1(xs.tobytes()).hexdigest()[:16]}.json"
     if not p.exists():
@@ -543,7 +550,8 @@ def rows_per_sentence(case: Case, dia, embed) -> list[dict]:
     """The live second layer since 09-29 21:40: every REFINE_EVERY_S a window from 1 s before the sentence the
     last pass left open (no context), Volcengine sentences, speakers from the conversation clustering (diarist).
     Sequential like the live loop: a window's start depends on where the previous one stopped."""
-    from server import EDGE_S, REFINE_MARGIN_S, label_sentences
+    from device_pipeline import REFINE_MARGIN_S
+    from transcript import EDGE_S, label_sentences
     total = min(len(case.x) / SR, float(os.environ.get("REPLAY_UNTIL_S", "inf")))
     records, done, t_run = [], None, time.time()
     for n, now in enumerate(list(np.arange(REFINE_EVERY_S, total, REFINE_EVERY_S)) + [total]):

@@ -7,6 +7,7 @@ import time
 import anyio
 import numpy as np
 
+import core
 import db
 import server
 from tenant import T
@@ -29,7 +30,7 @@ def test_no_voiceprint_and_restart(tmp_path, monkeypatch):
     t0 = dt.datetime.fromtimestamp(round(time.time()) - 10 * PIECE_S)
     for i in range(3):
         save(t0 + dt.timedelta(seconds=PIECE_S * i), flac(np.concatenate([silence[:10 * SR], tone(i, 3), silence[13 * SR:]])))
-    finals = lambda: db.sentences(server.iso(t0), server.iso(t0 + dt.timedelta(seconds=3 * PIECE_S)), source=DEVICE)
+    finals = lambda: db.sentences(core.iso(t0), core.iso(t0 + dt.timedelta(seconds=3 * PIECE_S)), source=DEVICE)
 
     async def run():
         dias = len(T().dias)

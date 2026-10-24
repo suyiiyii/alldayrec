@@ -14,7 +14,7 @@ import db
 import live
 import profiles
 import recap
-import server
+import routes_api
 import summary
 import tenant
 from tenant import T
@@ -68,8 +68,8 @@ def test_prompts(monkeypatch):
 
 def test_api():
     db.open_db(Path(tempfile.mkdtemp()) / "t.db")
-    assert anyio.run(server.lang_get) == {"lang": "zh"}
-    assert anyio.run(server.lang_put, {"lang": "en"}) == {"lang": "en"} and T().lang == "en"
+    assert anyio.run(routes_api.lang_get) == {"lang": "zh"}
+    assert anyio.run(routes_api.lang_put, {"lang": "en"}) == {"lang": "en"} and T().lang == "en"
     with pytest.raises(HTTPException) as e:
-        anyio.run(server.lang_put, {"lang": "fr"})
+        anyio.run(routes_api.lang_put, {"lang": "fr"})
     assert e.value.status_code == 400 and T().lang == "en"

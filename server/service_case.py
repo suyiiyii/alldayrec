@@ -20,8 +20,10 @@ from pathlib import Path
 import anyio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from asr import _http  # noqa: E402
 from replay_case import DEVICE_PARAMS, EPOCH, LINK_MIN, MIN_SPEAKER_S, Case, Registry, Speakers  # noqa: E402
-from server import SR, _http, final_rows  # noqa: E402
+from segmenter import SR  # noqa: E402
+from transcript import final_rows  # noqa: E402
 
 BRIDGE, SERVICE = os.environ["ASR_UPLOAD_BRIDGE_URL"], os.environ["ASR_SERVICE_URL"]
 

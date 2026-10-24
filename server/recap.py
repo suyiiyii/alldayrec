@@ -2,7 +2,7 @@
 and a numbered list of that day's todos of mine (only that day's: a todo is never repeated on the next days; none marked
 done or wrong). The model picks todos by number, so each is one a summary holds, owned by 我 (never 未知), with its
 conversation and its due as said that day; its id and text stay the summary's (完成 / 不对 name a todo by its id), short
-is the model's wording. Kept in kv recap:<date> by server.py. The model is summary.py's; nothing is pushed anywhere.
+is the model's wording. Kept in kv recap:<date> by summaries.py. The model is summary.py's; nothing is pushed anywhere.
 
     uv run python recap.py                          # self-check
     uv run python recap.py <live.db> <date>...      # recaps of those days from a db opened read only, as JSON lines

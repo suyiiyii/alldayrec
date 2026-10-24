@@ -19,10 +19,15 @@ import pytest
 from starlette.testclient import TestClient
 
 import audio
+import core
 import db
+import device_pipeline
+import monitor
+import pipeline_state
 import server
 import summary
 import tenant
+import ws
 from test_backlog import PIECE_S, SR, flac, hear, rig, tone
 
 DEV = "iPhone"  # both tenants have one
@@ -74,7 +79,7 @@ def seed(t: tenant.Tenant):
         (t.data / "voices" / "clips" / f"{mark}.ogg").write_bytes(OGG)
     tenant.call(t, store)
     t.events.append({"type": "event", "at": AT, "kind": "info", "text": mark})
-    t.devices[DEV] = server.PipelineState(
+    t.devices[DEV] = pipeline_state.PipelineState(
         conversation={"start": f"{TODAY}T11:00:00.000", "end": f"{TODAY}T11:01:00.000", "sentences": 1, "speech_s": 30,
                       "device": DEV, "note": mark},
         live={"start": f"{TODAY}T11:00:00.000", "topics": [{"title": mark}], "messages": []})
@@ -188,8 +193,8 @@ def two(tmp_path, monkeypatch):
     a, b = make(tmp_path, "a", "ta"), make(tmp_path, "b", "tb")
     for t in (a, b):
         seed(t)
-    monkeypatch.setattr(server, "TENANTS", [a, b])
-    monkeypatch.setitem(server.state, "embed", lambda x: VEC)
+    monkeypatch.setattr(core, "TENANTS", [a, b])
+    monkeypatch.setitem(core.state, "embed", lambda x: VEC)
     return a, b
 
 
@@ -254,7 +259,7 @@ def test_websocket(two):
         wb.send_json({"type": "ping"})
         async def push(t, msg):  # a push of t's (a pipeline's, a note's): it runs as t
             tenant.enter(t)
-            await server.broadcast(msg)
+            await ws.broadcast(msg)
         for t, w, msg in ((b, wb, {"type": "event", "text": "MARKb"}), (a, wa, {"type": "event", "text": "MARKa"})):
             w.portal.call(push, t, msg)  # each WebSocket's own event loop (the test client's thread)
         assert wa.receive_json() == {"type": "event", "text": "MARKa"}, "a's first push is a's, b's went to b alone"
@@ -274,7 +279,7 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     silence = np.zeros(PIECE_S * SR, np.int16)
     t0 = dt.datetime.fromtimestamp(round(dt.datetime.now().timestamp()) - 6 * PIECE_S)
     tones = {a: (1, 2), b: (51, 52)}
-    finals = lambda: [r["text"] for r in db.sentences(server.iso(t0), "~", source=DEV)]
+    finals = lambda: [r["text"] for r in db.sentences(core.iso(t0), "~", source=DEV)]
 
     async def one(t):
         tenant.enter(t)
@@ -283,7 +288,7 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
             audio.save(DEV, int((t0 + dt.timedelta(seconds=PIECE_S * k)).timestamp() * 1000),
                        flac(np.concatenate([silence[:10 * SR], tone(i, 3), silence[13 * SR:]])), "audio/flac")
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEV)
+            tg.start_soon(device_pipeline.pipeline, DEV)
             for _ in range(120):
                 if len(finals()) >= 2:
                     break
@@ -310,7 +315,7 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
 
 def test_outside_any_tenant():
     """No tenant, no data: an error, never someone's store."""
-    for f in (db.conn, lambda: audio.queued(DEV), lambda: server.note("x"), server.status, lambda: tenant.T()):
+    for f in (db.conn, lambda: audio.queued(DEV), lambda: ws.note("x"), monitor.status, lambda: tenant.T()):
         with pytest.raises(LookupError):
             contextvars.Context().run(f)
 
@@ -318,7 +323,7 @@ def test_outside_any_tenant():
 def test_nothing_per_person_in_a_module():
     """The modules the server runs keep no mutable state at module level but these (none of them a person's): a cache
     or a dict added there would be shared by every tenant."""
-    allowed = {"server": {"TENANTS", "PROVIDERS", "state", "CHARGE", "NO_CACHE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
+    allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
                "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"}}  # the model files' hashes (its recognizer is one for everyone too, like the VAD)

@@ -13,9 +13,9 @@ import httpx2
 import numpy as np
 import pytest
 
+import asr
 import db
 import net
-import server
 import summary
 
 
@@ -28,10 +28,10 @@ def test_calls(monkeypatch):
 
     async def ok(x, partial=None):
         return [{"text": "秘密", "start_ms": 0, "end_ms": 500}]
-    monkeypatch.setattr(server, "PROVIDERS", {**server.PROVIDERS, "a": bad, "b": ok})
-    monkeypatch.setattr(server, "SQUEEZE_KEEP_S", 0.0)
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "b")
-    anyio.run(server.engine_segs, np.zeros(16000 * 30, np.int16), [], None, "a", "draft", "LR-P3-116C")
+    monkeypatch.setattr(asr, "PROVIDERS", {**asr.PROVIDERS, "a": bad, "b": ok})
+    monkeypatch.setattr(asr, "SQUEEZE_KEEP_S", 0.0)
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "b")
+    anyio.run(asr.engine_segs, np.zeros(16000 * 30, np.int16), [], None, "a", "draft", "LR-P3-116C")
     rows = [dict(r) for r in db.conn().execute("SELECT * FROM calls ORDER BY rowid")]
     assert [(r["kind"], r["engine"], r["device"], r["audio_s"], r["sent_s"]) for r in rows] == \
         [("draft", "a", "LR-P3-116C", 30.0, 30.0), ("draft", "b", "LR-P3-116C", 30.0, 30.0)]

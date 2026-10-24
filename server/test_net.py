@@ -15,10 +15,10 @@ import numpy as np
 import pytest
 
 import ask
+import asr
 import db
 import net
 import qwen_asr
-import server
 import stepfun_asr
 import summary
 
@@ -158,12 +158,12 @@ def test_engine_call_cut_off(monkeypatch, store):
     async def fallback(x, partial=None):
         tried.append("b")
         return []
-    monkeypatch.setattr(server, "PROVIDERS", {**server.PROVIDERS, "a": hang, "b": fallback})
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "b")
+    monkeypatch.setattr(asr, "PROVIDERS", {**asr.PROVIDERS, "a": hang, "b": fallback})
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "b")
 
     async def run():
         with anyio.move_on_after(0.2):
-            await server.engine_segs(np.zeros(16000, np.int16), [], None, "a", "draft", "LR-P3-116C")
+            await asr.engine_segs(np.zeros(16000, np.int16), [], None, "a", "draft", "LR-P3-116C")
     anyio.run(run)
     assert tried == ["a"]
     assert [(c["kind"], c["engine"], c["device"], c["error"].split(":")[0]) for c in calls()] == [("draft", "a", "LR-P3-116C", "CancelledError")]
@@ -181,10 +181,10 @@ def test_errors_in_side_by_side_parts(monkeypatch, store):
     async def ok(x, partial=None):
         return [{"text": "好", "start_ms": 0, "end_ms": 500}]
     monkeypatch.setattr(stepfun_asr, "sse", sse)
-    monkeypatch.setattr(server, "diarize", diarize)
-    monkeypatch.setattr(server, "PROVIDERS", {**server.PROVIDERS, "volc": ok})
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "volc")
-    segs = anyio.run(server.engine_segs, np.zeros(16000, np.int16), [], None, "stepfun", "final", "LR-P3-116C")
+    monkeypatch.setattr(asr, "diarize", diarize)
+    monkeypatch.setattr(asr, "PROVIDERS", {**asr.PROVIDERS, "volc": ok})
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "volc")
+    segs = anyio.run(asr.engine_segs, np.zeros(16000, np.int16), [], None, "stepfun", "final", "LR-P3-116C")
     assert segs[0]["fallback"] == "stepfun: RuntimeError('stepfun sse HTTP 451: refused')", segs[0]
     assert [(c["engine"], c["error"]) for c in calls()] == [("stepfun", "RuntimeError: stepfun sse HTTP 451: refused"), ("volc", None)]
 
@@ -193,11 +193,11 @@ def test_errors_in_side_by_side_parts(monkeypatch, store):
 
     async def slow(x, on=None):
         await anyio.sleep(60)
-    monkeypatch.setattr(server, "diarize", boom)
+    monkeypatch.setattr(asr, "diarize", boom)
     monkeypatch.setattr(stepfun_asr, "sse", slow)
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
     with pytest.raises(RuntimeError, match=r"^stepfun: RuntimeError\('diarization job j still running after 120 s'\)$"):
-        anyio.run(server.engine_segs, np.zeros(16000, np.int16), [], None, "stepfun")
+        anyio.run(asr.engine_segs, np.zeros(16000, np.int16), [], None, "stepfun")
     assert calls()[-1]["error"] == "RuntimeError: diarization job j still running after 120 s"
 
 
@@ -256,16 +256,16 @@ def test_diarize(monkeypatch):
     x = (np.sin(np.arange(16000) / 5) * 3000).astype(np.int16)
 
     outcome = lambda model: {"status": "COMPLETED", "segments": [dict(seg)]}
-    assert anyio.run(server.diarize, x) == [{**seg, "engine": "stepaudio"}]
+    assert anyio.run(asr.diarize, x) == [{**seg, "engine": "stepaudio"}]
     assert seen == [("POST", "/presign"), ("PUT", "/live.ogg"), ("POST", "/audio/transcriptions"), ("GET", "/jobs/j0"), ("GET", "/jobs/j0")]
 
     outcome = lambda model: {"status": "FAILED", "error": "{'code': 'risk', 'retryable': False}"} if model.startswith("stepaudio") else \
         {"status": "COMPLETED", "segments": [dict(seg)]}
-    assert anyio.run(server.diarize, x) == [{**seg, "engine": "doubao"}]
+    assert anyio.run(asr.diarize, x) == [{**seg, "engine": "doubao"}]
 
     outcome = lambda model: {"status": "FAILED", "error": "UPSTREAM_TASK_FAILED"}
     with pytest.raises(RuntimeError, match="^UPSTREAM_TASK_FAILED$"):
-        anyio.run(server.diarize, x)
+        anyio.run(asr.diarize, x)
 
 
 def test_qwen(monkeypatch):
@@ -306,20 +306,20 @@ def test_qwen(monkeypatch):
 
     polls[:] = [{"task_status": "RUNNING"}, {"task_status": "SUCCEEDED", "results": [
         {"subtask_status": "SUCCEEDED", "transcription_url": "http://result/t1.json"}]}]
-    assert anyio.run(server.qwen, x) == [{"start_ms": 100, "end_ms": 900, "text": "你好。", "speaker": "SPEAKER_0"},
+    assert anyio.run(asr.qwen, x) == [{"start_ms": 100, "end_ms": 900, "text": "你好。", "speaker": "SPEAKER_0"},
                                           {"start_ms": 1600, "end_ms": 2400, "text": "好的。", "speaker": "SPEAKER_1"}]
     assert [s[1:] for s in seen] == [("dashscope.aliyuncs.com", "/api/v1/uploads"), ("oss", "/"),
                                      ("dashscope.aliyuncs.com", "/api/v1/services/audio/asr/transcription"),
                                      ("dashscope.aliyuncs.com", "/api/v1/tasks/t1"), ("dashscope.aliyuncs.com", "/api/v1/tasks/t1"), ("result", "/t1.json")]
 
     polls[:] = [{"task_status": "FAILED", "code": "ASR_RESPONSE_HAVE_NO_WORDS", "message": "ASR_RESPONSE_HAVE_NO_WORDS"}]
-    assert anyio.run(server.qwen, x) == [], "a window nobody spoke in (10-19 18:27, 47 s): no sentences, not a failure"
+    assert anyio.run(asr.qwen, x) == [], "a window nobody spoke in (10-19 18:27, 47 s): no sentences, not a failure"
     polls[:] = [{"task_status": "SUCCEEDED", "results": [{"subtask_status": "FAILED", "code": "SUCCESS_WITH_NO_VALID_FRAGMENT"}]}]
-    assert anyio.run(server.qwen, x) == [], "nor one too short to hold a fragment (10-19 19:42, a voice memo's last piece)"
+    assert anyio.run(asr.qwen, x) == [], "nor one too short to hold a fragment (10-19 19:42, a voice memo's last piece)"
 
     polls[:] = [{"task_status": "SUCCEEDED", "results": [{"subtask_status": "FAILED", "code": "InvalidFile.DownloadFailed"}]}]
     with pytest.raises(RuntimeError, match="DownloadFailed"):
-        anyio.run(server.qwen, x)
+        anyio.run(asr.qwen, x)
 
 
 def test_http_as_urllib(monkeypatch):
@@ -332,11 +332,11 @@ def test_http_as_urllib(monkeypatch):
             raise httpx2.ConnectError("[Errno 111] Connection refused", request=req)
         return httpx2.Response(404 if req.url.path == "/missing" else 200, content=b"ok")
     mock(monkeypatch, handler)
-    assert anyio.run(server._http, "http://x/a") == b"ok" and anyio.run(server._http, "http://x/a", b"d") == b"ok"
+    assert anyio.run(asr._http, "http://x/a") == b"ok" and anyio.run(asr._http, "http://x/a", b"d") == b"ok"
     assert seen == ["GET", "POST"]
     with pytest.raises(urllib.error.HTTPError) as e:
-        anyio.run(server._http, "http://x/missing")
-    assert e.value.code == 404 and server.failure(e.value) == "HTTPError: HTTP Error 404: Not Found"
+        anyio.run(asr._http, "http://x/missing")
+    assert e.value.code == 404 and asr.failure(e.value) == "HTTPError: HTTP Error 404: Not Found"
     with pytest.raises(urllib.error.URLError) as e:
-        anyio.run(server._http, "http://down/")
-    assert server.failure(e.value) == "URLError: <urlopen error [Errno 111] Connection refused>"
+        anyio.run(asr._http, "http://down/")
+    assert asr.failure(e.value) == "URLError: <urlopen error [Errno 111] Connection refused>"

@@ -11,6 +11,7 @@ from pathlib import Path
 import anyio
 
 import audio
+import core
 import db
 import server
 
@@ -44,7 +45,7 @@ def seconds(body: bytes) -> float:
 
 def test_listen(monkeypatch):
     t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
-    monkeypatch.setattr(server, "TENANTS", [t])  # no token: no auth
+    monkeypatch.setattr(core, "TENANTS", [t])  # no token: no auth
     assert get("device=phone")[0] == 204, "no audio yet"
     for i in range(3):  # 10:00:00, 01, 02: one second each, as the apps send them in front
         audio.save("phone", T + i * 1000, tone(1), "audio/ogg")

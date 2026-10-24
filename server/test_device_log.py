@@ -8,7 +8,7 @@ from pathlib import Path
 import anyio
 
 import db
-from server import DeviceEvent, device_log, device_log_upload, device_status_report, upgrades
+from routes_upload import DeviceEvent, device_log, device_log_upload, device_status_report, upgrades
 
 T = 1_700_000_000_000  # the phone's TIME write, epoch ms (lr_sync.py's selftest)
 iso = lambda ms: dt.datetime.fromtimestamp(ms / 1000).isoformat(timespec="milliseconds")

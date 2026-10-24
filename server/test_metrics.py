@@ -9,9 +9,12 @@ from pathlib import Path
 import anyio
 import pytest
 
+import asr
 import audio
+import core
 import db
-import server
+import monitor
+import pipeline_state
 from tenant import T
 
 LINE = re.compile(r'[a-zA-Z_:][a-zA-Z0-9_:]*\{[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*"(?:,[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n])*")*\} '
@@ -21,8 +24,8 @@ LINE = re.compile(r'[a-zA-Z_:][a-zA-Z0-9_:]*\{[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n]
 def test_metrics(monkeypatch):
     t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     t.id = "main"
-    monkeypatch.setattr(server, "TENANTS", [t])
-    monkeypatch.setattr(server, "STARTED", (dt.datetime.now() - dt.timedelta(seconds=1)).isoformat())
+    monkeypatch.setattr(core, "TENANTS", [t])
+    monkeypatch.setattr(monitor, "STARTED", (dt.datetime.now() - dt.timedelta(seconds=1)).isoformat())
     db.add_call("final", "stepfun", "LR-P3-116C", 4000, None, 300.0, 200.0)
     db.add_call("final", "stepfun", "LR-P3-116C", 9000, "RuntimeError: stepfun sse HTTP 402: balance", 300.0, 200.0)
     db.add_call("summary", "m", None, 2000, "TimeoutError: timed out")
@@ -33,12 +36,12 @@ def test_metrics(monkeypatch):
     db.add_device_status("LR-P3-116C", (now - dt.timedelta(seconds=30)).isoformat(timespec="milliseconds"),
                          {"battery": 80, "charge": "charging", "fw": 'a"b\\c\nd'})
     audio.hold("某人的 iPhone", ms)
-    st = server.PipelineState(audio_end=now - dt.timedelta(seconds=2), final_latency=[4.0])
-    T().devices.update({"LR-P3-116C": st, "某人的 iPhone": server.PipelineState()})
-    monkeypatch.setitem(server.state, "commit", "abc1234")
+    st = pipeline_state.PipelineState(audio_end=now - dt.timedelta(seconds=2), final_latency=[4.0])
+    T().devices.update({"LR-P3-116C": st, "某人的 iPhone": pipeline_state.PipelineState()})
+    monkeypatch.setitem(core.state, "commit", "abc1234")
     for h, cny in ((24, 27.3), (0, 24.1)):  # ¥3.2 a day: 7.5 days left
         db.conn().execute("INSERT INTO balances VALUES (?, 'stepfun', ?)", ((now - dt.timedelta(hours=h)).isoformat(timespec="seconds"), cny))
-    text = server.metrics()
+    text = monitor.metrics()
     lines = text.splitlines()
     assert text.endswith("\n") and all(LINE.fullmatch(x) for x in lines), [x for x in lines if not LINE.fullmatch(x)]
     assert all('instance="main"' in x for x in lines)
@@ -65,12 +68,12 @@ def test_metrics(monkeypatch):
     sent = []
     async def http(url, data, headers):
         sent.append((url, data, headers))
-    monkeypatch.setattr(server, "_http", http)
+    monkeypatch.setattr(asr, "_http", http)
 
     async def once(url):  # the loop's first minute
-        monkeypatch.setattr(server, "VM_INGEST_URL", url)
+        monkeypatch.setattr(monitor, "VM_INGEST_URL", url)
         with anyio.move_on_after(0.5) as scope:
-            await server.metrics_loop()
+            await monitor.metrics_loop()
         assert scope.cancelled_caught, "the loop goes on"
     anyio.run(once, "")
     assert sent == [], "no VM_INGEST_URL: nothing sent"

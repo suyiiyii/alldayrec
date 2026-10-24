@@ -1,6 +1,6 @@
 """Tenants: each person's own store, recordings and in-memory state, side by side in one process.
 
-The tenant of whatever runs now is in a context variable with no default: a request takes its token's (server.py's
+The tenant of whatever runs now is in a context variable with no default: a request takes its token's (auth.py's
 middleware), a background task its own (run_tenant), a thread the caller's (anyio.to_thread copies the context). Code
 running outside any tenant gets a LookupError instead of someone else's data. Everything a tenant has lives on its
 Tenant; nothing per person stays in a module.

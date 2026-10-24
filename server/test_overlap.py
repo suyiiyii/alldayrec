@@ -8,8 +8,9 @@ import anyio
 import numpy as np
 
 import audio
+import core
 import db
-import server
+import device_pipeline
 from tenant import T
 from test_backlog import DEVICE, SR, flac, hear, rig, save, tone
 
@@ -32,11 +33,11 @@ def day(tmp_path) -> tuple[np.ndarray, dt.datetime]:
 def test_backlog_once_in_order(tmp_path, monkeypatch):
     rig(tmp_path, monkeypatch, hear)
     x, t0 = day(tmp_path)
-    finals = lambda: db.sentences(server.iso(t0), server.iso(t0 + dt.timedelta(seconds=len(x) / SR)), source=DEVICE)
+    finals = lambda: db.sentences(core.iso(t0), core.iso(t0 + dt.timedelta(seconds=len(x) / SR)), source=DEVICE)
 
     async def run():
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             for _ in range(120):
                 if len(finals()) >= N:
                     break

@@ -7,7 +7,8 @@ import subprocess
 import anyio
 import numpy as np
 
-from server import CHUNK_S, QUIET_S, SR, Segmenter, clip_turns, final_rows, merge_drafts, next_cut, overlaps, speech_in
+from segmenter import CHUNK_S, QUIET_S, SR, Segmenter, next_cut, speech_in
+from transcript import clip_turns, final_rows, merge_drafts, overlaps
 
 CLIP = os.environ.get("TEST_CLIP", "")  # any recorder file with speech; the test skips the audio part without it
 
@@ -32,9 +33,9 @@ def run(sizes):
 
 
 def test_final_rows():
-    import server
-    from server import final_rows
-    server.TURN_GAP_S = 1.0  # the merge case below assumes the default, whatever .env says
+    import transcript
+    from transcript import final_rows
+    transcript.TURN_GAP_S = 1.0  # the merge case below assumes the default, whatever .env says
     t0 = dt.datetime(2026, 9, 28, 22, 0)
     ms = lambda s: int(s * 1000)
     segs = [dict(start_ms=ms(a), end_ms=ms(b), speaker=k, text=t) for a, b, k, t in [
@@ -133,7 +134,7 @@ def test_engine_squeeze(monkeypatch):
     import sys
     import types
 
-    import server
+    import asr
     import squeeze
     squeeze.check()
     sent = []
@@ -146,12 +147,12 @@ def test_engine_squeeze(monkeypatch):
         return us, {}
     monkeypatch.setitem(sys.modules, "volc_asr", types.SimpleNamespace(transcribe=transcribe))
     got = []
-    segs = anyio.run(server.engine_segs, np.zeros(60 * SR, np.int16), [(10, 12), (30, 31.5)], got.append, "volc")  # kept: 8.5-13.5, 28.5-33
+    segs = anyio.run(asr.engine_segs, np.zeros(60 * SR, np.int16), [(10, 12), (30, 31.5)], got.append, "volc")  # kept: 8.5-13.5, 28.5-33
     assert sent == [9.5]
     assert [(g["start_ms"], g["end_ms"]) for g in got[0]] == [(10100, 11900)]
     assert [(g["start_ms"], g["end_ms"], g["engine"]) for g in segs] == [(10100, 11900, "volc"), (28500, 29500, "volc")]
-    monkeypatch.setattr(server, "SQUEEZE_KEEP_S", 0.0)  # off: the window whole, times as the engine gave them
-    assert anyio.run(server.engine_segs, np.zeros(60 * SR, np.int16), [(10, 12)], None, "volc")[1]["start_ms"] == 5000 and sent[-1] == 60
+    monkeypatch.setattr(asr, "SQUEEZE_KEEP_S", 0.0)  # off: the window whole, times as the engine gave them
+    assert anyio.run(asr.engine_segs, np.zeros(60 * SR, np.int16), [(10, 12)], None, "volc")[1]["start_ms"] == 5000 and sent[-1] == 60
 
 
 def test_engine_fallback(monkeypatch):
@@ -162,7 +163,7 @@ def test_engine_fallback(monkeypatch):
 
     import pytest
 
-    import server
+    import asr
     import stepfun_asr
     stepfun_asr.check()
     calls, x = [], np.zeros(SR, np.int16)
@@ -176,20 +177,20 @@ def test_engine_fallback(monkeypatch):
     async def bad(x, partial=None):
         calls.append("bad")
         raise RuntimeError("stepfun sse HTTP 402: balance")
-    monkeypatch.setattr(server, "PROVIDERS", {**server.PROVIDERS, "a": bad, "b": ok, "c": bad})
-    monkeypatch.setattr(server, "SQUEEZE_KEEP_S", 0.0)
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "b")
-    segs = anyio.run(server.engine_segs, x, [], None, "a")
+    monkeypatch.setattr(asr, "PROVIDERS", {**asr.PROVIDERS, "a": bad, "b": ok, "c": bad})
+    monkeypatch.setattr(asr, "SQUEEZE_KEEP_S", 0.0)
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "b")
+    segs = anyio.run(asr.engine_segs, x, [], None, "a")
     assert calls == ["bad", "ok"] and [g["engine"] for g in segs] == ["b", "b"] and "402" in segs[0]["fallback"]
     got = []
-    assert "fallback" not in anyio.run(server.engine_segs, x, [], got.append, "b")[0] and got[0][0]["engine"] == "b"
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "c")
+    assert "fallback" not in anyio.run(asr.engine_segs, x, [], got.append, "b")[0] and got[0][0]["engine"] == "b"
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "c")
     with pytest.raises(RuntimeError, match="a: .*402.*; c: .*402"):
-        anyio.run(server.engine_segs, x, [], None, "a")
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "")
+        anyio.run(asr.engine_segs, x, [], None, "a")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
     calls.clear()
     with pytest.raises(RuntimeError):
-        anyio.run(server.engine_segs, x, [], None, "a")
+        anyio.run(asr.engine_segs, x, [], None, "a")
     assert calls == ["bad"], "no fallback configured: the error goes to the caller"
 
     d = lambda t, a, b: {"delta": t, "start_time": a, "end_time": b}
@@ -199,8 +200,8 @@ def test_engine_fallback(monkeypatch):
     async def diarize(x):
         return [{"start_ms": 0, "end_ms": 500, "speaker": "SPEAKER_1", "text": "你号", "words": []}]
     monkeypatch.setattr(stepfun_asr, "sse", sse)
-    monkeypatch.setattr(server, "diarize", diarize)
-    assert [(g["text"], g.get("speaker"), g["engine"]) for g in anyio.run(server.engine_segs, x, [], None, "stepfun")] == \
+    monkeypatch.setattr(asr, "diarize", diarize)
+    assert [(g["text"], g.get("speaker"), g["engine"]) for g in anyio.run(asr.engine_segs, x, [], None, "stepfun")] == \
         [("你好", "SPEAKER_1", "stepfun"), ("嗯", None, "stepfun")]
 
     polled = []
@@ -214,13 +215,13 @@ def test_engine_fallback(monkeypatch):
     async def refused(x, on):
         await anyio.sleep(0.2)
         raise RuntimeError("stepfun sse HTTP 451")
-    monkeypatch.setattr(server, "diarize", slow)
+    monkeypatch.setattr(asr, "diarize", slow)
     monkeypatch.setattr(stepfun_asr, "sse", refused)
 
     async def run():
         t = time.perf_counter()
         with pytest.raises(RuntimeError, match=r"^stepfun: RuntimeError\('stepfun sse HTTP 451'\)$"):  # the SSE's own error
-            await server.engine_segs(x, [], None, "stepfun")
+            await asr.engine_segs(x, [], None, "stepfun")
         assert time.perf_counter() - t < 1, "the fallback need not wait for the file job"
         await anyio.sleep(1.5)
         assert polled == [], "the file job's polling stopped"
@@ -234,6 +235,7 @@ def test_main_settings(monkeypatch):
 
     import pytest
 
+    import asr
     import infer
     import server
 
@@ -249,12 +251,12 @@ def test_main_settings(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     for k in ("DASHSCOPE_API_KEY", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
         monkeypatch.setenv(k, "x")
-    monkeypatch.setattr(server, "ENGINE", "qwen")
-    monkeypatch.setattr(server, "DRAFT_ENGINE", "qwen-stream")
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "")
+    monkeypatch.setattr(asr, "ENGINE", "qwen")
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "qwen-stream")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
     with pytest.raises(Started):
         server.main()
-    monkeypatch.setattr(server, "ENGINE_FALLBACK", "stepfun")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "stepfun")
     monkeypatch.setenv("STEPFUN_API_KEY", "x")
     monkeypatch.setenv("ASR_SERVICE_URL", "http://asr")
     with pytest.raises(SystemExit, match=r"not set: ASR_UPLOAD_BRIDGE_URL \(for stepfun\), ASR_UPLOAD_BRIDGE_TOKEN \(for stepfun\), "

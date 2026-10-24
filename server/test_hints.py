@@ -8,7 +8,7 @@ import numpy as np
 
 import db
 import hints
-from server import alias_set, apply_rename, label_suggestions, person
+from routes_speakers import alias_set, apply_rename, label_suggestions, person
 
 T = "2026-10-05T10:00:"
 ROWS = [dict(start=T + "01.000", end=T + "02.000", speaker="S1", text="老张，你来一下"),

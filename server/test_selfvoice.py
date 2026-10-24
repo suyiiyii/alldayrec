@@ -9,10 +9,14 @@ import numpy as np
 import pytest
 from fastapi import HTTPException
 
+import core
 import db
+import device_pipeline
+import routes_audio
+import routes_speakers
 import selfvoice as sv
-import server
 import tenant
+import ws
 from test_backlog import DEVICE, PIECE_S, SR, flac, hear, rig, save, tone
 
 rng = np.random.default_rng(0)
@@ -109,9 +113,9 @@ def test_card_round_trip(tmp_path, monkeypatch):
     async def cut(start, end, fmt, device=None):
         n = int((dt.datetime.fromisoformat(end) - dt.datetime.fromisoformat(start)).total_seconds() * SR)
         return (np.ones(n) * amp[start]).astype(np.int16).tobytes()
-    monkeypatch.setattr(server, "cut", cut)
-    monkeypatch.setitem(server.state, "embed", lambda x: noisy(ME) if x.max() > 2000 else noisy(FR))
-    monkeypatch.setattr(server, "broadcast", lambda m: anyio.sleep(0))
+    monkeypatch.setattr(routes_audio, "cut", cut)
+    monkeypatch.setitem(core.state, "embed", lambda x: noisy(ME) if x.max() > 2000 else noisy(FR))
+    monkeypatch.setattr(ws, "broadcast", lambda m: anyio.sleep(0))
     with db.tx() as t:
         for i in range(4):
             o = 600 * i
@@ -127,11 +131,11 @@ def test_card_round_trip(tmp_path, monkeypatch):
 
     npz = tmp_path / "owner-redimnet2.npz"
     np.savez(npz, mic=FR)  # a voiceprint already (the main instance): no card, nothing written
-    anyio.run(server.self_round)
-    assert db.kv("selfvoice") is None and anyio.run(server.self_get) == {"card": None}
+    anyio.run(routes_speakers.self_round)
+    assert db.kv("selfvoice") is None and anyio.run(routes_speakers.self_get) == {"card": None}
     npz.unlink()
 
-    anyio.run(server.self_round)
+    anyio.run(routes_speakers.self_round)
     st = db.kv("selfvoice")
     card = st["card"]
     assert card["why"] == "rule" and card["convs"] == 4 and not npz.exists(), "nothing is taken before the user picks"
@@ -139,55 +143,55 @@ def test_card_round_trip(tmp_path, monkeypatch):
     assert c0["tier"] == "很可能" and c0["convs"] == 4 and float(np.asarray(c0["bank"]) @ ME) > 0.95
     assert len(c0["clips"]) == 3 and len({c["start"][:16] for c in c0["clips"]}) == 3, "3 clips from 3 conversations"
     assert all(amp[c["start"]] == 3000 and c["device"] == "mic" and c["text"] for c in c0["clips"])
-    shown = anyio.run(server.self_get)["card"]
+    shown = anyio.run(routes_speakers.self_get)["card"]
     assert "bank" not in shown["candidates"][0] and "p" not in shown["candidates"][0], "no % on the card"
 
-    anyio.run(server.self_answer, {"answer": "later"})
+    anyio.run(routes_speakers.self_answer, {"answer": "later"})
     st = db.kv("selfvoice")
     assert st["card"] is None and "until" in st["wait"] and st["log"][-1]["answer"] == "later"
-    anyio.run(server.self_round)
+    anyio.run(routes_speakers.self_round)
     assert db.kv("selfvoice")["card"] is None, "a day later"
     db.put_kv("selfvoice", {**st, "wait": {"until": T(0)}})
-    anyio.run(server.self_round)
+    anyio.run(routes_speakers.self_round)
     assert db.kv("selfvoice")["card"]["why"] == "again"
     with pytest.raises(HTTPException):
-        anyio.run(server.self_answer, {"answer": 7})
+        anyio.run(routes_speakers.self_answer, {"answer": 7})
 
-    anyio.run(server.self_answer, {"answer": 0})
+    anyio.run(routes_speakers.self_answer, {"answer": 0})
     assert float(np.load(npz)["self"] @ ME) > 0.95 and float(tenant.T().owner["self"] @ ME) > 0.95
     st = db.kv("selfvoice")
     assert st["confirmed"]["pick"] == 0 and st["card"] is None and [x["answer"] for x in st["log"]] == ["later", 0]
-    assert anyio.run(server.self_get) == {"card": None}
+    assert anyio.run(routes_speakers.self_get) == {"card": None}
     with pytest.raises(HTTPException):
-        anyio.run(server.self_answer, {"answer": 0})
+        anyio.run(routes_speakers.self_answer, {"answer": 0})
 
 
 def test_pick_reaches_next_conversation(tmp_path, monkeypatch):
     """Picked while a conversation is open: it stays without 我 (also at its relabel at the close); the next one is 我."""
     rig(tmp_path, monkeypatch, hear)  # every sentence's voiceprint is [0, 1, 0, 0]
     (tmp_path / "owner-redimnet2.npz").unlink()
-    monkeypatch.setattr(server, "broadcast", lambda m: anyio.sleep(0))
+    monkeypatch.setattr(ws, "broadcast", lambda m: anyio.sleep(0))
     db.put_kv("selfvoice", {"first_at": T(0), "card": {"why": "rule", "convs": 3, "candidates": [{"p": 0.99, "bank": [0, 1, 0, 0]}]}})
     silence = np.zeros(PIECE_S * SR, np.int16)
     speech = lambda i: flac(np.concatenate([silence[:5 * SR], tone(i, 4), silence[9 * SR:15 * SR], tone(i + 1, 4), silence[19 * SR:]]))
     # A: pieces 0-1, 4 sentences (16 s: its first, alone, is S? and no speech); 6 quiet minutes close it; B: pieces 8-9
     pieces = {0: speech(0), 1: speech(2), 8: speech(10), 9: speech(12)}
     t0 = dt.datetime.fromtimestamp(round(time.time()) - 16 * PIECE_S)
-    texts = lambda: {r["text"]: r["speaker"] for r in db.sentences(server.iso(t0), server.iso(t0 + dt.timedelta(seconds=16 * PIECE_S)), source=DEVICE)}
+    texts = lambda: {r["text"]: r["speaker"] for r in db.sentences(core.iso(t0), core.iso(t0 + dt.timedelta(seconds=16 * PIECE_S)), source=DEVICE)}
 
     async def run():
         save(t0, pieces[0])
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             for _ in range(60):
                 if "1" in texts():
                     break
                 await anyio.sleep(0.5)
             assert "1" in texts() and db.kv(f"open_conversation:{DEVICE}"), "A is open"
-            await server.self_answer({"answer": 0})
+            await routes_speakers.self_answer({"answer": 0})
             for i in range(1, 16):
                 save(t0 + dt.timedelta(seconds=PIECE_S * i), pieces.get(i) or flac(silence))
-            db.put_kv(f"end_at:{DEVICE}", server.iso(t0 + dt.timedelta(seconds=16 * PIECE_S)))  # the recorder stopped: B closes
+            db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=16 * PIECE_S)))  # the recorder stopped: B closes
             for _ in range(120):
                 if len(db.conversations()) == 2:
                     break

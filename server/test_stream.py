@@ -8,8 +8,11 @@ import time
 import anyio
 import numpy as np
 
+import asr
 import db
-import server
+import device_pipeline
+import qwen_stream
+import ws
 from test_backlog import DEVICE, SR, flac, heard, rig, save, st, tone
 
 
@@ -57,14 +60,14 @@ def test_stream_drafts(tmp_path, monkeypatch):
     async def never(x, partial=None):  # the final layer stays out of the way: drafts only
         await anyio.sleep_forever()
     rig(tmp_path, monkeypatch, never)
-    monkeypatch.setattr(server, "DRAFT_ENGINE", "qwen-stream")
-    monkeypatch.setattr(server.qwen_stream, "Session", FakeSession)
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "qwen-stream")
+    monkeypatch.setattr(qwen_stream, "Session", FakeSession)
     FakeSession.opened = []
     pushed = []
 
     async def broadcast(msg):
         pushed.append(msg)
-    monkeypatch.setattr(server, "broadcast", broadcast)
+    monkeypatch.setattr(ws, "broadcast", broadcast)
     n = 4  # tones 7..10, 2 s each with 3 s of quiet after, in 1 s pieces as an app in front sends them
     now = np.concatenate([np.concatenate([tone(7 + j, 2), np.zeros(3 * SR, np.int16)]) for j in range(n)])
     pieces = [flac(now[k * SR:(k + 1) * SR]) for k in range(len(now) // SR)]
@@ -72,7 +75,7 @@ def test_stream_drafts(tmp_path, monkeypatch):
 
     async def run():
         async with anyio.create_task_group() as tg:
-            tg.start_soon(server.pipeline, DEVICE)
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
             for k, body in enumerate(pieces):
                 await anyio.sleep(live0.timestamp() + k + 1 - time.time())
                 await anyio.to_thread.run_sync(save, live0 + dt.timedelta(seconds=k), body)

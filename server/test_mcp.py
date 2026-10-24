@@ -7,6 +7,7 @@ from pathlib import Path
 
 import anyio
 
+import core
 import db
 import mcp_server as m
 import server
@@ -151,7 +152,7 @@ def post(body, headers: dict[str, str], method="POST") -> tuple[int, dict | None
 def test_http_token(monkeypatch):
     t = fake()
     t.token = "s3cret"
-    monkeypatch.setattr(server, "TENANTS", [t])
+    monkeypatch.setattr(core, "TENANTS", [t])
     call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "due", "arguments": {}}}
     assert post(call, {})[0] == 401, "no token"
     assert post(call, {"Authorization": "Bearer wrong"})[0] == 401
