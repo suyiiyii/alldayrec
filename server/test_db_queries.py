@@ -1,10 +1,13 @@
 """Real SQLite query contracts; no server, models, or external services."""
 import itertools
 import json
+import datetime as dt
 import sqlite3
 
+import anyio
 import pytest
 
+from alldayrec import audio
 from alldayrec import db
 from alldayrec import tenant
 
@@ -152,3 +155,26 @@ def test_init_makes_the_data_dir(tmp_path):
     """A tenant's data dir need not exist yet: the start makes it (Docker's first start, an empty volume)."""
     db.open_db(tmp_path / "main" / "live.db")
     assert (tmp_path / "main" / "live.db").is_file()
+
+
+def test_pieces_by_end(tmp_path):
+    """Where a device's audio ends comes from pieces_end, not a scan of all its pieces: audio.backlog (its rows and its
+    end: 751 and 314 ms at 1.3 M pieces), audio.pending's end, audio.stream's first piece (307 ms)."""
+    db.open_db(tmp_path / "t.db")
+    db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES ('d', 1000, 10, 'x')")
+
+    async def stream():  # its first query, then nothing after 20 s: it waits
+        with anyio.move_on_after(0.1):
+            async for _ in audio.stream("d", dt.datetime.fromtimestamp(20)):
+                pass
+    seen = []
+    db.conn().set_trace_callback(seen.append)
+    audio.backlog("d", dt.datetime.fromtimestamp(5))
+    audio.pending(set())
+    anyio.run(stream)
+    db.conn().set_trace_callback(None)
+    ends = [q for q in seen if "FROM pieces WHERE device = 'd' AND start_ms + seconds * 1000 >" in q or "max(start_ms + seconds * 1000)" in q]
+    assert len(ends) == 4, seen
+    for q in ends:
+        plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q))
+        assert "pieces_end" in plan, (q, plan)

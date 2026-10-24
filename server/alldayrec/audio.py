@@ -370,7 +370,8 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     device's queue (read_to, queued). spent: the ms its pieces took to decode (decode_ms) and the seconds it handed out
     (fed_s) added to it (perf.piece)."""
     ms = int(after.timestamp() * 1000) if after else 0
-    p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, ms)).fetchone()
+    p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1",
+                          (device, ms)).fetchone() if after else None  # None: from 0 all the same, and pieces_end would sort every piece
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
     # audio after `after` still on its way (a pipeline started mid catch-up took 3 such pieces as late)
     at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, 0.0
