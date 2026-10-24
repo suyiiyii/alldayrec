@@ -304,8 +304,12 @@ watch(
   .fold {
     pointer-events: none;
   }
+  .head {
+    flex: none;
+  }
   .body {
     flex: 1;
+    min-height: 0; /* a flex item: without it the topics push the card past the screen instead of scrolling */
     max-height: none;
   }
 }
