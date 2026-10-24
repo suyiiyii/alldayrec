@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
+import AskVoice from "../components/AskVoice.vue";
 import ConversationItem from "../components/ConversationItem.vue";
 import DayPicker from "../components/DayPicker.vue";
 import DueTodos from "../components/DueTodos.vue";
@@ -59,6 +60,7 @@ const yesterday = shiftDay(today(), -1);
 // 问 AI: the words in the search box (or the sheet's) as a question (POST /api/ask, 10-30 s); [c…] in the answer link
 // to the conversation. The answer is kept for the tab: back from a cited conversation it is still there
 interface Reply {
+  q?: string; // the question, as typed or heard
   answer: string;
   sources: { id: string; start: string; title?: string | null }[];
   calls: unknown[];
@@ -72,6 +74,7 @@ const kept = () => {
   }
 };
 const reply = ref<Reply | null>(kept()),
+  question = ref(reply.value?.q ?? ""),
   asking = ref(false),
   askErr = ref(""),
   askErrTitle = ref("");
@@ -83,10 +86,11 @@ watch(reply, (r) => {
 async function askAI(text: string) {
   asking.value = true;
   askErr.value = "";
+  question.value = text;
   const t0 = Date.now();
   try {
     const r = await post<Reply>("/api/ask", { q: text });
-    reply.value = { ...r, secs: Math.round((Date.now() - t0) / 1000) };
+    reply.value = { ...r, q: text, secs: Math.round((Date.now() - t0) / 1000) };
   } catch (e) {
     askErr.value = String((e as Error).message ?? e);
     askErrTitle.value = errorTitle(e);
@@ -110,17 +114,38 @@ const SUGGEST = computed(() => [
 const sq = ref("");
 const sheet = ref<HTMLDialogElement>(),
   input = ref<HTMLInputElement>(),
-  fab = ref<HTMLButtonElement>();
+  fab = ref<HTMLButtonElement>(),
+  askCard = useTemplateRef<HTMLElement>("askCard");
+// the question and its answer come up where the eye is: the card at the top of the screen (the pinned cards above it
+// would hold it under the fold)
 function ask(text: string) {
   if (!text) return;
   sheet.value?.close();
-  window.scrollTo(0, 0);
   void askAI(text);
+  void nextTick(() => askCard.value?.scrollIntoView({ block: "start" }));
 }
+// the sheet starts as hold-to-talk (豆包's way) on a touch screen, as the text box with a mouse; the one last picked
+// stays. No microphone (a page over plain http, an old WebView): the text box alone
+const canTalk = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+const mode = localStorage.askMode ?? (matchMedia("(pointer: coarse)").matches ? "voice" : "text");
+const talk = ref(canTalk && mode === "voice"),
+  hint = ref("");
 // focus inside the tap itself: iOS raises the keyboard only for a focus() in the user's gesture
 function openSheet() {
+  hint.value = "";
   sheet.value?.showModal();
-  input.value?.focus();
+  if (!talk.value) input.value?.focus();
+}
+function setTalk(on: boolean) {
+  talk.value = on;
+  localStorage.askMode = on ? "voice" : "text";
+  hint.value = "";
+  if (!on) void nextTick(() => input.value?.focus()); // shown first; a microtask is still inside the tap for iOS
+}
+const heard = (text: string) => (text ? ask(text) : (hint.value = t("timeline.notHeard")));
+function talkFailed(why: string, mic: boolean) {
+  hint.value = why;
+  if (mic) talk.value = false; // for now, not kept: the next time may have it
 }
 
 const search = (before: string) =>
@@ -266,6 +291,12 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         </DayPicker>
         <div class="q">
           <input v-model.trim="q" type="search" :placeholder="t('timeline.search')" />
+          <AskVoice
+            v-if="canTalk"
+            toggle
+            @heard="(s) => (s ? askAI(s) : ((question = ''), (askErr = t('timeline.notHeard'))))"
+            @fail="(why) => ((question = ''), (askErr = why))"
+          />
           <button :disabled="!q || asking" @click="askAI(q)">{{ t("timeline.ask") }}</button>
         </div>
         <div class="tags">
@@ -280,7 +311,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           </button>
         </div>
       </div>
-      <div v-if="asking || reply || askErr" class="card ask">
+      <div v-if="asking || reply || askErr" ref="askCard" class="card ask">
         <div class="meta">
           {{ t("timeline.ask")
           }}{{
@@ -300,6 +331,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             <Icon name="x" :size="18" />
           </button>
         </div>
+        <p v-if="question" class="said">{{ question }}</p>
         <div v-if="asking" class="muted">{{ t("timeline.asking") }}</div>
         <div v-else-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</div>
         <div v-else class="answer">
@@ -350,17 +382,34 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             </button>
           </div>
           <div class="row">
+            <AskVoice v-if="talk" @heard="heard" @fail="talkFailed" @pointerdown="hint = ''" />
             <input
+              v-show="!talk"
               ref="input"
               v-model.trim="sq"
               type="search"
               enterkeyhint="send"
               :placeholder="t('timeline.askToday')"
             />
-            <button class="btn-primary" :disabled="!sq" :aria-label="t('timeline.ask')">
+            <button
+              v-if="canTalk"
+              type="button"
+              class="btn-ghost switch"
+              :aria-label="talk ? t('timeline.typeInstead') : t('timeline.talkInstead')"
+              @click="setTalk(!talk)"
+            >
+              <Icon :name="talk ? 'keyboard' : 'mic'" :size="22" />
+            </button>
+            <button
+              v-show="!talk"
+              class="btn-primary"
+              :disabled="!sq"
+              :aria-label="t('timeline.ask')"
+            >
               <Icon name="sparkles" :size="18" />
             </button>
           </div>
+          <p v-if="hint" class="hint">{{ hint }}</p>
         </form>
       </dialog>
       <button ref="fab" class="fab btn-primary" :aria-label="t('timeline.ask')" @click="openSheet">
@@ -426,6 +475,16 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 .answer {
   white-space: pre-wrap;
   margin-top: 4px;
+}
+/* the question, as a bubble on the right */
+.said {
+  width: fit-content;
+  max-width: 85%;
+  margin: var(--space-2) 0 var(--space-2) auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  white-space: pre-wrap;
 }
 .meta {
   font-size: var(--fs-xs);
@@ -517,7 +576,8 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   outline: none;
   border-color: var(--accent);
 }
-.row .btn-primary {
+.row .btn-primary,
+.row .switch {
   flex: none;
   width: 44px;
   padding: 0;
@@ -525,6 +585,19 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+.row .switch {
+  align-self: center;
+  color: var(--fg-2);
+}
+.sheet form:has(.rec) .chips {
+  visibility: hidden; /* under 松手发送，上移取消 */
+}
+.sheet .hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  text-align: center;
 }
 /* the sheet: from the bottom edge, full width; the form fills it, so a tap on the dialog itself is the backdrop */
 .sheet {

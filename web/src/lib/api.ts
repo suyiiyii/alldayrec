@@ -387,7 +387,7 @@ export class ApiError extends Error {
 }
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {
     r = await fetch(path, init);

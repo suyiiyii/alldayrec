@@ -44,7 +44,8 @@
       "no_summaries": "No summaries that day",
       "analyzing": "Already analyzing",
       "no_open_conversation": "No conversation is going on",
-      "no_new_speech": "No new speech yet"
+      "no_new_speech": "No new speech yet",
+      "bad_audio": "That recording could not be played. Say it again"
     }
   },
   "speaker": {
@@ -802,7 +803,18 @@
     "askToday": "Ask about today…",
     "suggestPromises": "What did I promise today?",
     "suggestRecap": "Yesterday's recap",
-    "suggestFollowUp": "Draft a follow-up message"
+    "suggestFollowUp": "Draft a follow-up message",
+    "holdToTalk": "Hold to talk",
+    "releaseToSend": "Release to send, slide up to cancel",
+    "releaseToCancel": "Release to cancel",
+    "hearing": "Recognizing…",
+    "tooShort": "Too short",
+    "notHeard": "Didn't catch that. Say it again",
+    "noMic": "No microphone here. Type instead",
+    "typeInstead": "Type",
+    "talkInstead": "Talk",
+    "askByVoice": "Ask by voice",
+    "clickToSend": "Click again to send, Esc to cancel"
   },
   "todoItem": {
     "andMore": "{names} and {more} more",

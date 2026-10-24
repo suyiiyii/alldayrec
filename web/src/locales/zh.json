@@ -44,7 +44,8 @@
       "no_summaries": "那天没有摘要",
       "analyzing": "正在分析",
       "no_open_conversation": "没有进行中的对话",
-      "no_new_speech": "没有新的语音"
+      "no_new_speech": "没有新的语音",
+      "bad_audio": "没录到能听的声音，再说一次"
     }
   },
   "speaker": {
@@ -802,7 +803,18 @@
     "askToday": "问问今天…",
     "suggestPromises": "今天答应了谁什么",
     "suggestRecap": "昨天的回顾",
-    "suggestFollowUp": "帮我写跟进消息"
+    "suggestFollowUp": "帮我写跟进消息",
+    "holdToTalk": "按住说话",
+    "releaseToSend": "松手发送，上移取消",
+    "releaseToCancel": "松手取消",
+    "hearing": "正在识别…",
+    "tooShort": "说话时间太短",
+    "notHeard": "没听清，再说一次",
+    "noMic": "用不了麦克风，先打字吧",
+    "typeInstead": "打字",
+    "talkInstead": "说话",
+    "askByVoice": "说出问题",
+    "clickToSend": "再点一下发送，Esc 取消"
   },
   "todoItem": {
     "andMore": "{names} 等 {n} 人",
