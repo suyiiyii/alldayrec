@@ -5,8 +5,8 @@ middleware), a background task its own (run_tenant), a thread the caller's (anyi
 running outside any tenant gets a LookupError instead of someone else's data. Everything a tenant has lives on its
 Tenant; nothing per person stays in a module.
 
-The tenants are in tenants.json beside the server dir (/opt/<instance>/tenants.json, next to its .env), mode 600: it
-holds every token, and nothing else does (server/tenants.sh made it from each instance's .env):
+The tenants are in DATA_DIR/tenants.json, mode 600: it holds every token, and nothing else does (a first start makes one
+tenant, create(); server/tenants.sh made each deploy instance's from its .env, and adds tenants):
     [{"id": "main", "token": "...", "data": "/opt/alldayrec/data", "recordings": "/opt/alldayrec/recordings"}, ...]
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
@@ -17,6 +17,8 @@ import hmac
 import json
 import math
 import os
+import secrets
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -27,7 +29,12 @@ if TYPE_CHECKING:
     from alldayrec.pipeline_state import PipelineState
 
 current: contextvars.ContextVar["Tenant"] = contextvars.ContextVar("tenant")
-FILE = Path(__file__).resolve().parents[2] / "tenants.json"
+# tenants.json, the model files (infer.DIR) and a first start's tenant: DATA_DIR, else the user's data dir as platformdirs
+# names it (~/.local/share/alldayrec, ~/Library/Application Support/alldayrec). The stdlib: deploy.sh runs this file
+# alone, in the instance's venv before it takes the release's packages.
+DATA_DIR = Path(os.environ.get("DATA_DIR") or (Path.home() / "Library/Application Support" if sys.platform == "darwin" else
+                                               Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")) / "alldayrec")
+FILE = DATA_DIR / "tenants.json"
 LANGS = ("zh", "en")
 
 
@@ -89,7 +96,7 @@ def call(t: Tenant, f, *args):
 def load(path: Path = FILE) -> list[Tenant]:
     """The tenants file's tenants: one id and one token each (a token may be empty only for the only tenant)."""
     if not path.is_file():
-        raise SystemExit(f"{path}: no tenants file (see tenant.py)")
+        raise SystemExit(f"{path}: no tenants file (DATA_DIR; see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
     ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh")
@@ -102,6 +109,16 @@ def load(path: Path = FILE) -> list[Tenant]:
     if not ts[0].token and (host := os.environ.get("HOST", "127.0.0.1")) not in ("127.0.0.1", "localhost", "::1"):
         raise SystemExit(f"{path}: no token, and HOST={host} lets other machines in: give the tenant a token (openssl rand -hex 16)")
     return ts
+
+
+def create(path: Path = FILE) -> str:
+    """A first start's tenants file: one tenant, main, with a random token and its store beside the file (as
+    tenants.sh add makes one). Returns the token."""
+    t = {"id": "main", "token": secrets.token_urlsafe(24), "data": str(path.parent / "main"), "recordings": str(path.parent / "main/recordings")}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+        f.write(json.dumps([t], indent=1) + "\n")
+    return t["token"]
 
 
 def by_token(ts: list[Tenant], token: str | None) -> Tenant | None:

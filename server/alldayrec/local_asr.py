@@ -8,7 +8,7 @@ for the process, built at the first call with INFER_THREADS threads; its files l
 out of the release tarball (LOCAL_ASR_URL: GitHub's, or a mirror's copy of the same tarball; sha256-checked) when
 missing or not the pinned ones (FILES).
 
-    uv run python -m alldayrec.local_asr file.wav     decode a 16 kHz mono wav and print its sentences (fetches the model)
+    uv run --extra local python -m alldayrec.local_asr file.wav     decode a 16 kHz mono wav and print its sentences (fetches the model)
 """
 import logging
 import os
@@ -37,6 +37,8 @@ FILES = {  # file in the tarball: sha256
     "tokens.txt": "b818a60878b9aae978cbb8ad594acbd403d76d1af2e31ef4197c84e2dbdba27c",
     "bpe.model": "f87a38025a5fdd1e4e9591f6a44bb81295097ce0b80df6f4ab9f44e52c64ca5f",
 }
+NEEDS = ("ENGINE=local needs sherpa-onnx, the [local] extra: pip install 'alldayrec[local]', "
+         "uvx --python 3.11 --from 'alldayrec[local]' alldayrec, or in a checkout uv sync --extra local")
 PIECE_S = 20.0   # most audio in one decode (the bench's); longer is cut at the quietest 100 ms past half of it
 TOKEN_MS = 300   # a token ends where the next starts, at most this much later (a pause after it is not it)
 PAUSE_MS = 300   # a sentence ends before a token starting this long after the last one ended ...
@@ -71,7 +73,10 @@ def recognizer():
     global _rec
     with _lock:
         if _rec is None:
-            import sherpa_onnx
+            try:
+                import sherpa_onnx
+            except ImportError as e:
+                raise ImportError(NEEDS) from e
             d = infer.DIR / NAME
             fetch(d)
             f = lambda n: str(d / n)

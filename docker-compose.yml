@@ -1,6 +1,7 @@
 # The server in Docker, on port 8770 of every interface of this machine: phones connect to http://<its LAN or Tailscale IP>:8770.
 #   cp .env.example .env    # fill in: ENGINE=qwen needs DASHSCOPE_API_KEY and the LLM_* settings
 #   mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
+#     (or skip it: a first start without data/tenants.json makes one like it and logs the link with its token)
 #   docker compose up -d && docker compose logs -f    # then open http://<this machine's LAN or Tailscale IP>:8770/?token=<the token>
 # ./data holds tenants.json, the model files (downloaded into data/models at the first start, sha256-checked) and each
 # tenant's store and recordings. .env: comments on their own lines (Compose reads "VAR=   # comment" as the value).
@@ -12,12 +13,13 @@ services:
     environment:  # inside the container, whatever .env says
       HOST: 0.0.0.0
       PORT: "8770"
+      DATA_DIR: /data
       MODELS_DIR: /data/models
     volumes:
       - ./data:/data
     ports:
       # every interface, so phones reach it. The token in data/tenants.json is the only lock: the one you wrote there
-      # (the openssl line above; nothing generates it), and with HOST 0.0.0.0 the server won't start with an empty one.
+      # (the openssl line above) or the one a first start made, and with HOST 0.0.0.0 the server won't start with an empty one.
       # From the public internet: put a TLS reverse proxy in front. This machine only: "127.0.0.1:8770:8770"
       - "8770:8770"
     restart: unless-stopped

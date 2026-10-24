@@ -3,7 +3,7 @@ from pathlib import Path
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from alldayrec import apk
 from alldayrec import core
@@ -13,7 +13,7 @@ from alldayrec.core import NO_CACHE
 router = APIRouter()
 
 
-DIST = Path(__file__).resolve().parent / "static/dist"  # the web app (web/, built by deploy.sh)
+DIST = Path(__file__).resolve().parent / "static/dist"  # the web app (web/: pnpm build; deploy.sh, Docker, the wheel)
 
 
 @router.get("/")
@@ -30,6 +30,8 @@ DIST = Path(__file__).resolve().parent / "static/dist"  # the web app (web/, bui
 @router.get("/p/{name}")
 @router.get("/device/{name}")
 async def page(conv_id: str = "", name: str = ""):
+    if not (DIST / "index.html").is_file():  # a checkout without the web app built: the API works, the pages don't
+        return PlainTextResponse(f"the web app is not built: cd web && pnpm install && pnpm build (into {DIST})", 503)
     return FileResponse(DIST / "index.html", headers=NO_CACHE)
 
 

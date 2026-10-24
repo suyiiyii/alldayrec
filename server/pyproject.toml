@@ -3,6 +3,7 @@ name = "alldayrec"
 version = "0.1.0"
 description = "alldayrec server: a continuous audio stream in, conversations out — local VAD + cloud or local ASR + web page"
 requires-python = "==3.11.*"
+license = "MIT"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
@@ -14,9 +15,25 @@ dependencies = [
     "scipy>=1.17.1",
     "httpx2>=2.13.1",
     "anyio>=4.15.1",
-    "sherpa-onnx>=2.0.0",  # local_asr.py (1.13.8 garbled some models' output), owner.py, replay_case.py
-    "sherpa-onnx-core>=2.0.0",
 ]
+
+[project.optional-dependencies]
+# ENGINE=local (local_asr.py; 1.13.8 garbled some models' output), owner.py, replay_case.py: pip install 'alldayrec[local]'
+local = ["sherpa-onnx>=2.0.0", "sherpa-onnx-core>=2.0.0"]
+
+[project.scripts]
+alldayrec = "alldayrec.server:main"  # as python -m alldayrec
+
+[project.urls]
+Homepage = "https://github.com/suyiiyii/alldayrec"
+Documentation = "https://suyiiyii.github.io/alldayrec/"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+artifacts = ["alldayrec/static/dist/"]  # the web app, built into it before uv build (gitignored, so named here)
 
 [dependency-groups]
 export = ["torch==2.14.1", "torchaudio==2.11.0", "onnx==1.22.0"]  # export_onnx.py only: the server runs the models on onnxruntime

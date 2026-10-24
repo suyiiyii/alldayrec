@@ -8,10 +8,11 @@
 # `bash -s`) is the remote command this script is piped into; it must run as root (systemctl, the instance dirs):
 # `sudo bash -s`, `wsl -u root -e bash -s`, ... scp puts the release in the login's home as lr-deploy.tgz; a remote shell
 # whose $HOME is another one is told where: LR_TGZ (`wsl -u root -e env LR_TGZ=/mnt/c/Users/me/lr-deploy.tgz bash -s`).
-# An instance: <dir>/server/alldayrec (the package), <dir>/server/.venv, its unit running
-# <dir>/server/.venv/bin/python -m alldayrec in <dir>/server. It serves the tenants in <dir>/tenants.json
-# (server/alldayrec/tenant.py; made from its .env once by server/tenants.sh), asked as them; a deploy installs nothing
-# anywhere unless the new server reads every instance's tenants.json (a server without one stops at its start).
+# An instance: <dir>/server/alldayrec (the package), <dir>/server/.venv, <dir>/.env with DATA_DIR=<dir> (and MODELS_DIR
+# when the model files are elsewhere), its unit running <dir>/server/.venv/bin/python -m alldayrec in <dir>/server with
+# EnvironmentFile=<dir>/.env. It serves the tenants in <dir>/tenants.json (server/alldayrec/tenant.py; made from its .env
+# once by server/tenants.sh), asked as them; a deploy installs nothing anywhere unless the new server reads every
+# instance's tenants.json where its .env points (a server without one would start a new one, with a new token).
 # Each deploy keeps a backup with a copy of every tenant's live.db in <dir>/backup-deploy-<time>, <dir>/backup-last points
 # at it; a deploy that passes its check keeps only its own and the one before. An instance whose unit is disabled is
 # left alone: another one serves its tenants (server/tenants.sh merge).
@@ -100,11 +101,13 @@ deploy() {  # dir unit: back up, install the release, restart, check
   b=$d/backup-deploy-$RUN
   mkdir -p "$b/old" "$b/new"
   tar -xzf "$TGZ" -C "$b/new" --no-same-owner
-  # the release's packages (its uv.lock) into the instance's venv first: added or changed, none removed (--inexact), so
-  # the code running now and a rollback's run on them too; a failure stops here, nothing installed, nothing restarted
-  (cd "$b/new" && UV_PROJECT_ENVIRONMENT="$d/server/.venv" "$UV" sync --frozen --inexact -q)
-  # and every model file the release pins (infer.MODELS) in the instance's MODELS_DIR, or stop here the same way (a restart without them would fail)
-  (cd "$b/new" && MODELS_DIR="$(env_of "$d" MODELS_DIR)" "$d/server/.venv/bin/python" -c "from alldayrec import infer; infer.check()")
+  # the release's packages (its uv.lock, the [local] extra too) into the instance's venv first: added or changed, none
+  # removed (--inexact), so the code running now and a rollback's run on them too; not the project (the unit runs the
+  # package from server/); a failure stops here, nothing installed, nothing restarted
+  (cd "$b/new" && UV_PROJECT_ENVIRONMENT="$d/server/.venv" "$UV" sync --frozen --inexact --no-install-project --extra local -q)
+  # and every model file the release pins (infer.MODELS) where the instance's .env puts them (MODELS_DIR, else
+  # DATA_DIR/models), or stop here the same way (a restart without them would download them first)
+  (cd "$b/new" && DATA_DIR="$(env_of "$d" DATA_DIR)" MODELS_DIR="$(env_of "$d" MODELS_DIR)" "$d/server/.venv/bin/python" -c "from alldayrec import infer; infer.check()")
   for f in pyproject.toml uv.lock; do [ ! -f "$d/server/$f" ] || cp -a "$d/server/$f" "$b/old/"; done
   # per tenant, the columns now (rollback drops those a release adds: old code inserts whole rows) and an online copy of the db
   while read -r id data; do
@@ -168,10 +171,10 @@ stopped() {  # on exit: what a failed deploy left
   if [ -n "${INSTALLED:-}" ]; then echo "stopped; installed on$INSTALLED, undo with: server/deploy.sh rollback"; else echo "stopped; nothing installed"; fi
 }
 trap 'stopped $?' EXIT
-if [ "$mode" = deploy ]; then  # every instance's tenants.json as its new server reads it: the release's tenant.py, then load()
+if [ "$mode" = deploy ]; then  # every instance's tenants.json as its new server finds and reads it: the release's tenant.py, then load()
   for i in "$@"; do
-    { tar -xOzf "$TGZ" alldayrec/tenant.py; echo 'import sys; load(Path(sys.argv[1]))'; } | "${i%%:*}/server/.venv/bin/python" - "${i%%:*}/tenants.json" ||
-      { echo "  stop: the new server cannot read ${i%%:*}/tenants.json (server/tenants.sh migrate first)"; exit 1; }
+    { tar -xOzf "$TGZ" alldayrec/tenant.py; echo 'load()'; } | DATA_DIR="$(env_of "${i%%:*}" DATA_DIR)" "${i%%:*}/server/.venv/bin/python" - ||
+      { echo "  stop: the new server cannot read ${i%%:*}/tenants.json (DATA_DIR=${i%%:*} in its .env; server/tenants.sh migrate first)"; exit 1; }
   done
 fi
 NEWEST=$(for i in "$@"; do readlink "${i%%:*}/backup-last" || true; done | sed 's|.*/||' | sort | tail -1)

@@ -17,9 +17,10 @@ import kaldi_native_fbank as knf
 import numpy as np
 import onnxruntime as ort
 
+from alldayrec import tenant
 from alldayrec.vad_postprocessor import StreamVadPostprocessor
 
-DIR = Path(os.environ.get("MODELS_DIR") or "/opt/alldayrec/models")
+DIR = Path(os.environ.get("MODELS_DIR") or tenant.DATA_DIR / "models")
 THREADS = int(os.environ.get("INFER_THREADS", "4"))  # onnxruntime threads per voiceprint call (threads.INFER: calls at once)
 # The VAD hears its stream lifted to a level: its features take a fixed global CMVN, so speech 6-10 dB below the
 # usual (a far lecture through a PA, a quieter speaker) had p > 0.5 on no frame at all and was never sent. Each frame is

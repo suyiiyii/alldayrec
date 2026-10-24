@@ -1,6 +1,8 @@
 """Live transcript of the phone's recording.
 
-    set -a; . ../.env; set +a; uv run python -m alldayrec [--port 8770]   (variables: .env.example; tenants: ../tenants.json, alldayrec/tenant.py)
+    alldayrec [--port 8770]            installed (pip install alldayrec, uvx alldayrec)
+    set -a; . ../.env; set +a; uv run alldayrec [--port 8770]       in server/ of a checkout
+(variables: .env.example; tenants: DATA_DIR/tenants.json, tenant.py, one made at the first start)
 
 Takes the audio pieces the app and the /record page upload, keeps them on disk as a queue and feeds them in time
 order (only as fast as finalization keeps up), finds speech with FireRed Stream-VAD and transcribes in two layers:
@@ -11,7 +13,9 @@ import argparse
 import contextlib
 import datetime as dt
 import logging
+import importlib.util
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -32,6 +36,7 @@ from alldayrec import core
 from alldayrec import db
 from alldayrec import firmware
 from alldayrec import infer
+from alldayrec import local_asr
 from alldayrec import routes_api
 from alldayrec import routes_audio
 from alldayrec import routes_pages
@@ -177,17 +182,25 @@ def main():
     missing += [k for k in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL") if not os.environ.get(k)]
     if missing:
         raise SystemExit(f"not set: {', '.join(missing)} (see .env.example)")
+    if "local" in engines and not importlib.util.find_spec("sherpa_onnx"):
+        raise SystemExit(local_asr.NEEDS)
+    if not shutil.which("ffmpeg"):  # every upload is decoded with it (audio.py)
+        raise SystemExit("ffmpeg is not on PATH: brew install ffmpeg (macOS), sudo apt install ffmpeg (Debian, Ubuntu)")
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
     infer.fetch()  # a first start: the missing model files, downloaded
     infer.check()  # every model file there and the pinned one, before anything starts
     log.info("models ok: %d files in %s", len(infer.MODELS), infer.DIR)
+    if not tenant.FILE.exists():
+        token = tenant.create()
+        log.info("first start: %s made, one tenant; on this machine open http://127.0.0.1:%d/connect?token=%s",
+                 tenant.FILE, args.port, token)
     core.TENANTS[:] = tenant.load()
     for t in core.TENANTS:
         tenant.call(t, db.init)
     firmware.DIR = core.TENANTS[0].data / "firmware"  # every tenant's: the first one's
-    commit = HERE / "COMMIT"  # written by deploy.sh: the server has no git checkout
+    commit = HERE / "COMMIT"  # written by deploy.sh, the Docker build and the PyPI release: no git checkout there
     state["commit"] = commit.read_text().strip() if commit.exists() else \
         subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     log.info("tenants: %s", ", ".join(t.id for t in core.TENANTS))

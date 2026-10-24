@@ -10,7 +10,7 @@ resolution-markers = [
 [[package]]
 name = "alldayrec"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "fastapi" },
@@ -20,10 +20,14 @@ dependencies = [
     { name = "onnxruntime" },
     { name = "scikit-learn" },
     { name = "scipy" },
-    { name = "sherpa-onnx" },
-    { name = "sherpa-onnx-core" },
     { name = "uvicorn" },
     { name = "websockets" },
+]
+
+[package.optional-dependencies]
+local = [
+    { name = "sherpa-onnx" },
+    { name = "sherpa-onnx-core" },
 ]
 
 [package.dev-dependencies]
@@ -45,11 +49,12 @@ requires-dist = [
     { name = "onnxruntime", specifier = "==1.30.0" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "scipy", specifier = ">=1.17.1" },
-    { name = "sherpa-onnx", specifier = ">=2.0.0" },
-    { name = "sherpa-onnx-core", specifier = ">=2.0.0" },
+    { name = "sherpa-onnx", marker = "extra == 'local'", specifier = ">=2.0.0" },
+    { name = "sherpa-onnx-core", marker = "extra == 'local'", specifier = ">=2.0.0" },
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "websockets", specifier = ">=17.1" },
 ]
+provides-extras = ["local"]
 
 [package.metadata.requires-dev]
 export = [
