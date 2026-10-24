@@ -21,6 +21,19 @@ LINE = re.compile(r'[a-zA-Z_:][a-zA-Z0-9_:]*\{[a-zA-Z_]\w*="(?:[^"\\\n]|\\[\\"n]
                   r'-?\d+(?:\.\d+)?(?:e[-+]?\d+)?')
 
 
+def test_status_latency():
+    """The status line says how far behind the newest sentence came up (a page's drafts while it watches, else the final
+    rows'), the median of the last 10 beside it: a catch-up's late rows after a restart no longer hold it up (10-24: 54.5 s
+    of a 50-row median while the drafts came 4.5 s after)."""
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    st = pipeline_state.PipelineState(latency=[54.5, 50.0, 30.0, 4.5], final_latency=[70.0, 12.0], drafting=True)
+    d = monitor.device_status("LR-P3-116C", st)
+    assert (d["latency_s"], d["latency_med_s"], d["final_latency_s"]) == (4.5, 50.0, 12.0)
+    st.drafting = False  # no page watches: no drafts, the final rows'
+    d = monitor.device_status("LR-P3-116C", st)
+    assert (d["latency_s"], d["latency_med_s"], d["final_latency_s"]) == (12.0, 70.0, 12.0)
+
+
 def test_metrics(monkeypatch):
     t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     t.id = "main"

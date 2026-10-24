@@ -26,7 +26,7 @@ log = logging.getLogger("live")
 
 def device_status(device: str, st: PipelineState) -> dict:
     end, done, pr = st.audio_end, st.done_to, st.progress
-    lat = st.latency if st.drafting else st.final_latency  # what the page shows first: drafts while it watches
+    lat = st.latency if st.drafting else st.final_latency  # what the page shows first: drafts while it watches (the last 10)
     left, received_to = audio.backlog(device, done)
     hold, seen, arrived = audio.held(device), audio.hold_seen(device), audio.arrival(device)
     # seconds of audio finalized per second, over the commits of the last 10 min (silence goes fast, speech ~8x)
@@ -48,7 +48,9 @@ def device_status(device: str, st: PipelineState) -> dict:
             "refine": st.refine, "conversation": st.conversation, "drafting": st.drafting, "draft": st.draft,
             "analyzing": st.analyzing,  # the live analysis is running
             "draft_to": st.draft_to.isoformat(timespec="seconds") if st.draft_to else None,
-            "latency_s": sorted(lat)[len(lat) // 2] if lat else None,
+            # how far behind what one reads now is: its newest sentence's end to its showing; the median a diagnosis
+            "latency_s": lat[-1] if lat else None, "latency_med_s": sorted(lat)[len(lat) // 2] if lat else None,
+            "final_latency_s": st.final_latency[-1] if st.final_latency else None,
             "arrival": arrived, "sound": sound(device, received_to)}
 
 
@@ -65,7 +67,8 @@ def status() -> dict:
     pieces still queued over all devices."""
     ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in T().devices.items()]
     top = max(ds, key=lambda d: d["audio_end"] or "", default={"device": None, "audio_end": None, "behind_s": None, "done_to": None,
-                                                                 "last_speech": None, "refine": None, "conversation": None, "latency_s": None})
+                                                                 "last_speech": None, "refine": None, "conversation": None, "latency_s": None,
+                                                                 "latency_med_s": None, "final_latency_s": None})
     summaries = db.conn().execute("SELECT count(*) FROM summaries WHERE status = 'pending'").fetchone()[0]
     return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),

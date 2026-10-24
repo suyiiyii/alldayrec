@@ -183,15 +183,16 @@ function jump(start: string) {
       <DayPicker :day="day" @pick="go">
         <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
       </DayPicker>
-      <!-- recording or not, and how far behind the words come up; the rest is on the progress page -->
+      <!-- recording or not, and how far behind the newest sentence came up (each status, every 2 s); the rest is on the
+           progress page -->
       <RouterLink class="status" to="/progress" :title="t('title.progress')">
         <template v-if="!connected">{{ t("live.reconnecting") }}</template>
         <template v-else-if="status">
           <span v-if="status.recording === false">{{ t("live.notRecording") }}</span>
-          <span v-else :class="{ bad: (status.latency_s ?? 0) > 60 }">{{
-            status.latency_s == null
-              ? t("live.recording")
-              : t("live.recordingLag", { n: status.latency_s })
+          <span v-else :class="{ bad: (status.latency_s ?? 0) > 30 }">{{
+            t("live.recordingLag", {
+              v: status.latency_s == null ? "—" : t("common.sec", { n: status.latency_s }),
+            })
           }}</span>
         </template>
         <template v-else>{{ t("live.connecting") }}</template>

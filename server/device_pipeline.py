@@ -352,7 +352,7 @@ async def pipeline(device: str):
         for r in rows:
             r["source"], r["engine"], r["shown_at"] = device, engine, iso(shown)
             st.final_latency.append(round((shown - dt.datetime.fromisoformat(r["end"])).total_seconds(), 1))
-        del st.final_latency[:-50]
+        del st.final_latency[:-10]
         closed = [c for r in rows for c in grouper.sentence(r)]
         closed += grouper.advance(hi)
         await commit(closed, rows, iso(lo), hi)
@@ -399,7 +399,7 @@ async def pipeline(device: str):
             r["id"], r["state"] = "d" + r["id"][1:], "draft"
             r["source"], r["engine"], r["shown_at"] = device, engine, iso(shown)
             st.latency.append(round((shown - dt.datetime.fromisoformat(r["end"])).total_seconds(), 1))
-        del st.latency[:-50]
+        del st.latency[:-10]
         with db.tx() as t:
             db.insert_drafts(t, rows)
             db.put_kv(f"draft_to:{device}", iso(upto), t)
@@ -509,6 +509,7 @@ async def pipeline(device: str):
             st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
             if not st.drafting:
                 st.drafting = True
+                st.latency.clear()  # counted afresh: the rows of an earlier watch say nothing of this one
                 ws.note(f"{device}：页面在看，开始出初稿（从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
                 while await draft_pass():  # what came before the page opened, in windows
                     pass
@@ -554,6 +555,7 @@ async def pipeline(device: str):
                 ws.note(f"{device}：页面在看，开始出初稿（实时流，从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
             base = max(dseg.audio_base, dseg.sample_at(st.draft_to))
             sent, t, err = base, time.perf_counter(), None
+            st.latency.clear()  # counted afresh: the last session's rows (an earlier watch, a timeout) say nothing of this one
             try:
                 async with qwen_stream.Session() as s, anyio.create_task_group() as tg:
                     async def pump():

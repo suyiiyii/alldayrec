@@ -128,7 +128,10 @@ export interface DeviceStatus {
   hold_until?: string | null; // when the queue stops waiting without the phone (12 h after hold_seen)
   recording?: boolean; // its newest audio came in the last 2 min: behind_s and latency_s are about now
   queued: number;
-  latency_s: number | null;
+  latency_s: number | null; // its newest draft row's end to its showing (the final rows' while no page watches)
+  latency_med_s?: number | null; // the same over its last 10 rows, the median
+  final_latency_s?: number | null; // its newest final row's end to its showing
+  drafting?: boolean; // a page watches: drafts come up
   refine?: { at: string; ms: number; error?: string; backlog_s?: number } | null;
   conversation?: { start: string; end: string; sentences: number; speech_s: number } | null; // the one going on
   analyzing?: boolean; // its live analysis is running
@@ -257,7 +260,11 @@ export interface Status {
   device?: string | null;
   behind_s?: number | null;
   queued?: number; // uploaded pieces the server has not fed yet, all devices'
-  latency_s?: number | null;
+  latency_s?: number | null; // to arrival: of the device whose audio came in last, as its DeviceStatus
+  latency_med_s?: number | null;
+  final_latency_s?: number | null;
+  drafting?: boolean;
+  arrival?: { at: number; lag_s: number } | null;
   recording?: boolean; // some device's audio came in the last 2 min; false: behind_s is how long ago it last did
   last_audio?: string | null; // where the newest stored audio of any device ends
   refine?: { at: string; ms: number; error?: string } | null;

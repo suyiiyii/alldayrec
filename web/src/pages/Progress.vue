@@ -82,6 +82,7 @@ onUnmounted(() => clearInterval(tick));
 const KINDS = ["final", "draft", "summary", "hints", "profile", "recap", "live", "ask"];
 const kind = (k: string) => (KINDS.includes(k) ? t(`progress.kind.${k}`) : k);
 const secs = (ms: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)} s`);
+const sec = (n?: number | null) => (n == null ? "—" : t("common.sec", { n }));
 const callLine = (c: CallSum) => {
   const failed = Object.entries(c.failed);
   const nf = failed.reduce((s, [, n]) => s + n, 0);
@@ -208,15 +209,19 @@ const eta = (d: DeviceStatus) => {
         <template v-else>
           <span>{{ t("progress.device") }}</span
           ><span>{{ status.device || t("progress.waitingAudio") }}</span>
-          <span>{{ t("progress.behind") }}</span
-          ><span :class="{ bad: (status.behind_s ?? 0) > 30 }">{{
-            t("progress.behindVal", {
-              v: status.behind_s == null ? "—" : t("common.sec", { n: status.behind_s }),
-            })
+          <span>{{ t("progress.arrival") }}</span
+          ><span :class="{ bad: (status.arrival?.lag_s ?? 0) > 30 }">{{
+            t("progress.arrivalVal", { v: sec(status.arrival?.lag_s) })
           }}</span>
-          <span>{{ t("progress.latency") }}</span
-          ><span :class="{ bad: (status.latency_s ?? 0) > 60 }">{{
-            t("progress.latencyVal", { v: status.latency_s ?? "—" })
+          <span>{{ t("progress.draft") }}</span
+          ><span :class="{ bad: status.drafting && (status.latency_s ?? 0) > 30 }">{{
+            status.drafting
+              ? t("progress.draftVal", { v: sec(status.latency_s), m: sec(status.latency_med_s) })
+              : t("progress.draftOff")
+          }}</span>
+          <span>{{ t("progress.final") }}</span
+          ><span :class="{ bad: (status.behind_s ?? 0) > 30 }">{{
+            t("progress.finalVal", { v: sec(status.final_latency_s), b: sec(status.behind_s) })
           }}</span>
         </template>
         <span>{{ t("progress.queued") }}</span
