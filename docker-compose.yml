@@ -1,7 +1,7 @@
-# The server in Docker, on http://127.0.0.1:8770 of this machine.
+# The server in Docker, on port 8770 of every interface of this machine: phones connect to http://<its LAN or Tailscale IP>:8770.
 #   cp .env.example .env    # fill in: ENGINE=qwen needs DASHSCOPE_API_KEY and the LLM_* settings
 #   mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
-#   docker compose up -d && docker compose logs -f    # then open http://127.0.0.1:8770/?token=<the token>
+#   docker compose up -d && docker compose logs -f    # then open http://<this machine's LAN or Tailscale IP>:8770/?token=<the token>
 # ./data holds tenants.json, the model files (downloaded into data/models at the first start, sha256-checked) and each
 # tenant's store and recordings. .env: comments on their own lines (Compose reads "VAR=   # comment" as the value).
 services:
@@ -16,7 +16,10 @@ services:
     volumes:
       - ./data:/data
     ports:
-      - "127.0.0.1:8770:8770"  # this machine only: phones need HTTPS, put your TLS reverse proxy in front
+      # every interface, so phones reach it. The token in data/tenants.json is the only lock: the one you wrote there
+      # (the openssl line above; nothing generates it), and with HOST 0.0.0.0 the server won't start with an empty one.
+      # From the public internet: put a TLS reverse proxy in front. This machine only: "127.0.0.1:8770:8770"
+      - "8770:8770"
     restart: unless-stopped
     healthcheck:  # GET /api/health needs no token; no proxy for it (.env's HTTP_PROXY is the server's)
       test: ["CMD", "python", "-c", "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8770/api/health', timeout=5)"]

@@ -106,7 +106,9 @@ docker compose up -d
 docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验 sha256
 ```
 
-打开 `http://127.0.0.1:8770/?token=<your token>`（token 在 `data/tenants.json` 里），在 **连接手机** 页扫码连上 App。手机可以直接连 `http://<服务器 IP>:8770`，比如 Tailscale 的 100.x 地址或局域网地址；要走公网再加 HTTPS，见 [Docker 部署细节](#docker-部署细节)。
+在电脑上打开 `http://<服务器 IP>:8770/?token=<你的 token>`（token 在 `data/tenants.json` 里），在 **连接手机** 页用 App 扫码。服务器 IP 要用手机连得上的：Tailscale 的 100.x 地址或局域网地址，不要用 127.0.0.1，因为二维码里放的就是网页的地址。已经用 127.0.0.1 打开了，就在 **连接手机** 页的「手机用哪个地址」里选一个，或者自己填。
+
+端口发布在所有网卡上，靠 token 挡住别人；token 为空时服务不会启动。要从公网访问，在前面放一个带 TLS 的反向代理，见 [Docker 部署细节](#docker-部署细节)。
 
 **更多文档**
 
@@ -150,9 +152,9 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 
 预构建镜像发布在 `ghcr.io/suyiiyii/alldayrec`（amd64/arm64），`docker-compose.yml` 用的就是它。想在本机构建，把 `docker-compose.yml` 里的 `build: .` 取消注释，再运行 `docker compose up -d --build`。
 
-打开 `http://127.0.0.1:8770/?token=<your token>`（token 在 `data/tenants.json` 里；服务在远程机器上的话，先 `ssh -L 8770:127.0.0.1:8770 host`）；之后靠 cookie 保持登录。所有东西都在 `./data` 里：`tenants.json`、模型文件，以及每个人各自的 SQLite 数据库和原始录音。
+打开 `http://<服务器 IP>:8770/?token=<your token>`（token 在 `data/tenants.json` 里），之后靠 cookie 保持登录。**连接手机** 页的「手机用哪个地址」列出服务看得到的 Tailscale 和局域网地址；服务在 Docker 里看不到电脑的网卡，这时用「自己填」。所有东西都在 `./data` 里：`tenants.json`、模型文件，以及每个人各自的 SQLite 数据库和原始录音。
 
-App 连 `http://` 的服务器也可以（1.5.1 起），在 Tailscale 或局域网里直接用 IP 和端口就行；要从公网访问，在 8770 端口前面放一个带 TLS 的反向代理（Caddy、nginx、Cloudflare Tunnel、Tailscale Serve）；`GET /api/health` 不需要 token 就返回 `{"ok": true}`，可以给代理做健康检查。compose 文件只把端口发布在 127.0.0.1 上；token 为空的服务不要暴露出去。
+App 连 `http://` 的服务器也可以（1.5.1 起），在 Tailscale 或局域网里直接用 IP 和端口就行；要从公网访问，在 8770 端口前面放一个带 TLS 的反向代理（Caddy、nginx、Cloudflare Tunnel、Tailscale Serve）；`GET /api/health` 不需要 token 就返回 `{"ok": true}`，可以给代理做健康检查。compose 文件把 8770 端口发布在所有网卡上，挡住别人的只有 token；token 为空时，除非 HOST 是 127.0.0.1，服务不会启动。只想本机访问，把那一行改成 `127.0.0.1:8770:8770`。
 
 ### 快速开始（不用 Docker）
 
@@ -166,7 +168,7 @@ echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/
 cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 ```
 
-`tenants.json` 列出服务为哪些人服务：每人一条，各有自己的 token、数据目录和录音目录（`server/tenant.py`）。只有一条且 token 为空时不做认证：这样的服务只能放在 127.0.0.1 上。
+`tenants.json` 列出服务为哪些人服务：每人一条，各有自己的 token、数据目录和录音目录（`server/tenant.py`）。只有一条且 token 为空时不做认证，这时 HOST 必须是 127.0.0.1，否则服务不会启动。手机要直连，在 `.env` 里设 `HOST=0.0.0.0`（要有 token）。
 
 ### 模型文件
 

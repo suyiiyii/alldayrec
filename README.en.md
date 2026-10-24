@@ -106,7 +106,9 @@ docker compose up -d
 docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
 ```
 
-Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`) and scan the QR code on the **连接手机** page from the app. Phones can connect to `http://<server IP>:8770` directly, e.g. a Tailscale 100.x or LAN address; add HTTPS only to reach it over the public internet, see [Docker details](#docker-details).
+On the computer, open `http://<server IP>:8770/?token=<your token>` (the token is in `data/tenants.json`) and scan the QR code on the **连接手机** page from the app. Use a server IP the phone can reach: the Tailscale 100.x address or the LAN address, not 127.0.0.1, because the QR code carries the page's address. Already opened it on 127.0.0.1? Pick an address under 「手机用哪个地址」 on the **连接手机** page, or type one.
+
+The port is published on all interfaces, and the token keeps others out; the server refuses to start with an empty token. To reach it over the public internet, put a reverse proxy with TLS in front, see [Docker details](#docker-details).
 
 **More docs**
 
@@ -150,9 +152,9 @@ The container runs in UTC unless `.env` sets `TZ` (`.env.example` has `TZ=Asia/S
 
 A prebuilt image is published to `ghcr.io/suyiiyii/alldayrec` (amd64/arm64), and `docker-compose.yml` uses it. To build it locally instead, uncomment `build: .` in `docker-compose.yml` and run `docker compose up -d --build`.
 
-Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`; on a remote machine: `ssh -L 8770:127.0.0.1:8770 host` first); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
+Open `http://<server IP>:8770/?token=<your token>` (the token is in `data/tenants.json`); a cookie keeps you signed in. Under 「手机用哪个地址」, the **连接手机** page lists the Tailscale and LAN addresses the server sees; in Docker the server can't see the computer's interfaces, so type the address under 「自己填」. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
 
-The app accepts plain `http://` servers (since 1.5.1): inside Tailscale or a LAN, use the IP and port directly. To reach the server over the public internet, put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
+The app accepts plain `http://` servers (since 1.5.1): inside Tailscale or a LAN, use the IP and port directly. To reach the server over the public internet, put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes port 8770 on all interfaces, and the token is the only lock; with an empty token the server refuses to start unless HOST is 127.0.0.1. To keep it on this machine only, change that line to `127.0.0.1:8770:8770`.
 
 ### Quickstart (without Docker)
 
@@ -166,7 +168,7 @@ echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/
 cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 ```
 
-`tenants.json` lists who the server serves: one entry per person, each with its own token and its own data and recordings directories (`server/tenant.py`). A single entry with an empty token runs without auth: keep such a server on 127.0.0.1.
+`tenants.json` lists who the server serves: one entry per person, each with its own token and its own data and recordings directories (`server/tenant.py`). A single entry with an empty token runs without auth, and then HOST must be 127.0.0.1, or the server refuses to start. For phones to connect directly, set `HOST=0.0.0.0` in `.env` (with a token).
 
 ### Model files
 

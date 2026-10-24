@@ -8,8 +8,9 @@ Tenant; nothing per person stays in a module.
 The tenants are in tenants.json beside the server dir (/opt/<instance>/tenants.json, next to its .env), mode 600: it
 holds every token, and nothing else does (server/tenants.sh made it from each instance's .env):
     [{"id": "main", "token": "...", "data": "/opt/alldayrec/data", "recordings": "/opt/alldayrec/recordings"}, ...]
-A process with one tenant whose token is empty runs without auth (loopback only). "lang" (optional): the language the
-models write that tenant's summaries, recaps and answers in, zh or en; without it UI_LANG, else zh.
+A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
+won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
+en; without it UI_LANG, else zh.
 """
 import contextvars
 import hmac
@@ -97,6 +98,8 @@ def load(path: Path = FILE) -> list[Tenant]:
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")
+    if not ts[0].token and (host := os.environ.get("HOST", "127.0.0.1")) not in ("127.0.0.1", "localhost", "::1"):
+        raise SystemExit(f"{path}: no token, and HOST={host} lets other machines in: give the tenant a token (openssl rand -hex 16)")
     return ts
 
 

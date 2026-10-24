@@ -35,6 +35,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel
 from starlette.requests import HTTPConnection
 
+import addresses
 import apk
 import ask
 import audio
@@ -463,6 +464,7 @@ async def lifespan(app):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(firmware.router)  # the recorders' firmware packages (firmware.DIR: the first tenant's, set by main)
+app.include_router(addresses.router)  # GET /api/addresses: where phones reach this server (the 连接手机 page)
 state = {"commit": "", "embed": None}  # the process's: what runs, and the voiceprint model every tenant uses
 MODEL = anyio.Event()  # the model is loaded
 

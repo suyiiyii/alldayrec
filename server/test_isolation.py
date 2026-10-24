@@ -151,6 +151,7 @@ SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/assets/{name}": "the web app's files", "/app.apk": "the Android app: one for all", "/api/app/latest": "the Android app's version",
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",
     "/api/firmware/latest": "firmware", "/api/firmware/{model}/{version}.zip": "firmware",
+    "/api/addresses": "this machine's IPs for the 连接手机 page: the process's, not a tenant's (a token still needed)",
     "/openapi.json": "FastAPI's", "/docs": "FastAPI's", "/docs/oauth2-redirect": "FastAPI's", "/redoc": "FastAPI's",
     "/api/health": "the one route without a token: {ok: true}, no tenant (test_health)",
 }
@@ -380,7 +381,7 @@ def test_tenant_tasks(tmp_path, monkeypatch):
     anyio.run(run)
 
 
-def test_tenants_file(tmp_path):
+def test_tenants_file(tmp_path, monkeypatch):
     """tenants.json is who the server serves, the only place with the tokens: mode 600, one id and one token each."""
     f = tmp_path / "tenants.json"
     with pytest.raises(SystemExit, match="no tenants file"):
@@ -399,5 +400,9 @@ def test_tenants_file(tmp_path):
         with pytest.raises(SystemExit, match="one each"):
             tenant.load(f)
     write([{**one, "token": ""}])
+    monkeypatch.delenv("HOST", raising=False)
     assert tenant.by_token(tenant.load(f), None).id == "main", "the only tenant without a token: no auth"
     assert tenant.by_token(tenant.load(f), "anything").id == "main"
+    monkeypatch.setenv("HOST", "0.0.0.0")  # Docker's: an auth-less server reachable from the network never starts
+    with pytest.raises(SystemExit, match="no token, and HOST=0.0.0.0"):
+        tenant.load(f)

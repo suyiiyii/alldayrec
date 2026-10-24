@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import QRCode from "qrcode";
-import { nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
@@ -23,6 +23,55 @@ onMounted(async () => {
   heard.value = d.length > 0;
 });
 
+// 手机用哪个地址: the page's own origin is often 127.0.0.1 (opened on the server's machine), which a phone can't reach;
+// /api/addresses lists the machine's Tailscale / LAN / public IPs (none in a container: then 自己填). The QR, the
+// manual entry and the MCP snippets all use the one picked; remembered in localStorage (connect.address)
+type Addr = { ip: string; kind: "tailscale" | "lan" | "public" };
+type Addrs = { addresses: Addr[]; port: number; bind: string; in_container: boolean; proxied: boolean };
+const KIND = { tailscale: "Tailscale", lan: "局域网", public: "公网" };
+const here = location.origin;
+const loopback = /^(localhost|127\.|\[::1\])/.test(location.hostname);
+const found = ref<Addrs | null>(null);
+const options = computed(() => [
+  { url: here, label: "这个网页的地址" },
+  ...(found.value?.addresses ?? []).map((a) => ({
+    url: `http://${a.ip}:${found.value!.port}`,
+    label: KIND[a.kind],
+  })),
+]);
+const pick = ref(""), // an option's url, or "custom"
+  custom = ref("");
+function valid(s: string): string {
+  // http(s)://host[:port], nothing after it: the app appends the paths itself
+  try {
+    const u = new URL(s.trim());
+    return /^https?:$/.test(u.protocol) && u.pathname === "/" && !u.search && !u.hash ? u.origin : "";
+  } catch {
+    return "";
+  }
+}
+const address = computed(() => (pick.value === "custom" ? valid(custom.value) : pick.value));
+function load(key: string) {
+  try {
+    return localStorage.getItem(key) ?? "";
+  } catch {
+    return "";
+  }
+}
+function remember() {
+  // only what was picked by hand: a default stays a default (the LAN address may change)
+  try {
+    if (address.value) localStorage.setItem("connect.address", address.value);
+  } catch {}
+}
+onMounted(async () => {
+  found.value = await get<Addrs>("/api/addresses").catch(() => null);
+  const saved = load("connect.address"),
+    urls = options.value.map((o) => o.url);
+  if (saved && !urls.includes(saved)) [pick.value, custom.value] = ["custom", saved];
+  else pick.value = saved || (loopback && urls[1]) || here; // not 127.0.0.1 when there is something better
+});
+
 // The app's settings page scans this: server + token, so they don't need typing in by hand (manual entry stays).
 // The token comes from the server, not from the cookie the browser holds (it's HttpOnly, page JS can't read it).
 const qr = ref(""),
@@ -31,41 +80,50 @@ const qr = ref(""),
 onMounted(async () => {
   try {
     token.value = (await get<{ token: string }>("/api/app-setup")).token;
-    const url = `liverecord://setup?server=${encodeURIComponent(location.origin)}&token=${encodeURIComponent(token.value)}`;
-    qr.value = await QRCode.toDataURL(url, { width: 320, margin: 2 });
     if (openAi) nextTick(() => document.getElementById("ai")?.scrollIntoView());
   } catch (e) {
     error.value = (e as Error).message;
   }
 });
+watch([address, token], async ([a, t]) => {
+  if (!a || error.value) return void (qr.value = "");
+  const url = `liverecord://setup?server=${encodeURIComponent(a)}&token=${encodeURIComponent(t)}`;
+  qr.value = await QRCode.toDataURL(url, { width: 320, margin: 2 });
+});
+const tokenCopied = ref(false);
+async function copyToken() {
+  await navigator.clipboard.writeText(token.value);
+  tokenCopied.value = true;
+  setTimeout(() => (tokenCopied.value = false), 2000);
+}
 
 // 接入 AI: the agents that take a URL and a header (server mcp_server.py), with the same token as the app.
 // Shown with the token hidden; 复制 always copies the real one. Folded (few need it); /connect#ai opens it (/me links there)
-const mcp = `${location.origin}/mcp`;
+const mcp = computed(() => `${address.value || here}/mcp`);
 const json = (server: object) => JSON.stringify({ mcpServers: { alldayrec: server } }, null, 2);
 const CLIENTS: { name: string; where: string; text: (t: string) => string }[] = [
   {
     name: "Claude Code",
     where: "在终端里运行一次",
     text: (t) =>
-      `claude mcp add --transport http alldayrec ${mcp} --header "Authorization: Bearer ${t}" --scope user`,
+      `claude mcp add --transport http alldayrec ${mcp.value} --header "Authorization: Bearer ${t}" --scope user`,
   },
   {
     name: "Codex",
     where: "加进 ~/.codex/config.toml",
     text: (t) =>
-      `[mcp_servers.alldayrec]\nurl = "${mcp}"\nhttp_headers = { "Authorization" = "Bearer ${t}" }`,
+      `[mcp_servers.alldayrec]\nurl = "${mcp.value}"\nhttp_headers = { "Authorization" = "Bearer ${t}" }`,
   },
   {
     name: "Cursor",
     where: "加进 ~/.cursor/mcp.json",
-    text: (t) => json({ url: mcp, headers: { Authorization: `Bearer ${t}` } }),
+    text: (t) => json({ url: mcp.value, headers: { Authorization: `Bearer ${t}` } }),
   },
   {
     name: "Cherry Studio",
     where: "设置 › MCP › 添加 › 从 JSON 导入",
     text: (t) =>
-      json({ type: "streamableHttp", url: mcp, headers: { Authorization: `Bearer ${t}` } }),
+      json({ type: "streamableHttp", url: mcp.value, headers: { Authorization: `Bearer ${t}` } }),
   },
 ];
 const openAi = useRoute().hash === "#ai";
@@ -115,10 +173,53 @@ async function copy(c: (typeof CLIENTS)[number]) {
           <p class="muted">
             在 App 的「设置 › 扫码登录」里扫这个二维码，服务器地址和 Token 会自动填好
           </p>
+          <fieldset class="where" @change="remember">
+            <legend>手机用哪个地址</legend>
+            <label v-for="o in options" :key="o.url" class="opt">
+              <input v-model="pick" type="radio" name="addr" :value="o.url" />
+              <span class="what"
+                ><b>{{ o.label }}</b> <code>{{ o.url }}</code>
+                <span v-if="o.url === here && loopback" class="muted hint"
+                  >手机连不上这个地址</span
+                ></span
+              >
+            </label>
+            <label class="opt">
+              <input v-model="pick" type="radio" name="addr" value="custom" />
+              <span class="what"><b>自己填</b></span>
+            </label>
+            <template v-if="pick === 'custom'">
+              <input
+                v-model="custom"
+                class="custom"
+                type="url"
+                inputmode="url"
+                placeholder="http://192.168.1.5:8770"
+                aria-label="服务器地址"
+                @input="remember"
+              />
+              <p v-if="custom && !address" class="bad">要写成 http://地址:端口 或 https://域名</p>
+            </template>
+            <p v-if="found?.in_container" class="muted">
+              服务跑在 Docker 里，列不出这台电脑的地址：在电脑上用它的局域网或 Tailscale IP 打开这个网页（端口默认
+              8770），或者选「自己填」
+            </p>
+            <p v-else-if="found && !found.addresses.length && !['0.0.0.0', '::'].includes(found.bind)" class="muted">
+              服务只监听 {{ found.bind }}（.env 里的 HOST），别的机器连不进来：手机要直连，改成 HOST=0.0.0.0 再重启
+            </p>
+          </fieldset>
           <p v-if="error" class="bad">二维码生成失败：{{ error }}</p>
-          <div v-else class="frame">
-            <img v-if="qr" :src="qr" width="320" height="320" alt="登录二维码" />
-          </div>
+          <template v-else-if="address">
+            <div class="frame">
+              <img v-if="qr" :src="qr" width="320" height="320" alt="登录二维码" />
+            </div>
+            <p class="muted">
+              扫不了码：在 App 里手动填服务器 <code>{{ address }}</code> 和 Token
+              <button v-if="token" class="inline" @click="copyToken">
+                {{ tokenCopied ? "已复制" : "复制 Token" }}
+              </button>
+            </p>
+          </template>
           <p v-if="phone" class="ok">已经有手机连上了；换手机或多一台手机，再扫一次就行</p>
         </div>
       </li>
@@ -233,6 +334,58 @@ h2 {
 }
 .nw {
   white-space: nowrap;
+}
+.where {
+  border: 0;
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  min-width: 0;
+}
+.where legend {
+  padding: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: var(--space-1) 0;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.opt input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.what {
+  min-width: 0;
+}
+.what code {
+  overflow-wrap: anywhere;
+}
+.hint {
+  display: block;
+  font-size: var(--fs-xs);
+}
+.custom {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  margin-top: var(--space-1);
+}
+.where p {
+  font-size: var(--fs-xs);
+}
+.inline {
+  min-height: 28px;
+  margin-left: var(--space-1);
 }
 .frame {
   /* the QR is always black-on-white (scanners need that contrast); a fixed white box keeps it readable in dark mode too */
