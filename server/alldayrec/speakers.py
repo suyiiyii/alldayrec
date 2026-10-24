@@ -56,25 +56,33 @@ def close_pairs(keys: list[str], vec: dict[str, np.ndarray], at: float) -> list[
 
 
 def speakers(voices: list[dict], link: float, suggest: float, apart: set[tuple[str, str]]) -> list[dict]:
-    """Named groups (with anonymous groups that sound like them as suggestions), then anonymous groups."""
+    """Named groups (with anonymous groups that sound like them as suggestions), then anonymous groups. A suggestion
+    leaves out the group's voices in conversations the name is in already (two labels of one conversation: the
+    conversation page offers those as a merge); they stay an anonymous group, under the leader's key, which pins are
+    against. Before 10-25 one shared conversation kept the whole group from the name (#295: all 18 twins of a name)."""
     vec = centered(voices)
     named, anon = {}, []
     for v in voices:
         (anon.append(v) if ANON.fullmatch(v["label"]) else named.setdefault(v["label"], []).append(v))
     cent = {n: np.mean([vec[key(v)] for v in vs], 0) for n, vs in named.items()}
     cent = {n: c / (np.linalg.norm(c) or 1) for n, c in cent.items()}
+    convs = {n: {v["conv"] for v in vs} for n, vs in named.items()}
     out = {n: {"id": n, "name": n, "members": vs, "suggested": []} for n, vs in named.items()}
     rest = []
     for g in cluster(anon, vec, link, apart):
-        c = np.mean([vec[key(v)] for v in g], 0)
-        c /= np.linalg.norm(c) or 1
-        convs = {v["conv"] for v in g}
-        near = sorted(((float(c @ cn), n) for n, cn in cent.items()
-                       if not convs & {v["conv"] for v in named[n]} and not any((key(v), n) in apart for v in g)), reverse=True)
-        if near and near[0][0] >= suggest:
-            out[near[0][1]]["suggested"].append({"score": round(near[0][0], 3), "members": g})
-        else:
-            rest.append({"id": key(g[0]), "name": None, "members": g, "suggested": []})
+        best = (suggest, None, g)
+        for n, cn in cent.items():
+            free = [v for v in g if v["conv"] not in convs[n]]
+            if not free or any((key(v), n) in apart for v in g):
+                continue
+            c = np.mean([vec[key(v)] for v in free], 0)
+            if (s := float(c @ cn) / (np.linalg.norm(c) or 1)) >= best[0]:
+                best = (s, n, free)
+        s, n, free = best
+        if n:
+            out[n]["suggested"].append({"score": round(s, 3), "members": free})
+        if left := [v for v in g if v["conv"] in convs[n]] if n else g:
+            rest.append({"id": key(g[0]), "name": None, "members": left, "suggested": []})
     return list(out.values()) + rest
 
 
