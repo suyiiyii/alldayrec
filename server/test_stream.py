@@ -1,12 +1,14 @@
 """DRAFT_ENGINE qwen-stream: while a page watches, the draft stream's audio goes to one streaming session as it comes;
 each sentence the engine ends is a draft row at once, the sentence still being said goes to the pages as `partial`; a
 session the server ends starts again from the end of the last draft row, nothing drafted twice or lost. The pipeline
-and audio store of test_backlog, a fake streaming engine that hears its tones."""
+and audio store of test_backlog, a fake streaming engine that hears its tones. The session's audio goes uncompressed."""
 import datetime as dt
+import json
 import time
 
 import anyio
 import numpy as np
+import websockets
 
 from alldayrec import asr
 from alldayrec import db
@@ -94,3 +96,31 @@ def test_stream_drafts(tmp_path, monkeypatch):
             tg.cancel_scope.cancel()
 
     anyio.run(run)
+
+
+def test_session_no_deflate(monkeypatch):
+    """No permessage-deflate on the session: deflating a page's first DRAFT_BACK_S of PCM in one send held the event
+    loop up to 0.76 s (10-24), for 13-40 % fewer bytes."""
+    got = {}
+
+    class Peer:
+        async def send(self, m):
+            pass
+
+        async def recv(self):
+            return json.dumps({"header": {"event": "task-started"}})
+
+        async def close(self):
+            pass
+
+    async def connect(url, **kw):
+        got.update(kw)
+        return Peer()
+    monkeypatch.setattr(websockets, "connect", connect)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "k")
+
+    async def run():
+        async with qwen_stream.Session():
+            pass
+    anyio.run(run)
+    assert "compression" in got and got["compression"] is None, got

@@ -21,7 +21,9 @@ class Session:
 
     async def __aenter__(self):
         self.task = uuid.uuid4().hex
-        self.ws = await websockets.connect(URL, additional_headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}"}, max_size=None)
+        # no permessage-deflate: PCM hardly compresses, and deflating a page's first 300 s in one send held the event loop up to 0.76 s
+        self.ws = await websockets.connect(URL, additional_headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}"}, max_size=None,
+                                           compression=None)
         await self.ws.send(json.dumps({"header": {"action": "run-task", "task_id": self.task, "streaming": "duplex"}, "payload": {
             "task_group": "audio", "task": "asr", "function": "recognition", "model": MODEL,
             "parameters": {"format": "pcm", "sample_rate": 16000, "language_hints": ["zh", "en"]}, "input": {}}}))
