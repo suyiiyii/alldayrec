@@ -29,13 +29,10 @@ class Grouper:
     def sentence(self, s: dict) -> list[dict]:
         a, b = P(s["start"]), P(s["end"])
         out = self._close_if_stale(a)
-        if s.get("speaker") in IGNORE:
-            if self.open:
-                self.open["sentences"].append(s)
-        else:
-            if self.open is None:
-                self.open = dict(start=s["start"], end=s["end"], sentences=[], speech_s=0.0)
-            self.open["sentences"].append(s)
+        if self.open is None:  # an S? sentence opens one too: with ENGINE=local a conversation often starts with short ones
+            self.open = dict(start=s["start"], end=s["end"], sentences=[], speech_s=0.0)
+        self.open["sentences"].append(s)
+        if s.get("speaker") not in IGNORE:  # an ignored speaker neither extends it nor counts as speech
             self.open["end"] = max(self.open["end"], s["end"])
             self.open["speech_s"] += (b - a).total_seconds()
         return self._touch(out)
