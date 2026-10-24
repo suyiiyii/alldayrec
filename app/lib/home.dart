@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:record/record.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'pause_button.dart';
 import 'recorder.dart';
@@ -97,7 +99,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   bool get running => status['running'] == true;
 
   WebViewController _web() {
-    final c = WebViewController();
+    // the web pages play audio from script (the conversation player's next window, a seek): no tap needed for that
+    final c = WebViewController.fromPlatformCreationParams(WebViewPlatform.instance is WebKitWebViewPlatform
+        ? WebKitWebViewControllerCreationParams(allowsInlineMediaPlayback: true, mediaTypesRequiringUserAction: const {})
+        : const PlatformWebViewControllerCreationParams());
+    final p = c.platform;
+    if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
+    if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
     return c
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..clearCache()  // the page changes with server deploys
