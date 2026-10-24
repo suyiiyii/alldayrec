@@ -131,9 +131,18 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   WebViewController _web({int? tab}) {
     // the web pages play audio from script (the conversation player's next window, a seek): no tap needed for that
-    final c = WebViewController.fromPlatformCreationParams(WebViewPlatform.instance is WebKitWebViewPlatform
-        ? WebKitWebViewControllerCreationParams(allowsInlineMediaPlayback: true, mediaTypesRequiringUserAction: const {})
-        : const PlatformWebViewControllerCreationParams());
+    // the microphone for a page's getUserMedia (问 AI's hold-to-talk, /record) once the app has it: Android's WebView
+    // refuses without this, iOS's would ask again for each page on top of the app's own prompt
+    final c = WebViewController.fromPlatformCreationParams(
+        WebViewPlatform.instance is WebKitWebViewPlatform
+            ? WebKitWebViewControllerCreationParams(allowsInlineMediaPlayback: true, mediaTypesRequiringUserAction: const {})
+            : const PlatformWebViewControllerCreationParams(),
+        onPermissionRequest: (r) async {
+          final rec = AudioRecorder();
+          final ok = r.types.difference({WebViewPermissionResourceType.microphone}).isEmpty && await rec.hasPermission();
+          rec.dispose();
+          ok ? r.grant() : r.deny();
+        });
     c.setBackgroundColor(Colors.transparent);  // the scaffold shows through until the page paints (no white flash in dark mode)
     final p = c.platform;
     if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
