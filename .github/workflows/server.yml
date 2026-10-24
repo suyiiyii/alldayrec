@@ -20,5 +20,8 @@ jobs:
           APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
           $APT update && $APT install -yq --no-install-recommends ffmpeg
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
-      - run: uv sync --locked  # uv.lock as it is, as deploy.sh installs it on the deploy host (uv sync --frozen)
+      - run: uv sync --locked  # uv.lock as it is (deploy.sh: uv sync --frozen); without the [local] extra, as pip installs it
       - run: uv run --with pytest pytest -q
+      - run: |  # the wheel pip and uvx install (no web app built here: its pages say so), its command up to --help
+          uv build
+          uv run --isolated --no-project --python 3.11 --with dist/alldayrec-*.whl alldayrec --help
