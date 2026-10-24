@@ -1407,6 +1407,8 @@ DIST = HERE / "static/dist"  # the web app (web/, built by deploy.sh)
 
 
 @app.get("/")
+@app.get("/live")
+@app.get("/me")
 @app.get("/conversations")
 @app.get("/c/{conv_id}")
 @app.get("/record")

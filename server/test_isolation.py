@@ -7,6 +7,7 @@ import contextvars
 import datetime as dt
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -140,7 +141,7 @@ REQUESTS = {
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/speakers": "page",
-    "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
+    "/live": "page", "/me": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
     "/assets/{name}": "the web app's files", "/app.apk": "the Android app: one for all", "/api/app/latest": "the Android app's version",
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",
     "/api/firmware/latest": "firmware", "/api/firmware/{model}/{version}.zip": "firmware",
@@ -165,6 +166,14 @@ def routes() -> set[tuple[str, str]]:
 def test_every_route():
     missing = [r for r in routes() if r not in REQUESTS and r[1] not in SHARED and r != ("WS", "/ws")]
     assert not missing, f"routes without an isolation check (REQUESTS) or a reason (SHARED): {sorted(missing)}"
+
+
+def test_every_page_is_served():
+    """Each path of the web app's router has its page here: else a reload of it, or the App opening it, is a 404."""
+    pages = re.findall(r'path: "([^"]+)"', (Path(__file__).parent.parent / "web/src/router.ts").read_text())
+    served = {re.sub(r"\{\w+\}", "{}", p) for m, p in routes() if m == "GET"}
+    missing = [p for p in pages if re.sub(r":\w+", "{}", p) not in served]
+    assert pages and not missing, f"router.ts paths the server does not serve: {missing}"
 
 
 @pytest.fixture

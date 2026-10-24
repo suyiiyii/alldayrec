@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, watch, type Ref } from "vue";
 
 // The server pushes status every 2 s. After a long screen-off Android freezes the WebView and the socket
 // dies without onclose, so silence longer than STALE_MS counts as a drop. onResync runs after every
@@ -69,4 +69,32 @@ export function useSocket(onMessage: (m: any) => void, onResync: () => void) {
     return true;
   }
   return { connected, send };
+}
+
+// The live analysis and drafts run only while a page shows today in front (server watch_until): a heartbeat every
+// 20 s while on() holds, and a wake when the page comes back to the front so a stale analysis is redone at once.
+export function useWatch(
+  send: (m: unknown) => boolean,
+  connected: Ref<boolean>,
+  on: () => boolean = () => true,
+) {
+  let wake = true,
+    timer = 0;
+  const beat = () => {
+    if (on() && !document.hidden && send({ type: "watch", wake })) wake = false;
+  };
+  const onVisible = () => {
+    if (document.hidden) return;
+    wake = true;
+    beat();
+  };
+  onMounted(() => {
+    timer = window.setInterval(beat, 20000);
+    document.addEventListener("visibilitychange", onVisible);
+  });
+  onUnmounted(() => {
+    clearInterval(timer);
+    document.removeEventListener("visibilitychange", onVisible);
+  });
+  watch([connected, on], ([c, o]) => c && o && ((wake = true), beat()));
 }

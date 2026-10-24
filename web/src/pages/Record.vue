@@ -319,7 +319,7 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
         <div class="log">{{ log }}</div>
       </details>
     </div>
-    <iframe src="/" title="字幕"></iframe>
+    <iframe src="/live" title="字幕"></iframe>
   </div>
 </template>
 

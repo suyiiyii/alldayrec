@@ -43,12 +43,12 @@ function seek(e: Event) {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--tabbar); /* above the bottom tabs (AppHeader), which cover the safe area then */
   z-index: 3;
   background: var(--surface);
   border-top: 1px solid var(--line);
   box-shadow: 0 -1px 3px rgb(0 0 0 / 0.06);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: max(0px, calc(env(safe-area-inset-bottom) - var(--tabbar)));
 }
 .in {
   max-width: 860px;

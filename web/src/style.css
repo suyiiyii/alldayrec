@@ -33,6 +33,15 @@
   --font:
     system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans CJK SC",
     "Microsoft YaHei", sans-serif;
+  --tabbar: 0px; /* the bottom tab bar's height (AppHeader): none on a wide screen and inside the app */
+}
+@media (max-width: 600px) {
+  :root {
+    --tabbar: calc(56px + env(safe-area-inset-bottom));
+  }
+}
+:root.in-app {
+  --tabbar: 0px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -61,6 +70,7 @@ body {
   background: var(--bg);
   color: var(--fg);
   font: var(--fs-md) / 1.65 var(--font);
+  padding-bottom: var(--tabbar); /* nothing hides under the tabs */
 }
 h1,
 h2,

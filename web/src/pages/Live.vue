@@ -4,27 +4,24 @@ import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
 import Icon from "../components/Icon.vue";
+import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
-import Timeline from "../components/Timeline.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
-  errorTitle,
+  convLink,
   fold,
   get,
   inSpans,
   hhmm,
   hhmmss,
   holdLeft,
-  post,
   type Conversation,
-  type DeviceStatus,
   type LiveState,
-  type LogEvent,
   type Row,
   type Status,
 } from "../lib/api";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
-import { useSocket } from "../lib/socket";
+import { useSocket, useWatch } from "../lib/socket";
 import { speakerLabel } from "../lib/speakers";
 
 // One day at a time (?day=YYYY-MM-DD; none: today, which follows the live stream)
@@ -38,14 +35,11 @@ const day = computed(() => (route.query.day as string | undefined) || today),
 const rows = ref<Row[]>([]),
   partials = ref<Record<string, Row>>({}), // per device, the sentence being said now (DRAFT_ENGINE qwen-stream)
   convs = ref<Conversation[]>([]),
-  events = ref<LogEvent[]>([]),
   status = ref<Status | null>(null);
 const lives = ref<LiveState[]>([]),
   hit = ref("");
 const ready = ref(false);
-const follow = ref(true),
-  logOpen = ref(false),
-  logBox = ref<HTMLElement | null>(null);
+const follow = ref(true);
 
 type Item =
   | { k: "row"; key: string; r: Row; media?: boolean }
@@ -92,7 +86,10 @@ const catchups = computed(() =>
 const timeline = computed(() => {
   const ev = [
     ...rows.value.map((r) => ({ s: r.start, it: { k: "row", key: "s" + r.id, r } as Item })),
-    ...Object.values(partials.value).map((r) => ({ s: r.start, it: { k: "row", key: r.id, r } as Item })),
+    ...Object.values(partials.value).map((r) => ({
+      s: r.start,
+      it: { k: "row", key: r.id, r } as Item,
+    })),
     ...convs.value.map((c) => ({ s: c.end, it: { k: "conv", key: "c" + c.id, c } as Item })),
     ...catchups.value,
   ].sort((a, b) => (a.s < b.s ? -1 : a.s > b.s ? 1 : 0)); // stable: a divider stays after rows starting at its end
@@ -131,10 +128,6 @@ const mediaOf = (r: Row) =>
       r.start <= c.end &&
       inSpans(r, c.summary?.media_spans),
   );
-const lastEvent = computed(() => {
-  const e = events.value.at(-1);
-  return e ? `· ${hhmmss(e.at)} ${e.text}`.slice(0, 90) : "";
-});
 
 // per device, up to where final rows cover the time: its drafts before that are no longer shown (they stay on the server)
 const finalTo: Record<string, string> = {};
@@ -158,10 +151,6 @@ function addConv(c: Conversation) {
   const i = convs.value.findIndex((x) => x.id === c.id);
   if (i >= 0) convs.value[i] = c;
   else convs.value.push(c);
-}
-function addEvent(e: LogEvent) {
-  events.value.push(e);
-  if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
 }
 
 async function loadDay() {
@@ -196,20 +185,12 @@ watch(timeline, async () => {
   await nextTick();
   toBottom();
 });
-watch(
-  () => events.value.length,
-  async () => {
-    await nextTick();
-    if (logOpen.value && logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight;
-  },
-);
 
 onMounted(async () => {
   window.addEventListener("scroll", onScroll);
   loadCalendar();
   follow.value = live.value;
   await loadDay();
-  (await get<LogEvent[]>("/api/events")).forEach(addEvent);
 });
 onUnmounted(() => window.removeEventListener("scroll", onScroll));
 
@@ -229,154 +210,11 @@ const { connected, send } = useSocket((m) => {
     if (c) c.summary = { ...m };
   } else if (m.type === "live") {
     lives.value = lives.value.filter((l) => l.device !== m.device).concat(m.live ? [m.live] : []);
-  } else if (m.type === "event") addEvent(m);
-  else status.value = m;
+  } else if (m.type === "status") status.value = m;
 }, loadDay);
 
-// The live analysis runs only while a page shows today in front: a heartbeat every 20 s, and a wake when
-// the page comes back to the front so a stale analysis is redone at once.
-let wake = true;
-function beat() {
-  if (live.value && !document.hidden && send({ type: "watch", wake })) wake = false;
-}
-function onVisible() {
-  if (document.hidden) return;
-  wake = true;
-  beat();
-}
-let beatTimer = 0;
-onMounted(() => {
-  beatTimer = window.setInterval(beat, 20000);
-  document.addEventListener("visibilitychange", onVisible);
-});
-onUnmounted(() => {
-  clearInterval(beatTimer);
-  document.removeEventListener("visibilitychange", onVisible);
-});
-watch([connected, live], ([c, l]) => c && l && ((wake = true), beat()));
+useWatch(send, connected, () => live.value);
 
-// The bar above the transcript, today: what the live analysis does for one device, its result in a pane whose height
-// is dragged. The device: of the recording ones, the one whose conversation going on spoke last (not the one analyzed
-// last: a conversation under a minute has no analysis yet); with none talking, the one whose audio came in last
-const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation is analyzed by itself from this much speech on
-const barDev = computed(() => {
-  const ds = status.value?.devices ?? [];
-  const talking = ds
-    .filter((d) => d.recording && d.conversation)
-    .reduce<DeviceStatus | null>(
-      (a, d) => (a && a.conversation!.end > d.conversation!.end ? a : d),
-      null,
-    );
-  return talking ?? ds.find((d) => d.device === status.value?.device) ?? null;
-});
-const talk = computed(() => (barDev.value?.recording && barDev.value.conversation) || null);
-// its analysis, when it is of the conversation going on (server overlaps())
-const current = computed(() => {
-  const c = talk.value;
-  return (
-    (c &&
-      lives.value.find(
-        (l) => l.device === barDev.value!.device && l.start <= c.end && l.upto >= c.start,
-      )) ||
-    null
-  );
-});
-// with none going on, its last conversation today: its summary stays until the next one starts
-const last = computed(() =>
-  convs.value
-    .filter((c) => !c.device || c.device === barDev.value?.device)
-    .reduce<Conversation | null>((a, c) => (a && a.end > c.end ? a : c), null),
-);
-const said = (s: number) => (s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`);
-const barText = computed(() => {
-  const d = barDev.value,
-    c = talk.value,
-    l = current.value;
-  // not recording: the status line above says so already
-  const prev = last.value ? `上一段 ${hhmm(last.value.start)}《${convLink(last.value)}》` : "";
-  if (!status.value?.recording) return prev;
-  if (!c) return "暂无进行中的对话" + (prev && " · " + prev);
-  if (l) return `实时分析 · 更新于 ${hhmm(l.at)}` + (d?.analyzing ? " · 分析中…" : "");
-  if (d?.analyzing) return "分析中…";
-  return (
-    `对话进行中 · 已说 ${said(c.speech_s)}` +
-    (c.speech_s < MIN_SPEECH_S ? `，满 ${MIN_SPEECH_S / 60} 分钟自动分析` : "")
-  );
-});
-const body = computed(() => (current.value ? "live" : !talk.value && last.value ? "last" : ""));
-// 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
-const asking = ref(false),
-  askErr = ref(""),
-  askErrTitle = ref("");
-const fresh = computed(() => (talk.value?.speech_s ?? 0) > (current.value?.speech_s ?? 0));
-async function askNow() {
-  const d = barDev.value;
-  if (!d) return;
-  asking.value = true;
-  setTimeout(() => (asking.value = false), 10000);
-  askErr.value = "";
-  try {
-    Object.assign(
-      d,
-      await post<Partial<DeviceStatus>>(`/api/live/${encodeURIComponent(d.device)}`),
-    );
-  } catch (e) {
-    askErr.value = (e as Error).message;
-    askErrTitle.value = errorTitle(e);
-    setTimeout(() => (askErr.value = ""), 5000);
-  }
-}
-const paneOpen = ref(
-  (() => {
-    try {
-      return localStorage.getItem("livePaneOpen") !== "0";
-    } catch {
-      return true;
-    }
-  })(),
-);
-function toggle() {
-  paneOpen.value = !paneOpen.value;
-  try {
-    localStorage.setItem("livePaneOpen", paneOpen.value ? "1" : "0");
-  } catch {}
-}
-const clampH = (h: number) => Math.round(Math.min(Math.max(h, 80), window.innerHeight * 0.7));
-const paneH = ref(
-  clampH(
-    Number(
-      (() => {
-        try {
-          return localStorage.getItem("livePaneH");
-        } catch {
-          return null;
-        }
-      })(),
-    ) || 220,
-  ),
-);
-const paneBox = ref<HTMLElement | null>(null);
-let drag: { y: number; h: number } | null = null;
-function dragStart(e: PointerEvent) {
-  drag = { y: e.clientY, h: paneH.value };
-  (e.target as HTMLElement).setPointerCapture(e.pointerId);
-}
-function dragMove(e: PointerEvent) {
-  if (drag) paneH.value = clampH(drag.h + e.clientY - drag.y);
-}
-function dragEnd() {
-  drag = null;
-  try {
-    localStorage.setItem("livePaneH", String(paneH.value));
-  } catch {}
-}
-watch(
-  () => [current.value?.at, paneOpen.value],
-  async () => {
-    await nextTick();
-    if (paneBox.value) paneBox.value.scrollTop = paneBox.value.scrollHeight; // the newest topic is at the bottom
-  },
-);
 function jump(start: string) {
   hit.value = start;
   const el = document.querySelector(`[data-start="${CSS.escape(start)}"]`);
@@ -387,13 +225,6 @@ function jump(start: string) {
     behavior: "smooth",
   });
 }
-
-const convLink = (c: Conversation) =>
-  c.summary?.status === "done"
-    ? c.summary.title || "查看"
-    : c.summary?.status === "failed"
-      ? "摘要生成失败"
-      : "摘要生成中…";
 </script>
 
 <template>
@@ -414,71 +245,17 @@ const convLink = (c: Conversation) =>
         <template v-else>连接中…</template>
       </RouterLink>
     </div>
-    <div v-if="live && status && barText" class="pane">
-      <div class="pane-line">
-        <button
-          class="fold"
-          :disabled="!body"
-          :aria-expanded="body ? paneOpen : undefined"
-          @click="toggle"
-        >
-          <Icon
-            v-if="body"
-            class="caret"
-            :name="paneOpen ? 'chevron-down' : 'chevron-right'"
-            :size="14"
-          />{{ barText }}
-          <span v-if="askErr" class="bad" :title="askErrTitle"> · {{ askErr }}</span>
-        </button>
-        <button
-          v-if="talk"
-          class="ask"
-          :disabled="asking || barDev?.analyzing || !fresh"
-          :title="fresh ? '' : '没有新的语音'"
-          @click="askNow"
-        >
-          {{ current ? "立即更新" : "立即总结" }}
-        </button>
-      </div>
-      <div
-        v-if="body && paneOpen"
-        ref="paneBox"
-        class="pane-body"
-        :style="{ [current ? 'height' : 'maxHeight']: paneH + 'px' }"
-      >
-        <template v-if="current">
-          <div class="pane-meta">
-            {{ current.start > doneTo(current.device) ? "含还没定稿的句子 · " : "" }}对话
-            {{ hhmmss(current.start) }} 起 · 到 {{ hhmmss(current.upto) }} 共
-            {{ current.sentences }} 句
-          </div>
-          <Timeline :topics="current.topics" open @jump="jump" />
-        </template>
-        <template v-else-if="last">
-          <div class="pane-meta">
-            对话 {{ hhmmss(last.start) }}–{{ hhmmss(last.end) }} · {{ last.sentences }} 句 ·
-            <RouterLink :to="'/c/' + last.id">查看</RouterLink>
-          </div>
-          <p v-if="last.summary?.status !== 'done'" class="muted">{{ convLink(last) }}</p>
-          <p v-else-if="last.summary.summary">{{ last.summary.summary }}</p>
-          <p v-else class="muted">这段太短，没有生成摘要</p>
-        </template>
-      </div>
-      <div
-        v-if="body && paneOpen"
-        class="grip"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="拖动调整实时分析的高度"
-        title="拖动调整高度"
-        @pointerdown="dragStart"
-        @pointermove="dragMove"
-        @pointerup="dragEnd"
-        @pointercancel="dragEnd"
-      ></div>
-    </div>
+    <LivePanel
+      v-if="live"
+      :status="status"
+      :lives="lives"
+      :convs="convs"
+      :done-to="doneTo"
+      resizable
+      @jump="jump"
+    />
   </AppHeader>
-  <main class="live">
+  <main>
     <template v-for="it in timeline" :key="it.key">
       <TranscriptRow
         v-if="it.k === 'row'"
@@ -507,18 +284,6 @@ const convLink = (c: Conversation) =>
     </div>
   </main>
   <button v-show="live && !follow" class="jump" @click="toBottom">回到最新</button>
-  <details
-    class="syslog"
-    :open="logOpen"
-    @toggle="logOpen = ($event.target as HTMLDetailsElement).open"
-  >
-    <summary>
-      <Icon class="caret" name="chevron-right" :size="14" /> 系统日志 <span>{{ lastEvent }}</span>
-    </summary>
-    <div ref="logBox" class="events">
-      <div v-for="(e, i) in events" :key="i" :class="e.kind">{{ hhmmss(e.at) }} {{ e.text }}</div>
-    </div>
-  </details>
 </template>
 
 <style scoped>
@@ -529,105 +294,10 @@ const convLink = (c: Conversation) =>
   gap: 14px;
   flex-wrap: wrap;
 }
-.live {
-  padding-bottom: 120px;
-}
 .pane {
   flex-basis: 100%;
   border-top: 1px solid var(--line);
   margin-top: 4px;
-}
-.pane-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
-}
-.fold {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  padding: 0;
-  text-align: left;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  background: none;
-}
-.caret {
-  margin-right: 2px;
-  color: var(--accent);
-}
-.ask {
-  flex: none;
-}
-.pane-body {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.pane-body p {
-  margin: 4px 0;
-  font-size: var(--fs-sm);
-}
-.pane-meta {
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  padding-top: 4px;
-}
-/* the whole strip takes the drag (tall enough for a finger); its bottom is the header's bottom line, through the
-   header's padding, and a handle sits on that line: the line between the analysis and the transcript is what moves */
-.grip {
-  position: relative;
-  height: 24px;
-  margin-bottom: -12px;
-  cursor: ns-resize;
-  touch-action: none;
-}
-.grip::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 -1px;
-  height: 2px;
-  background: var(--accent);
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-.grip::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -9px;
-  width: 48px;
-  height: 18px;
-  margin-left: -24px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background:
-    linear-gradient(var(--muted) 0 0) 50% 5px / 18px 1.5px no-repeat,
-    linear-gradient(var(--muted) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--surface);
-  box-shadow: var(--shadow);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-.grip:hover::before,
-.grip:active::before {
-  opacity: 1;
-}
-.grip:hover::after,
-.grip:active::after {
-  border-color: var(--accent);
-  background:
-    linear-gradient(var(--accent) 0 0) 50% 5px / 18px 1.5px no-repeat,
-    linear-gradient(var(--accent) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--surface);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-@media (max-width: 600px) {
-  .grip {
-    height: 28px;
-    margin-bottom: -8px; /* the header's padding here */
-  }
 }
 .conv {
   color: var(--accent);
@@ -656,58 +326,9 @@ const convLink = (c: Conversation) =>
 .jump {
   position: fixed;
   right: 24px;
-  bottom: 64px;
+  bottom: calc(var(--tabbar) + 24px);
   border-radius: var(--radius-pill);
   padding: 0 var(--space-4);
   box-shadow: var(--shadow);
-}
-.syslog {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-  z-index: 2;
-}
-.syslog summary {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 6px 16px;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  cursor: pointer;
-  list-style: none;
-}
-.syslog[open] summary .caret {
-  transform: rotate(90deg);
-}
-.events {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 0 16px 8px;
-  max-height: 32vh;
-  overflow: auto;
-  font:
-    12px/1.5 ui-monospace,
-    monospace;
-}
-.events div {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.events .state {
-  color: var(--accent);
-}
-.events .warn {
-  color: var(--warn);
-}
-.events .error {
-  color: var(--err);
-}
-@media (max-width: 600px) {
-  .live {
-    padding: 4px 12px 110px;
-  }
 }
 </style>

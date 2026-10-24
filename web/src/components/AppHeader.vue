@@ -1,39 +1,47 @@
 <script setup lang="ts">
-import Icon from "./Icon.vue";
+import { useRoute } from "vue-router";
+import Icon, { type IconName } from "./Icon.vue";
 
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
 defineProps<{ inApp?: boolean }>();
+
+// four places, each owning the pages under it (the live page is today's; devices, progress, connect are 我的)
+const TABS: { to: string; label: string; icon: IconName; under: RegExp }[] = [
+  { to: "/", label: "今天", icon: "home", under: /^\/(live)?$/ },
+  {
+    to: "/conversations",
+    label: "对话",
+    icon: "message-circle",
+    under: /^\/(conversations|c\/|calendar)/,
+  },
+  { to: "/speakers", label: "人物", icon: "users", under: /^\/(speakers|p\/)/ },
+  { to: "/me", label: "我的", icon: "user", under: /^\/(me|connect|progress|device\/|record)/ },
+];
+const route = useRoute();
 </script>
 
 <template>
   <header :class="{ bare: !inApp }">
     <div class="bar">
       <h1>alldayrec</h1>
-      <nav>
-        <RouterLink to="/" exact-active-class="on"
-          ><Icon name="mic" :size="18" />实时字幕</RouterLink
-        >
+      <nav class="nav-top">
         <RouterLink
-          to="/conversations"
-          :class="{ on: $route.path === '/conversations' || $route.path.startsWith('/c/') }"
-          ><Icon name="message-circle" :size="18" />对话</RouterLink
-        >
-        <RouterLink to="/calendar" exact-active-class="on"
-          ><Icon name="calendar" :size="18" />日历</RouterLink
-        >
-        <RouterLink to="/speakers" exact-active-class="on"
-          ><Icon name="users" :size="18" />说话人</RouterLink
-        >
-        <RouterLink to="/progress" exact-active-class="on"
-          ><Icon name="activity" :size="18" />进度</RouterLink
-        >
-        <RouterLink to="/connect" exact-active-class="on"
-          ><Icon name="smartphone" :size="18" />连接手机</RouterLink
+          v-for="t in TABS"
+          :key="t.to"
+          :to="t.to"
+          :class="{ on: t.under.test(route.path) }"
+          ><Icon :name="t.icon" :size="18" />{{ t.label }}</RouterLink
         >
       </nav>
       <slot />
     </div>
   </header>
+  <!-- a phone: the same four as tabs at the bottom -->
+  <nav class="nav-tabs">
+    <RouterLink v-for="t in TABS" :key="t.to" :to="t.to" :class="{ on: t.under.test(route.path) }"
+      ><Icon :name="t.icon" :size="22" />{{ t.label }}</RouterLink
+    >
+  </nav>
 </template>
 
 <style scoped>
@@ -62,53 +70,66 @@ h1 {
 }
 nav {
   display: flex;
-  font-size: var(--fs-sm);
   white-space: nowrap;
 }
-/* each link is as tall as a finger: 44 px */
 nav a {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: 44px;
-  padding: 0 var(--space-2);
   color: var(--muted);
 }
 nav a.on {
   color: var(--accent);
   font-weight: 600;
 }
-:global(.in-app nav),
-:global(.in-app h1) {
+/* each link is as tall as a finger: 44 px */
+.nav-top {
+  font-size: var(--fs-sm);
+}
+.nav-top a {
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+}
+.nav-tabs {
   display: none;
 }
-:global(.in-app header.bare) {
-  display: none;
-}
-/* a phone: the name on a line of its own, smaller, the links under it */
+/* a phone: no name bar (a page with nothing in the header has none), the tabs at the bottom over the safe area */
 @media (max-width: 600px) {
-  h1 {
-    flex-basis: 100%;
-    font-size: var(--fs-md);
-    line-height: 22px;
-    padding-top: var(--space-2);
-  }
   .bar {
     padding: 0 var(--space-3);
   }
-  /* the icon above the word, the six spread over the width */
-  nav {
-    flex: 1;
-    justify-content: space-between;
+  h1,
+  .nav-top,
+  header.bare {
+    display: none;
+  }
+  .nav-tabs {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 3;
+    height: var(--tabbar); /* exactly what the page keeps clear: border and safe area inside */
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--surface);
+    border-top: 1px solid var(--line);
     font-size: var(--fs-xs);
   }
-  nav a {
+  .nav-tabs a {
+    flex: 1;
     flex-direction: column;
     justify-content: center;
-    gap: 0;
-    min-height: 48px;
-    padding: 0 var(--space-1);
-    line-height: 1.3;
+    gap: 2px;
+    line-height: 1.2;
   }
+}
+/* inside the app its own bottom bar navigates; the app adds the class after the page loads (CSS, not a JS check).
+   :global() takes the whole selector (it drops anything after it), so the names are unique */
+:global(html.in-app .nav-top),
+:global(html.in-app .nav-tabs),
+:global(html.in-app header h1),
+:global(html.in-app header.bare) {
+  display: none;
 }
 </style>

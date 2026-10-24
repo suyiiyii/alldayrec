@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Listen from "../components/Listen.vue";
 import Skeleton from "../components/Skeleton.vue";
 import {
   CHARGE,
   build,
+  card,
+  caughtUp,
   get,
   hhmm,
   hhmmss,
@@ -17,7 +19,7 @@ import {
   type Calls,
   type CallSum,
   type DeviceStatus,
-  type RecorderStatus,
+  type LogEvent,
   type Status,
   type Upgrade,
 } from "../lib/api";
@@ -28,9 +30,19 @@ import { useSocket } from "../lib/socket";
 // when it should be done; refreshed by the status the socket sends every 2 s.
 const status = ref<Status | null>(null);
 onMounted(async () => (status.value = await get<Status>("/api/status")));
+// the server's log lines (pipelines, engines, errors), the last 300, the newest at the bottom of its box
+const events = ref<LogEvent[]>([]),
+  logBox = useTemplateRef<HTMLElement>("logBox");
+async function addEvents(es: LogEvent[]) {
+  events.value = events.value.concat(es).slice(-300);
+  await nextTick();
+  if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight;
+}
+onMounted(async () => addEvents(await get<LogEvent[]>("/api/events")));
 useSocket(
   (m) => {
     if (m.type === "status") status.value = m;
+    else if (m.type === "event") addEvents([m]);
   },
   async () => (status.value = await get<Status>("/api/status")),
 );
@@ -134,21 +146,6 @@ function span(s: number) {
   const m = Math.round(s / 60);
   return m >= 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分` : `${m} 分钟`;
 }
-// store is an errno; with nothing mounted this boot (total_kb 0) no card or one not seated (-19, -116: a mount that
-// timed out), as the app's cardState says it
-const card = (h: RecorderStatus) =>
-  h.store === -28
-    ? "已满，停止离线录音"
-    : h.store === -16
-      ? "U 盘模式，离线录音暂停"
-      : h.store && !h.total_kb
-        ? "没插卡或没插好，只能实时上传"
-        : h.store
-          ? "出错，重插或换卡"
-          : h.total_kb
-            ? `剩 ${((h.free_kb ?? 0) / 1048576).toFixed(1)} / ${(h.total_kb / 1048576).toFixed(1)} GB`
-            : "—";
-const caughtUp = (d: DeviceStatus) => d.left_s < 30;
 // Held: the phone reads older audio off the recorder's card in the background while it sends what is said now;
 // finals wait at the hold for it, so the server's own estimate does not apply
 const held = (d: DeviceStatus) => {
@@ -309,6 +306,13 @@ const eta = (d: DeviceStatus) => {
     </section>
     <div v-if="status && !devices.length" class="muted">还没有设备的处理任务</div>
     <Skeleton v-if="!status" />
+    <section class="card">
+      <div class="top"><b>系统日志</b></div>
+      <div ref="logBox" class="events">
+        <div v-for="(e, i) in events" :key="i" :class="e.kind">{{ hhmmss(e.at) }} {{ e.text }}</div>
+        <div v-if="!events.length" class="muted">还没有日志</div>
+      </div>
+    </section>
   </main>
 </template>
 
@@ -350,6 +354,26 @@ main {
 .call b,
 .call .muted {
   margin-right: 6px;
+}
+.events {
+  max-height: 40vh;
+  overflow: auto;
+  font:
+    var(--fs-xs) / 1.5 ui-monospace,
+    monospace;
+}
+.events div {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.events .state {
+  color: var(--accent);
+}
+.events .warn {
+  color: var(--warn);
+}
+.events .error {
+  color: var(--err);
 }
 .grid span:nth-child(odd) {
   color: var(--muted);

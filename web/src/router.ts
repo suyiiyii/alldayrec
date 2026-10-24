@@ -3,7 +3,9 @@ import { createRouter, createWebHistory } from "vue-router";
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: "/", component: () => import("./pages/Live.vue"), meta: { title: "alldayrec" } },
+    { path: "/", component: () => import("./pages/Today.vue"), meta: { title: "今天" } },
+    { path: "/live", component: () => import("./pages/Live.vue"), meta: { title: "实时字幕" } },
+    { path: "/me", component: () => import("./pages/Me.vue"), meta: { title: "我的" } },
     {
       path: "/conversations",
       component: () => import("./pages/Conversations.vue"),
@@ -28,7 +30,7 @@ export const router = createRouter({
     {
       path: "/speakers",
       component: () => import("./pages/Speakers.vue"),
-      meta: { title: "说话人" },
+      meta: { title: "人物" },
     },
     {
       path: "/p/:name",

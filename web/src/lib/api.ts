@@ -282,6 +282,44 @@ export interface Calls {
   balance: Balance | null;
 }
 
+// GET /api/recap: the newest daily recap (server recap.py, written each morning for the day before)
+export interface Recap {
+  date: string;
+  conversations: number;
+  headline: string;
+  highlights: { text: string; conv: string | null }[];
+  // text: the summary's (完成 / 不对 name it by it), short: the recap's wording (a recap written before there was a
+  // short holds the wording in text: no buttons, they would name no todo); due: as said that day
+  todos: { conv: string; text: string; short?: string; to?: string | null; due?: string | null }[];
+  people: { who: string; note: string }[];
+}
+// GET /api/todos/due: my todos due today or before (summary prompt v8 dates them), not marked done or wrong
+export interface Due {
+  conv: string;
+  text: string;
+  to?: string | null;
+  due?: string | null;
+  due_date: string;
+  at?: string | null;
+}
+
+// a device's finals are within 30 s of its newest audio
+export const caughtUp = (d: DeviceStatus) => d.left_s < 30;
+// its recorder's card: store is an errno; with nothing mounted this boot (total_kb 0) no card or one not seated (-19,
+// -116: a mount that timed out), as the app's cardState says it
+export const card = (h: RecorderStatus) =>
+  h.store === -28
+    ? "已满，停止离线录音"
+    : h.store === -16
+      ? "U 盘模式，离线录音暂停"
+      : h.store && !h.total_kb
+        ? "没插卡或没插好，只能实时上传"
+        : h.store
+          ? "出错，重插或换卡"
+          : h.total_kb
+            ? `剩 ${((h.free_kb ?? 0) / 1048576).toFixed(1)} / ${(h.total_kb / 1048576).toFixed(1)} GB`
+            : "—";
+
 export interface LogEvent {
   at: string;
   text: string;
@@ -342,6 +380,13 @@ export const holdLeft = (d: DeviceStatus) =>
     ? `手机 ${hhmm(d.hold_seen)} 后没再联系，最晚 ${hhmm(d.hold_until ?? "")} 不再等`
     : "";
 export const hhmmss = (iso: string) => iso.slice(11, 19);
+// a closed conversation's link text: its summary's title, or how the summary is going
+export const convLink = (c: Conversation) =>
+  c.summary?.status === "done"
+    ? c.summary.title || "查看"
+    : c.summary?.status === "failed"
+      ? "摘要生成失败"
+      : "摘要生成中…";
 export const minutes = (c: Conversation) =>
   Math.max(1, Math.round((+new Date(c.end) - +new Date(c.start)) / 60000));
 

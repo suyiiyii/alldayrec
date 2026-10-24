@@ -19,7 +19,8 @@ function undo() {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--space-6) + env(safe-area-inset-bottom));
+  /* above the tabs */
+  bottom: calc(var(--space-6) + max(var(--tabbar), env(safe-area-inset-bottom)));
   transform: translateX(-50%);
   z-index: 10;
   display: flex;

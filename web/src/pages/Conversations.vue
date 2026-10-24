@@ -2,30 +2,33 @@
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
+import ConversationItem from "../components/ConversationItem.vue";
 import DayPicker from "../components/DayPicker.vue";
+import DueTodos from "../components/DueTodos.vue";
 import Icon from "../components/Icon.vue";
+import RecapCard from "../components/RecapCard.vue";
 import SelfVoice from "../components/SelfVoice.vue";
-import TodoMarks from "../components/TodoMarks.vue";
 import {
   errorTitle,
   get,
   hhmm,
-  minutes,
-  MOSTLY_MEDIA,
   post,
   type Conversation,
+  type Due,
+  type Recap,
   type Status,
 } from "../lib/api";
 import { shiftDay, today } from "../lib/calendar";
-import { speakerLabel } from "../lib/speakers";
 import { useSocket } from "../lib/socket";
 
 // newest first, PAGE at a time as the end scrolls into view; words, one tag and the kind filter it; ?day= starts
-// the list at the end of that day (older ones keep coming as it scrolls)
+// the list at the end of that day (older ones keep coming as it scrolls); ?ask= (the today page's question box) asks
+// the AI at once
 const PAGE = 30;
 const route = useRoute(),
   router = useRouter();
-const q = ref(String(route.query.q ?? "")),
+const ask = route.query.ask ? String(route.query.ask) : "";
+const q = ref(ask || String(route.query.q ?? "")),
   tag = ref(String(route.query.tag ?? "")),
   kind = ref(String(route.query.kind ?? "对话")),
   day = ref(String(route.query.day ?? ""));
@@ -85,28 +88,8 @@ const answer = computed(() => {
     .map((t) => ({ t, s: by.get(t) ?? by.get(t.split("-")[0]) }));
 });
 
-// the newest daily recap (server recap.py, written each morning for the day before), folded to its headline
-interface Recap {
-  date: string;
-  conversations: number;
-  headline: string;
-  highlights: { text: string; conv: string | null }[];
-  // text: the summary's (完成 / 不对 name it by it), short: the recap's wording (a recap written before there was a
-  // short holds the wording in text: no buttons, they would name no todo); due: as said that day
-  todos: { conv: string; text: string; short?: string; to?: string | null; due?: string | null }[];
-  people: { who: string; note: string }[];
-}
+// the newest daily recap, folded to its headline; my todos due today or before
 const recap = ref<Recap | null>(null);
-
-// my todos due today or before (summary prompt v8 dates them), not marked done or wrong
-interface Due {
-  conv: string;
-  text: string;
-  to?: string | null;
-  due?: string | null;
-  due_date: string;
-  at?: string | null;
-}
 const due = ref<Due[]>([]);
 // a todo marked 完成 or 不对 leaves both cards at once (the server leaves it out from now on)
 function closed(conv: string, text: string) {
@@ -188,6 +171,7 @@ onMounted(async () => {
   get<Record<string, number>>("/api/tags").then(
     (t) => (tags.value = Object.entries(t).slice(0, 40)),
   );
+  if (ask) askAI(); // restart() drops ?ask= from the address: a reload does not ask again
   await restart();
 });
 onUnmounted(() => {
@@ -276,98 +260,17 @@ useSocket((m) => {
       </div>
     </div>
     <SelfVoice v-show="!q && !tag && !day" ref="selfCard" />
-    <div v-if="due.length && !q && !tag && !day" class="card due">
-      <div class="meta">到期的待办 · {{ due.length }} 条</div>
-      <ul>
-        <li v-for="t in due" :key="t.conv + t.text">
-          <RouterLink :to="'/c/' + t.conv + (t.at ? '#' + t.at : '')">{{ t.text }}</RouterLink
-          ><span class="muted">
-            · {{ t.due_date === today() ? "今天" : "已过期 " + t.due_date.slice(5)
-            }}{{ t.to ? " · 答应" + t.to : "" }}</span
-          ><TodoMarks :conv="t.conv" :text="t.text" @marked="closed(t.conv, t.text)" />
-        </li>
-      </ul>
-    </div>
-    <details v-if="recap && !q && !tag && !day" class="card recap">
-      <summary>
-        <span class="meta"
-          >{{ recap.date === shiftDay(today(), -1) ? "昨天" : recap.date.slice(5) }}的回顾 ·
-          {{ recap.conversations }} 段对话<template v-if="recap.todos.length">
-            · {{ recap.todos.length }} 条待办</template
-          ></span
-        >
-        <div class="title">{{ recap.headline }}</div>
-      </summary>
-      <ul>
-        <li v-for="(h, i) in recap.highlights" :key="i">
-          <RouterLink v-if="h.conv" :to="'/c/' + h.conv">{{ h.text }}</RouterLink
-          ><template v-else>{{ h.text }}</template>
-        </li>
-      </ul>
-      <template v-if="recap.todos.length">
-        <div class="sub">我要做的</div>
-        <ul>
-          <li v-for="t in recap.todos" :key="t.conv + t.text">
-            <RouterLink :to="'/c/' + t.conv">{{ t.short ?? t.text }}</RouterLink
-            ><span v-if="t.to || t.due" class="muted">
-              · {{ [t.to && "答应" + t.to, t.due].filter(Boolean).join(" · ") }}</span
-            ><TodoMarks
-              v-if="t.short"
-              :conv="t.conv"
-              :text="t.text"
-              @marked="closed(t.conv, t.text)"
-            />
-          </li>
-        </ul>
-      </template>
-      <template v-if="recap.people.length">
-        <div class="sub">聊过的人</div>
-        <ul>
-          <li v-for="p in recap.people" :key="p.who">{{ p.who }}：{{ p.note }}</li>
-        </ul>
-      </template>
-    </details>
+    <template v-if="!q && !tag && !day">
+      <DueTodos :due="due" @closed="closed" />
+      <RecapCard v-if="recap" :recap="recap" @closed="closed" />
+    </template>
     <div v-if="open" class="card open">
       <div class="meta">{{ hhmm(open.start) }} 开始 · 进行中 · {{ open.sentences }} 句</div>
       <div class="title muted">对话进行中，结束后生成摘要</div>
     </div>
     <template v-for="(c, i) in items" :key="c.id">
       <div v-if="dayOf(i)" class="day" :data-day="dayOf(i)">{{ dayOf(i) }}</div>
-      <RouterLink
-        class="card"
-        :class="{ media: (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA }"
-        :to="'/c/' + c.id"
-      >
-        <div class="meta">
-          {{ (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA ? "媒体 · " : ""
-          }}{{ c.kind === "口述" ? "口述 · " : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }} ·
-          {{ minutes(c) }} 分钟 · {{ (c.participants || []).map(speakerLabel).join("、") || "—" }}
-          <template v-if="c.summary?.todos?.length">
-            · {{ c.summary.todos.length }} 条待办</template
-          >
-        </div>
-        <div
-          class="title"
-          :class="{
-            bad: c.summary?.status === 'failed',
-            muted: c.summary?.status !== 'done' && c.summary?.status !== 'failed',
-          }"
-        >
-          {{
-            c.summary?.status === "done"
-              ? c.summary.title || "（无标题）"
-              : c.summary?.status === "failed"
-                ? "摘要生成失败"
-                : "摘要生成中…"
-          }}
-        </div>
-        <template v-if="(c.summary?.media_share ?? 0) < MOSTLY_MEDIA">
-          <div v-if="c.summary?.summary" class="gist">{{ c.summary.summary }}</div>
-          <div v-if="c.summary?.tags?.length" class="tagline">
-            <span v-for="t in c.summary.tags" :key="t" class="tag">{{ t }}</span>
-          </div>
-        </template>
-      </RouterLink>
+      <ConversationItem :c="c" />
     </template>
     <template v-if="done && !items.length && !open && !reply && !asking">
       <div v-if="q || tag || day || kind !== '对话'" class="empty">
@@ -386,7 +289,7 @@ useSocket((m) => {
 </template>
 
 <style scoped>
-/* sticky under the header (AppHeader: 45 px; on a phone, two rows, 79 px) */
+/* sticky under the header (AppHeader: 45 px; none on a phone) */
 .find {
   position: sticky;
   top: 45px;
@@ -443,9 +346,6 @@ useSocket((m) => {
   color: var(--muted);
   margin: 20px 0 8px;
 }
-.card.media {
-  opacity: 0.5;
-}
 .ask .x {
   float: right;
   display: inline-flex;
@@ -459,20 +359,6 @@ useSocket((m) => {
 .answer {
   white-space: pre-wrap;
   margin-top: 4px;
-}
-.recap summary {
-  cursor: pointer;
-}
-.recap ul,
-.due ul {
-  margin: 6px 0 0;
-  padding-left: 20px;
-  font-size: var(--fs-sm);
-}
-.recap .sub {
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  margin-top: 8px;
 }
 /* still going: an outline, not a card yet */
 .card.open {
@@ -489,33 +375,16 @@ useSocket((m) => {
   font-weight: 600;
   margin: 2px 0;
 }
-.gist {
-  font-size: var(--fs-sm);
-  color: var(--fg-2);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.tagline {
-  margin-top: 6px;
-}
-.tagline .tag {
-  cursor: inherit;
-  margin-right: 4px;
-  min-height: 22px;
-  padding: 0 8px;
-}
 .more {
   display: block;
   margin: 16px auto;
 }
+/* a phone and inside the app: no header to stay under */
 @media (max-width: 600px) {
   .find {
-    top: 79px;
+    top: 0;
   }
 }
-/* after the phone rule: inside the app there is no header to stay under */
 :global(.in-app .find) {
   top: 0;
 }
