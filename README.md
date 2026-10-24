@@ -106,11 +106,11 @@ docker compose up -d
 docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验 sha256
 ```
 
-打开 `http://127.0.0.1:8770/?token=<your token>`（token 在 `data/tenants.json` 里），在 **连接手机** 页扫码连上 App。手机连服务器需要 HTTPS，见 [Docker 部署细节](#docker-部署细节)。
+打开 `http://127.0.0.1:8770/?token=<your token>`（token 在 `data/tenants.json` 里），在 **连接手机** 页扫码连上 App。手机可以直接连 `http://<服务器 IP>:8770`，比如 Tailscale 的 100.x 地址或局域网地址；要走公网再加 HTTPS，见 [Docker 部署细节](#docker-部署细节)。
 
 **更多文档**
 
-- [Docker 部署细节](#docker-部署细节)：key 的限制、`ENGINE=local`、时区、镜像、HTTPS 反向代理
+- [Docker 部署细节](#docker-部署细节)：key 的限制、`ENGINE=local`、时区、镜像、公网访问的 HTTPS 反向代理
 - [不用 Docker](#快速开始不用-docker)
 - [配置](#配置)：所有环境变量和语音识别引擎
 - [模型文件](#模型文件)
@@ -152,7 +152,7 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 
 打开 `http://127.0.0.1:8770/?token=<your token>`（token 在 `data/tenants.json` 里；服务在远程机器上的话，先 `ssh -L 8770:127.0.0.1:8770 host`）；之后靠 cookie 保持登录。所有东西都在 `./data` 里：`tenants.json`、模型文件，以及每个人各自的 SQLite 数据库和原始录音。
 
-手机连服务器需要 HTTPS：在 8770 端口前面放一个带 TLS 的反向代理（Caddy、nginx、Cloudflare Tunnel、Tailscale Serve）；`GET /api/health` 不需要 token 就返回 `{"ok": true}`，可以给代理做健康检查。compose 文件只把端口发布在 127.0.0.1 上；token 为空的服务不要暴露出去。
+App 连 `http://` 的服务器也可以（1.5.1 起），在 Tailscale 或局域网里直接用 IP 和端口就行；要从公网访问，在 8770 端口前面放一个带 TLS 的反向代理（Caddy、nginx、Cloudflare Tunnel、Tailscale Serve）；`GET /api/health` 不需要 token 就返回 `{"ok": true}`，可以给代理做健康检查。compose 文件只把端口发布在 127.0.0.1 上；token 为空的服务不要暴露出去。
 
 ### 快速开始（不用 Docker）
 
@@ -223,7 +223,7 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 ### 架构和目录
 
 ```
-BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) ──▶ web UI, MCP, CLI
+BLE recorder ──BLE──▶ phone app ──HTTP(S)──▶ server (FastAPI) ──▶ web UI, MCP, CLI
                       (or the phone's mic)    │ local: VAD, voiceprints (onnxruntime)
                                               │ cloud: ASR engine, OpenAI-compatible LLM
                                               ▼

@@ -48,7 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 32), children: [
       section('服务器'),
       TextField(controller: server, keyboardType: TextInputType.url,
-          decoration: const InputDecoration(labelText: '地址', hintText: 'https://your.server', border: OutlineInputBorder())),
+          decoration: const InputDecoration(labelText: '地址', hintText: 'http://100.x.y.z:8770 或 https://your.server', border: OutlineInputBorder())),
       const SizedBox(height: 12),
       TextField(
         controller: token,

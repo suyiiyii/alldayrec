@@ -106,11 +106,11 @@ docker compose up -d
 docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
 ```
 
-Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`) and scan the QR code on the **连接手机** page from the app. Phones need HTTPS: see [Docker details](#docker-details).
+Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`) and scan the QR code on the **连接手机** page from the app. Phones can connect to `http://<server IP>:8770` directly, e.g. a Tailscale 100.x or LAN address; add HTTPS only to reach it over the public internet, see [Docker details](#docker-details).
 
 **More docs**
 
-- [Docker details](#docker-details): key restrictions, `ENGINE=local`, time zone, the image, an HTTPS reverse proxy
+- [Docker details](#docker-details): key restrictions, `ENGINE=local`, time zone, the image, an HTTPS reverse proxy for public access
 - [Without Docker](#quickstart-without-docker)
 - [Configuration](#configuration): every environment variable and the ASR engines
 - [Model files](#model-files)
@@ -152,7 +152,7 @@ A prebuilt image is published to `ghcr.io/suyiiyii/alldayrec` (amd64/arm64), and
 
 Open `http://127.0.0.1:8770/?token=<your token>` (the token is in `data/tenants.json`; on a remote machine: `ssh -L 8770:127.0.0.1:8770 host` first); a cookie keeps you signed in. Everything lives in `./data`: `tenants.json`, the model files, and per person a SQLite database and the original audio.
 
-Phones need HTTPS: put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
+The app accepts plain `http://` servers (since 1.5.1): inside Tailscale or a LAN, use the IP and port directly. To reach the server over the public internet, put a reverse proxy with TLS in front of port 8770 (Caddy, nginx, a Cloudflare Tunnel, Tailscale Serve); `GET /api/health` answers `{"ok": true}` without a token, for its health checks. The compose file publishes the port on 127.0.0.1 only; don't expose a server whose token is empty.
 
 ### Quickstart (without Docker)
 
@@ -223,7 +223,7 @@ Firmware, wiring, build (nRF Connect SDK v2.7.0) and over-the-air updates: [`fir
 ### Architecture and layout
 
 ```
-BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) ──▶ web UI, MCP, CLI
+BLE recorder ──BLE──▶ phone app ──HTTP(S)──▶ server (FastAPI) ──▶ web UI, MCP, CLI
                       (or the phone's mic)    │ local: VAD, voiceprints (onnxruntime)
                                               │ cloud: ASR engine, OpenAI-compatible LLM
                                               ▼
