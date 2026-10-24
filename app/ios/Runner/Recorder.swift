@@ -42,6 +42,7 @@ enum Recorder {
         for k in ["foreground", "background"] { defaults.set(a[k] as? Int ?? 20, forKey: k) }
         result(nil)
       case "status": result(status())
+      case "version": result(DeviceLog.version)  // 我的 › 关于
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message
         DeviceLog.app(DeviceLog.mine(), "app_error", "界面出错：\(a["type"] as? String ?? "?") \(a["stack"] as? String ?? "")", level: "error")
         result(nil)

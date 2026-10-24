@@ -18,6 +18,7 @@ class Recorder {
   static Future<void> foreground(bool on) => _ch.invokeMethod('foreground', {'on': on});
   static Future<Map> status() async => (await _ch.invokeMethod('status')) as Map;
   static Future<String> deviceName() async => (await _ch.invokeMethod('deviceName')) as String;
+  static Future<String> version() async => (await _ch.invokeMethod('version')) as String;  // this build: 1.4.9+24
   // the BLE recorder: which one is bound, what it last said, how a firmware update goes (firmware.dart)
   static Future<Map> recorder() async => (await _ch.invokeMethod('recorder')) as Map;
   /// Unbinding: true when the recorder was connected and forgot every phone, false when only this phone forgot it.

@@ -28,14 +28,14 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Map status = {};
   String note = '';
   bool stopping = false;
-  int page = 0;  // 0 字幕, 1 对话, 2 说话人, 3 上传, 4 录音设备, 5 设置
+  int page = 0;  // the bottom bar's: 0 今天, 1 对话, 2 人物 (web pages), 3 我的 (its entries open over it)
   final webs = <WebViewController?>[null, null, null];  // one per web page: each keeps its scroll while another is shown
   Timer? ticker;
   int ticks = 0;
+  String version = '';
 
-  static const titles = ['字幕', '对话', '说话人', '上传', '录音设备', '设置'];
+  static const titles = ['今天', '对话', '人物', '我的'];
   static const paths = ['/', '/conversations', '/speakers'];
-  static const uploadPage = 3, recorderPage = 4, settingsPage = 5;
 
   @override
   void initState() {
@@ -49,6 +49,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       });
       _slices();
     });
+    Recorder.version().then((v) => mounted ? setState(() => version = v) : null);
     ticker = Timer.periodic(const Duration(seconds: 2), (_) async {  // the service may be running from before this UI opened
       if (++ticks % 150 == 0) _slices();  // every 5 min: the server may have changed the lengths
       final s = await Recorder.status();
@@ -95,17 +96,31 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   bool get running => status['running'] == true;
 
-  void _loadWeb() {
-    final s = settings!;
-    if (s.token.isEmpty) return;
-    WebViewController make() => WebViewController()
+  WebViewController _web() {
+    final c = WebViewController();
+    return c
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..clearCache();  // the page changes with server deploys
-    for (var i = 0; i < webs.length; i++) {  // ?token= sets the cookie, then the page follows itself
-      webs[i] ??= make();
-      webs[i]!.loadRequest(Uri.parse('${s.server}${paths[i]}?token=${s.token}'));
+      ..clearCache()  // the page changes with server deploys
+      // the web page hides its own navigation in the app: Android's WebView says so in its user agent, iOS's does not
+      ..setNavigationDelegate(NavigationDelegate(
+          onPageFinished: (_) => c.runJavaScript("document.documentElement.classList.add('in-app')").ignore()));
+  }
+
+  Uri _url(String path) => Uri.parse('${settings!.server}$path?token=${settings!.token}');  // ?token= sets the cookie
+
+  void _loadWeb() {
+    if (settings!.token.isEmpty) return;
+    for (var i = 0; i < webs.length; i++) {
+      (webs[i] ??= _web()).loadRequest(_url(paths[i]));
     }
   }
+
+  /// One of 我的's entries, over the bottom bar; back (the key or the app bar's arrow) comes back to 我的.
+  void _open(String title, Widget body) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: body)));
+
+  /// A web page (实时字幕: /live) in a WebView of its own, there while open.
+  void _openWeb(String title, String path) => _open(title, WebViewWidget(controller: _web()..loadRequest(_url(path))));
 
   Future<void> _saved() async {
     await settings!.save();
@@ -115,6 +130,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (changed) await _stop();
     autoStarted = DateTime(2000);
     if (!mounted) return;
+    Navigator.popUntil(context, (r) => r.isFirst);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(running && !changed ? '已保存，下次开始录音时生效' : '已保存'), behavior: SnackBarBehavior.floating));
     setState(() => page = 0);
@@ -130,7 +146,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 字幕, then leave
+  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 今天, then leave
     final w = page < webs.length ? webs[page] : null;
     if (w != null && await w.canGoBack()) return w.goBack();
     if (page != 0) return setState(() => page = 0);
@@ -170,47 +186,51 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新', onPressed: () => webs[page]!.reload()),
         ],
       ),
-      drawer: NavigationDrawer(
-        selectedIndex: page,
-        onDestinationSelected: (i) {
-          setState(() => page = i);
-          Navigator.pop(context);
-        },
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 20, 16, 4),
-            child: Text('alldayrec', style: Theme.of(context).textTheme.titleLarge),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 0, 16, 16),
-            child: Text(settings == null ? '' : '${settings!.device} · ${Uri.tryParse(settings!.server)?.host ?? ''}',
-                style: TextStyle(color: cs.onSurfaceVariant)),
-          ),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.subtitles_outlined), selectedIcon: Icon(Icons.subtitles), label: Text('字幕')),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: Text('对话')),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: Text('说话人')),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.cloud_upload_outlined), selectedIcon: Icon(Icons.cloud_upload), label: Text('上传')),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.bluetooth_outlined), selectedIcon: Icon(Icons.bluetooth), label: Text('录音设备')),
-          const NavigationDrawerDestination(
-              icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: Text('设置')),
-        ],
-      ),
       body: settings == null
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [const UpdateBanner(), Expanded(child: IndexedStack(index: page, children: [  // keeps the WebView alive across pages
-              for (final w in webs)
-                w == null ? _Empty(onSetup: () => setState(() => page = settingsPage)) : WebViewWidget(controller: w),
-              UploadPage(settings: settings!, status: status, visible: page == uploadPage),
-              RecorderPage(visible: page == recorderPage, onSource: _setSource),
-              SettingsPage(settings: settings!, onSaved: _saved),
+              for (final w in webs) w == null ? _Empty(onSetup: _openSettings) : WebViewWidget(controller: w),
+              _me(cs),
             ]))]),
-      bottomNavigationBar: page == 0 && settings != null ? _controlBar(cs) : null,
+      bottomNavigationBar: settings == null ? null : Column(mainAxisSize: MainAxisSize.min, children: [
+        if (page == 0) _controlBar(cs),
+        NavigationBar(
+          selectedIndex: page,
+          onDestinationSelected: (i) => setState(() => page = i),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '今天'),
+            NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '对话'),
+            NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '人物'),
+            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '我的'),
+          ],
+        ),
+      ]),
     ));
+  }
+
+  void _openSettings() => _open('设置', SettingsPage(settings: settings!, onSaved: _saved));
+  void _openRecorder() => _open('录音设备', RecorderPage(onSource: _setSource));
+
+  /// 我的: this phone, and the native pages.
+  Widget _me(ColorScheme cs) {
+    final s = settings!;
+    Widget entry(IconData icon, String title, VoidCallback onTap, [String? sub]) => ListTile(
+        leading: Icon(icon), title: Text(title), subtitle: sub == null ? null : Text(sub), onTap: onTap,
+        trailing: Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant));
+    return ListView(children: [
+      ListTile(
+        leading: CircleAvatar(backgroundColor: cs.primaryContainer, child: Icon(Icons.smartphone_rounded, color: cs.onPrimaryContainer)),
+        title: Text(s.device),
+        subtitle: Text(s.token.isEmpty ? '还没登录' : Uri.tryParse(s.server)?.host ?? s.server),
+      ),
+      const Divider(),
+      entry(Icons.bluetooth_outlined, '录音设备', _openRecorder),
+      entry(Icons.subtitles_outlined, '实时字幕', s.token.isEmpty ? _openSettings : () => _openWeb('实时字幕', '/live')),
+      entry(Icons.cloud_upload_outlined, '上传', () => _open('上传', UploadPage(settings: s))),
+      entry(Icons.settings_outlined, '设置', _openSettings),
+      entry(Icons.info_outline, '关于', () => showAboutDialog(context: context, applicationName: 'alldayrec', applicationVersion: version),
+          version),
+    ]);
   }
 
   /// The BLE recorder as the source: nothing to start or stop, only where its audio is.
@@ -233,36 +253,33 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ].where((x) => x.isNotEmpty).join(' · ');
     return Material(
       color: cs.surfaceContainer,
-      child: SafeArea(
-        top: false,
-        child: InkWell(
-          onTap: () => setState(() => page = recorderPage),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
-            child: Row(children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  // LIVE goes on while the backlog is read; before that only the file being recorded is waited
-                  // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
-                  Text(!syncing ? link : connected
-                          ? '实时上传 · 后台补传 ${(syncDone / 1024).toStringAsFixed(1)} / ${(syncTotal / 1024).toStringAsFixed(1)} MB'
-                          : '接上实时前先取正在录的这段 · 还差 ${(syncLive / 1024).toStringAsFixed(1)} MB',
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  if (syncing) ...[
-                    const SizedBox(height: 6),
-                    LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
-                  ],
-                  if (detail.isNotEmpty) Text(detail, style: small),
-                  if (s['note'] != null) Text('${s['note']}', style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-                  if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
-                ]),
-              ),
-              if (connected) PauseButton(paused: pausedMin > 0, onDone: _pauseNote),
-              Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
-            ]),
-          ),
+      child: InkWell(
+        onTap: _openRecorder,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+          child: Row(children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                // LIVE goes on while the backlog is read; before that only the file being recorded is waited
+                // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
+                Text(!syncing ? link : connected
+                        ? '实时上传 · 后台补传 ${(syncDone / 1024).toStringAsFixed(1)} / ${(syncTotal / 1024).toStringAsFixed(1)} MB'
+                        : '接上实时前先取正在录的这段 · 还差 ${(syncLive / 1024).toStringAsFixed(1)} MB',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (syncing) ...[
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
+                ],
+                if (detail.isNotEmpty) Text(detail, style: small),
+                if (s['note'] != null) Text('${s['note']}', style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
+                if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
+              ]),
+            ),
+            if (connected) PauseButton(paused: pausedMin > 0, onDone: _pauseNote),
+            Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
+          ]),
         ),
       ),
     );
@@ -299,28 +316,25 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ];
     return Material(
       color: cs.surfaceContainer,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Text(headline, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-                if (detail.isNotEmpty) Text(detail, style: small),
-                for (final w in warn) Text(w, style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-              ]),
-            ),
-            const SizedBox(width: 12),
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                  backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
-              onPressed: stopping ? null : (running ? _stop : _start),
-              icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
-              label: Text(running ? '停止' : '开始录音'),
-            ),
-          ]),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(headline, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+              if (detail.isNotEmpty) Text(detail, style: small),
+              for (final w in warn) Text(w, style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
+            ]),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+                backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
+            onPressed: stopping ? null : (running ? _stop : _start),
+            icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
+            label: Text(running ? '停止' : '开始录音'),
+          ),
+        ]),
       ),
     );
   }
@@ -344,7 +358,7 @@ class _Empty extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.key_outlined, size: 40, color: Theme.of(context).colorScheme.outline),
           const SizedBox(height: 12),
-          const Text('填好 Token 后显示字幕'),
+          const Text('扫码登录或填好 Token 后显示'),
           const SizedBox(height: 12),
           OutlinedButton(onPressed: onSetup, child: const Text('去设置')),
         ]),

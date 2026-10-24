@@ -75,6 +75,7 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "status" -> result.success(RecorderService.status(File(filesDir, "chunks")))
+                "version" -> result.success(DeviceLog.version)  // 我的 › 关于
                 "error" -> {  // an error the Flutter side did not catch: its type and first frames, no message
                     DeviceLog.app(DeviceLog.mine(), "app_error", "界面出错：${call.argument<String>("type")} ${call.argument<String>("stack")}", "error")
                     result.success(null)

@@ -11,14 +11,13 @@ import 'settings.dart';
 /// The phone's upload queue (from the native side's status) and how far the server has got with this device's audio.
 class UploadPage extends StatefulWidget {
   final Settings settings;
-  final Map status;
-  final bool visible;
-  const UploadPage({super.key, required this.settings, required this.status, required this.visible});
+  const UploadPage({super.key, required this.settings});
   @override
   State<UploadPage> createState() => _UploadPageState();
 }
 
 class _UploadPageState extends State<UploadPage> {
+  Map st = {};  // the native side's status
   Map? server;  // this device's entry of /api/status
   String serverNote = '', dev = '';  // dev: the name its audio goes up as (the BLE recorder's own, or the setting)
   Timer? timer;
@@ -26,7 +25,7 @@ class _UploadPageState extends State<UploadPage> {
   @override
   void initState() {
     super.initState();
-    timer = Timer.periodic(const Duration(seconds: 5), (_) => widget.visible ? _fetch() : null);
+    timer = Timer.periodic(const Duration(seconds: 5), (_) => _fetch());
     _fetch();
   }
 
@@ -37,7 +36,8 @@ class _UploadPageState extends State<UploadPage> {
   }
 
   Future<void> _fetch() async {
-    final s = widget.settings;
+    final s = widget.settings, phone = await Recorder.status();
+    if (mounted) setState(() => st = phone);
     if (s.token.isEmpty) return;
     try {
       final c = HttpClient()..connectionTimeout = const Duration(seconds: 10);
@@ -73,7 +73,7 @@ class _UploadPageState extends State<UploadPage> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context), cs = t.colorScheme, st = widget.status, srv = server;
+    final t = Theme.of(context), cs = t.colorScheme, srv = server;
     final pending = (st['pending'] ?? 0) as int, bytes = (st['pendingBytes'] ?? 0) as num;
     final running = st['running'] == true, uploading = st['uploading'] == true;
     final (String chip, Color chipColor, IconData chipIcon) = running

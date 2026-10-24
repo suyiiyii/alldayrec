@@ -15,9 +15,8 @@ import 'settings.dart';
 /// The BLE recorder: which one is bound and, as last read over the link, its battery, card, offline sync and firmware;
 /// the card as a USB disk on a computer, the firmware page (firmware.dart: versions, notes, the update), unbinding.
 class RecorderPage extends StatefulWidget {
-  final bool visible;
   final Future<void> Function(String source) onSource;  // bound: 'ble'; unbound: back to 'mic'
-  const RecorderPage({super.key, required this.visible, required this.onSource});
+  const RecorderPage({super.key, required this.onSource});
   @override
   State<RecorderPage> createState() => _RecorderPageState();
 }
@@ -32,7 +31,7 @@ class _RecorderPageState extends State<RecorderPage> {
     super.initState();
     _load();
     // every 2 s; while listening every second, for its line a second
-    timer = Timer.periodic(const Duration(seconds: 1), (t) => widget.visible && (st['listen'] != null || t.tick.isEven) ? _load() : null);
+    timer = Timer.periodic(const Duration(seconds: 1), (t) => st['listen'] != null || t.tick.isEven ? _load() : null);
   }
 
   @override

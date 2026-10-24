@@ -13,6 +13,7 @@ void main() {
     SharedPreferences.setMockInitialValues({'server': 'http://127.0.0.1:1'});
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('live_record/recorder'), (call) async {
       if (call.method == 'deviceName') return 'Smoke phone';
+      if (call.method == 'version') return '1.0.0+1';
       if (call.method == 'nearby') return <Object>[];
       if (call.method == 'status') return {'running': false, 'uploading': false, 'pending': 0};
       if (call.method == 'recorder' || call.method == 'permissions') return <String, Object>{};
@@ -24,13 +25,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Home), findsOneWidget);
     expect(find.text('开始录音'), findsOneWidget);
+    expect(tester.widgetList<NavigationDestination>(find.byType(NavigationDestination)).map((d) => d.label),
+        ['今天', '对话', '人物', '我的']);
+    await tester.tap(find.widgetWithText(NavigationDestination, '我的'));
+    await tester.pumpAndSettle();
+    expect(find.text('开始录音'), findsNothing);  // the recording bar is 今天's
+    expect(find.text('1.0.0+1'), findsOneWidget);
     for (final entry in <String, Type>{'设置': SettingsPage, '上传': UploadPage, '录音设备': RecorderPage}.entries) {
-      final scaffold = tester.state<ScaffoldState>(find.byType(Scaffold).first);
-      scaffold.openDrawer();
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(NavigationDrawerDestination, entry.key));
+      await tester.tap(find.widgetWithText(ListTile, entry.key));
       await tester.pumpAndSettle();
       expect(find.byType(entry.value), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(entry.value), findsNothing);  // gone with its route, polling and all
     }
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();

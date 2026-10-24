@@ -41,7 +41,7 @@ final class Flow: XCTestCase {
     sleep(2)  // its state from the scan response
     let force = button(["强制绑定"]), bind = button(["绑定"])
     if force.exists { force.tap(); tap(button(["强制绑定"])); say("bound force") } else { tap(bind); say("bound plain") }
-    page("字幕")
+    page("今天")
     var advised = false
     XCTAssert(until(waitS) {
       self.dialogs(0)
@@ -72,7 +72,7 @@ final class Flow: XCTestCase {
   func testOpen() {
     app.activate()
     dialogs(3)
-    page("字幕")
+    page("今天")
     XCTAssert(until(waitS) { self.dialogs(0); return self.text("已连接 · 实时上传").exists }, "not following live within \(waitS) s")
     say("connected")
   }
@@ -178,12 +178,16 @@ final class Flow: XCTestCase {
     e.tap()
   }
 
-  /// One of the app's pages from its drawer.
+  /// One of the app's pages: a tab of its bottom bar, or one of 我的's entries (录音设备, 上传, 设置).
   func page(_ title: String) {
     app.activate()
-    tap(button(["Open navigation menu", "打开导航菜单"]))
-    // "录音设备\nTab 5 of 6": a StaticText, or Other while it is the page shown (10-06)
-    tap(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'Tab '", title)).firstMatch)
+    let back = button(["Back", "返回"])  // one of 我的's pages is open: back to the tabs
+    for _ in 0..<3 where back.exists { back.tap(); sleep(1) }
+    let tabs = ["今天", "对话", "人物", "我的"]
+    // "我的\nTab 4 of 4"
+    tap(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS 'Tab '",
+                                                             tabs.contains(title) ? title : "我的")).firstMatch)
+    if !tabs.contains(title) { tap(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch) }
     sleep(1)
   }
 
