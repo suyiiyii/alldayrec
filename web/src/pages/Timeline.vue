@@ -276,7 +276,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             :class="{ on: tag === tg }"
             @click="tag = tag === tg ? '' : tg"
           >
-            {{ tg }} {{ n }}
+            {{ tg }} <span class="n">{{ n }}</span>
           </button>
         </div>
       </div>
@@ -314,7 +314,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
       <SelfVoice v-if="top" ref="selfCard" />
       <section v-for="g in days" :key="g.day">
         <h2 class="day" :data-day="g.day">
-          {{ t("timeline.dayConversations", { day: dayLabel(g.day) }, g.convs.length) }}
+          {{ dayLabel(g.day) }} <span class="n">{{ t("calendar.convs", g.convs.length) }}</span>
         </h2>
         <RecapCard
           v-if="!q && !tag && recaps[g.day]"
@@ -332,7 +332,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <div>{{ t("timeline.none") }}</div>
         </div>
       </template>
-      <button v-show="!done" ref="more" class="more" @click="page">
+      <button v-show="!done" ref="more" class="more" :disabled="loading" @click="page">
         {{ loading ? t("timeline.loading") : t("timeline.earlier") }}
       </button>
       <!-- 问 AI on a phone: a sheet from the bottom; a tap on the dim backdrop (the dialog itself) or Escape closes it -->
@@ -371,12 +371,14 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 </template>
 
 <style scoped>
-/* sticky under the header on a wide screen (AppHeader: 45 px) */
+/* sticky under the header on a wide screen (AppHeader: 45 px), a hairline under it so cards pass under an edge */
 .find {
   position: sticky;
   top: 45px;
   background: var(--bg);
-  padding: 10px 0 6px;
+  padding: var(--space-3) 0;
+  box-shadow: 0 1px 0 var(--line);
+  margin-bottom: var(--space-3);
   z-index: 1;
 }
 .cal {
@@ -406,12 +408,32 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   scrollbar-width: none;
   padding-top: 8px;
 }
-/* a day: 10月24日 周六 · 3 段对话 */
-.day {
-  font-size: var(--fs-sm);
-  font-weight: 600;
+/* the filter: white chips edged like the search box and the picker's buttons, accent once picked, so the row does
+   not outshout the cards under it */
+.tags .tag:not(.on) {
+  background: var(--surface);
   color: var(--fg-2);
-  margin: var(--space-5) 0 var(--space-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tags .n {
+  margin-left: 2px;
+  color: var(--muted);
+}
+.tags .on .n {
+  color: inherit;
+}
+/* a day: 10月24日 周六  3 段对话 — the strongest line of its section */
+.day {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--fg);
+  margin: var(--space-6) 0 var(--space-3);
+}
+.day .n {
+  margin-left: var(--space-1);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  color: var(--muted);
 }
 .ask .x {
   float: right;
@@ -537,8 +559,10 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   background: var(--surface);
   color: var(--fg);
 }
-.sheet[open] {
-  animation: up 0.2s ease-out;
+@media (prefers-reduced-motion: no-preference) {
+  .sheet[open] {
+    animation: up 0.2s ease-out;
+  }
 }
 @keyframes up {
   from {
@@ -555,6 +579,8 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 @media (max-width: 600px) {
   .find {
     position: static;
+    box-shadow: none;
+    margin-bottom: 0;
   }
   .q button {
     display: none;
@@ -563,11 +589,16 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
     display: inline-flex;
   }
   main {
+    padding-top: var(
+      --space-3
+    ); /* no header above on a phone: the first card off the screen's edge */
     padding-bottom: 88px; /* the last conversation scrolls clear of the button */
   }
 }
 :global(.in-app .find) {
   position: static;
+  box-shadow: none;
+  margin-bottom: 0;
 }
 html.in-app .q button {
   display: none;
@@ -576,6 +607,7 @@ html.in-app .fab {
   display: inline-flex;
 }
 html.in-app main {
+  padding-top: var(--space-3);
   padding-bottom: 88px;
 }
 </style>

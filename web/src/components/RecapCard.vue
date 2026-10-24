@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { intl, lang, t } from "../i18n";
+import Icon from "./Icon.vue";
 import TodoItem from "./TodoItem.vue";
 import { type Recap } from "../lib/api";
 import { shiftDay, today } from "../lib/calendar";
@@ -28,14 +29,16 @@ const when = computed(() =>
   <details class="card recap" :open="open">
     <summary>
       <span class="meta"
-        >{{ when }} · {{ t("calendar.convs", recap.conversations)
+        ><Icon class="chev" name="chevron-right" :size="14" />{{ when }} ·
+        {{ t("calendar.convs", recap.conversations)
         }}<template v-if="todos.length"> · {{ t("convItem.todos", todos.length) }}</template></span
       >
       <div class="title">{{ recap.headline }}</div>
     </summary>
     <ul>
       <li v-for="(h, i) in recap.highlights" :key="i">
-        <RouterLink v-if="h.conv" :to="'/c/' + h.conv">{{ h.text }}</RouterLink
+        <RouterLink v-if="h.conv" :to="'/c/' + h.conv"
+          >{{ h.text }}<Icon class="go" name="chevron-right" :size="16" /></RouterLink
         ><template v-else>{{ h.text }}</template>
       </li>
     </ul>
@@ -57,16 +60,47 @@ const when = computed(() =>
 </template>
 
 <style scoped>
+/* the browser's ▼ is bigger and blacker than the line it opens: a small chevron that turns instead */
 summary {
   cursor: pointer;
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
 }
 .meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   font-size: var(--fs-xs);
   color: var(--muted);
 }
+.chev {
+  margin-left: -2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chev {
+    transition: transform 0.15s;
+  }
+}
+details[open] .chev {
+  transform: rotate(90deg);
+}
 .title {
   font-weight: 600;
+  line-height: 1.4;
   margin: 2px 0;
+}
+/* the day's points read as text; a grey chevron at the row's end says which open a conversation */
+ul a {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: inherit;
+}
+.go {
+  margin: 4px 0 0 auto;
+  color: var(--muted);
 }
 ul {
   margin: 6px 0 0;

@@ -23,29 +23,37 @@ const shown = computed(() =>
 
 <template>
   <div v-if="left.length" class="card due">
-    <RouterLink class="meta" to="/todos"
-      >{{ t("dueTodos.title") }}<Icon name="chevron-right" :size="14"
+    <RouterLink class="head" to="/todos"
+      >{{ t("dueTodos.title") }}<Icon name="chevron-right" :size="16"
     /></RouterLink>
     <ul>
       <TodoItem v-for="x in shown" :key="x.id" :t="x" />
     </ul>
     <RouterLink v-if="left.length > shown.length" class="rest" to="/todos"
-      >{{ t("dueTodos.more", left.length - shown.length) }}<Icon name="chevron-right" :size="14"
+      >{{ t("dueTodos.more", left.length - shown.length) }}<Icon name="chevron-right" :size="16"
     /></RouterLink>
   </div>
 </template>
 
 <style scoped>
-.meta,
+/* the head and the way to the rest look like the live card's (a card about now, as that one is) */
+.head,
 .rest {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: var(--fs-xs);
+}
+.head {
+  font-weight: 600;
+  color: var(--fg);
+}
+.head svg {
   color: var(--muted);
 }
 .rest {
+  min-height: 36px;
   margin-top: var(--space-1);
+  font-size: var(--fs-sm);
 }
 ul {
   margin: var(--space-1) 0 0;

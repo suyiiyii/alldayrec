@@ -47,6 +47,7 @@
     }
   },
   "speaker": {
+    "andMore": "{names} and {more} more",
     "unknown": "Unidentified",
     "me": "Me",
     "n": "Speaker {n}",
@@ -789,7 +790,6 @@
     "askStats": "{n} lookup · {s} s | {n} lookups · {s} s",
     "close": "Close",
     "asking": "Searching… usually 10–30 s",
-    "dayConversations": "{day} · {n} conversation | {day} · {n} conversations",
     "noMatch": "No matching conversations",
     "none": "No finished conversations yet. What you talk about wearing the recorder shows up here, one conversation at a time",
     "loading": "Loading…",
@@ -800,7 +800,6 @@
     "suggestFollowUp": "Draft a follow-up message"
   },
   "todoItem": {
-    "andMore": "{names} and {more} more",
     "quote": "“{q}”",
     "promised": "promised to {who}",
     "with": "with {who}",

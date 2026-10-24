@@ -7,6 +7,8 @@ import "./style.css";
 
 // Android WebView: the app has its own navigation
 if (/; wv\)/.test(navigator.userAgent)) document.documentElement.classList.add("in-app");
+// iOS WebKit applies :active (style.css's press feedback) on a touch only where some touch listener is
+document.addEventListener("touchstart", () => {}, { passive: true });
 // the language picked on 我的 in this browser; none: the browser's, then the tenant's (what the models write in)
 const picked = localStorage.lang;
 setLang(

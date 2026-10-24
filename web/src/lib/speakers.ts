@@ -40,6 +40,17 @@ export const speakerLabel = (name?: string | null) =>
           ? t("speaker.n", { n: name.slice(1) })
           : name;
 
+// a list of people in one short line: 我 first (whether I was there matters most), two names, then 「等 N 人」
+export const speakerList = (names: string[]) => {
+  const two = [...names.filter((n) => n === "我"), ...names.filter((n) => n !== "我")]
+    .slice(0, 2)
+    .map(speakerLabel)
+    .join(t("common.list"));
+  return names.length > 2
+    ? t("speaker.andMore", { names: two, n: names.length, more: names.length - 2 })
+    : two;
+};
+
 // a voiceprint score in words: no numbers on the page
 export const likeness = (score: number) =>
   t(score >= 0.7 ? "speaker.veryLike" : "speaker.someLike");

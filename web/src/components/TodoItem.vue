@@ -4,22 +4,17 @@
 import { computed, ref } from "vue";
 import { t as tr } from "../i18n";
 import { hhmm, type TodoView } from "../lib/api";
-import { speakerLabel } from "../lib/speakers";
+import { speakerList } from "../lib/speakers";
 import Icon from "./Icon.vue";
 import TodoMarks from "./TodoMarks.vue";
 
 const { t } = defineProps<{ t: TodoView }>();
 const cut = (s: string, n: number) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
-const who = (names: string[]) => {
-  const two = names.slice(0, 2).map(speakerLabel).join(tr("common.list"));
-  return names.length > 2
-    ? tr("todoItem.andMore", { names: two, n: names.length, more: names.length - 2 })
-    : two;
-};
 const context = computed(() =>
   [
     t.quote && tr("todoItem.quote", { q: cut(t.quote, 40) }),
-    t.with?.length && tr(t.to ? "todoItem.promised" : "todoItem.with", { who: who(t.with) }),
+    t.with?.length &&
+      tr(t.to ? "todoItem.promised" : "todoItem.with", { who: speakerList(t.with) }),
     t.title ? cut(t.title, 12) : t.start && tr("todoItem.conv", { t: hhmm(t.start) }),
     t.at && hhmm(t.at),
   ]
@@ -130,6 +125,7 @@ function guard(e: MouseEvent) {
 .when {
   color: var(--muted);
   font-size: var(--fs-xs);
+  white-space: nowrap; /* 「· 3 days overdue」 in one piece */
 }
 .ctx {
   font-size: var(--fs-xs);

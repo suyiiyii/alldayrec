@@ -47,6 +47,7 @@
     }
   },
   "speaker": {
+    "andMore": "{names} 等 {n} 人",
     "unknown": "未识别",
     "me": "我",
     "n": "说话人 {n}",
@@ -789,7 +790,6 @@
     "askStats": "查了 {n} 次 · {s} 秒",
     "close": "关掉",
     "asking": "正在查……一般要 10~30 秒",
-    "dayConversations": "{day} · {n} 段对话",
     "noMatch": "没有匹配的对话",
     "none": "还没有聊完的对话。戴上录音设备聊过的话，会在这里整理成一段段对话",
     "loading": "加载中…",
@@ -800,7 +800,6 @@
     "suggestFollowUp": "帮我写跟进消息"
   },
   "todoItem": {
-    "andMore": "{names} 等 {n} 人",
     "quote": "「{q}」",
     "promised": "答应{who}",
     "with": "和{who}",

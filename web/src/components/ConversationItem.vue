@@ -2,25 +2,23 @@
 import { computed } from "vue";
 import { hhmm, minutes, MOSTLY_MEDIA, type Conversation } from "../lib/api";
 import { t } from "../i18n";
-import { speakerColor, speakerLabel } from "../lib/speakers";
+import { speakerList } from "../lib/speakers";
 
-// one conversation in a list: a card on a time line down the left, its dot the colour of its first tag (the same
-// topic, the same colour; grey until summarized)
+// one conversation in a list: a card on a time line down the left (a grey dot: person colours are for avatars)
 const { c } = defineProps<{ c: Conversation }>();
 const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
-const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
 </script>
 
 <template>
   <div class="item">
-    <span class="dot" :style="{ background: dot }" />
+    <span class="dot" />
     <RouterLink class="card" :class="{ media }" :to="'/c/' + c.id">
       <div class="meta">
-        {{ media ? t("convItem.media") : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }} ·
-        {{ t("common.min", { n: minutes(c) }) }} ·
-        {{ (c.participants || []).map(speakerLabel).join(t("common.list")) || "—" }}
+        <span>{{ media ? t("convItem.media") : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }}</span> ·
+        <span>{{ t("common.min", { n: minutes(c) }) }}</span> ·
+        <span>{{ speakerList(c.participants || []) || "—" }}</span>
         <template v-if="c.summary?.todos?.length">
-          · {{ t("convItem.todos", c.summary.todos.length) }}</template
+          · <span>{{ t("convItem.todos", c.summary.todos.length) }}</span></template
         >
       </div>
       <div
@@ -70,21 +68,29 @@ const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  background: var(--muted);
   box-shadow: 0 0 0 3px var(--bg);
 }
 .card {
   margin-bottom: 0;
 }
-.card.media {
-  opacity: 0.5;
+/* mostly media: told apart by a quiet title (muted text keeps 4.9:1; a faded card did not) */
+.media .title:not(.bad) {
+  color: var(--muted);
+  font-weight: 400;
 }
 .meta {
   font-size: var(--fs-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+/* a line breaks between the parts, never inside one (「1 / 条待办」) */
+.meta span {
+  white-space: nowrap;
+}
 .title {
   font-weight: 600;
+  line-height: 1.4;
   margin: 2px 0;
 }
 .gist {
@@ -98,10 +104,13 @@ const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
 .tagline {
   margin-top: 6px;
 }
+/* the topics are words here, not buttons: grey, no accent */
 .tagline .tag {
   cursor: inherit;
   margin-right: 4px;
   min-height: 22px;
   padding: 0 8px;
+  color: var(--muted);
+  background: var(--bg);
 }
 </style>

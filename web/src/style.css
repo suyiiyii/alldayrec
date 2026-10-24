@@ -160,6 +160,22 @@ a.card:hover {
     0 0 0 1px var(--accent),
     var(--shadow);
 }
+/* pressed (a finger, a held click): a card tints to the page's grey, a link or a button dims; at once, back in 120 ms.
+   The browser's own tap box (grey on iOS, blue on Android) goes: this is the one feedback */
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.12s,
+    opacity 0.12s;
+}
+a.card:active {
+  background: var(--bg);
+}
+a:not(.card):active,
+button:not(:disabled):active {
+  opacity: 0.7;
+}
 .muted {
   color: var(--muted);
 }
