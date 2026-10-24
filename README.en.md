@@ -92,9 +92,11 @@ The app and the web UI have no import button yet; importing goes through `POST /
 # start: when the recording began (unix ms); it sets the day and time of its conversations. `date -d` is GNU date
 curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-binary @rec.mp3 \
   "https://<your server>/api/chunks?device=import&start=$(date -d '2026-10-20 09:30' +%s)000"
+# after the batch's last file, end it; t: when that file ends (unix ms), its start plus its duration
+curl -X POST -H "Authorization: Bearer $TOKEN" "https://<your server>/api/chunks/end?device=import&t=<end time>"
 ```
 
-Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. The endpoint is `chunk()` in `server/routes_upload.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
+Use a device name of its own (e.g. `import`) and upload oldest first: audio earlier than where that device has already been processed is kept but not transcribed. After a batch, call `/api/chunks/end` once; otherwise its last stretch keeps waiting for more audio and never gets a final transcript. The full steps (with the macOS `date` form too) are in [How to import recordings you already have](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) on the docs site. The endpoint is `chunk()` in `server/routes_upload.py` (Ogg Opus as the apps send it is `Content-Type: audio/ogg`; `audio/webm` and `audio/aac` work too); `firmware/devkit/lr_sync.py` is a reference Python client that reads a recorder's card and uploads it.
 
 ## Quickstart (Docker)
 
@@ -128,11 +130,10 @@ The port is published on all interfaces, and the token keeps others out; the ser
 ## Roadmap
 
 - **Import**: import recording files from the app or the CLI (today only through `POST /api/chunks`).
-- **Undo**: a to-do's 完成 / 不对 marks and a speaker merge can't be undone yet.
+- **Undo**: a speaker merge can't be undone yet.
 - **Desktop split view**: the list on the left, the details on the right on wide screens.
 - **People cards**: add what you talked about lately to the existing people cards.
 - **Player polish**: keep improving the conversation page's bottom player and follow-along highlight.
-- **Live captions**: a "going on now" card plus a full-screen caption mode.
 
 ## Community and contributing
 

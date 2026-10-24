@@ -33,7 +33,7 @@ type: how-to
 
 ## 导入的录音最后一段一直没有转写
 
-传完一批文件后要调用一次 `POST /api/chunks/end`，见[如何导入已有录音](./import-recordings.md)。
+传完一批文件后要调用一次 `POST /api/chunks/end`，见[如何导入已有录音](./import-recordings.md)。调用之前，这一批的最后一段对话也可能还显示「进行中」。
 
 ## 手机扫码后连不上
 

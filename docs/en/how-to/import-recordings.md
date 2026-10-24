@@ -20,7 +20,7 @@ The sources for the third-party products are in [What alldayrec is](../explanati
 
 ## Rules
 
-- **Use a device name of its own**, e.g. `import`. A new name for each batch (e.g. `import-2026-10`) is the least hassle.
+- **Use a device name of its own**, e.g. `import`. A new name for each batch (e.g. `import-2026-10`) is the least hassle: the next rule holds per device name, so a new batch is transcribed even when it has recordings older than the last batch's.
 - **Upload oldest first.** Under one device name, audio earlier than where the server has already processed is kept but not transcribed.
 - **After the last file, tell the server the batch is over.** Otherwise the last stretch keeps waiting for more audio and never gets a final transcript.
 
@@ -58,7 +58,7 @@ The sources for the third-party products are in [What alldayrec is](../explanati
    curl -X POST -H "Authorization: Bearer $TOKEN" "https://<your-server>/api/chunks/end?device=import&t=<end-time>"
    ```
 
-   It returns `{"ok":true}`. Once the server has processed the remaining audio, the transcripts show up on that day's page.
+   It returns `{"ok":true}`. Once the server has processed the remaining audio, the transcripts show up on that day's page, and the batch's last conversation ends: it no longer shows as 「进行中」 (in progress). A conversation with less than 10 seconds of speech is not kept as a conversation; its sentences stay in the transcript (see [Architecture and data flow](../explanation/architecture.md#conversations-summaries-and-the-recap)).
 
 ## Content-Type
 

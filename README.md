@@ -92,9 +92,11 @@ App 和网页里目前没有导入按钮，导入走 `POST /api/chunks`：一个
 # start：这段录音开始的时刻（Unix 毫秒），对话按它落到哪一天、几点；date -d 是 GNU date 的写法
 curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-binary @rec.mp3 \
   "https://<你的服务器>/api/chunks?device=import&start=$(date -d '2026-10-20 09:30' +%s)000"
+# 这一批传完后结束它；t：最后一个文件结束的时刻（Unix 毫秒），也就是它的 start 加上时长
+curl -X POST -H "Authorization: Bearer $TOKEN" "https://<你的服务器>/api/chunks/end?device=import&t=<结束时刻>"
 ```
 
-导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。接口细节见 `server/routes_upload.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
+导入用一个单独的 `device` 名（比如 `import`），按时间从早到晚传：早于这台设备已经处理到的位置的音频只保存、不转写。传完一批后调用一次 `/api/chunks/end`，不然最后一段一直等后面的音频，不会定稿。完整步骤（包括 macOS 的 `date` 写法）见文档站的[如何导入已有录音](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。接口细节见 `server/routes_upload.py` 里的 `chunk()`（App 发的 Ogg Opus 用 `Content-Type: audio/ogg`，也收 `audio/webm`、`audio/aac`）；`firmware/devkit/lr_sync.py` 是一个从录音设备读卡再上传的 Python 参考客户端。
 
 ## 快速开始（Docker）
 
@@ -128,11 +130,10 @@ docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验
 ## 路线图
 
 - **导入**：在 App 或命令行里直接导入已有的录音文件（现在只能用 `POST /api/chunks`）。
-- **撤销**：待办的「完成 / 不对」和合并说话人现在不能撤销。
+- **撤销**：合并说话人现在不能撤销。
 - **桌面端分栏**：宽屏左边列表、右边详情。
 - **人物名片**：在已有的人物卡片上加上最近聊了什么。
 - **播放器打磨**：对话页的底部播放条和跟读高亮继续改进。
-- **实时字幕**：做成「正在进行」卡片加全屏字幕模式。
 
 ## 社区与贡献
 

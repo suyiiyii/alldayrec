@@ -33,7 +33,7 @@ When the first audio arrives, the server first downloads a model tarball of abou
 
 ## The last part of imported recordings is never transcribed
 
-After you upload a batch of files, call `POST /api/chunks/end` once. See [Import recordings you already have](./import-recordings.md).
+After you upload a batch of files, call `POST /api/chunks/end` once. See [Import recordings you already have](./import-recordings.md). Until then, the batch's last conversation may also still show as 「进行中」 (in progress).
 
 ## The phone can't connect after scanning the QR code
 
