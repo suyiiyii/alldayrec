@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
 import Skeleton from "../components/Skeleton.vue";
-import { errorTitle, get, post, type Speaker, type Voice } from "../lib/api";
+import { errorTitle, get, hhmm, post, type Speaker, type Voice } from "../lib/api";
 import { play, player } from "../lib/audio";
+import { shiftDay, today } from "../lib/calendar";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerLabel } from "../lib/speakers";
 
 const groups = ref<Speaker[]>([]),
   names = ref<string[]>([]),
   loaded = ref(false),
-  filter = ref<"unnamed" | "all">("unnamed"),
+  filter = ref<"unnamed" | "all">("all"),
   shown = ref(30),
   open = ref(""),
   members = ref<Voice[]>([]),
@@ -36,13 +38,22 @@ async function load() {
 }
 void load();
 
+// people as cards, the one heard last first; 待命名 narrows it to the voices without a name (or with a suggestion)
 const list = computed(() =>
-  groups.value.filter((g) => filter.value === "all" || !g.name || g.suggested.length),
+  groups.value
+    .filter((g) => filter.value === "all" || !g.name || g.suggested.length)
+    .sort((a, b) => (b.last ?? "").localeCompare(a.last ?? "")),
 );
 const unnamed = computed(() => groups.value.filter((g) => !g.name).length);
 
 const mins = (s: number) => (s < 60 ? `${Math.round(s)} 秒` : `${Math.round(s / 60)} 分钟`);
 const day = (iso: string) => `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
+const heard = (iso: string) =>
+  iso.startsWith(today())
+    ? `今天 ${hhmm(iso)}`
+    : iso.startsWith(shiftDay(today(), -1))
+      ? `昨天 ${hhmm(iso)}`
+      : iso.slice(5, 10);
 const voiceId = (v: Voice) => `${v.conv}|${v.label}`;
 function listen(v: Voice) {
   const src = v.clip
@@ -50,8 +61,8 @@ function listen(v: Voice) {
     : `/api/audio?${new URLSearchParams({ start: v.clip_start!, end: v.clip_end! })}`;
   play(voiceId(v), src);
 }
-const title = (g: Speaker) =>
-  g.name ?? `声音 ${groups.value.filter((x) => !x.name).indexOf(g) + 1}`;
+const num = (g: Speaker) => groups.value.filter((x) => !x.name).indexOf(g) + 1;
+const title = (g: Speaker) => g.name ?? `声音 ${num(g)}`;
 
 function edit(id: string) {
   editing.value = id;
@@ -106,15 +117,16 @@ async function detach(g: Speaker, v: Voice) {
 </script>
 
 <template>
-  <AppHeader>
-    <span class="count" v-if="groups.length"
-      >{{ groups.length }} 个说话人 · {{ unnamed }} 个未命名</span
-    >
-  </AppHeader>
+  <AppHeader />
   <main>
+    <h1>人物</h1>
     <div v-if="groups.length" class="tabs">
-      <button :class="{ on: filter === 'unnamed' }" @click="filter = 'unnamed'">待命名</button>
-      <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部</button>
+      <button class="chip" :class="{ on: filter === 'all' }" @click="filter = 'all'">
+        全部 {{ groups.length }}
+      </button>
+      <button class="chip" :class="{ on: filter === 'unnamed' }" @click="filter = 'unnamed'">
+        待命名 {{ unnamed }}
+      </button>
     </div>
     <p v-if="flash" class="flash">{{ flash }}</p>
     <p v-if="error && !errorAt" class="error" role="alert" :title="detail">{{ error }}</p>
@@ -131,13 +143,20 @@ async function detach(g: Speaker, v: Voice) {
 
     <section v-for="g in list.slice(0, shown)" :key="g.id" class="card">
       <div class="head">
-        <RouterLink v-if="g.name && g.name !== '我'" :to="`/p/${encodeURIComponent(g.name)}`"
-          ><b>{{ g.name }}</b></RouterLink
-        >
-        <b v-else :class="{ anon: !g.name }">{{ title(g) }}</b>
-        <span class="meta"
-          >{{ g.count }} 段对话 · {{ mins(g.speech_s) }} · 最近 {{ g.last && day(g.last) }}</span
-        >
+        <Avatar :name="g.name ?? 'S' + num(g)" :size="32" />
+        <div class="who">
+          <RouterLink
+            v-if="g.name && g.name !== '我'"
+            class="name"
+            :to="`/p/${encodeURIComponent(g.name)}`"
+            >{{ g.name }}<Icon name="chevron-right" :size="16"
+          /></RouterLink>
+          <span v-else class="name" :class="{ anon: !g.name }">{{ title(g) }}</span>
+          <div class="meta">
+            <template v-if="g.last">最近 {{ heard(g.last) }} · </template>{{ g.count }} 段对话 ·
+            {{ mins(g.speech_s) }}
+          </div>
+        </div>
       </div>
       <div class="samples">
         <button
@@ -188,7 +207,9 @@ async function detach(g: Speaker, v: Voice) {
           <button :disabled="busy" @click="name(g, newName, title(g))">保存</button>
           <button class="btn-ghost" @click="cancel">取消</button>
         </template>
-        <button v-else @click="edit(g.id)">{{ g.name ? "改名" : "起名" }}</button>
+        <button v-else :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
+          {{ g.name ? "改名" : "起名" }}
+        </button>
         <button class="btn-ghost" @click="expand(g)">
           {{ open === g.id ? "收起" : `对话列表（${g.count}）` }}
         </button>
@@ -252,37 +273,37 @@ async function detach(g: Speaker, v: Voice) {
 </template>
 
 <style scoped>
-main {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 12px 16px 48px;
+h1 {
+  margin: var(--space-4) 0 var(--space-3);
 }
-.count,
 .meta {
   color: var(--muted);
   font-size: var(--fs-sm);
 }
 .tabs {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.tabs button.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--surface);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 .head {
   display: flex;
-  gap: 10px;
-  align-items: baseline;
-  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }
-.head b {
-  font-size: var(--fs-md);
+.who {
+  min-width: 0;
+  line-height: 1.4;
 }
-.head b.anon {
+.name {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+.name.anon {
   color: var(--muted);
+}
+.who .meta {
+  font-size: var(--fs-xs);
 }
 .samples,
 .chips,
@@ -317,10 +338,14 @@ main {
   font-size: var(--fs-sm);
 }
 .suggest {
-  background: var(--accent-soft);
+  background: var(--bg);
   border-radius: var(--radius-sm);
   padding: 8px;
   font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+.actions .btn-ghost {
+  color: var(--muted);
 }
 .members {
   width: 100%;

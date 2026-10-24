@@ -5,6 +5,7 @@
 import { onMounted, ref } from "vue";
 import { get, post } from "../lib/api";
 import { play, player } from "../lib/audio";
+import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
 interface Clip {
@@ -70,9 +71,12 @@ async function answer(a: number | "none" | "later") {
       这几个声音在你的录音里出现得最多。逐个听一听，选出你自己的声音。确认后，之后的新对话里你说的话会显示为「我」，已有的对话不变。
     </p>
     <div v-for="(c, i) in card.candidates" :key="i" class="cand">
-      <div class="meta">
-        <b>声音 {{ i + 1 }}</b> · {{ tierText(c.tier) }} · 出现在 {{ c.convs }} 段对话 · 共
-        {{ Math.max(1, Math.round(c.speech_s / 60)) }} 分钟
+      <div class="head">
+        <Avatar :name="'S' + (i + 1)" :size="32" />
+        <div class="meta">
+          <b>声音 {{ i + 1 }}</b> · {{ tierText(c.tier) }}<br />出现在 {{ c.convs }} 段对话 · 共
+          {{ Math.max(1, Math.round(c.speech_s / 60)) }} 分钟
+        </div>
       </div>
       <button
         v-for="cl in c.clips"
@@ -83,7 +87,7 @@ async function answer(a: number | "none" | "later") {
         @click="play(clipId(cl), src(cl))"
       >
         <Icon :name="player.playing === clipId(cl) ? 'square' : 'play'" :size="14" />
-        {{ cl.text || "（无文字）" }}
+        <span>{{ cl.text || "（无文字）" }}</span>
       </button>
       <div v-if="!c.clips.length" class="muted">没有合适的试听句子</div>
       <div class="acts">
@@ -117,25 +121,39 @@ async function answer(a: number | "none" | "later") {
   color: var(--fg-2);
   margin: 4px 0 8px;
 }
+/* each voice a white card on the light ground, laid out like a person on 人物 */
 .cand {
-  border-top: 1px solid var(--line);
-  padding: 8px 0;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin-top: var(--space-2);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
 .meta {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
   color: var(--muted);
 }
 .meta b {
+  font-size: var(--fs-md);
   color: var(--fg);
 }
 .clip {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  max-width: 100%;
   text-align: left;
-  margin-top: 6px;
-  color: var(--fg);
+  margin-top: var(--space-2);
+}
+.clip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .clip.playing {
   border-color: var(--accent);

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
 import { errorTitle, get, hhmm, post, type Person, type Profile } from "../lib/api";
+import { shiftDay, today } from "../lib/calendar";
 import { speakerLabel } from "../lib/speakers";
 
 const props = defineProps<{ name: string }>();
@@ -26,6 +28,12 @@ watch(
   { immediate: true },
 );
 const day = (iso: string) => iso.slice(0, 10);
+const heard = (iso: string) =>
+  iso.startsWith(today())
+    ? `今天 ${hhmm(iso)}`
+    : iso.startsWith(shiftDay(today(), -1))
+      ? `昨天 ${hhmm(iso)}`
+      : iso.slice(5, 10);
 
 // the profile: made on a click, then kept up to date as conversations with them close
 const making = ref(false),
@@ -73,42 +81,84 @@ const link = (id: string, at: string | null) =>
 <template>
   <AppHeader />
   <main>
-    <RouterLink class="back" to="/speakers"
-      ><Icon name="chevron-left" :size="18" />说话人</RouterLink
-    >
+    <RouterLink class="back" to="/speakers"><Icon name="chevron-left" :size="18" />人物</RouterLink>
     <div v-if="missing" class="empty">没有带「{{ name }}」的对话</div>
     <template v-else-if="p">
-      <h2>{{ p.name }}</h2>
-      <div class="muted">
-        {{ p.count }} 段对话 · {{ day(p.first) }} 到 {{ day(p.last) }}
-        <template v-if="p.with.length">
-          · 常一起：<template v-for="(w, i) in p.with" :key="w"
+      <!-- a card for the person: who, when last heard, and what is open between us (我答应 TA 的 first) -->
+      <section class="card head">
+        <div class="top">
+          <Avatar :name="p.name" :size="48" />
+          <div class="who">
+            <h1>{{ p.name }}</h1>
+            <div class="muted">
+              最近 {{ heard(p.last) }} · {{ p.count }} 段对话 · {{ day(p.first).slice(5) }} 起
+            </div>
+          </div>
+        </div>
+        <div class="stats">
+          <a class="stat" :href="p.mine.length ? '#mine' : undefined"
+            ><b>{{ p.mine.length }}</b
+            >我答应 TA 的</a
+          >
+          <a class="stat" :href="p.theirs.length ? '#theirs' : undefined"
+            ><b>{{ p.theirs.length }}</b
+            >TA 的待办</a
+          >
+        </div>
+        <div class="aliases muted">
+          别名：<span v-for="a in p.aliases" :key="a" class="tag"
+            >{{ a }}
+            <button class="x" title="删掉这个别名" @click="setAlias(a, '')">
+              <Icon name="x" :size="14" /></button></span
+          ><input
+            v-model="newAlias"
+            placeholder="添加别名，回车"
+            @keydown.enter="newAlias.trim() && setAlias(newAlias.trim(), p.name)"
+          /><span class="bad" :title="aliasTitle">{{ aliasError }}</span>
+        </div>
+        <div v-if="p.with.length" class="muted">
+          常一起：<template v-for="(w, i) in p.with" :key="w"
             >{{ i ? "、" : ""
             }}<RouterLink v-if="w !== '我'" :to="`/p/${encodeURIComponent(w)}`">{{ w }}</RouterLink
             ><template v-else>{{ w }}</template></template
           >
-        </template>
-      </div>
-      <div class="aliases muted">
-        别名：<span v-for="a in p.aliases" :key="a" class="tag"
-          >{{ a }}
-          <button class="x" title="删掉这个别名" @click="setAlias(a, '')">
-            <Icon name="x" :size="14" /></button></span
-        ><input
-          v-model="newAlias"
-          placeholder="添加别名，回车"
-          @keydown.enter="newAlias.trim() && setAlias(newAlias.trim(), p.name)"
-        /><span class="bad" :title="aliasTitle">{{ aliasError }}</span>
-      </div>
-      <div v-if="p.tags.length" class="tags">
-        <RouterLink
-          v-for="t in p.tags"
-          :key="t"
-          class="tag"
-          :to="{ path: '/conversations', query: { tag: t } }"
-          >{{ t }}</RouterLink
-        >
-      </div>
+        </div>
+        <div v-if="p.tags.length" class="tags">
+          <RouterLink
+            v-for="t in p.tags"
+            :key="t"
+            class="tag"
+            :to="{ path: '/conversations', query: { tag: t } }"
+            >{{ t }}</RouterLink
+          >
+        </div>
+      </section>
+
+      <section v-if="p.mine.length" id="mine" class="card">
+        <h2>我答应 {{ p.name }} 的</h2>
+        <ul class="items">
+          <li v-for="(t, i) in allMine ? p.mine : p.mine.slice(0, 8)" :key="i">
+            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
+            <RouterLink class="from" :to="link(t.conversation, t.at)">{{
+              t.title || "对话"
+            }}</RouterLink>
+          </li>
+        </ul>
+        <button v-if="p.mine.length > 8 && !allMine" class="btn-ghost" @click="allMine = true">
+          全部 {{ p.mine.length }} 条
+        </button>
+      </section>
+      <section v-if="p.theirs.length" id="theirs" class="card">
+        <h2>{{ p.name }} 的待办</h2>
+        <ul class="items">
+          <li v-for="(t, i) in p.theirs" :key="i">
+            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
+            <RouterLink class="from" :to="link(t.conversation, t.at)">{{
+              t.title || "对话"
+            }}</RouterLink>
+          </li>
+        </ul>
+      </section>
 
       <section class="profile">
         <template v-if="p.profile">
@@ -150,32 +200,6 @@ const link = (id: string, at: string | null) =>
         <span class="bad" :title="profileTitle">{{ profileError }}</span>
       </section>
 
-      <template v-if="p.theirs.length">
-        <h3>{{ p.name }} 的待办</h3>
-        <ul class="items">
-          <li v-for="(t, i) in p.theirs" :key="i">
-            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
-            <RouterLink class="muted" :to="link(t.conversation, t.at)">{{
-              t.title || "对话"
-            }}</RouterLink>
-          </li>
-        </ul>
-      </template>
-      <template v-if="p.mine.length">
-        <h3>我答应 {{ p.name }} 的</h3>
-        <ul class="items">
-          <li v-for="(t, i) in allMine ? p.mine : p.mine.slice(0, 8)" :key="i">
-            {{ t.text }}<span v-if="t.due" class="muted">（{{ t.due }}）</span>
-            <RouterLink class="muted" :to="link(t.conversation, t.at)">{{
-              t.title || "对话"
-            }}</RouterLink>
-          </li>
-        </ul>
-        <button v-if="p.mine.length > 8 && !allMine" class="btn-ghost" @click="allMine = true">
-          全部 {{ p.mine.length }} 条
-        </button>
-      </template>
-
       <h3>对话</h3>
       <section v-for="c in p.conversations.slice(0, shown)" :key="c.id" class="conv">
         <RouterLink :to="`/c/${c.id}`" class="title">{{ c.title || "（无标题）" }}</RouterLink>
@@ -196,13 +220,49 @@ const link = (id: string, at: string | null) =>
 </template>
 
 <style scoped>
-main {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 12px 16px 48px;
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
 }
-h2 {
-  margin: 12px 0 4px;
+.who {
+  min-width: 0;
+}
+h1 {
+  margin: 0;
+}
+.head > * + * {
+  margin-top: var(--space-3);
+}
+.stats {
+  display: flex;
+  gap: var(--space-2);
+}
+.stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+}
+.stat:first-child {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.stat b {
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+}
+.card h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-md);
+}
+#mine,
+#theirs {
+  scroll-margin-top: 64px; /* under the sticky header */
 }
 h3 {
   margin: 20px 0 6px;
@@ -215,7 +275,6 @@ h3 {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 8px;
 }
 .items {
   padding-left: 18px;
@@ -226,6 +285,11 @@ h3 {
 }
 .items .muted {
   margin-left: 6px;
+}
+/* the conversation a todo came from: its own small line under the todo */
+.items .from {
+  display: block;
+  font-size: var(--fs-xs);
 }
 .conv {
   border-top: 1px solid var(--line);
@@ -270,7 +334,6 @@ h3 {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
 }
 .aliases input {
   font: inherit;
