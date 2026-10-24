@@ -2,7 +2,9 @@
 
 # alldayrec（全天录）
 
-**做你自己的录音豆 / 心力球：全天佩戴，随口说的话变成转写、摘要和待办，原始录音和数据都在你自己的服务器上。**
+### 开源录音豆，私有第二大脑。
+
+开源版 Plaud 与心力球：全天录音私有化，每小时转写只要五分钱。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)

@@ -2,7 +2,9 @@
 
 # alldayrec（全天录）
 
-**Your own Plaud or Limitless, self-hosted: wear it all day, and what you say becomes transcripts, summaries and to-dos, with the original audio and all the data on your own server.**
+### The open-source Plaud & Limitless you can self-host and truly own.
+
+Wear it all day: what you say becomes transcripts, summaries and to-dos, with the original audio and all the data on your own server.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)
