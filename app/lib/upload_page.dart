@@ -69,11 +69,6 @@ class _UploadPageState extends State<UploadPage> {
     return '${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
   }
 
-  static String _span(AppLocalizations l, num s) {
-    final m = (s / 60).round();
-    return m >= 60 ? l.hoursMinutes(m ~/ 60, m % 60) : l.minutes(m);
-  }
-
   static String _size(num b) => b < 1048576 ? '${(b / 1024).round()} KB' : '${(b / 1048576).toStringAsFixed(1)} MB';
 
   @override
@@ -141,7 +136,7 @@ class _UploadPageState extends State<UploadPage> {
                           color: caughtUp ? Colors.green.shade600 : cs.tertiary),
                       const SizedBox(width: 8),
                       Expanded(
-                          child: Text(caughtUp ? l.caughtUp : l.serverBehind(_span(l, left), '${srv['queued']}'),
+                          child: Text(caughtUp ? l.caughtUp : l.serverBehind(durationText(l, left), '${srv['queued']}'),
                               style: t.textTheme.bodyLarge)),
                     ]),
                     if (!caughtUp) ...[
@@ -154,10 +149,10 @@ class _UploadPageState extends State<UploadPage> {
                           hold != null
                               ? l.finalsHeld(_at(hold), backlogKb == null || backlogKb <= 0 ? ''
                                   : backlogEta == null ? l.backlogLeft(_size(backlogKb * 1024))
-                                  : l.backlogLeftEta(_size(backlogKb * 1024), _span(l, backlogEta)))
+                                  : l.backlogLeftEta(_size(backlogKb * 1024), durationText(l, backlogEta)))
                               : eta == null
                                   ? ''
-                                  : l.etaDone(_span(l, eta)),
+                                  : l.etaDone(durationText(l, eta)),
                           style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                     ],
                     const Divider(height: 24),

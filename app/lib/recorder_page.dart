@@ -91,15 +91,6 @@ class _RecorderPageState extends State<RecorderPage> {
     _load();
   }
 
-  static String _size(num kb) => kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '$kb KB';
-
-  static IconData _batteryIcon(int? p) {
-    if (p == null) return Icons.battery_unknown_rounded;
-    const icons = [Icons.battery_0_bar_rounded, Icons.battery_1_bar_rounded, Icons.battery_2_bar_rounded, Icons.battery_3_bar_rounded,
-      Icons.battery_4_bar_rounded, Icons.battery_5_bar_rounded, Icons.battery_6_bar_rounded, Icons.battery_full_rounded];
-    return icons[(p * 7 / 100).round().clamp(0, 7)];
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
@@ -129,11 +120,10 @@ class _RecorderPageState extends State<RecorderPage> {
     Widget stat({required IconData icon, required Color color, required String label, required String value, String? sub, double? fraction}) =>
         statTile(context, icon: icon, color: color, label: label, value: value, sub: sub, fraction: fraction ?? 0);
 
-    final batteryColor = battery == null ? cs.outline : battery <= 20 ? cs.error : battery <= 50 ? Colors.orange.shade700 : Colors.green.shade600;
     final card = cardState(l, hw);
     final cardColor = store == null || store == -16 ? cs.outline : store != 0 ? cs.error : free < total * 0.1 ? Colors.orange.shade700 : cs.primary;
     final (String cardValue, String? cardSub) =
-        !linked ? ('—', null) : card != null ? (card.tile, card.sub) : (_size(free), l.cardFreeOf(_size(total)));
+        !linked ? ('—', null) : card != null ? (card.tile, card.sub) : (sizeText(free), l.cardFreeOf(sizeText(total)));
 
     final small = t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
     final add = FilledButton.icon(
@@ -193,8 +183,8 @@ class _RecorderPageState extends State<RecorderPage> {
         const SizedBox(height: 12),
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            stat(icon: linked && hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : _batteryIcon(linked ? battery : null),
-                color: batteryColor, label: l.battery, value: linked && battery != null ? '$battery%' : '—', sub: linked ? charge : null,
+            stat(icon: linked && hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(linked ? battery : null),
+                color: batteryColor(cs, battery), label: l.battery, value: linked && battery != null ? '$battery%' : '—', sub: linked ? charge : null,
                 fraction: linked && battery != null ? battery / 100 : 0),
             const SizedBox(width: 12),
             stat(icon: Icons.sd_card_rounded, color: cardColor, label: l.card, value: cardValue, sub: cardSub,
@@ -208,12 +198,12 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(l.fetchingCard, style: t.textTheme.bodyLarge)),
-              Text('${_size(syncDone)} / ${_size(syncTotal)}', style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+              Text('${sizeText(syncDone)} / ${sizeText(syncTotal)}', style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
             ]),
             const SizedBox(height: 10),
             LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
-            Text(live ? l.syncLiveHelp : l.syncFirstHelp(_size(syncLive)),
+            Text(live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
                 style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           ] else
             Row(children: [

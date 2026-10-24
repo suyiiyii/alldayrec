@@ -67,24 +67,61 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notConnected => 'Not connected';
 
   @override
-  String get paused => 'Paused';
-
-  @override
   String get connected => 'Connected';
-
-  @override
-  String connectedBattery(Object battery) {
-    return 'Connected $battery%';
-  }
 
   @override
   String get stopping => 'Stopping';
 
   @override
-  String get recording => 'Recording';
+  String get notRecording => 'Not recording';
 
   @override
-  String get notRecording => 'Not recording';
+  String statePaused(Object minutes) {
+    return 'Paused · resumes in $minutes min';
+  }
+
+  @override
+  String stateCatchingUp(Object time) {
+    return 'Catching up · about $time left';
+  }
+
+  @override
+  String get stateAway => 'Recorder out of reach';
+
+  @override
+  String stateAwaySince(Object time) {
+    return 'Recorder out of reach · last seen $time';
+  }
+
+  @override
+  String get awayHelp =>
+      'It keeps recording to its own card and catches up once it is near the phone again';
+
+  @override
+  String get phoneMic => 'Phone microphone';
+
+  @override
+  String get backlog => 'To sync';
+
+  @override
+  String get allSynced => 'Synced';
+
+  @override
+  String aboutTime(Object time) {
+    return 'about $time';
+  }
+
+  @override
+  String get signal => 'Signal';
+
+  @override
+  String get signalStrong => 'Strong';
+
+  @override
+  String get signalFair => 'Fair';
+
+  @override
+  String get signalWeak => 'Weak';
 
   @override
   String get deviceDetails => 'Device details';
@@ -93,38 +130,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get starting => 'Starting';
 
   @override
-  String pausedMinutesLeft(Object minutes) {
-    return 'Paused, $minutes min left';
-  }
-
-  @override
   String piecesPending(Object count) {
     return '$count pieces to upload';
   }
 
   @override
-  String liveUploadCatchingUp(Object done, Object total) {
-    return 'Live upload · catching up $done / $total MB';
-  }
-
-  @override
-  String fetchingCurrentFile(Object left) {
-    return 'Fetching the file being recorded before going live · $left MB left';
-  }
-
-  @override
   String waitingLastPieces(Object count) {
     return 'Waiting for the last $count pieces to upload';
-  }
-
-  @override
-  String recordingPieceSeconds(Object seconds) {
-    return 'Recording · $seconds s pieces';
-  }
-
-  @override
-  String sentPending(Object sent, Object pending) {
-    return 'Sent $sent · to upload $pending';
   }
 
   @override

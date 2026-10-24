@@ -144,7 +144,7 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
     // busy: not connectable (connected to another phone), told by the advertisement itself; the state byte comes in
     // the scan response, which a busy recorder seldom gets across
     final busy = d['busy'] == true || (state >= 0 && state & 2 != 0), bound = state >= 0 && state & 1 != 0;
-    final near = rssi > -60 ? l.signalNear : rssi > -80 ? l.signalMid : l.signalFar;
+    final near = [l.signalFar, l.signalMid, l.signalNear][signalLevel(rssi)];
     final (String what, Widget? action) = d['gone']
         ? (l.signalLost, null)
         : busy

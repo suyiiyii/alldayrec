@@ -1,6 +1,7 @@
 // Application navigation and shared recording lifecycle; pages receive the live settings/status.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:record/record.dart';
@@ -9,6 +10,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'l10n/app_localizations.dart';
+import 'page_widgets.dart';
 import 'pause_button.dart';
 import 'recorder.dart';
 import 'recorder_page.dart';
@@ -18,7 +20,29 @@ import 'settings_page.dart';
 import 'update.dart';
 import 'upload_page.dart';
 
-const recordingRed = Color(0xffc62828);
+/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, paused, disconnected, low, charging, mic, warning)
+/// shows that canned status instead of the recorder's, for screenshots of the chip and its panel.
+const fakeStatus = kDebugMode ? String.fromEnvironment('FAKE_STATUS') : '';
+
+/// A canned native status (Recorder.status) by name, as the BLE link or the microphone would report it.
+Map cannedStatus(String name) {
+  final now = DateTime.now().millisecondsSinceEpoch;
+  final hw = {'name': 'LR-P3-0000', 'model': 'LR-P3', 'battery': 87, 'charge': 'battery', 'rssi': -62, 'store': 0,
+    'free_kb': 25000000, 'total_kb': 31000000, 'backlog_kb': 0};
+  final ble = {'running': true, 'source': 'ble', 'connected': true, 'link': {'code': 'connected'}, 'hw': hw, 'pending': 0};
+  return switch (name) {
+    'recording' => ble,
+    'syncing' => {...ble, 'syncDone': 790500, 'syncTotal': 1254000, 'hw': {...hw, 'backlog_kb': 464000, 'backlog_eta_s': 1200}},
+    'fetching' => {...cannedStatus('syncing'), 'connected': false, 'link': {'code': 'joining'}},  // the file being recorded, before LIVE
+    'paused' => {...ble, 'pausedUntil': now + 12 * 60000 - 1000},
+    'disconnected' => {...ble, 'connected': false, 'link': {'code': 'away', 'lastSeen': now - 47 * 60000}},
+    'low' => {...ble, 'hw': {...hw, 'battery': 14, 'rssi': -84}},
+    'charging' => {...ble, 'hw': {...hw, 'battery': 62, 'charge': 'charging'}},
+    'mic' => {'running': true, 'source': 'mic', 'pending': 2, 'pendingBytes': 61000, 'sent': 312, 'slice': 10},
+    'warning' => {...ble, 'note': {'code': 'uploadFailed', 'detail': 'HTTP 502'}, 'pending': 14, 'pendingBytes': 2400000},
+    _ => {},
+  };
+}
 
 class Home extends StatefulWidget {
   const Home({super.key});
@@ -28,7 +52,7 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> with WidgetsBindingObserver {
   Settings? settings;
-  Map status = {};
+  Map status = fakeStatus.isEmpty ? {} : cannedStatus(fakeStatus);
   String note = '';
   bool stopping = false;
   int page = 0;  // the bottom bar's: 0 时间线, 1 实时, 2 人物 (web pages), 3 我的 (its entries open over it)
@@ -53,6 +77,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     });
     Recorder.version().then((v) => mounted ? setState(() => version = v) : null);
     ticker = Timer.periodic(const Duration(seconds: 2), (_) async {  // the service may be running from before this UI opened
+      if (fakeStatus.isNotEmpty) return setState(() => status = cannedStatus(fakeStatus));
       if (++ticks % 150 == 0) _slices();  // every 5 min: the server may have changed the lengths
       final s = await Recorder.status();
       if (!mounted) return;
@@ -80,7 +105,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   DateTime autoStarted = DateTime(2000);
-  bool get ble => settings?.source == 'ble';
+  bool get ble => fakeStatus.isNotEmpty ? status['source'] == 'ble' : settings?.source == 'ble';
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -251,9 +276,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         title: Text(titles[page]),
         actionsPadding: const EdgeInsets.only(right: 8),  // the chip alone (我的) off the edge
         actions: [
-          if (settings != null) Padding(padding: const EdgeInsets.only(right: 4), child: _chip(cs)),
-          if (page < webs.length && webs[page] != null)
-            IconButton(icon: const Icon(Icons.refresh), tooltip: l.refresh, onPressed: () => webs[page]!.reload()),
+          if (settings != null)
+            StatusChip(status: status, ble: ble, stopping: stopping, onPressed: _statusSheet,
+                warn: status['error'] != null || status['note'] != null || note.isNotEmpty),
+          if (page < webs.length && webs[page] != null)  // the WebView can get stuck
+            IconButton(icon: const Icon(Icons.refresh), tooltip: l.refresh, visualDensity: VisualDensity.compact, onPressed: () => webs[page]!.reload()),
         ],
       ),
       body: settings == null
@@ -301,142 +328,138 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ]);
   }
 
-  /// The top bar's recording status on every tab, in a few words: red recording, grey not, amber stopping or
-  /// something to look at; a tap opens the sheet with all of it.
-  Widget _chip(ColorScheme cs) {
-    final s = status, battery = (s['hw'] as Map?)?['battery'], amber = Colors.amber.shade700, grey = cs.outline;
-    final warn = s['error'] != null || s['note'] != null || note.isNotEmpty, l = AppLocalizations.of(context);
-    final (Color dot, String text) = ble
-        ? syncing ? (connected ? recordingRed : amber, l.catchingUp)
-            : !connected ? (amber, l.notConnected)
-            : pauseLeftMin(s) > 0 ? (grey, l.paused)
-            : (recordingRed, battery == null ? l.connected : l.connectedBattery(battery))  // hw keeps the last read after a disconnect
-        : stopping ? (amber, l.stopping) : running ? (recordingRed, l.recording) : (grey, l.notRecording);
-    return ActionChip(
-      avatar: Center(child: Container(width: 8, height: 8, decoration: BoxDecoration(color: warn ? amber : dot, shape: BoxShape.circle))),
-      label: Text(text),
-      labelStyle: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-      visualDensity: VisualDensity.compact,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      side: BorderSide(color: cs.outlineVariant),
-      onPressed: () => _statusSheet(),
-    );
-  }
-
-  /// Everything about the recording: what the chip sums up with start/stop or pause, and the recorder page (the live
-  /// captions are a tab).
+  /// The recording's status panel, from the top bar's chip: what goes on in words, the recorder's battery, what is
+  /// left to catch up and its signal, pause or start/stop, and the recorder page.
   void _statusSheet() => showModalBottomSheet(
         context: context,
         showDragHandle: true,
+        backgroundColor: Theme.of(context).colorScheme.surface,  // the tiles' cards (surfaceContainerLow) stand out on it
         builder: (sheet) => ListenableBuilder(
           listenable: rev,
           builder: (_, _) => SafeArea(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 16, 8),
-                child: ble ? _bleBody(Theme.of(sheet).colorScheme) : _micBody(Theme.of(sheet).colorScheme),
-              ),
-              ListTile(
-                leading: const Icon(Icons.bluetooth_outlined),
-                title: Text(AppLocalizations.of(sheet).deviceDetails),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  _openRecorder();
-                },
-              ),
-            ]),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                _panelHeader(sheet),
+                ...ble ? _bleBody(sheet) : _micBody(sheet),
+                const SizedBox(height: 4),
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                  leading: const Icon(Icons.bluetooth_outlined),
+                  title: Text(AppLocalizations.of(sheet).deviceDetails),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _openRecorder();
+                  },
+                ),
+              ]),
+            ),
           ),
         ),
       );
 
-  /// The BLE recorder as the source: nothing to start or stop, only where its audio is.
-  Widget _bleBody(ColorScheme cs) {
-    final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context);
-    final link = s['link'] == null ? l.starting : nativeText(context, s['link']);
-    final syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0, syncLive = (s['syncLive'] as num?) ?? 0;
-    final (IconData icon, Color color) = syncing
-        ? (Icons.sync_rounded, cs.tertiary)
-        : connected
-            ? (Icons.bluetooth_connected_rounded, Colors.green.shade600)
-            : (Icons.bluetooth_searching_rounded, Colors.orange.shade700);
-    final small = TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
-    final pausedMin = pauseLeftMin(s);
-    final detail = [
-      if (pausedMin > 0) l.pausedMinutesLeft(pausedMin),
-      hwLine(l, hw),
-      if ((s['pending'] ?? 0) > 0) l.piecesPending(s['pending']),
-    ].where((x) => x.isNotEmpty).join(' · ');
-    return Row(children: [
-      Icon(icon, color: color),
+  /// What records, what it does in a few words (the chip's line), and what went wrong.
+  Widget _panelHeader(BuildContext context) {
+    final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context), t = Theme.of(context), cs = t.colorScheme;
+    final c = chipSpec(context, s, ble: ble, stopping: stopping);
+    final away = ble && !connected && (s['link'] as Map?)?['code'] == 'away';
+    final warn = [
+      if (s['error'] != null) l.recordingError(nativeText(context, s['error'])),
+      if (s['note'] != null) nativeText(context, s['note']),  // also when stopped: iOS reports leftovers sent after a kill
+      if (!ble && running && s['interruptedAt'] != null)
+        l.interruptedRecovered(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)),
+      if (note.isNotEmpty) note,
+    ];
+    final small = t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      CircleAvatar(radius: 22, backgroundColor: c.color.withValues(alpha: 0.14), child: Icon(c.icon, color: c.color)),
       const SizedBox(width: 12),
       Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          // LIVE goes on while the backlog is read; before that only the file being recorded is waited
-          // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
-          Text(!syncing ? link : connected
-                  ? l.liveUploadCatchingUp((syncDone / 1024).toStringAsFixed(1), (syncTotal / 1024).toStringAsFixed(1))
-                  : l.fetchingCurrentFile((syncLive / 1024).toStringAsFixed(1)),
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
-          if (syncing) ...[
-            const SizedBox(height: 6),
-            LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(ble ? (hw['name'] ?? hw['model'] ?? l.recorder) as String : l.phoneMic,
+              style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+          Text(c.line, style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+          if (away) Text(l.awayHelp, style: small),  // it records to its card meanwhile: nothing is lost
+          if (ble && syncing) ...[  // LIVE goes on while the backlog is read; before LIVE only the file being recorded
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: connected ? (status['syncDone'] ?? 0) / status['syncTotal'] : null, borderRadius: BorderRadius.circular(2)),
           ],
-          if (detail.isNotEmpty) Text(detail, style: small),
-          if (s['note'] != null) Text(nativeText(context, s['note']), style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-          if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
+          for (final w in warn) Text(w, style: small?.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
         ]),
       ),
-      if (connected) PauseButton(paused: pausedMin > 0, onDone: _pauseNote),
     ]);
   }
+
+  /// The BLE recorder as the source: nothing to start or stop; its battery, what is left to catch up, its signal (each
+  /// when known: the link keeps the last read, greyed while away), and its pause.
+  List<Widget> _bleBody(BuildContext context) {
+    final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context), cs = Theme.of(context).colorScheme;
+    final battery = hw['battery'] as int?, rssi = hw['rssi'] as int?, eta = hw['backlog_eta_s'] as num?;
+    final left = ((s['syncTotal'] as num?) ?? 0) - ((s['syncDone'] as num?) ?? 0), pending = (s['pending'] as num?) ?? 0;
+    final pausedMin = pauseLeftMin(s);
+    final tiles = [
+      if (battery != null)
+        statTile(context,
+            icon: hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(battery),
+            color: connected ? batteryColor(cs, battery) : cs.outline, label: l.battery, value: '$battery%',
+            sub: connected ? chargeText(l, hw['charge']) : null),
+      if (connected || syncing)
+        statTile(context,
+            icon: Icons.cloud_upload_rounded, color: syncing || pending > 0 ? cs.primary : Colors.green.shade600, label: l.backlog,
+            value: syncing ? sizeText(left) : pending > 0 ? sizeText(((s['pendingBytes'] as num?) ?? 0) ~/ 1024) : l.allSynced,
+            sub: [
+              if (syncing && eta != null && eta > 0) l.aboutTime(durationText(l, eta)),
+              if (pending > 0) l.piecesPending(pending),
+            ].join(' · ')),
+      if (connected && rssi != null)
+        statTile(context,
+            icon: [Icons.signal_cellular_alt_1_bar_rounded, Icons.signal_cellular_alt_2_bar_rounded, Icons.signal_cellular_alt_rounded][signalLevel(rssi)],
+            color: signalLevel(rssi) == 0 ? Colors.orange.shade700 : cs.primary, label: l.signal,
+            value: [l.signalWeak, l.signalFair, l.signalStrong][signalLevel(rssi)], sub: '$rssi dBm'),
+    ];
+    return [
+      ..._tileRow(tiles),
+      if (connected) ...[
+        const SizedBox(height: 12),
+        Align(alignment: AlignmentDirectional.centerStart, child: PauseButton(paused: pausedMin > 0, onDone: _pauseNote, labels: true)),
+      ],
+    ];
+  }
+
+  /// The panel's tiles, three to a row: each keeps its width when another is absent.
+  static List<Widget> _tileRow(List<Widget> tiles) => [
+        if (tiles.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final (i, w) in tiles.indexed) ...[if (i > 0) const SizedBox(width: 8), w],
+            for (var i = tiles.length; i < 3; i++) ...[const SizedBox(width: 8), const Spacer()],
+          ])),
+        ],
+      ];
 
   void _pauseNote(PlatformException? e) {
     if (e != null && mounted) setState(() => note = platformText(context, e));
   }
 
-  /// This phone's microphone as the source: started and stopped here.
-  Widget _micBody(ColorScheme cs) {
-    final s = status, l = AppLocalizations.of(context);
-    final small = TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
-    String headline, detail = '';
-    if (stopping) {
-      headline = l.stopping;
-      detail = l.waitingLastPieces(s['pending'] ?? 0);
-    } else if (running) {
-      headline = l.recordingPieceSeconds('${s['slice']}');
-      if (s['link'] != null) headline += ' · ${nativeText(context, s['link'])}';
-      detail = l.sentPending('${s['sent']}', '${s['pending']}');
-      final hw = hwLine(l, s['hw'] as Map?);
-      if (hw.isNotEmpty) detail += ' · $hw';
-    } else {
-      headline = note.isEmpty ? l.notRecording : note;
-      final n = s['pending'] ?? 0;
-      if (n > 0) detail = s['uploading'] == true ? l.uploadingLeftover(n) : l.piecesPending(n);
-    }
-    final warn = [
-      if (s['error'] != null) l.recordingError(nativeText(context, s['error'])),
-      if (s['note'] != null) nativeText(context, s['note']),  // also when stopped: iOS reports leftovers sent after a kill
-      if (running && s['interruptedAt'] != null)
-        l.interruptedRecovered(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)),
-    ];
-    return Row(children: [
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Text(headline, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-          if (detail.isNotEmpty) Text(detail, style: small),
-          for (final w in warn) Text(w, style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-        ]),
-      ),
-      const SizedBox(width: 12),
+  /// This phone's microphone as the source: what waits to be uploaded, and start/stop here.
+  List<Widget> _micBody(BuildContext context) {
+    final s = status, l = AppLocalizations.of(context), cs = Theme.of(context).colorScheme, n = (s['pending'] as num?) ?? 0;
+    return [
+      ..._tileRow([
+        if (n > 0)
+          statTile(context, icon: Icons.cloud_upload_rounded, color: cs.primary, label: l.toUpload,
+              value: sizeText(((s['pendingBytes'] as num?) ?? 0) ~/ 1024),
+              sub: s['uploading'] == true && !running ? l.uploadingLeftover(n) : l.piecesPending(n)),
+      ]),
+      const SizedBox(height: 12),
       FilledButton.icon(
-        style: FilledButton.styleFrom(
-            backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
+        style: FilledButton.styleFrom(backgroundColor: running ? recordingRed : null, minimumSize: const Size.fromHeight(48)),
         onPressed: stopping ? null : (running ? _stop : _start),
         icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
         label: Text(running ? l.stop : l.startRecording),
       ),
-    ]);
+    ];
   }
 }
 

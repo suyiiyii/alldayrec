@@ -206,23 +206,11 @@ abstract class AppLocalizations {
   /// **'未连接'**
   String get notConnected;
 
-  /// No description provided for @paused.
-  ///
-  /// In zh, this message translates to:
-  /// **'已暂停'**
-  String get paused;
-
   /// No description provided for @connected.
   ///
   /// In zh, this message translates to:
   /// **'已连接'**
   String get connected;
-
-  /// No description provided for @connectedBattery.
-  ///
-  /// In zh, this message translates to:
-  /// **'已连接 {battery}%'**
-  String connectedBattery(Object battery);
 
   /// No description provided for @stopping.
   ///
@@ -230,17 +218,89 @@ abstract class AppLocalizations {
   /// **'停止中'**
   String get stopping;
 
-  /// No description provided for @recording.
-  ///
-  /// In zh, this message translates to:
-  /// **'录音中'**
-  String get recording;
-
   /// No description provided for @notRecording.
   ///
   /// In zh, this message translates to:
   /// **'未在录音'**
   String get notRecording;
+
+  /// No description provided for @statePaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停 · {minutes} 分钟后继续'**
+  String statePaused(Object minutes);
+
+  /// No description provided for @stateCatchingUp.
+  ///
+  /// In zh, this message translates to:
+  /// **'补传中 · 还剩约 {time}'**
+  String stateCatchingUp(Object time);
+
+  /// No description provided for @stateAway.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备不在附近'**
+  String get stateAway;
+
+  /// No description provided for @stateAwaySince.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备不在附近 · 上次 {time} 在线'**
+  String stateAwaySince(Object time);
+
+  /// No description provided for @awayHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'它照常录到自己的卡里，回到手机附近后自动补传'**
+  String get awayHelp;
+
+  /// No description provided for @phoneMic.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机麦克风'**
+  String get phoneMic;
+
+  /// No description provided for @backlog.
+  ///
+  /// In zh, this message translates to:
+  /// **'待补传'**
+  String get backlog;
+
+  /// No description provided for @allSynced.
+  ///
+  /// In zh, this message translates to:
+  /// **'已同步'**
+  String get allSynced;
+
+  /// No description provided for @aboutTime.
+  ///
+  /// In zh, this message translates to:
+  /// **'约 {time}'**
+  String aboutTime(Object time);
+
+  /// No description provided for @signal.
+  ///
+  /// In zh, this message translates to:
+  /// **'信号'**
+  String get signal;
+
+  /// No description provided for @signalStrong.
+  ///
+  /// In zh, this message translates to:
+  /// **'强'**
+  String get signalStrong;
+
+  /// No description provided for @signalFair.
+  ///
+  /// In zh, this message translates to:
+  /// **'中'**
+  String get signalFair;
+
+  /// No description provided for @signalWeak.
+  ///
+  /// In zh, this message translates to:
+  /// **'弱'**
+  String get signalWeak;
 
   /// No description provided for @deviceDetails.
   ///
@@ -254,47 +314,17 @@ abstract class AppLocalizations {
   /// **'正在启动'**
   String get starting;
 
-  /// No description provided for @pausedMinutesLeft.
-  ///
-  /// In zh, this message translates to:
-  /// **'已暂停，还剩 {minutes} 分钟'**
-  String pausedMinutesLeft(Object minutes);
-
   /// No description provided for @piecesPending.
   ///
   /// In zh, this message translates to:
   /// **'待传 {count} 块'**
   String piecesPending(Object count);
 
-  /// No description provided for @liveUploadCatchingUp.
-  ///
-  /// In zh, this message translates to:
-  /// **'实时上传 · 后台补传 {done} / {total} MB'**
-  String liveUploadCatchingUp(Object done, Object total);
-
-  /// No description provided for @fetchingCurrentFile.
-  ///
-  /// In zh, this message translates to:
-  /// **'接上实时前先取正在录的这段 · 还差 {left} MB'**
-  String fetchingCurrentFile(Object left);
-
   /// No description provided for @waitingLastPieces.
   ///
   /// In zh, this message translates to:
   /// **'等最后 {count} 块传完'**
   String waitingLastPieces(Object count);
-
-  /// No description provided for @recordingPieceSeconds.
-  ///
-  /// In zh, this message translates to:
-  /// **'录音中 · {seconds} 秒一块'**
-  String recordingPieceSeconds(Object seconds);
-
-  /// No description provided for @sentPending.
-  ///
-  /// In zh, this message translates to:
-  /// **'已传 {sent} · 待传 {pending}'**
-  String sentPending(Object sent, Object pending);
 
   /// No description provided for @uploadingLeftover.
   ///

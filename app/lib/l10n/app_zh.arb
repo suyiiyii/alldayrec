@@ -23,61 +23,54 @@
   "about": "关于",
   "catchingUp": "补传中",
   "notConnected": "未连接",
-  "paused": "已暂停",
   "connected": "已连接",
-  "connectedBattery": "已连接 {battery}%",
-  "@connectedBattery": {
-    "placeholders": {
-      "battery": {}
-    }
-  },
   "stopping": "停止中",
-  "recording": "录音中",
   "notRecording": "未在录音",
-  "deviceDetails": "设备详情",
-  "starting": "正在启动",
-  "pausedMinutesLeft": "已暂停，还剩 {minutes} 分钟",
-  "@pausedMinutesLeft": {
+  "statePaused": "已暂停 · {minutes} 分钟后继续",
+  "@statePaused": {
     "placeholders": {
       "minutes": {}
     }
   },
+  "stateCatchingUp": "补传中 · 还剩约 {time}",
+  "@stateCatchingUp": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "stateAway": "录音设备不在附近",
+  "stateAwaySince": "录音设备不在附近 · 上次 {time} 在线",
+  "@stateAwaySince": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "awayHelp": "它照常录到自己的卡里，回到手机附近后自动补传",
+  "phoneMic": "手机麦克风",
+  "backlog": "待补传",
+  "allSynced": "已同步",
+  "aboutTime": "约 {time}",
+  "@aboutTime": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "signal": "信号",
+  "signalStrong": "强",
+  "signalFair": "中",
+  "signalWeak": "弱",
+  "deviceDetails": "设备详情",
+  "starting": "正在启动",
   "piecesPending": "待传 {count} 块",
   "@piecesPending": {
     "placeholders": {
       "count": {}
     }
   },
-  "liveUploadCatchingUp": "实时上传 · 后台补传 {done} / {total} MB",
-  "@liveUploadCatchingUp": {
-    "placeholders": {
-      "done": {},
-      "total": {}
-    }
-  },
-  "fetchingCurrentFile": "接上实时前先取正在录的这段 · 还差 {left} MB",
-  "@fetchingCurrentFile": {
-    "placeholders": {
-      "left": {}
-    }
-  },
   "waitingLastPieces": "等最后 {count} 块传完",
   "@waitingLastPieces": {
     "placeholders": {
       "count": {}
-    }
-  },
-  "recordingPieceSeconds": "录音中 · {seconds} 秒一块",
-  "@recordingPieceSeconds": {
-    "placeholders": {
-      "seconds": {}
-    }
-  },
-  "sentPending": "已传 {sent} · 待传 {pending}",
-  "@sentPending": {
-    "placeholders": {
-      "sent": {},
-      "pending": {}
     }
   },
   "uploadingLeftover": "正在补传 {count} 块",

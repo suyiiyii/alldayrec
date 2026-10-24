@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 import 'l10n/app_localizations.dart';
 
+const recordingRed = Color(0xffc62828);
+
 /// What a BLE recorder runs on (its status' `charge`; none from an older firmware).
 String? chargeText(AppLocalizations l, Object? charge) =>
     switch (charge) { 'battery' => l.onBattery, 'charging' => l.charging, 'full' => l.charged, _ => null };
@@ -40,6 +42,123 @@ String hwLine(AppLocalizations l, Map? hw) {
   final free = hw['free_kb'], total = hw['total_kb'];
   final card = cardState(l, hw)?.line ?? (total is num && total > 0 ? l.cardFreeGb((free / 1048576).toStringAsFixed(1)) : '');
   return [if (hw['battery'] != null) l.batteryPercent(hw['battery']), ?chargeText(l, hw['charge']), if (card.isNotEmpty) card].join(' · ');
+}
+
+/// So many KB as KB, MB or GB.
+String sizeText(num kb) => kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '$kb KB';
+
+/// A battery glyph with as many bars as the level (unknown: a question mark).
+IconData batteryIcon(int? p) {
+  if (p == null) return Icons.battery_unknown_rounded;
+  const icons = [Icons.battery_0_bar_rounded, Icons.battery_1_bar_rounded, Icons.battery_2_bar_rounded, Icons.battery_3_bar_rounded,
+    Icons.battery_4_bar_rounded, Icons.battery_5_bar_rounded, Icons.battery_6_bar_rounded, Icons.battery_full_rounded];
+  return icons[(p * 7 / 100).round().clamp(0, 7)];
+}
+
+/// A battery level's colour on the native pages: red at 20 % or less, orange to 50 %, green above.
+Color batteryColor(ColorScheme cs, int? p) =>
+    p == null ? cs.outline : p <= 20 ? cs.error : p <= 50 ? Colors.orange.shade700 : Colors.green.shade600;
+
+/// How close a recorder is by its signal (dBm): 2 right here, 1 nearby, 0 farther away.
+int signalLevel(int rssi) => rssi > -60 ? 2 : rssi > -80 ? 1 : 0;
+
+/// Seconds as minutes, or hours and minutes.
+String durationText(AppLocalizations l, num s) {
+  final m = (s / 60).round();
+  return m >= 60 ? l.hoursMinutes(m ~/ 60, m % 60) : l.minutes(m);
+}
+
+/// What the top bar's chip shows and the status panel says, from the native status (`ble`: the BLE recorder is the
+/// source; `stopping`: the microphone is being stopped). The chip answers "is my day being recorded, and for how
+/// long still": an icon for what goes on, a number for how much of it (the recorder's battery, the catch-up's share
+/// done, the pause's minutes left), and `line`, what goes on in a few words (the chip's tooltip, the panel's header).
+/// The BLE link keeps the last read hw after a disconnect: its battery shows greyed then.
+({IconData icon, Color color, IconData? battery, String? number, Color numberColor, bool spin, String line}) chipSpec(
+    BuildContext context, Map s, {required bool ble, bool stopping = false}) {
+  final l = AppLocalizations.of(context), cs = Theme.of(context).colorScheme, amber = Colors.amber.shade700;
+  final hw = (s['hw'] as Map?) ?? {}, b = hw['battery'] as int?, pct = b == null ? null : '$b%';
+  final connected = s['connected'] == true, syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0;
+  final link = s['link'] as Map?, pausedMin = pauseLeftMin(s);
+  IconData? glyph() => b == null ? null : hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(b);
+  final low = b != null && b <= 20 ? cs.error : cs.onSurfaceVariant;  // as batteryColor
+  if (!ble) {
+    return stopping
+        ? (icon: Icons.mic_rounded, color: amber, battery: null, number: null, numberColor: low, spin: false,
+            line: '${l.stopping} · ${l.waitingLastPieces(s['pending'] ?? 0)}')
+        : s['running'] == true
+            ? (icon: Icons.mic_rounded, color: recordingRed, battery: null, number: null, numberColor: low, spin: false, line: l.recordingNow)
+            : (icon: Icons.mic_off_rounded, color: cs.outline, battery: null, number: null, numberColor: low, spin: false, line: l.notRecording);
+  }
+  if (pausedMin > 0) {
+    return (icon: Icons.pause_rounded, color: cs.outline, battery: null, number: l.minutes(pausedMin), numberColor: cs.onSurfaceVariant,
+        spin: false, line: l.statePaused(pausedMin));
+  }
+  if (syncTotal > 0) {  // the card's backlog being read; before LIVE is up only the file being recorded: no share yet
+    final eta = hw['backlog_eta_s'] as num?;
+    return (icon: Icons.sync_rounded, color: cs.primary, battery: null,
+        number: connected ? '${(syncDone * 100 / syncTotal).floor()}%' : null, numberColor: cs.onSurfaceVariant, spin: true,
+        line: eta == null || eta <= 0 ? l.catchingUp : l.stateCatchingUp(durationText(l, eta)));
+  }
+  if (!connected) {
+    final lastSeen = link?['lastSeen'] as int?;
+    return (icon: Icons.bluetooth_searching_rounded, color: amber, battery: glyph(), number: pct, numberColor: cs.outline, spin: false,
+        line: link == null ? (s['running'] == true ? l.starting : l.notConnected)
+            : link['code'] != 'away' ? nativeText(context, link)
+            : lastSeen == null ? l.stateAway
+            : l.stateAwaySince(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(lastSeen)).format(context)));
+  }
+  return (icon: Icons.mic_rounded, color: recordingRed, battery: glyph(), number: pct, numberColor: low, spin: false, line: l.recordingNow);
+}
+
+/// The top bar's chip (chipSpec): an icon, the battery's glyph when there is one, a number; an amber dot on the icon
+/// when something wants a look (`warn`: an upload's note, an error), the number stays.
+class StatusChip extends StatelessWidget {
+  final Map status;
+  final bool ble, stopping, warn;
+  final VoidCallback onPressed;
+  const StatusChip({super.key, required this.status, required this.ble, required this.onPressed, this.stopping = false, this.warn = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = chipSpec(context, status, ble: ble, stopping: stopping), l = AppLocalizations.of(context);
+    Widget icon = Icon(c.icon, size: 20, color: c.color);
+    if (c.spin && !MediaQuery.disableAnimationsOf(context)) icon = _Spin(child: icon);
+    return ActionChip(
+      tooltip: c.battery == null ? c.line : '${c.line} · ${l.battery} ${c.number}',
+      label: Row(mainAxisSize: MainAxisSize.min, children: [
+        Badge(isLabelVisible: warn, smallSize: 8, backgroundColor: Colors.amber.shade700, child: icon),
+        if (c.battery != null) Padding(padding: const EdgeInsets.only(left: 6), child: Icon(c.battery, size: 18, color: c.numberColor)),
+        if (c.number != null)
+          Padding(
+            padding: EdgeInsets.only(left: c.battery == null ? 6 : 1),
+            child: Text(c.number!, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: c.numberColor,
+                fontFeatures: const [FontFeature.tabularFigures()])),
+          ),
+      ]),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),  // standard density: a 48 px target
+      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+      onPressed: onPressed,
+    );
+  }
+}
+
+class _Spin extends StatefulWidget {
+  final Widget child;
+  const _Spin({required this.child});
+  @override
+  State<_Spin> createState() => _SpinState();
+}
+
+class _SpinState extends State<_Spin> with SingleTickerProviderStateMixin {
+  late final turns = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
+  @override
+  void dispose() {
+    turns.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RotationTransition(turns: turns, child: widget.child);
 }
 
 /// Minutes the recorder's pause has left (0: recording), from the link's status.

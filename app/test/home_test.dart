@@ -34,7 +34,7 @@ void main() {
     expect(find.byType(Home), findsOneWidget);
     final start = find.widgetWithText(FilledButton, 'Start recording');
     expect(start, findsNothing);  // in the status sheet, behind the top bar's chip
-    await tester.tap(find.widgetWithText(ActionChip, 'Not recording'));
+    await tester.tap(find.byTooltip('Not recording'));
     await tester.pumpAndSettle();
     expect(start, findsOneWidget);
     await tester.pump(const Duration(seconds: 2));  // a poll while the sheet is open

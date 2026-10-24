@@ -66,24 +66,60 @@ class AppLocalizationsZh extends AppLocalizations {
   String get notConnected => '未连接';
 
   @override
-  String get paused => '已暂停';
-
-  @override
   String get connected => '已连接';
-
-  @override
-  String connectedBattery(Object battery) {
-    return '已连接 $battery%';
-  }
 
   @override
   String get stopping => '停止中';
 
   @override
-  String get recording => '录音中';
+  String get notRecording => '未在录音';
 
   @override
-  String get notRecording => '未在录音';
+  String statePaused(Object minutes) {
+    return '已暂停 · $minutes 分钟后继续';
+  }
+
+  @override
+  String stateCatchingUp(Object time) {
+    return '补传中 · 还剩约 $time';
+  }
+
+  @override
+  String get stateAway => '录音设备不在附近';
+
+  @override
+  String stateAwaySince(Object time) {
+    return '录音设备不在附近 · 上次 $time 在线';
+  }
+
+  @override
+  String get awayHelp => '它照常录到自己的卡里，回到手机附近后自动补传';
+
+  @override
+  String get phoneMic => '手机麦克风';
+
+  @override
+  String get backlog => '待补传';
+
+  @override
+  String get allSynced => '已同步';
+
+  @override
+  String aboutTime(Object time) {
+    return '约 $time';
+  }
+
+  @override
+  String get signal => '信号';
+
+  @override
+  String get signalStrong => '强';
+
+  @override
+  String get signalFair => '中';
+
+  @override
+  String get signalWeak => '弱';
 
   @override
   String get deviceDetails => '设备详情';
@@ -92,38 +128,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get starting => '正在启动';
 
   @override
-  String pausedMinutesLeft(Object minutes) {
-    return '已暂停，还剩 $minutes 分钟';
-  }
-
-  @override
   String piecesPending(Object count) {
     return '待传 $count 块';
   }
 
   @override
-  String liveUploadCatchingUp(Object done, Object total) {
-    return '实时上传 · 后台补传 $done / $total MB';
-  }
-
-  @override
-  String fetchingCurrentFile(Object left) {
-    return '接上实时前先取正在录的这段 · 还差 $left MB';
-  }
-
-  @override
   String waitingLastPieces(Object count) {
     return '等最后 $count 块传完';
-  }
-
-  @override
-  String recordingPieceSeconds(Object seconds) {
-    return '录音中 · $seconds 秒一块';
-  }
-
-  @override
-  String sentPending(Object sent, Object pending) {
-    return '已传 $sent · 待传 $pending';
   }
 
   @override

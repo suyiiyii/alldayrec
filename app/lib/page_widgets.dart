@@ -31,10 +31,12 @@ Widget statTile(BuildContext context,
           Row(children: [
             Icon(icon, color: color, size: 22),
             const SizedBox(width: 6),
-            Text(label, style: t.textTheme.labelLarge?.copyWith(color: cs.onSurfaceVariant)),
+            Flexible(child: Text(label, style: t.textTheme.labelLarge?.copyWith(color: cs.onSurfaceVariant), overflow: TextOverflow.ellipsis)),
           ]),
           const SizedBox(height: 10),
-          Text(value, style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600)),
+          // a narrow tile (three in a row) shrinks a long value rather than wrapping it
+          FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerStart,
+              child: Text(value, maxLines: 1, style: t.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600))),
           if (sub != null) Text(sub, style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           if (fraction != null) ...[
             const SizedBox(height: 10),
