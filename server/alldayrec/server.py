@@ -11,7 +11,6 @@ each pause for the minutes not final yet; all state is in data/live.db.
 """
 import argparse
 import contextlib
-import datetime as dt
 import logging
 import importlib.util
 import os
@@ -121,12 +120,9 @@ async def pipelines():
     tenant's task group."""
     await MODEL.wait()
     while True:
-        devices = [r[0] for r in db.conn().execute("SELECT DISTINCT device FROM pieces")]
-        after = {d: dt.datetime.fromisoformat(v) for d in devices if (v := db.kv(f"finalized_to:{d}"))}
-        for d in audio.pending(after):
-            if d not in T().pipelines:
-                T().pipelines.add(d)
-                T().tg.start_soon(lasting, d, name=f"pipeline:{d}")
+        for d in await anyio.to_thread.run_sync(audio.pending, set(T().pipelines), limiter=threads.DB):
+            T().pipelines.add(d)
+            T().tg.start_soon(lasting, d, name=f"pipeline:{d}")
         await anyio.sleep(5)
 
 

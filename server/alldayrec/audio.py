@@ -321,10 +321,24 @@ def arrival(device: str) -> dict | None:
     return p and p["received_ms"] and {"at": p["received_ms"], "lag_s": round((p["received_ms"] - p["start_ms"]) / 1000 - p["seconds"], 1)}
 
 
-def pending(after: dict[str, dt.datetime | None]) -> list[str]:
-    """Devices with audio after their finalized time (`after`, by device; a device not in it has none yet)."""
-    return [r[0] for r in db.conn().execute("SELECT device, max(start_ms + seconds * 1000) FROM pieces GROUP BY device")
-            if r[1] > (int(after[r[0]].timestamp() * 1000) if after.get(r[0]) else 0)]
+def devices() -> list[str]:
+    """Every device with pieces: an index lookup each (SELECT DISTINCT read the whole index, 89 ms at 1.3 M pieces)."""
+    return [r[0] for r in db.conn().execute(
+        "WITH RECURSIVE d(x) AS (SELECT min(device) FROM pieces UNION ALL SELECT (SELECT min(device) FROM pieces WHERE device > x) FROM d "
+        "WHERE x IS NOT NULL) SELECT x FROM d WHERE x IS NOT NULL")]
+
+
+def pending(running: set[str]) -> list[str]:
+    """Devices, of those whose pipeline is not `running`, with audio after their finalized time (none yet: any audio).
+    Unbounded per device (an imported file is one piece, hours long): its caller runs it in a thread."""
+    out = []
+    for d in devices():
+        if d not in running:
+            v = db.kv(f"finalized_to:{d}")
+            end = db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (d,)).fetchone()[0]
+            if end > (int(dt.datetime.fromisoformat(v).timestamp() * 1000) if v else 0):
+                out.append(d)
+    return out
 
 
 def hold(device: str, at_ms: int | None):
@@ -495,7 +509,13 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
     assert queued("phone") == 1, "the last piece handed out counts until the reader comes back"
     assert save("iphone", M(2), tone(30), "audio/aac") > 29  # another device, inside phone's gap
     assert anyio.run(take, None, 1, "iphone") == [2], "each device streams on its own"
-    assert set(pending({"phone": dt.datetime(2026, 10, 2, 10, 6)})) == {"iphone"}, "phone done, iphone has none finalized"
+    db.put_kv("finalized_to:phone", "2026-10-02T10:06:00")
+    assert devices() == ["iphone", "phone"] and pending(set()) == ["iphone"], "phone done, iphone has none finalized"
+    assert pending({"iphone"}) == [], "a device whose pipeline runs is not asked about"
+    db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES ('import', ?, 10800, 'x')", (M(0),))  # one 3 h file
+    db.put_kv("finalized_to:import", "2026-10-02T11:30:00")  # a restart 1.5 h into it: the rest is still to do
+    assert pending({"iphone"}) == ["import"], "a piece hours long counts to its end"
+    db.conn().execute("DELETE FROM pieces WHERE device = 'import'")
     assert cut(dt.datetime(2026, 10, 2, 10, 2, 5), dt.datetime(2026, 10, 2, 10, 2, 6), "s16le", "phone") is None
     left, end = backlog("phone", dt.datetime(2026, 10, 2, 10, 1, 30))
     assert 89 < left < 91 and end == dt.datetime(2026, 10, 2, 10, 6), (left, end)  # 30 s of 10:01 + all of 10:05
