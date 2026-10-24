@@ -177,3 +177,46 @@ def test_undo_takes_a_merge_back(tmp_path):
     with pytest.raises(HTTPException):
         anyio.run(speaker_undo, {"undo": k})
     assert dump() == changed
+
+
+def test_this_is_me_learns_a_centroid(tmp_path):
+    """「这是我」 (a rename to 我) relabels like any merge and adds one centroid to 我's voiceprint: the unit mean of the
+    voices, weighted by speech. The undo takes both back: the file gone when the click made it, else the centroid
+    dropped and the npz before kept as .prev. Under 10 s of voice relabels only."""
+    db.open_db(tmp_path / "t.db")
+    npz, A, B = tmp_path / "owner-redimnet2.npz", np.array([1.0, 0, 0, 0]), np.array([0.8, 0.6, 0, 0])
+    convs = [f"c2026100510000{i}" for i in range(2)]
+    with db.tx() as t:  # S1 is one voice in two conversations (A 30 s, B 10 s), S2 someone else in each
+        for i, cid in enumerate(convs):
+            rows = [dict(id=f"{i}{k}", start=f"{T}{i}{k}.000", end=f"{T}{i}{k}.900", speaker=f"S{k % 2 + 1}", text="嗯") for k in range(4)]
+            db.insert_sentences(t, rows)
+            db.insert_conversation(t, {"id": cid, "start": rows[0]["start"], "end": rows[-1]["end"], "participants": ["S1", "S2"],
+                                       "sentences": 4, "speech_s": 3.6})
+        db.insert_voices(t, [{"conv": c, "label": l, "device": "mic", "n": 3, "speech_s": s, "e": e} for c, l, s, e in (
+            (convs[0], "S1", 30.0, A), (convs[1], "S1", 10.0, B), (convs[0], "S2", 20.0, np.array([0, 0, 1.0, 0])),
+            (convs[1], "S2", 4.0, np.array([0, 0, 0, 1.0])))])
+    dump = lambda: [sorted(map(tuple, db.conn().execute(f"SELECT * FROM {n}"))) for n in ("sentences", "conversations", "voices")]
+    was = dump()
+
+    g = next(g for g in anyio.run(routes_speakers.speaker_list) if g["count"] == 2)
+    r = anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我"})
+    assert r["renamed"] == 2 and r["learned"] and [c["participants"] for c in map(db.conversation, convs)] == [["我", "S2"]] * 2
+    bank = dict(np.load(npz))
+    (k, v), = bank.items()
+    assert k.startswith("me-") and np.allclose(v, np.array([38.0, 6, 0, 0]) / np.hypot(38, 6)), "30 A + 10 B, unit"
+    assert np.allclose(tenant.T().owner[k], v) and not (tmp_path / "owner-redimnet2.npz.prev").exists()
+    assert anyio.run(speaker_undo, {"undo": r["undo"]}) == {"undone": 2}
+    assert dump() == was and not npz.exists() and tenant.T().owner == {}, "no voiceprint before: none after the undo"
+
+    np.savez(npz, self=np.array([0, 1.0, 0, 0]))  # the card's (or a hand-made one)
+    r = anyio.run(rename, convs[0], {"from": "S1", "to": "我"})
+    assert r["learned"] and r["participants"] == ["我", "S2"]
+    bank = dict(np.load(npz))
+    (s, me) = bank
+    assert s == "self" and me.startswith("me-") and np.allclose(bank[me], A)
+    assert list(np.load(tmp_path / "owner-redimnet2.npz.prev")) == ["self"]
+    anyio.run(speaker_undo, {"undo": r["undo"]})
+    assert dump() == was and list(np.load(npz)) == ["self"] and list(tenant.T().owner) == ["self"]
+
+    r = anyio.run(rename, convs[1], {"from": "S2", "to": "我"})  # 4 s of voice
+    assert not r["learned"] and r["participants"] == ["S1", "我"] and list(np.load(npz)) == ["self"]

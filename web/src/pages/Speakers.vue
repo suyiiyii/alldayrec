@@ -91,14 +91,17 @@ async function name(g: Speaker, to: string, what: string, suggestion?: string) {
   if (!to) return;
   await card(g.id).run(async () => {
     flash.value = "";
-    const r = await post<{ renamed: number; undo: string | null }>("/api/speakers/name", {
+    const r = await post<{ renamed: number; learned?: boolean; undo: string | null }>("/api/speakers/name", {
       name: to,
       group: g.id,
       suggestion,
     });
     // 撤销 for 10 s: every conversation of it back as it was (the server keeps what it changed)
+    // 这是我: 我's voiceprint learnt it too, unless there was too little of it (server learn_me)
     toast(
-      t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed),
+      to === "我"
+        ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
+        : t("speakers.renamed", { what, to: speakerLabel(to), n: r.renamed }, r.renamed),
       r.undo ? { undo: () => void undo(r.undo!), ms: 10_000 } : {},
     );
     if (editing.value === g.id) editing.value = ""; // another card's box opened meanwhile stays
@@ -231,9 +234,14 @@ async function detach(g: Speaker, v: Voice) {
           </button>
           <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
         </template>
-        <button v-else :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
-          {{ g.name ? t("speakers.rename") : t("speakers.giveName") }}
-        </button>
+        <template v-else>
+          <button :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
+            {{ g.name ? t("speakers.rename") : t("speakers.giveName") }}
+          </button>
+          <button v-if="!g.name" :disabled="card(g.id).busy.value" @click="name(g, '我', title(g))">
+            {{ t("speaker.isMe") }}
+          </button>
+        </template>
         <button class="btn-ghost" @click="expand(g)">
           {{ open === g.id ? t("speakers.collapse") : t("speakers.list", { n: g.count }) }}
         </button>

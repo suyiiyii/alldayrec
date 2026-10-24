@@ -234,15 +234,17 @@ async function edit(label: string) {
 async function rename(from: string, to: string) {
   const merge = !!c.value && (c.value.participants.includes(to) || c.value.rows.some((r) => r.speaker === to));
   await runSpeaker(async () => {
-    const r = await post<{ renamed: number; voiceprints: number; undo: string }>(
+    const r = await post<{ renamed: number; voiceprints: number; learned?: boolean; undo: string }>(
       `/api/conversation/${props.id}/rename`,
       { from, to },
     );
     editing.value = "";
     toast(
-      merge
-        ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
-        : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
+      to === "我"
+        ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
+        : merge
+          ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
+          : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
       { undo: () => void undo(r.undo, from), ms: 10_000 },
     );
     await Promise.all([load(), loadSug()]);
@@ -351,6 +353,9 @@ async function alias(name: string, of: string) {
             <button v-for="l in labels" :key="l" class="chip" @click="edit(l)">{{ speakerLabel(l) }}</button>
           </template>
           <template v-else>
+            <button v-if="anon(editing)" :disabled="saving" @click="rename(editing, '我')">
+              {{ t("speaker.isMe") }}
+            </button>
             <input
               v-model="newName"
               :placeholder="t('conv.whoIs', { who: speakerLabel(editing) })"

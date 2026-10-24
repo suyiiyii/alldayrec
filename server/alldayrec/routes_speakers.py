@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import time
 
 import anyio.to_thread
@@ -37,12 +38,13 @@ async def names():
 
 @router.post("/api/conversation/{conv_id}/rename")
 async def rename(conv_id: str, body: dict):
-    """One label renamed; with a name the conversation has already, a merge. The answer's undo takes it back
-    (POST /api/speakers/undo)."""
+    """One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me).
+    The answer's undo takes it back (POST /api/speakers/undo)."""
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
+    me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
-    return {**r, "undo": keep_undo([before])}
+    return {**r, **learn_me(to, me, [before]), "undo": keep_undo([before])}
 
 
 def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dict]:
@@ -79,7 +81,8 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     T().speakers["at"] = 0.0
     queue_summary(c, keep=True)
     long = []
-    if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):  # S<n> means "not known": nothing to learn
+    # S<n> means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank
+    if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):
         long = sorted((r for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5),
                       key=lambda r: r["start"])[:ENROLL]
     ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
@@ -89,6 +92,53 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
 
 ENROLL = 20
 UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not after a restart
+ME_MIN_S = 10.0  # 「这是我」: less speech than this relabels only; a voiceprint from a few words would let others in as 我
+
+
+def voice_of(conv: str, label: str) -> tuple[np.ndarray, float] | None:
+    """A label's voiceprint in one conversation (the voices table: a mean of its longest sentences) and its speech."""
+    r = db.conn().execute("SELECT e, speech_s FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone()
+    return (db.vec(r[0]), r[1] or 0.0) if r else None
+
+
+def save_owner(bank: dict[str, np.ndarray]):
+    """我's voiceprint, whole or not at all (a restart loads it like a hand-made one); the pipelines take it from their
+    next conversation on (device_pipeline: T().owner). No centroid left: no file, nobody is 我."""
+    if bank:
+        tmp = T().data / "owner-redimnet2.tmp.npz"
+        np.savez(tmp, **bank)
+        os.replace(tmp, owner_npz())
+    else:
+        owner_npz().unlink(missing_ok=True)
+    T().owner = bank
+
+
+def owner_bank() -> dict[str, np.ndarray]:
+    if not owner_npz().exists():
+        return {}
+    with np.load(owner_npz()) as z:
+        return dict(z)
+
+
+def learn_me(to: str, vs: list[tuple[np.ndarray, float] | None], befores: list[dict]) -> dict:
+    """「这是我」: voices (voice_of) renamed 我 in one click become one more centroid of 我's voiceprint, their unit mean
+    weighted by speech. A centroid, not a mean into the old one: the diarist takes the best of them (Diarist.add), and a
+    voice split from 我 is one the old centroids missed (another recorder, another room); a mean would pull the old
+    one off the voice it does match. The npz before is kept beside it (.prev); the undo drops the centroid again (any
+    order of undos). Less than ME_MIN_S of speech with a voiceprint learns nothing. Another name: nothing to say."""
+    if to != "我":
+        return {}
+    vs = [v for v in vs if v]  # a label without one: an open conversation, under 3 sentences, no recording here
+    s = sum(x for _, x in vs)
+    if s < ME_MIN_S or not befores:
+        return {"learned": False}
+    bank = owner_bank()
+    if bank:
+        shutil.copyfile(owner_npz(), owner_npz().with_name(owner_npz().name + ".prev"))
+    k = befores[0]["me"] = f"me-{secrets.token_hex(4)}"
+    save_owner({**bank, k: selfvoice.unit(sum(x * selfvoice.unit(e) for e, x in vs)).astype(np.float32)})
+    ws.note(f"「我」的声音：多记住了一种（{round(s)} 秒），从下一段对话起认出", "state")
+    return {"learned": True}
 
 
 def keep_undo(befores: list[dict]) -> str:
@@ -103,9 +153,9 @@ def keep_undo(befores: list[dict]) -> str:
 @router.post("/api/speakers/undo")
 async def speaker_undo(body: dict):
     """Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and
-    name hints as they were, the summaries redone. Not the voice learnt from it (enroll: a running mean in the people
-    bank). 409 when the id is unknown (taken back already, too old, the server restarted) or a conversation changed
-    since."""
+    name hints as they were, the summaries redone, the centroid a 「这是我」 added to 我's voiceprint dropped. Not a voice
+    learnt otherwise (enroll: a running mean in the people bank). 409 when the id is unknown (taken back already, too
+    old, the server restarted) or a conversation changed since."""
     bs = T().undo.pop(body.get("undo"), None)
     if not bs:
         raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
@@ -125,6 +175,10 @@ async def speaker_undo(body: dict):
             if b["hints"]:
                 db.put_name_hints(b["hints"], t)
     T().speakers["at"] = 0.0
+    if k := bs[0].get("me"):  # 「这是我」's centroid
+        bank = owner_bank()
+        if bank.pop(k, None) is not None:
+            save_owner(bank)
     for cid in dict.fromkeys(b["conv"] for b in bs):
         queue_summary(find_conversation(cid), keep=True)
     b = bs[0]
@@ -266,13 +320,14 @@ def check_name(to: str):
 @router.post("/api/speakers/name")
 async def speaker_name(body: dict):
     """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations. The
-    answer comes when the store has it; the voice is learnt after (enroll_soon)."""
+    answer comes when the store has it; the voice is learnt after (enroll_soon), 我's before it (learn_me)."""
     to = (body.get("name") or "").strip()
     check_name(to)
-    rows, befores = [], []
+    rows, befores, me = [], [], []
     for m in (await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB))["members"]:
         if m["label"] == to:
             continue
+        v = voice_of(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
         try:
             _, more, before = apply_rename(m["conv"], m["label"], to)
         except HTTPException as e:  # the conversation changed since the page loaded
@@ -280,8 +335,9 @@ async def speaker_name(body: dict):
             continue
         rows += more
         befores.append(before)
+        me.append(v)
     await enroll_soon(to, rows)
-    return {"renamed": len(befores), "undo": keep_undo(befores) if befores else None}
+    return {"renamed": len(befores), **learn_me(to, me, befores), "undo": keep_undo(befores) if befores else None}
 
 
 @router.post("/api/speakers/detach")
@@ -593,11 +649,7 @@ async def self_answer(body: dict):
     elif a == "later":
         st["wait"] = {"until": (now + dt.timedelta(seconds=selfvoice.LATER_S)).isoformat(timespec="seconds")}
     elif isinstance(a, int) and not isinstance(a, bool) and 0 <= a < len(card["candidates"]):
-        bank = selfvoice.unit(card["candidates"][a]["bank"]).astype(np.float32)
-        tmp = T().data / "owner-redimnet2.tmp.npz"
-        np.savez(tmp, self=bank)
-        os.replace(tmp, owner_npz())  # whole or not at all: a restart loads it like a hand-made one
-        T().owner = {"self": bank}
+        save_owner({"self": selfvoice.unit(card["candidates"][a]["bank"]).astype(np.float32)})
         st["confirmed"] = {"at": now.isoformat(timespec="seconds"), "pick": a}
     else:
         raise HTTPException(400, "bad answer")

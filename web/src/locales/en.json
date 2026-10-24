@@ -54,7 +54,10 @@
     "me": "Me",
     "n": "Speaker {n}",
     "veryLike": "very similar",
-    "someLike": "somewhat similar"
+    "someLike": "somewhat similar",
+    "isMe": "This is me",
+    "toMe": "Merged into Me; this voice is learnt and recognized from now on",
+    "toMeShort": "Merged into Me; under 10 s of usable voice, so nothing was learnt"
   },
   "api": {
     "draftEngine": "drafts {e}",
