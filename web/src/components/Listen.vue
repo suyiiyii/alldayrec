@@ -119,7 +119,8 @@ function draw() {
     h = (c.height = c.clientHeight * devicePixelRatio);
   const css = getComputedStyle(c),
     accent = css.getPropertyValue("--accent"),
-    muted = css.getPropertyValue("--muted");
+    muted = css.getPropertyValue("--muted"),
+    err = css.getPropertyValue("--err");
   const n = Math.floor((an.frequencyBinCount * MAX_HZ * 2) / ctx.sampleRate),
     f = new Float32Array(an.frequencyBinCount),
     lo = an.minDecibels,
@@ -157,7 +158,7 @@ function draw() {
   const s = new Float32Array(an.fftSize);
   an.getFloatTimeDomainData(s);
   const rms = 10 * Math.log10(s.reduce((a, v) => a + v * v, 0) / s.length + 1e-10);
-  g.fillStyle = rms > -6 ? "#b3261e" : accent;
+  g.fillStyle = rms > -6 ? err : accent;
   g.fillRect(0, 0, (Math.max(rms + 60, 0) / 60) * w, 3 * devicePixelRatio);
   g.fillStyle = muted;
   g.fillText(`${rms.toFixed(0)} dBFS`, w - 52 * devicePixelRatio, 14 * devicePixelRatio);
@@ -190,15 +191,12 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
-  font-size: 12px;
-}
-.listen button {
-  font-size: 12px;
-  padding: 1px 10px;
+  font-size: var(--fs-xs);
 }
 .listen button.on {
   background: var(--accent);
-  color: var(--bg);
+  border-color: var(--accent);
+  color: var(--surface);
 }
 .note {
   color: var(--muted);
@@ -207,6 +205,6 @@ canvas {
   width: 100%;
   height: 90px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 </style>

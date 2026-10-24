@@ -29,8 +29,8 @@ const open = ref(false);
   background: none;
   color: var(--muted);
   font: inherit;
-  font-size: 13px;
-  padding: 6px 0;
+  font-size: var(--fs-sm);
+  padding: var(--space-2) 0;
   cursor: pointer;
 }
 </style>

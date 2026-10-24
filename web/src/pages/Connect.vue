@@ -123,23 +123,22 @@ async function copy(c: (typeof CLIENTS)[number]) {
   min-width: 0;
 }
 h2 {
-  font-size: 17px;
   margin: 16px 0 4px;
 }
 .ai p {
   margin: 4px 0;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 code {
   overflow-wrap: anywhere;
 }
 .warn {
-  background: var(--soft);
-  border-radius: 10px;
+  background: var(--warn-soft);
+  border-radius: var(--radius);
   padding: 8px 14px 8px 30px;
   margin: 8px 0;
-  font-size: 13px;
-  color: var(--warm);
+  font-size: var(--fs-sm);
+  color: var(--warn);
 }
 .bar {
   margin: 8px 0;
@@ -151,18 +150,18 @@ code {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .head .muted {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 pre {
-  background: var(--soft);
-  border-radius: 8px;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
   padding: 8px 12px;
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   white-space: pre-wrap; /* the phone shows it all; 复制 copies it as it is */
   overflow-wrap: anywhere;
 }

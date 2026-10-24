@@ -122,7 +122,7 @@ svg {
 }
 .grid text {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 .line {
@@ -135,7 +135,7 @@ svg {
   fill: var(--accent);
 }
 .ring {
-  stroke: var(--bg);
+  stroke: var(--surface);
   stroke-width: 2;
 }
 .mark {
@@ -143,7 +143,7 @@ svg {
   stroke-dasharray: 3 3;
 }
 .mark.strong {
-  stroke: var(--warm);
+  stroke: var(--warn);
   stroke-dasharray: none;
 }
 .cross {
@@ -154,11 +154,11 @@ svg {
   position: absolute;
   top: 0;
   pointer-events: none;
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   display: flex;
   flex-direction: column;
   white-space: nowrap;

@@ -69,13 +69,12 @@ function pick(d: string) {
   gap: 6px;
 }
 .arrow {
-  padding: 2px 10px;
-  font-size: 16px;
-  line-height: 1.2;
+  min-width: 36px;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-md);
 }
 .arrow:disabled {
-  color: #c9ccd8;
-  cursor: default;
+  opacity: 0.4;
 }
 .label {
   font-weight: 600;
@@ -84,7 +83,7 @@ function pick(d: string) {
 }
 .sub {
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   margin-left: 4px;
 }
@@ -92,18 +91,18 @@ function pick(d: string) {
   position: fixed;
   z-index: 5;
   width: min(340px, calc(100vw - 24px));
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow);
 }
 .head {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 8px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .head .today {
   margin-left: auto;

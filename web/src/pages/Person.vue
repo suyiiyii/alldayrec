@@ -159,7 +159,7 @@ const link = (id: string, at: string | null) =>
             }}</RouterLink>
           </li>
         </ul>
-        <button v-if="p.mine.length > 8 && !allMine" class="ghost" @click="allMine = true">
+        <button v-if="p.mine.length > 8 && !allMine" class="btn-ghost" @click="allMine = true">
           全部 {{ p.mine.length }} 条
         </button>
       </template>
@@ -193,11 +193,10 @@ h2 {
 }
 h3 {
   margin: 20px 0 6px;
-  font-size: 15px;
 }
 .muted {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .tags {
   display: flex;
@@ -225,31 +224,28 @@ h3 {
 .points {
   margin: 4px 0 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .summary {
   margin: 4px 0 0;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 .more {
   width: 100%;
 }
-.empty {
-  color: var(--muted);
-  margin-top: 24px;
-}
 .profile {
   margin-top: 12px;
 }
 .whois {
-  background: var(--soft);
-  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
   padding: 10px 14px;
   margin: 0;
 }
 .src {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
 }
@@ -265,14 +261,13 @@ h3 {
 }
 .aliases input {
   font: inherit;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   padding: 2px 8px;
   width: 9em;
 }
 .aliases .x {
   border: 0;
   background: none;
+  min-height: 28px;
   padding: 0 2px;
   color: var(--muted);
   cursor: pointer;

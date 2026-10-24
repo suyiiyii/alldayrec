@@ -365,16 +365,17 @@ useSocket((m) => {
 </template>
 
 <style scoped>
+/* sticky under the header (AppHeader: 45 px; on a phone, two rows, 75 px) */
 .find {
   position: sticky;
-  top: 49px;
+  top: 45px;
   background: var(--bg);
   padding: 10px 0 6px;
   z-index: 1;
 }
 .cal {
   margin-left: auto;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .q {
   display: flex;
@@ -387,11 +388,7 @@ useSocket((m) => {
 .find input {
   flex: 1;
   min-width: 0;
-  font: inherit;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   padding: 7px 12px;
-  outline: none;
 }
 .find input:focus {
   border-color: var(--accent);
@@ -399,19 +396,19 @@ useSocket((m) => {
 .kinds {
   display: inline-flex;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   margin-top: 8px;
 }
 .kinds button {
   border: 0;
   border-radius: 0;
-  padding: 3px 14px;
-  color: #4a4f63;
+  padding: 0 14px;
+  color: var(--fg-2);
 }
 .kinds button.on {
   background: var(--accent);
-  color: #fff;
+  color: var(--surface);
 }
 .tags {
   display: flex;
@@ -421,31 +418,19 @@ useSocket((m) => {
   padding-top: 8px;
 }
 .day {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   margin: 20px 0 8px;
 }
 .card.media {
   opacity: 0.5;
 }
-.card {
-  display: block;
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 10px;
-}
-a.card:hover {
-  border-color: var(--accent);
-}
-.card.ask {
-  border-color: var(--accent);
-}
 .ask .x {
   float: right;
   border: 0;
-  padding: 0 4px;
+  min-width: 36px;
+  padding: 0;
+  margin: -8px -8px 0 0;
   line-height: 1;
 }
 .answer {
@@ -459,18 +444,21 @@ a.card:hover {
 .due ul {
   margin: 6px 0 0;
   padding-left: 20px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .recap .sub {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   margin-top: 8px;
 }
+/* still going: an outline, not a card yet */
 .card.open {
-  border-style: dashed;
+  background: none;
+  box-shadow: none;
+  border: 1px dashed var(--line);
 }
 .meta {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -479,8 +467,8 @@ a.card:hover {
   margin: 2px 0;
 }
 .gist {
-  font-size: 13px;
-  color: #4a4f63;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -492,6 +480,7 @@ a.card:hover {
 .tagline .tag {
   cursor: inherit;
   margin-right: 4px;
+  min-height: 22px;
   padding: 0 8px;
 }
 .more {
@@ -500,7 +489,7 @@ a.card:hover {
 }
 @media (max-width: 600px) {
   .find {
-    top: 41px;
+    top: 75px;
   }
 }
 /* after the phone rule: inside the app there is no header to stay under */

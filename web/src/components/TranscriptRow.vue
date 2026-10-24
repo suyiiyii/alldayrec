@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { hhmmss, type Row } from "../lib/api";
 import { player, toggle } from "../lib/audio";
+import Avatar from "./Avatar.vue";
 
 defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played aloud, not said in the room
 </script>
@@ -23,13 +24,10 @@ defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played al
     </div>
     <div
       class="spk"
-      :class="{
-        me: row.speaker === '我',
-        other: row.speaker && row.speaker !== 'S?' && row.speaker !== '我',
-      }"
+      :class="{ me: row.speaker === '我' }"
       :title="row.speaker_confidence == null ? '' : `置信度 ${row.speaker_confidence}`"
     >
-      {{ row.speaker || "—" }}
+      <Avatar :name="row.speaker" />{{ row.speaker || "—" }}
     </div>
     <div v-if="row.error" class="text err">识别失败：{{ row.error }}</div>
     <div v-else class="text">
@@ -41,29 +39,42 @@ defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played al
 </template>
 
 <style scoped>
+/* the speaker column takes the name's width (「同事A」 on one line), at least 4.5em: names up to three characters line up */
 .row {
   display: grid;
-  grid-template-columns: 80px 48px 1fr;
-  gap: 12px;
-  padding: 6px 0;
+  grid-template-columns: 80px minmax(4.5em, auto) 1fr;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
   border-bottom: 1px solid var(--line);
 }
 .row.hit {
-  background: #fff6d6;
+  background: var(--warn-soft);
 }
 .t,
 .spk {
   color: var(--muted);
-  font-size: 13px;
-  padding-top: 1px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.t {
+  display: flex;
+  align-items: center;
+  align-self: start;
+  min-height: 26px;
+}
+.spk {
+  display: flex;
+  align-items: center;
+  align-self: start;
+  gap: 6px;
+  min-height: 26px;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
 }
 .spk.me {
   color: var(--accent);
   font-weight: 600;
-}
-.spk.other {
-  color: var(--warm);
 }
 .row.media {
   opacity: 0.45;
@@ -72,46 +83,46 @@ defineProps<{ row: Row; hit?: boolean; media?: boolean }>(); // media: played al
 .row.pending .spk {
   color: var(--muted);
 }
+/* the glyph is small, the button around it a 32 px square */
 .play {
   border: 0;
   background: none;
   color: var(--accent);
-  cursor: pointer;
-  padding: 0 4px 0 0;
-  font-size: 12px;
-  border-radius: 0;
+  min-height: 32px;
+  min-width: 32px;
+  margin-left: -8px;
+  padding: 0;
+  font-size: var(--fs-xs);
+  border-radius: var(--radius-sm);
 }
 .play:disabled {
   color: var(--muted);
-  cursor: default;
 }
 .text {
   word-break: break-word;
+  padding-top: 1px;
 }
 .err {
   color: var(--err);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .draft {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   border: 1px dashed var(--line);
-  border-radius: 4px;
-  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
   margin-right: 6px;
   white-space: nowrap;
 }
 @media (max-width: 600px) {
   .row {
-    grid-template-columns: 70px 30px 1fr;
-    gap: 8px;
-  }
-  .t,
-  .spk {
-    font-size: 12px;
+    grid-template-columns: 72px minmax(4.5em, auto) 1fr;
+    gap: var(--space-2);
   }
   .play {
-    padding: 0 2px 0 0;
+    min-width: 28px;
+    margin-left: -6px;
   }
 }
 </style>

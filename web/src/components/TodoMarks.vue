@@ -32,8 +32,8 @@ async function mark(m: keyof typeof TODO_MARK) {
   white-space: nowrap;
 }
 .marks button {
-  font-size: 12px;
-  padding: 0 6px;
+  min-height: 32px;
+  padding: 0 var(--space-2);
   margin-left: 6px;
 }
 /* the buttons stay together; an error wraps inside the page instead of running off a phone's edge */

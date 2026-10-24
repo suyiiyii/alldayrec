@@ -249,37 +249,34 @@ const eta = (d: DeviceStatus) => {
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin: 12px 0;
-}
 .top {
   display: flex;
   justify-content: space-between;
   margin-bottom: 6px;
 }
+main {
+  padding-top: var(--space-3);
+}
 .ok {
-  color: var(--accent);
-  font-size: 13px;
+  color: var(--ok);
+  font-size: var(--fs-sm);
 }
 .busy {
-  color: var(--warm);
-  font-size: 13px;
+  color: var(--warn);
+  font-size: var(--fs-sm);
 }
 .grid {
   display: grid;
   grid-template-columns: 5em 1fr;
   gap: 2px 12px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 .listen {
   margin-top: 8px;
 }
 .call {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   padding: 2px 0;
   font-variant-numeric: tabular-nums;
 }

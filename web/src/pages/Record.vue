@@ -308,7 +308,7 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
           <option value="ble">蓝牙录音硬件</option>
         </select>
         <label><input v-model="upload" type="checkbox" :disabled="recording" />上传</label>
-        <button :class="{ on: recording }" @click="toggle">
+        <button class="btn-primary" :class="{ on: recording }" @click="toggle">
           {{ recording ? "停止" : "开始录音" }}
         </button>
       </div>
@@ -331,6 +331,7 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
 }
 .top {
   padding: 10px 16px 6px;
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
 .ctl {
@@ -339,25 +340,19 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
   align-items: center;
 }
 .ctl button {
-  font-size: 16px;
-  padding: 10px 22px;
-  border: 0;
-  border-radius: 10px;
-  background: #3b4cca;
-  color: #fff;
+  font-size: var(--fs-md);
   white-space: nowrap;
 }
 .ctl button.on {
-  background: #c0392b;
+  background: var(--err);
+  border-color: var(--err);
 }
 .ctl label {
-  font-size: 14px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 .ctl select {
-  font-size: 15px;
   padding: 8px 6px;
-  border-radius: 8px;
 }
 audio {
   width: 100%;
@@ -365,21 +360,18 @@ audio {
   margin-top: 4px;
 }
 .ctl input:not([type="checkbox"]) {
-  font-size: 15px;
   padding: 8px 10px;
   flex: 1;
   min-width: 0;
-  border: 1px solid #ccc;
-  border-radius: 8px;
 }
 .stat {
-  color: #555;
-  font-size: 13px;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
   margin: 6px 0 0;
 }
 details {
-  font-size: 12px;
-  color: #888;
+  font-size: var(--fs-xs);
+  color: var(--muted);
   margin-top: 4px;
 }
 .log {
@@ -387,7 +379,7 @@ details {
     12px ui-monospace,
     monospace;
   white-space: pre-wrap;
-  color: #666;
+  color: var(--muted);
   max-height: 30vh;
   overflow: auto;
 }

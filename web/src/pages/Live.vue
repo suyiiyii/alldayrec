@@ -560,7 +560,7 @@ const convLink = (c: Conversation) =>
 
 <style scoped>
 .status {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   display: flex;
   gap: 14px;
@@ -584,13 +584,11 @@ const convLink = (c: Conversation) =>
   flex: 1;
   min-width: 0;
   border: 0;
-  padding: 2px 0;
+  padding: 0;
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
-}
-.fold:disabled {
-  cursor: default;
+  background: none;
 }
 .caret {
   display: inline-block;
@@ -599,12 +597,6 @@ const convLink = (c: Conversation) =>
 }
 .ask {
   flex: none;
-  font-size: 12px;
-  padding: 2px 10px;
-}
-.ask:disabled {
-  color: var(--muted);
-  cursor: default;
 }
 .pane-body {
   overflow-y: auto;
@@ -612,10 +604,10 @@ const convLink = (c: Conversation) =>
 }
 .pane-body p {
   margin: 4px 0;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .pane-meta {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   padding-top: 4px;
 }
@@ -645,13 +637,13 @@ const convLink = (c: Conversation) =>
   width: 48px;
   height: 18px;
   margin-left: -24px;
-  border: 1px solid #d5d8e2;
-  border-radius: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
   background:
     linear-gradient(var(--muted) 0 0) 50% 5px / 18px 1.5px no-repeat,
     linear-gradient(var(--muted) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--bg);
-  box-shadow: 0 1px 4px rgb(31 35 48 / 0.14);
+    var(--surface);
+  box-shadow: var(--shadow);
   transition:
     border-color 0.15s,
     box-shadow 0.15s;
@@ -666,8 +658,8 @@ const convLink = (c: Conversation) =>
   background:
     linear-gradient(var(--accent) 0 0) 50% 5px / 18px 1.5px no-repeat,
     linear-gradient(var(--accent) 0 0) 50% 9px / 18px 1.5px no-repeat,
-    var(--bg);
-  box-shadow: 0 2px 8px rgb(59 63 158 / 0.3);
+    var(--surface);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 @media (max-width: 600px) {
   .grip {
@@ -677,14 +669,14 @@ const convLink = (c: Conversation) =>
 }
 .conv {
   color: var(--accent);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   padding: 12px 0 4px;
   border-top: 2px solid var(--accent);
   margin-top: 8px;
 }
 .gap {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   text-align: center;
   padding: 10px 0 4px;
 }
@@ -694,6 +686,7 @@ const convLink = (c: Conversation) =>
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: var(--space-1) 0;
 }
 .back {
   margin-left: auto;
@@ -702,16 +695,16 @@ const convLink = (c: Conversation) =>
   position: fixed;
   right: 24px;
   bottom: 64px;
-  border-radius: 16px;
-  padding: 6px 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-4);
+  box-shadow: var(--shadow);
 }
 .syslog {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
-  background: var(--bg);
+  background: var(--surface);
   border-top: 1px solid var(--line);
   z-index: 2;
 }
@@ -719,7 +712,7 @@ const convLink = (c: Conversation) =>
   max-width: 860px;
   margin: 0 auto;
   padding: 6px 16px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   cursor: pointer;
   list-style: none;
@@ -748,7 +741,7 @@ const convLink = (c: Conversation) =>
   color: var(--accent);
 }
 .events .warn {
-  color: var(--warm);
+  color: var(--warn);
 }
 .events .error {
   color: var(--err);

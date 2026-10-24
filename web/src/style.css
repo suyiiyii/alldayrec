@@ -1,12 +1,57 @@
 :root {
+  color-scheme: light dark;
+  --bg: #f4f5f7; /* the page */
+  --surface: #ffffff; /* cards */
   --fg: #1f2330;
-  --muted: #8a8fa3;
-  --line: #eceef3;
-  --accent: #3b3f9e;
-  --bg: #fff;
+  --fg-2: #4a4f63; /* secondary text */
+  --muted: #6b7080; /* grey text, 4.9:1 on white */
+  --line: #dfe2ea; /* table and list dividers only; cards have no border */
+  --accent: #3b3f9e; /* what can be clicked, and 我 */
+  --accent-soft: #e9eafc;
+  --ok: #1f7a4d;
+  --ok-soft: #e3f3ea;
+  --warn: #9a6b1f;
+  --warn-soft: #fbf1dc;
+  --warm: var(--warn); /* the old name */
   --err: #b3261e;
-  --soft: #f5f6fa;
-  --warm: #9a6b1f;
+  --err-soft: #fbe7e5;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --fs-xs: 12px; /* timestamps and small labels only */
+  --fs-sm: 14px;
+  --fs-md: 16px;
+  --fs-lg: 20px;
+  --fs-xl: 24px;
+  --font:
+    system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans CJK SC",
+    "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171e;
+    --surface: #1e2129;
+    --fg: #e8eaf0;
+    --fg-2: #c3c7d3;
+    --muted: #a4a9bb;
+    --line: #2c303b;
+    --accent: #8b8ff0;
+    --accent-soft: #2a2d4a;
+    --ok: #5fcf8f;
+    --ok-soft: #1d3328;
+    --warn: #e2b25b;
+    --warn-soft: #3a2f17;
+    --err: #ff8a80;
+    --err-soft: #3d1f1d;
+    --shadow: none;
+  }
 }
 * {
   box-sizing: border-box;
@@ -15,29 +60,95 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font:
-    15px/1.6 -apple-system,
-    "PingFang SC",
-    sans-serif;
+  font: var(--fs-md) / 1.65 var(--font);
+}
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  line-height: 1.35;
+}
+h1 {
+  font-size: var(--fs-xl);
+}
+h2 {
+  font-size: var(--fs-lg);
+}
+h3 {
+  font-size: var(--fs-md);
 }
 a {
   color: var(--accent);
   text-decoration: none;
 }
-button {
+/* every button is a .btn: 36 px high at least, so a finger can hit it */
+button,
+.btn {
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  min-height: 36px;
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--accent);
-  border-radius: 8px;
-  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3);
   cursor: pointer;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.btn-primary {
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  color: var(--surface);
+}
+.btn-ghost {
+  border-color: transparent;
+  background: none;
+}
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 main {
   max-width: 860px;
   margin: 0 auto;
-  padding: 8px 16px 60px;
+  padding: var(--space-2) var(--space-4) 60px;
+}
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+a.card {
+  display: block;
+  color: inherit;
+}
+a.card:hover {
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--shadow);
 }
 .muted {
   color: var(--muted);
@@ -45,37 +156,67 @@ main {
 .bad {
   color: var(--err);
 }
+/* .tag: the old name of .chip, a pill; .on is the chosen one */
+.chip,
 .tag {
   flex: none;
-  font-size: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 1px 10px;
-  color: #4a4f63;
-  background: var(--bg);
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  font-size: var(--fs-xs);
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-3);
+  color: var(--accent);
+  background: var(--accent-soft);
+  white-space: nowrap;
   cursor: pointer;
 }
+.chip.on,
 .tag.on {
   background: var(--accent);
+  color: var(--surface);
+}
+/* a round tick box: a todo's 完成 */
+.check {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  background: none;
+  color: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.check.on {
   border-color: var(--accent);
-  color: #fff;
+  background: var(--accent);
 }
 .dict {
-  font-size: 11px;
-  color: var(--warm);
-  border: 1px solid #ecd9b0;
-  border-radius: 4px;
-  padding: 0 4px;
+  font-size: var(--fs-xs);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-1);
   margin-right: 6px;
   white-space: nowrap;
 }
+/* nothing here yet: an icon, a line, one button */
 .empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
   color: var(--muted);
   text-align: center;
-  padding: 60px 0;
+  padding: 60px var(--space-4);
 }
 @media (max-width: 600px) {
   main {
-    padding: 4px 12px 40px;
+    padding: var(--space-1) var(--space-3) 40px;
   }
 }

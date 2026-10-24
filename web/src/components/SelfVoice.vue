@@ -87,7 +87,7 @@ async function answer(a: number | "none" | "later") {
       <div class="acts">
         <template v-if="chosen === i">
           <span>确认声音 {{ i + 1 }} 是你？</span>
-          <button class="yes" :disabled="busy" @click="answer(i)">确认</button>
+          <button class="btn-primary" :disabled="busy" @click="answer(i)">确认</button>
           <button :disabled="busy" @click="chosen = null">取消</button>
         </template>
         <button v-else :disabled="busy" @click="chosen = i">这是我</button>
@@ -103,18 +103,16 @@ async function answer(a: number | "none" | "later") {
 </template>
 
 <style scoped>
-.card {
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 10px;
+/* the one card that asks something: on the accent's light ground */
+.self {
+  background: var(--accent-soft);
 }
 .title {
   font-weight: 600;
 }
 .hint {
-  font-size: 13px;
-  color: #4a4f63;
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
   margin: 4px 0 8px;
 }
 .cand {
@@ -122,7 +120,7 @@ async function answer(a: number | "none" | "later") {
   padding: 8px 0;
 }
 .meta {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--muted);
 }
 .meta b {
@@ -133,7 +131,6 @@ async function answer(a: number | "none" | "later") {
   width: 100%;
   text-align: left;
   margin-top: 6px;
-  font-size: 14px;
   color: var(--fg);
 }
 .clip.playing {
@@ -146,10 +143,6 @@ async function answer(a: number | "none" | "later") {
   gap: 8px;
   align-items: center;
   margin-top: 8px;
-  font-size: 13px;
-}
-.yes {
-  background: var(--accent);
-  color: #fff;
+  font-size: var(--fs-sm);
 }
 </style>

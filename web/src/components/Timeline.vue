@@ -45,26 +45,26 @@ defineEmits<{ jump: [start: string] }>();
   gap: 8px;
 }
 .at {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 .badge {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 0 6px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-2);
 }
 ul {
   margin: 2px 0 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .dec {
   color: var(--accent);
 }
 .todo .who {
-  color: var(--warm);
+  color: var(--warn);
 }
 .q {
   color: var(--muted);

@@ -57,25 +57,25 @@ const t = today();
   gap: 3px;
 }
 .wd {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   text-align: center;
 }
 .cell {
   position: relative;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 2px 0 0;
-  min-height: 38px;
+  min-height: 40px;
   display: flex;
   flex-direction: column;
   align-items: center;
   color: var(--fg);
-  background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 22%), var(--bg));
+  background: color-mix(in srgb, var(--accent) calc(var(--heat, 0) * 22%), var(--surface));
 }
 .cell.empty {
-  color: #c9ccd8;
-  background: var(--bg);
+  color: var(--muted);
+  background: var(--surface);
   cursor: default;
 }
 .cell.today .n {
@@ -86,11 +86,11 @@ const t = today();
   border-color: var(--accent);
 }
 .n {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.3;
 }
 .count {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
@@ -98,7 +98,7 @@ const t = today();
   min-height: 58px;
 }
 .min {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 </style>

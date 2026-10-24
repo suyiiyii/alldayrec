@@ -28,32 +28,37 @@ defineProps<{ inApp?: boolean }>();
 header {
   position: sticky;
   top: 0;
-  background: var(--bg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
   border-bottom: 1px solid var(--line);
   z-index: 2;
 }
 .bar {
   max-width: 860px;
   margin: 0 auto;
-  padding: 12px 16px;
+  padding: 0 var(--space-4);
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 16px;
+  align-items: center;
+  column-gap: var(--space-4);
 }
 h1 {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   margin: 0;
   color: var(--accent);
   white-space: nowrap;
 }
 nav {
   display: flex;
-  gap: 16px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
+/* each link is as tall as a finger: 44 px */
 nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--space-2);
   color: var(--muted);
 }
 nav a.on {
@@ -67,16 +72,22 @@ nav a.on {
 :global(.in-app header.bare) {
   display: none;
 }
+/* a phone: the name on a line of its own, smaller, the links under it */
 @media (max-width: 600px) {
   h1 {
-    display: none;
-  }
-  nav {
-    gap: 12px;
-    font-size: 13px;
+    flex-basis: 100%;
+    font-size: var(--fs-md);
+    line-height: 22px;
+    padding-top: var(--space-2);
   }
   .bar {
-    padding: 8px 12px;
+    padding: 0 var(--space-3);
+  }
+  nav {
+    margin-left: -6px;
+  }
+  nav a {
+    padding: 0 6px;
   }
 }
 </style>

@@ -342,7 +342,6 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
 }
 h2 {
   margin: 0;
-  font-size: 18px;
 }
 .ranges {
   display: flex;
@@ -350,11 +349,8 @@ h2 {
   gap: 6px;
 }
 .card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
   margin: 12px 0;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .head {
   display: flex;
@@ -366,14 +362,14 @@ h2 {
 .legend {
   display: flex;
   gap: 16px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .legend i {
   display: inline-block;
   width: 14px;
   vertical-align: middle;
   margin-right: 4px;
-  border-top: 1px solid var(--warm);
+  border-top: 1px solid var(--warn);
 }
 .legend i.dashed {
   border-top: 1px dashed var(--muted);
@@ -384,7 +380,7 @@ h2 {
   align-items: baseline;
   gap: 2px 10px;
   padding: 3px 0;
-  border-top: 1px solid var(--soft);
+  border-top: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
 }
 .at,
@@ -397,7 +393,7 @@ h2 {
   overflow-wrap: anywhere; /* a crash's class and frames are one long word */
 }
 .ev.warn b {
-  color: var(--warm);
+  color: var(--warn);
 }
 .ev.bad b,
 .ev.bad .detail {

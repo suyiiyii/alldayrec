@@ -11,6 +11,7 @@ alldayrec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 | `firmware/devkit/src/lib/battery/` | Battery driver, Copyright 2024 Marcus Alexander Tjomsaas | Apache-2.0 (below) |
 | `firmware/devkit/src/sdhc_spi.c` | Zephyr's `drivers/sdhc/sdhc_spi.c` from nRF Connect SDK v2.7.0, Copyright 2022,2024 NXP; changed, each change marked `LR:` | Apache-2.0 (below) |
 | `server/vad_postprocessor.py` | [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) 0.0.2 `fireredvad/core/stream_vad_postprocessor.py`, unchanged, Copyright 2026 Xiaohongshu | Apache-2.0 (below) |
+| `web/src/components/Icon.vue` | The SVG paths of 24 [Lucide](https://lucide.dev) icons, lucide-static 0.460.0, unchanged | ISC (below) |
 
 ## Model files (not in the repository; the server downloads them, `server/infer.py`)
 
@@ -230,4 +231,24 @@ Firmware binaries (UF2 or DFU zip) contain Opus and the nRF Connect SDK: distrib
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
+
+## ISC License (Lucide)
+
+```text
+ISC License
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```

@@ -165,10 +165,10 @@ async function detach(g: Speaker, v: Voice) {
             @keyup.enter="name(g, newName, title(g))"
           />
           <button :disabled="busy" @click="name(g, newName, title(g))">保存</button>
-          <button class="ghost" @click="cancel">取消</button>
+          <button class="btn-ghost" @click="cancel">取消</button>
         </template>
         <button v-else @click="edit(g.id)">{{ g.name ? "改名" : "起名" }}</button>
-        <button class="ghost" @click="expand(g)">
+        <button class="btn-ghost" @click="expand(g)">
           {{ open === g.id ? "收起" : `对话列表（${g.count}）` }}
         </button>
       </div>
@@ -211,7 +211,9 @@ async function detach(g: Speaker, v: Voice) {
               >· {{ v.label }} · {{ v.n }} 句 · 同场 {{ v.with.join("、") || "无" }}</span
             >
           </td>
-          <td><button class="ghost mini" :disabled="busy" @click="detach(g, v)">不是</button></td>
+          <td>
+            <button class="btn-ghost mini" :disabled="busy" @click="detach(g, v)">不是</button>
+          </td>
         </tr>
       </table>
     </section>
@@ -229,7 +231,7 @@ main {
 .count,
 .meta {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .tabs {
   display: flex;
@@ -238,13 +240,8 @@ main {
 }
 .tabs button.on {
   background: var(--accent);
-  color: #fff;
-}
-.card {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  border-color: var(--accent);
+  color: var(--surface);
 }
 .head {
   display: flex;
@@ -253,7 +250,7 @@ main {
   flex-wrap: wrap;
 }
 .head b {
-  font-size: 16px;
+  font-size: var(--fs-md);
 }
 .head b.anon {
   color: var(--muted);
@@ -273,7 +270,6 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
 }
 .clip.playing {
   border-color: var(--accent);
@@ -282,18 +278,18 @@ main {
 .points {
   margin: 6px 0 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .suggest {
-  background: var(--soft, rgba(0, 0, 0, 0.03));
-  border-radius: 8px;
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
   padding: 8px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .members {
   width: 100%;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   border-collapse: collapse;
 }
 .members td {
@@ -305,28 +301,24 @@ main {
   white-space: nowrap;
 }
 .mini {
-  font-size: 12px;
-  padding: 1px 6px;
-}
-.ghost {
-  background: none;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 6px;
 }
 .flash {
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .error {
-  color: #c33;
-  font-size: 13px;
-}
-.empty {
-  color: var(--muted);
+  color: var(--err);
+  font-size: var(--fs-sm);
 }
 .more {
   width: 100%;
 }
 input {
-  font-size: 14px;
+  font-size: var(--fs-sm);
   padding: 4px 8px;
+  min-height: 36px;
 }
 </style>

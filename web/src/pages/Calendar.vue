@@ -24,7 +24,7 @@ const open = (day: string) => router.push({ path: "/conversations", query: { day
 <template>
   <AppHeader />
   <main>
-    <section v-for="[m, t] in months" :key="m" class="month">
+    <section v-for="[m, t] in months" :key="m" class="month card">
       <h2>
         {{ m.replace("-", " 年 ") }} 月
         <span
@@ -43,12 +43,11 @@ const open = (day: string) => router.push({ path: "/conversations", query: { day
   margin: 12px 0 24px;
 }
 h2 {
-  font-size: 15px;
   margin: 0 0 8px;
 }
 h2 span {
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   margin-left: 8px;
 }

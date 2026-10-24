@@ -252,7 +252,7 @@ async function alias(name: string, of: string) {
             <button :disabled="saving" @click="rename(m.from, m.to)">合并到 {{ m.to }}</button>
           </li>
           <li v-if="sug!.merge.length > 5 && !allMerges">
-            <button class="ghost" @click="allMerges = true">再显示 {{ sug!.merge.length - 5 }} 条合并建议</button>
+            <button class="btn-ghost" @click="allMerges = true">再显示 {{ sug!.merge.length - 5 }} 条合并建议</button>
           </li>
         </ul>
       </div>
@@ -268,7 +268,7 @@ async function alias(name: string, of: string) {
       </div>
 
       <template v-if="s?.status === 'done'">
-        <div v-if="s.summary" class="summary">{{ s.summary }}</div>
+        <div v-if="s.summary" class="summary card">{{ s.summary }}</div>
         <template v-if="s.people?.length">
           <h3>各人要点</h3>
           <ul class="items">
@@ -345,10 +345,10 @@ async function alias(name: string, of: string) {
           <button :disabled="regenerating" @click="regen">重新生成</button>
         </div>
       </template>
-      <div v-else-if="s?.status === 'failed'" class="summary bad">
+      <div v-else-if="s?.status === 'failed'" class="summary card bad">
         摘要生成失败：{{ s.error }} <button :disabled="regenerating" @click="regen">重新生成</button>
       </div>
-      <div v-else class="summary muted">摘要生成中…</div>
+      <div v-else class="summary card muted">摘要生成中…</div>
       <p v-if="regenError" class="bad" role="alert">{{ regenError }}</p>
 
       <div class="note">
@@ -380,13 +380,9 @@ async function alias(name: string, of: string) {
 
 <style scoped>
 h2 {
-  font-size: 20px;
   margin: 16px 0 4px;
 }
 h3 {
-  font-size: 14px;
-  color: var(--muted);
-  font-weight: 600;
   margin: 22px 0 6px;
 }
 .tags {
@@ -397,9 +393,6 @@ h3 {
   padding-top: 8px;
 }
 .summary {
-  background: var(--soft);
-  border-radius: 10px;
-  padding: 12px 14px;
   margin-top: 12px;
 }
 ul.items {
@@ -414,31 +407,31 @@ ul.items > li {
 .points {
   margin: 2px 0 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .who {
   color: var(--accent);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   margin-right: 6px;
 }
 .due {
-  color: var(--warm);
-  font-size: 12px;
+  color: var(--warn);
+  font-size: var(--fs-xs);
   margin-left: 6px;
 }
 .quote {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 .at {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
 }
 .topic ul {
   margin: 2px 0 0;
   padding-left: 18px;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 .foot {
   margin-top: 12px;
@@ -452,31 +445,24 @@ ul.items > li {
   align-items: center;
   gap: 6px;
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .rename input {
-  font: inherit;
-  border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-color: var(--accent);
   padding: 4px 10px;
   width: 9em;
-  outline: none;
 }
 .flash {
   margin-top: 10px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--accent);
 }
 .note {
   margin-top: 12px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 .note textarea {
-  font: inherit;
   width: 100%;
-  box-sizing: border-box;
-  border: 1px solid var(--line);
-  border-radius: 8px;
   padding: 6px 10px;
   resize: vertical;
 }
@@ -488,14 +474,15 @@ ul.items > li {
 }
 .sug button {
   margin-left: 6px;
-  font-size: 12px;
 }
 .sug button.play {
   margin: 0 4px 0 0;
-  padding: 0 6px;
+  min-width: 32px;
+  padding: 0;
 }
 .hint {
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
 </style>
