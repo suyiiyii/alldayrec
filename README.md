@@ -136,7 +136,7 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 | `LR-X1` | Seeed XIAO nRF52840 Sense（自带麦克风）+ SD 模块 + 电池 |
 | `LR-P3` | ProMicro nRF52840（兼容 nice!nano）+ PDM 麦克风 + SD 模块 + 开关，装在 3D 打印外壳里 |
 
-固件、接线、构建（nRF Connect SDK v2.7.0）和空中升级：[`firmware/devkit/README.md`](firmware/devkit/README.md)（英文）。新板子可以用 [`firmware/selftest`](firmware/selftest) 检查。固件最初基于 [Omi](https://github.com/BasedHardware/omi) devkit。
+固件、接线、构建（nRF Connect SDK v2.7.0）和空中升级：[`firmware/devkit/README.md`](firmware/devkit/README.md)（英文）。新板子可以用 [`firmware/selftest`](firmware/selftest) 检查。LR-P3 的零件、接线、焊接顺序和 3D 打印外壳（STL、STEP 和源码）见 [`hardware/lr-p3/README.md`](hardware/lr-p3/README.md)。固件最初基于 [Omi](https://github.com/BasedHardware/omi) devkit。
 
 ## 隐私和法律
 

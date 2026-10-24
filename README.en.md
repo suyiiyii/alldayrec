@@ -137,7 +137,7 @@ The phone alone is enough. For all-day wear there is an open BLE recorder: an nR
 | `LR-X1` | Seeed XIAO nRF52840 Sense (built-in mic) + SD module + battery |
 | `LR-P3` | ProMicro nRF52840 (nice!nano compatible) + PDM mic + SD module + switch, in a printed case |
 
-Firmware, wiring, build (nRF Connect SDK v2.7.0) and over-the-air updates: [`firmware/devkit/README.md`](firmware/devkit/README.md). New boards can be checked with [`firmware/selftest`](firmware/selftest). The firmware started from the [Omi](https://github.com/BasedHardware/omi) devkit.
+Firmware, wiring, build (nRF Connect SDK v2.7.0) and over-the-air updates: [`firmware/devkit/README.md`](firmware/devkit/README.md). New boards can be checked with [`firmware/selftest`](firmware/selftest). LR-P3's parts, wiring, soldering order and printed case (STL, STEP and source) are in [`hardware/lr-p3/README.md`](hardware/lr-p3/README.md) (Chinese, with an English summary). The firmware started from the [Omi](https://github.com/BasedHardware/omi) devkit.
 
 ## Privacy and the law
 
