@@ -28,8 +28,8 @@ void main() {
     supportedLocales: AppLocalizations.supportedLocales,
     localeResolutionCallback: (system, _) => appLocale(system),
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(colorSchemeSeed: const Color(0xff3b4cca), useMaterial3: true),
-    darkTheme: ThemeData(colorSchemeSeed: const Color(0xff3b4cca), brightness: Brightness.dark, useMaterial3: true,
+    theme: ThemeData(colorSchemeSeed: const Color(0xff0f6569), useMaterial3: true),
+    darkTheme: ThemeData(colorSchemeSeed: const Color(0xff0f6569), brightness: Brightness.dark, useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xff15171e)),  // the web's dark --bg, so page and chrome are one surface
     themeMode: ThemeMode.system,
   ));
