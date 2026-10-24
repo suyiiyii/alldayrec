@@ -1,4 +1,4 @@
-// live-record client. Native code keeps the microphone open (or follows the BLE recorder), cuts the stream into pieces
+// alldayrec client. Native code keeps the microphone open (or follows the BLE recorder), cuts the stream into pieces
 // whose length follows the app state and uploads them in order: on Android RecorderService.kt + Ble.kt (Opus/Ogg,
 // START_STICKY, survives a kill), on iOS Recorder.swift + Ble.swift (Opus/Ogg, `audio` and `bluetooth-central`
 // background modes). This side is settings, status and the pages in a WebView.
