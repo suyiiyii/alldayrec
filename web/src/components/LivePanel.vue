@@ -3,6 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import Icon from "./Icon.vue";
 import Timeline from "./Timeline.vue";
 import { t } from "../i18n";
+import { speakerLabel } from "../lib/speakers";
 import {
   errorTitle,
   hhmm,
@@ -15,26 +16,30 @@ import {
 
 // The live analysis of the conversation going on, as a card: the newest topic is the headline (always in sight), the
 // topics under it (a tap on the head folds them away on a phone; a wide screen always shows them); shown only while one
-// goes on. mini: the headline line alone (时间线's live card). The page owns the data: the status, the analyses.
-// doneTo: up to where a device's rows are final (the live page knows it from final messages; else the status's)
+// goes on. mini: the headline and the newest topic's last few points (时间线's live card). The page owns the data: the
+// status, the analyses. doneTo: up to where a device's rows are final (the live page knows it from final messages; else
+// the status's). device: the one to follow, if it is in a conversation (the live card's caption on top)
 const props = defineProps<{
   status: Status | null;
   lives: LiveState[];
   doneTo?: (device: string) => string;
   mini?: boolean;
+  device?: string;
 }>();
 defineEmits<{ jump: [start: string] }>();
 const doneTo = (device: string) =>
   props.doneTo?.(device) ?? props.status?.devices?.find((d) => d.device === device)?.done_to ?? "";
 
-// The device: of the recording ones, the one whose conversation going on spoke last (not the one analyzed
-// last: a conversation under a minute has no analysis yet); with none talking, the one whose audio came in last
+// The device: the one given, if it is in a conversation; else of the recording ones, the one whose conversation going on
+// spoke last (not the one analyzed last: a conversation under a minute has no analysis yet); with none talking, the one
+// whose audio came in last
 const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation is analyzed by itself from this much speech on
 const barDev = computed(() => {
   const ds = props.status?.devices ?? [];
-  const talking = ds
-    .filter((d) => d.recording && d.conversation)
-    .reduce<DeviceStatus | null>(
+  const going = ds.filter((d) => d.recording && d.conversation);
+  const talking =
+    going.find((d) => d.device === props.device) ??
+    going.reduce<DeviceStatus | null>(
       (a, d) => (a && a.conversation!.end > d.conversation!.end ? a : d),
       null,
     );
@@ -74,6 +79,24 @@ const headline = computed(() => {
       n: MIN_SPEECH_S / 60,
     });
   return t("livePanel.waiting");
+});
+// mini: the newest topic's last 3 points, decisions and to-dos, in the order the live page lists them
+const MINI_ITEMS = 3;
+const items = computed(() => {
+  const tp = current.value?.topics.at(-1);
+  if (!tp) return [];
+  return [
+    ...tp.points.map((p) => ({ cls: "", text: p })),
+    ...tp.decisions.map((d) => ({ cls: "dec", text: t("topicTimeline.decided", { d }) })),
+    ...tp.todos.map((x) => ({
+      cls: "todo",
+      text:
+        t("topicTimeline.todo") +
+        (x.who ? speakerLabel(x.who) : t("common.unknown")) +
+        " " +
+        x.what,
+    })),
+  ].slice(-MINI_ITEMS);
 });
 // 立即总结 / 立即更新: the analysis now, with speech it has not seen; the button rests 10 s after a press (double taps)
 const asking = ref(false),
@@ -180,6 +203,9 @@ watch(
       <b>{{ headline }}</b>
       <span v-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</span>
       <span v-else-if="sub" class="muted">{{ sub }}</span>
+      <ul v-if="items.length" class="items">
+        <li v-for="(x, i) in items" :key="i" :class="x.cls">{{ x.text }}</li>
+      </ul>
     </div>
     <button
       v-if="talk"
@@ -258,13 +284,12 @@ watch(
 /* 时间线's live card: the headline on one line, its time under it, the button on the right */
 .mini {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
 }
 .spark {
   flex: none;
   color: var(--accent);
-  align-self: flex-start;
   margin-top: 4px;
 }
 .mini-text {
@@ -276,6 +301,24 @@ watch(
 }
 .mini-text span {
   font-size: var(--fs-xs);
+}
+/* one line each: the card keeps its height, the rest is on the live page */
+.items {
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style-position: inside; /* an outside bullet is clipped with the line's overflow */
+  font-size: var(--fs-sm);
+}
+.items li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.items .dec {
+  color: var(--accent);
+}
+.items .todo {
+  color: var(--warn);
 }
 .ask {
   flex: none;
