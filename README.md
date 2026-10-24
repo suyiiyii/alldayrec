@@ -58,13 +58,11 @@ BLE recorder ──BLE──▶ phone app ──HTTPS──▶ server (FastAPI) 
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
-cp .env.example .env    # fill in DASHSCOPE_API_KEY and LLM_API_KEY (the same key works with the example LLM settings)
+cp .env.example .env    # 填 DASHSCOPE_API_KEY 和 LLM_API_KEY（用示例的大模型设置时两者是同一把 key）
 mkdir -p data && echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "/data/main", "recordings": "/data/main/recordings"}]' > data/tenants.json && chmod 600 data/tenants.json
 docker compose up -d
-docker compose logs -f  # the first start downloads the model files (about 55 MB), sha256-checked
+docker compose logs -f  # 首次启动下载模型文件（约 55 MB），校验 sha256
 ```
-
-`.env` 里要填 `DASHSCOPE_API_KEY` 和 `LLM_API_KEY`（用示例的大模型设置时两者填同一把 key）。首次启动会下载模型文件（约 55 MB），并校验 sha256。
 
 用 `ENGINE=local` 时，第一段音频到达时服务还要再下载约 136 MB（sherpa-onnx 的模型包），所以第一条转写要等一分钟左右。
 
@@ -82,13 +80,11 @@ docker compose logs -f  # the first start downloads the model files (about 55 MB
 
 ```bash
 git clone https://github.com/suyiiyii/alldayrec && cd alldayrec
-cp .env.example .env    # fill in the keys, and MODELS_DIR=<an absolute, writable directory>
-(cd web && pnpm install && pnpm build)    # -> server/static/dist
+cp .env.example .env    # 填 key，以及 MODELS_DIR=<一个可写目录的绝对路径>
+(cd web && pnpm install && pnpm build)    # 网页构建到 server/static/dist
 echo '[{"id": "main", "token": "'$(openssl rand -hex 16)'", "data": "'$PWD/data/main'", "recordings": "'$PWD/data/main/recordings'"}]' > tenants.json && chmod 600 tenants.json
 cd server && uv sync && set -a && . ../.env && set +a && uv run python server.py
 ```
-
-`.env` 里除了 key，还要把 `MODELS_DIR` 设成一个可写目录的绝对路径；网页构建到 `server/static/dist`。
 
 `tenants.json` 列出服务为哪些人服务：每人一条，各有自己的 token、数据目录和录音目录（`server/tenant.py`）。只有一条且 token 为空时不做认证：这样的服务只能放在 127.0.0.1 上。
 
@@ -154,13 +150,11 @@ uv run --with pytest pytest -q
 # web/
 pnpm install --frozen-lockfile && pnpm build
 for f in *.check.ts; do node --experimental-strip-types "$f" || exit 1; done
-# app/ (use the pub host recorded in pubspec.lock)
+# app/（用 pubspec.lock 里记录的 pub 源）
 PUB_HOSTED_URL=https://pub.flutter-io.cn flutter pub get --enforce-lockfile
 flutter analyze --no-pub && flutter test --no-pub -j 4
-# Android JVM and Swift checks: .github/workflows/app.yml; firmware host checks: .github/workflows/firmware-check.yml
+# 安卓 JVM 和 Swift 检查见 .github/workflows/app.yml；固件的主机端检查见 .github/workflows/firmware-check.yml
 ```
-
-app 的命令要用 `pubspec.lock` 里记录的 pub 源；安卓 JVM 和 Swift 检查见 `.github/workflows/app.yml`，固件的主机端检查见 `.github/workflows/firmware-check.yml`。
 
 代码边界、CI 流程、发布构建及其密钥：[CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
@@ -169,15 +163,13 @@ app 的命令要用 `pubspec.lock` 里记录的 pub 源；安卓 JVM 和 Swift �
 除了 Docker，服务也可以作为 systemd 单元跑在 Linux 主机上，从 `origin/main` 的干净检出通过 ssh 部署。`server/deploy.sh` 会构建网页、拷贝发布包、备份每个实例的代码和每个租户的 `live.db`、安装（`uv sync`）、检查模型文件是否就位、逐个重启实例并检查；`server/deploy.sh check` 只读取正在运行的状态，`server/deploy.sh rollback` 把上一次部署替换掉的东西放回去。
 
 ```bash
-export LR_DEPLOY_HOST=user@host                  # required: the ssh / scp target (your ssh config and agent)
-export LR_DEPLOY_SHELL='sudo bash -s'            # default `bash -s`: the remote shell the script is piped into, as root
-export LR_INSTANCES='/opt/alldayrec:alldayrec'   # the default: <dir>:<systemd unit> pairs, space separated, test first
-server/deploy.sh                                 # or: server/deploy.sh check | rollback
-server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk   # the APK phones are offered at /app.apk
-server/tenants.sh add <id>                       # a new tenant (its own token and dirs) of the last instance
+export LR_DEPLOY_HOST=user@host                  # 必填：ssh / scp 的目标（用你自己的 ssh 配置和 agent）
+export LR_DEPLOY_SHELL='sudo bash -s'            # 默认 `bash -s`：脚本通过管道送进去、以 root 运行的远程 shell
+export LR_INSTANCES='/opt/alldayrec:alldayrec'   # 默认值：<目录>:<systemd 单元>，空格分隔，测试实例在前
+server/deploy.sh                                 # 或 server/deploy.sh check | rollback
+server/apk_release.sh app/build/app/outputs/flutter-apk/app-release.apk   # 发布手机从 /app.apk 下载的 APK
+server/tenants.sh add <id>                       # 给最后一个实例加一个新租户（自己的 token 和目录）
 ```
-
-各变量的含义：`LR_DEPLOY_HOST` 必填，是 ssh / scp 的目标（用你自己的 ssh 配置和 agent）；`LR_DEPLOY_SHELL` 是脚本通过管道送进去、以 root 运行的远程 shell，默认 `bash -s`；`LR_INSTANCES` 是用空格分隔的 `<目录>:<systemd 单元>` 列表，测试实例排在前面，默认 `/opt/alldayrec:alldayrec`。`server/apk_release.sh` 发布在 `/app.apk` 提供给手机的 APK，`server/tenants.sh add <id>` 给最后一个实例加一个新租户（有自己的 token 和目录）。
 
 每个实例是一个目录，里面有它的 `.env` 和 `tenants.json`，由对应的 systemd 单元运行。scp 会把发布包和 APK 放到主机上登录用户的 home 目录；如果远程 shell 的 `$HOME` 是另一个目录，用 `LR_TGZ` 和 `LR_APK` 指定它们在那里的路径。细节见每个脚本开头的注释。
 
