@@ -15,7 +15,7 @@ const dot = computed(() => speakerColor(c.summary?.tags?.[0]));
     <span class="dot" :style="{ background: dot }" />
     <RouterLink class="card" :class="{ media }" :to="'/c/' + c.id">
       <div class="meta">
-        {{ media ? "媒体 · " : "" }}{{ c.kind === "口述" ? "口述 · " : "" }}{{ hhmm(c.start) }}–{{
+        {{ media ? "媒体 · " : "" }}{{ hhmm(c.start) }}–{{
           hhmm(c.end)
         }}
         · {{ minutes(c) }} 分钟 · {{ (c.participants || []).map(speakerLabel).join("、") || "—" }}

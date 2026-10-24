@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS drafts (          -- the draft layer's rows (only whi
 CREATE INDEX IF NOT EXISTS drafts_start ON drafts(start);
 CREATE TABLE IF NOT EXISTS conversations (
     id TEXT PRIMARY KEY, start TEXT NOT NULL, end TEXT NOT NULL, participants TEXT NOT NULL, speech_s REAL,
-    sentences INTEGER NOT NULL, kind TEXT, source TEXT, dictation_share REAL, device TEXT);  -- device: its sentences' source
+    sentences INTEGER NOT NULL, source TEXT, device TEXT);  -- device: its sentences' source
 CREATE INDEX IF NOT EXISTS conversations_start ON conversations(start);
 CREATE TABLE IF NOT EXISTS summaries (        -- body: the summary as the API returns it
     conversation TEXT PRIMARY KEY, status TEXT NOT NULL, prompt_version INTEGER, body TEXT NOT NULL);
@@ -105,6 +105,9 @@ def init():
             conn().execute(f"ALTER TABLE pieces ADD COLUMN {col}")
     if "level" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 10-14: how loud each voice is
         conn().execute("ALTER TABLE voices ADD COLUMN level REAL")
+    for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
+        if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
+            conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")
 
 
 def conn() -> sqlite3.Connection:
@@ -203,7 +206,7 @@ def has_text(lo: str, hi: str, q: str, source: str | None = None) -> bool:
 
 # conversations and summaries
 
-C_COLS = ("id", "start", "end", "participants", "speech_s", "sentences", "kind", "source", "dictation_share", "device")
+C_COLS = ("id", "start", "end", "participants", "speech_s", "sentences", "source", "device")
 
 
 def _conversation(r: sqlite3.Row) -> dict:
@@ -238,7 +241,7 @@ def _metadata_contains(fields: str | None, q: str) -> bool:
     return q in json.dumps(meta, ensure_ascii=False).lower()
 
 
-def search(q: str = "", tag: str = "", kind: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30) -> list[dict]:
+def search(q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30) -> list[dict]:
     """Closed conversations newest first, with metadata/transcript filters and start in [after, before).
 
     JSON1 handles membership/extraction; Python retains the metadata search's Unicode
@@ -250,7 +253,6 @@ def search(q: str = "", tag: str = "", kind: str = "", who: str = "", after: str
         (before, "c.start < ?"),
         (who, "EXISTS (SELECT 1 FROM json_each(c.participants) WHERE value = ?)"),
         (tag, "EXISTS (SELECT 1 FROM json_each(s.body, '$.tags') WHERE value = ?)"),
-        (kind, "coalesce(c.kind, '对话') = ?"),
     ):
         if value:
             clauses.append(clause)

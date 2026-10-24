@@ -2,7 +2,7 @@
 
 | Tool | Description (as sent to the agent) | Arguments |
 |---|---|---|
-| `calendar` | 每天的对话段数（对话、口述分开）和说话分钟数，查库的准确数字：数段数、哪天最多这类问题用它，不要自己数 day 的结果。不给 month 时列每个月的总数。 | `month?` (string): YYYY-MM<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
+| `calendar` | 每天的对话段数和说话分钟数，查库的准确数字：数段数、哪天最多这类问题用它，不要自己数 day 的结果。不给 month 时列每个月的总数。 | `month?` (string): YYYY-MM<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `day` | 某一天开始的全部对话：每段的 id、时间、参与者、标题、摘要、待办、决定。 | `date` (string): YYYY-MM-DD<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `search` | 按关键词找对话，最新的在前：q 是一个子串，原样匹配标题、摘要、标签、待办、决定，摘要里没有时再匹配原文；不分词，一次只放一个词，搜不到就换同义词、同音字再搜。可按参与者 who、标签 tag、开始日期 after（含）/ before（不含）过滤。 | `q?` (string)<br>`who?` (string)<br>`tag?` (string)<br>`after?` (string): YYYY-MM-DD<br>`before?` (string): YYYY-MM-DD，或上次结果末尾给的时间<br>`limit?` (integer): 最多几段，默认 20，最多 40<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `conversation` | 一段对话的完整摘要：每个人说了什么、话题、待办（带原话）、让 AI 做的事、决定、标签；不带原文，原文用 transcript。 | `id` (string)<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |

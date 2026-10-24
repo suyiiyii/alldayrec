@@ -23,7 +23,7 @@ import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calend
 import { useSocket, useWatch } from "../lib/socket";
 
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
-// one tag and the kind filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
+// one tag filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
 // Pinned on top while it shows today unfiltered: the conversation going on (the live card) and what is due. Each past
 // day opens with its recap, yesterday's unfolded. A brand-new instance gets the three steps to start instead.
 const PAGE = 30;
@@ -31,7 +31,6 @@ const route = useRoute(),
   router = useRouter();
 const q = ref(String(route.query.q ?? "")),
   tag = ref(String(route.query.tag ?? "")),
-  kind = ref(String(route.query.kind ?? "对话")),
   day = ref(String(route.query.day ?? ""));
 // the day of the topmost card on screen, shown by the picker
 const seen = ref(""),
@@ -123,7 +122,6 @@ const search = (before: string) =>
   get<Conversation[]>("/api/search", {
     q: q.value,
     tag: tag.value,
-    kind: kind.value,
     before: before || (day.value ? shiftDay(day.value, 1) + "T00:00:00" : ""),
     limit: String(PAGE),
   });
@@ -133,7 +131,6 @@ async function restart() {
     query: {
       ...(q.value && { q: q.value }),
       ...(tag.value && { tag: tag.value }),
-      ...(kind.value !== "对话" && { kind: kind.value }),
       ...(day.value && { day: day.value }),
     },
   });
@@ -185,7 +182,7 @@ watch(q, () => {
   clearTimeout(timer);
   timer = window.setTimeout(restart, 300);
 });
-watch([tag, kind, day], restart);
+watch([tag, day], restart);
 watch(day, () => window.scrollTo(0, 0));
 const pick = (d: string) => (day.value = d === today() ? "" : d);
 
@@ -262,20 +259,6 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <input v-model.trim="q" type="search" placeholder="搜索标题、摘要、待办、原文" />
           <button :disabled="!q || asking" @click="askAI(q)">问 AI</button>
         </div>
-        <div class="kinds">
-          <button
-            v-for="[k, label] in [
-              ['对话', '对话'],
-              ['口述', '口述'],
-              ['', '全部'],
-            ]"
-            :key="k"
-            :class="{ on: kind === k }"
-            @click="kind = k"
-          >
-            {{ label }}
-          </button>
-        </div>
         <div class="tags">
           <button
             v-for="[t, n] in tags"
@@ -318,7 +301,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
       <SelfVoice v-if="top" ref="selfCard" />
       <section v-for="g in days" :key="g.day">
         <h2 class="day" :data-day="g.day">
-          {{ dayLabel(g.day) }} · {{ g.convs.length }} 段{{ kind === "口述" ? "口述" : "对话" }}
+          {{ dayLabel(g.day) }} · {{ g.convs.length }} 段对话
         </h2>
         <RecapCard
           v-if="!q && !tag && recaps[g.day]"
@@ -328,7 +311,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         <ConversationItem v-for="c in g.convs" :key="c.id" :c="c" />
       </section>
       <template v-if="done && !items.length && !reply && !asking">
-        <div v-if="q || tag || day || kind !== '对话'" class="empty">
+        <div v-if="q || tag || day" class="empty">
           <Icon name="search" :size="48" />没有匹配的对话
         </div>
         <div v-else-if="!going" class="empty">
@@ -402,23 +385,6 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 }
 .find input:focus {
   border-color: var(--accent);
-}
-.kinds {
-  display: inline-flex;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  margin-top: 8px;
-}
-.kinds button {
-  border: 0;
-  border-radius: 0;
-  padding: 0 14px;
-  color: var(--fg-2);
-}
-.kinds button.on {
-  background: var(--accent);
-  color: var(--surface);
 }
 .tags {
   display: flex;

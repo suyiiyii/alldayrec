@@ -24,7 +24,7 @@ def fake():
         db.insert_conversation(c, dict(id=CID, start="2026-10-01T10:00:00.000", end="2026-10-01T10:30:00.000", participants=["我", "老王"],
                                        speech_s=1200, sentences=len(rows), device="phone"))
         db.insert_conversation(c, dict(id="c20261001150000", start="2026-10-01T15:00:00.000", end="2026-10-01T15:05:00.000",
-                                       participants=["我"], speech_s=60, sentences=1, kind="口述", device="phone"))
+                                       participants=["我"], speech_s=60, sentences=1, device="phone"))
         db.insert_sentences(c, rows + [dict(id="x", start="2026-10-01T10:00:01.000", end="2026-10-01T10:00:02.000", speaker="我",
                                             text="另一台也录到了", source="LR-X1-567E")])
         db.put_summary({"conversation": CID, "status": "done", "prompt_version": 8, "title": "存储方案", "summary": "定了按小时存。",
@@ -89,10 +89,10 @@ def test_protocol():
 def test_tools_and_paging():
     fake()
     text, bad = tool("day", date="2026-10-01")
-    assert not bad and "共 2 段，对话 1，口述 1" in text and f"`{CID}` 10-01 10:00-10:30 我、老王 **存储方案**" in text and "待办：改存储" in text, text
+    assert not bad and "共 2 段\n" in text and f"`{CID}` 10-01 10:00-10:30 我、老王 **存储方案**" in text and "待办：改存储" in text, text
     assert tool("day", date="10-01") == ("date 要写成 YYYY-MM-DD，不是 '10-01'", True)
     assert "2026-10：1 天有对话，共 2 段，说话 21 分钟" in tool("calendar")[0]
-    assert "10-01 口述 1 段，对话 1 段，说话 21 分钟" in tool("calendar", month="2026-10")[0]
+    assert "10-01 2 段，说话 21 分钟" in tool("calendar", month="2026-10")[0]
     assert tool("calendar", month="10")[1]
     assert CID in tool("search", q="按小时")[0] and "搜到 0 段" in tool("search", q="按小时", before="2026-10-01")[0]
     assert "搜到 1 段（只列了最新的 1 段；更早的：before 设成 2026-10-01T15:00 再搜）" in tool("search", limit=0)[0], "limit at least 1"

@@ -51,7 +51,7 @@ def digest(convs: list[dict]) -> str:
         if s.get("status") != "done" or not s.get("title"):
             continue
         lines = [f"## [{c['id']}] {c['start'][:16].replace('T', ' ')}–{c['end'][11:16]} {s['title']}"
-                 f"（参与：{'、'.join(c['participants']) or '—'}；{c.get('kind') or '对话'}）", s.get("summary") or ""]
+                 f"（参与：{'、'.join(c['participants']) or '—'}）", s.get("summary") or ""]
         lines += [f"- {p['who']}：{'；'.join(p.get('points') or [])}" for p in s.get("people") or []]
         lines += [f"- 待办：{t.get('owner') or '未知'}{'→' + t['to'] if t.get('to') else ''} {t.get('text', '')}"
                   f"{'（' + t['due'] + '）' if t.get('due') else ''}" for t in s.get("todos") or []]
@@ -66,7 +66,7 @@ def digest(convs: list[dict]) -> str:
 
 def _brief(c: dict) -> dict:
     s = c.get("summary") or {}
-    return {"id": c["id"], "start": c["start"][:16], "end": c["end"][11:16], "kind": c.get("kind") or "对话",
+    return {"id": c["id"], "start": c["start"][:16], "end": c["end"][11:16],
             "participants": c["participants"], "title": s.get("title"), "summary": s.get("summary")}
 
 
@@ -76,13 +76,13 @@ def _next_day(date: str) -> str:
 
 def t_search(q="", after="", before="", who="", tag="", limit=20):
     return [{**_brief(c), "summary": ((c["summary"] or {}).get("summary") or "")[:160], "tags": (c["summary"] or {}).get("tags")}
-            for c in db.search(q, tag, "", who, after, before, min(int(limit), 40))]
+            for c in db.search(q, tag, who, after, before, min(int(limit), 40))]
 
 
 def t_day(date):
-    """The day's conversations by their start, and how many of each kind: the model miscounts a long list."""
+    """The day's conversations by their start, and how many: the model miscounts a long list."""
     cs = db.conversations(date[:10], _next_day(date))
-    return {"date": date[:10], "count": dict(collections.Counter(c.get("kind") or "对话" for c in cs)),
+    return {"date": date[:10], "count": len(cs),
             "conversations": [{**_brief(c), "todos": [t.get("text") for t in (c["summary"] or {}).get("todos") or []],
                                "decisions": [d.get("text") for d in (c["summary"] or {}).get("decisions") or []]} for c in cs]}
 
@@ -121,14 +121,10 @@ def t_todos(after, before, owner=""):
 
 
 def t_calendar(month):
-    """Per day: conversations of each kind (对话, 口述) and speech minutes, as the calendar page counts them."""
-    out = {}
-    for d, kind, n, s in db.conn().execute("SELECT substr(start, 1, 10), coalesce(kind, '对话'), count(*), coalesce(sum(speech_s), 0) "
-                                           "FROM conversations WHERE start LIKE ? GROUP BY 1, 2", (month[:7] + "%",)):
-        x = out.setdefault(d, {"speech_min": 0.0})
-        x[kind] = n
-        x["speech_min"] = round(x["speech_min"] + s / 60, 1)
-    return out
+    """Per day: conversations and speech minutes, as the calendar page counts them."""
+    return {d: {"conversations": n, "speech_min": round(s / 60, 1)}
+            for d, n, s in db.conn().execute("SELECT substr(start, 1, 10), count(*), coalesce(sum(speech_s), 0) "
+                                             "FROM conversations WHERE start LIKE ? GROUP BY 1", (month[:7] + "%",))}
 
 
 def t_grep(q, after="", before="", limit=30):
@@ -153,13 +149,13 @@ def _fn(name, desc, props, req=()):
 SPECS = [
     _fn("search", "按关键词找对话（最新的在前）：q 是一个子串，原样匹配标题、摘要、标签、待办、决定，摘要没有时再匹配原文；不分词，一次只放一个词。"
         "可按开始时间 after（含）/ before（不含）、参与者 who、标签 tag 过滤，时间写 YYYY-MM-DD。", {"q": S, "after": S, "before": S, "who": S, "tag": S, "limit": I}),
-    _fn("day", "某一天（YYYY-MM-DD）开始的全部对话：count 是每类（对话、口述）的段数，conversations 是每段的时间、参与者、标题、摘要、待办、决定。", {"date": S}, ["date"]),
+    _fn("day", "某一天（YYYY-MM-DD）开始的全部对话：count 是段数，conversations 是每段的时间、参与者、标题、摘要、待办、决定。", {"date": S}, ["date"]),
     _fn("conversation", f"一段对话的完整摘要（议题、每个人说了什么、待办、决定、对 AI 的请求），可带原文（最多 {TRANSCRIPT_CHARS} 字）。",
         {"id": S, "with_transcript": B}, ["id"]),
     _fn("person", "一个有名字的说话人：和我聊过几次、最早最近、最近 12 段对话里 TA 说了什么、TA 的待办、我答应 TA 的事。", {"name": S}, ["name"]),
     _fn("todos", "开始时间在 [after, before) 里的对话摘要中的待办（谁做、答应给谁、内容、原话里的时间、原句）。owner 填「我」只看我的。",
         {"after": S, "before": S, "owner": S}, ["after", "before"]),
-    _fn("calendar", "某月（YYYY-MM）每天开始的对话段数（对话、口述分开）和说话分钟数，查库的准确数字。", {"month": S}, ["month"]),
+    _fn("calendar", "某月（YYYY-MM）每天开始的对话段数和说话分钟数，查库的准确数字。", {"month": S}, ["month"]),
     _fn("grep", "在原文里找包含某个子串的句子（最新的在前）：时间、说话人、原文、所在对话 id。转写有同音错字，找不到可以换同音或近义的词再试。",
         {"q": S, "after": S, "before": S, "limit": I}, ["q"]),
 ]
@@ -242,7 +238,7 @@ if __name__ == "__main__":
     db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     convs = [dict(id="c20260930100000", start="2026-09-30T10:00:00.000", end="2026-09-30T10:30:00.000", participants=["我", "老王"], speech_s=900, sentences=2, device="phone"),
              dict(id="c20260930100000-LR_X1_567E", start="2026-09-30T10:00:00.000", end="2026-09-30T10:05:00.000", participants=["我"], speech_s=30, sentences=1, device="LR-X1-567E"),
-             dict(id="c20260801090000", start="2026-08-01T09:00:00.000", end="2026-08-01T09:20:00.000", participants=["我", "S1"], speech_s=600, sentences=1, kind="口述")]
+             dict(id="c20260801090000", start="2026-08-01T09:00:00.000", end="2026-08-01T09:20:00.000", participants=["我", "S1"], speech_s=600, sentences=1)]
     with db.tx() as c:
         for x in convs:
             db.insert_conversation(c, x)
@@ -257,20 +253,20 @@ if __name__ == "__main__":
     now = dt.datetime(2026, 10, 2, 12)
     sp = system(now)
     assert "最近 7 天的对话摘要（2026-09-26 起）" in sp and "星期五" in sp, sp[-300:]
-    assert "## [c20260930100000] 2026-09-30 10:00–10:30 存储方案（参与：我、老王；对话）" in sp
+    assert "## [c20260930100000] 2026-09-30 10:00–10:30 存储方案（参与：我、老王）" in sp
     assert "- 待办：我→老王 改存储（周五）" in sp and "- 待办：未知 买菜" in sp and "- 标签：存储" in sp and "体检" not in sp
     assert sorted(x["id"] for x in t_search("按小时")) == ["c20260930100000", "c20260930100000-LR_X1_567E"], "summary words, the other device's transcript"
-    assert [x["id"] for x in t_search("复查", before="2026-08-01")] == [] and t_search("复查", after="2026-08-01")[0]["kind"] == "口述"
+    assert [x["id"] for x in t_search("复查", before="2026-08-01")] == [] and t_search("复查", after="2026-08-01")[0]["id"] == "c20260801090000"
     d = t_day("2026-09-30")
     assert [x["id"] for x in d["conversations"]] == ["c20260930100000", "c20260930100000-LR_X1_567E"] and d["conversations"][0]["decisions"] == ["按小时存"]
-    assert d["count"] == {"对话": 2} and t_day("2026-08-01")["count"] == {"口述": 1} and t_day("2026-08-02") == {"date": "2026-08-02", "count": {}, "conversations": []}
+    assert d["count"] == 2 and t_day("2026-08-01")["count"] == 1 and t_day("2026-08-02") == {"date": "2026-08-02", "count": 0, "conversations": []}
     one = t_conversation("c20260930100000")
     assert one["title"] == "存储方案" and "[10:01:00] 老王: 周五把音频按小时存" in one["transcript"] and "另一台" not in one["transcript"], one
     assert "error" in t_conversation("c1") and "transcript" not in t_conversation("c20260930100000", with_transcript=False)
     p = t_person("老王")
     assert p["count"] == 1 and p["recent"][0]["points"] == ["建议按小时存"] and p["my_todos_to_them"] == [{"id": "c20260930100000", "text": "改存储", "due": "周五"}], p
     assert [t["text"] for t in t_todos("2026-09-01", "2026-10-01")] == ["改存储", "买菜"] and len(t_todos("2026-09-01", "2026-10-01", "我")) == 1
-    assert t_calendar("2026-09") == {"2026-09-30": {"speech_min": 15.5, "对话": 2}} and t_calendar("2026-08") == {"2026-08-01": {"speech_min": 10.0, "口述": 1}}
+    assert t_calendar("2026-09") == {"2026-09-30": {"conversations": 2, "speech_min": 15.5}} and t_calendar("2026-08") == {"2026-08-01": {"conversations": 1, "speech_min": 10.0}}
     g = t_grep("按小时")
     assert sorted((x["id"], x["speaker"]) for x in g) == [("c20260930100000", "老王"), ("c20260930100000-LR_X1_567E", "我")], g
     assert t_grep("复查", after="2026-08-02") == [] and t_grep("复查")[0]["id"] == "c20260801090000"

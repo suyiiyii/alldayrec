@@ -57,6 +57,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | (no docstring) | `model` (path, string)<br>`version` (path, string) |
 
+### `/api/addresses`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | (no docstring) | — |
+
 ### `/app.apk`
 
 | Method | Description | Parameters |
@@ -183,13 +189,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | Per day with sentences: closed conversations (dictations apart), their speech minutes and the sentence count, for the day picker and the calendar page. | — |
+| `GET` | Per day with sentences: closed conversations, their speech minutes and the sentence count, for the day picker and the calendar page. | — |
 
 ### `/api/search`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`kind?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
+| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
 
 ### `/api/ask`
 

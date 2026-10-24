@@ -61,8 +61,7 @@ def line(c: dict) -> str:
     s = summary_of(c)
     title = s.get("title") or ("（进行中）" if c.get("state") == "open" else "（无摘要）")
     who = ",".join(c.get("participants") or [])
-    kind = "" if c.get("kind", "对话") == "对话" else f" {c['kind']}"
-    out = f"- `{c.get('id', '进行中')}` {c['start'][5:10]} {hm(c['start'])}-{hm(c.get('end') or c['start'])} [{who}]{kind} **{title}**"
+    out = f"- `{c.get('id', '进行中')}` {c['start'][5:10]} {hm(c['start'])}-{hm(c.get('end') or c['start'])} [{who}] **{title}**"
     if s.get("summary"):
         out += f"\n  {s['summary']}"
     return out

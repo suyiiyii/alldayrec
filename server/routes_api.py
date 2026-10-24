@@ -98,23 +98,20 @@ async def days():
 
 @router.get("/api/calendar")
 async def calendar():
-    """Per day with sentences: closed conversations (dictations apart), their speech minutes and the sentence count,
-    for the day picker and the calendar page."""
-    out = {d: {"conversations": 0, "dictations": 0, "speech_min": 0.0, "sentences": n}
+    """Per day with sentences: closed conversations, their speech minutes and the sentence count, for the day picker
+    and the calendar page."""
+    out = {d: {"conversations": 0, "speech_min": 0.0, "sentences": n}
            for d, n in db.conn().execute("SELECT substr(start, 1, 10), count(*) FROM sentences GROUP BY 1")}
-    for d, kind, n, s in db.conn().execute("SELECT substr(start, 1, 10), coalesce(kind, '对话'), count(*), coalesce(sum(speech_s), 0) "
-                                           "FROM conversations GROUP BY 1, 2"):
-        x = out.setdefault(d, {"conversations": 0, "dictations": 0, "speech_min": 0.0, "sentences": 0})
-        x["dictations" if kind == "口述" else "conversations"] += n
-        x["speech_min"] = round(x["speech_min"] + s / 60, 1)
+    for d, n, s in db.conn().execute("SELECT substr(start, 1, 10), count(*), coalesce(sum(speech_s), 0) FROM conversations GROUP BY 1"):
+        x = out.setdefault(d, {"conversations": 0, "speech_min": 0.0, "sentences": 0})
+        x["conversations"], x["speech_min"] = n, round(s / 60, 1)
     return dict(sorted(out.items(), reverse=True))
 
 
 @router.get("/api/search")
-async def search(q: str = "", tag: str = "", kind: str = "", who: str = "", after: str = "", before: str = "",
-                 limit: int = 30):
+async def search(q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30):
     """db.search; `before` is the start of the last one already shown."""
-    return db.search(q, tag, kind, who, after, before, limit)
+    return db.search(q, tag, who, after, before, limit)
 
 
 @router.post("/api/ask")

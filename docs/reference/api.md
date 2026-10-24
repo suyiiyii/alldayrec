@@ -56,6 +56,12 @@ type: reference
 |---|---|---|
 | `GET` | （无说明） | `model` (path, string)<br>`version` (path, string) |
 
+### `/api/addresses`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | （无说明） | — |
+
 ### `/app.apk`
 
 | 方法 | 说明 | 参数 |
@@ -182,13 +188,13 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | Per day with sentences: closed conversations (dictations apart), their speech minutes and the sentence count, for the day picker and the calendar page. | — |
+| `GET` | Per day with sentences: closed conversations, their speech minutes and the sentence count, for the day picker and the calendar page. | — |
 
 ### `/api/search`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`kind?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
+| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
 
 ### `/api/ask`
 

@@ -90,7 +90,7 @@ def questions(now: dt.datetime) -> dict:
               if len(tagged[t]) <= 20)  # a topic, not the project every other conversation is tagged with
     out["Q10"] = dict(q=f"最近一次聊到「{t2}」是什么时候？定了什么？", expect=ids(tagged[t2][:2]), allow=ids(tagged[t2]))
     day1 = {c["id"] for c in convs if c["start"][:10] == d1}
-    n1 = sum(1 for c in convs if c["start"][:10] == d1 and (c.get("kind") or "对话") == "对话")
+    n1 = len(day1)
     undated = lambda a: re.sub(r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}月\d{1,2}[日号]|\d{1,2}:\d{2}|c\d{14}\S*", "", a)
     out["Q11"] = dict(q=f"{d1} 一共有几段对话？", truth=n1,
                       check=lambda a, cited: bool(re.search(rf"(?<!\d){n1}\s*段", undated(a))) and bool(cited) and set(cited) <= day1)

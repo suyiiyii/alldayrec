@@ -1,6 +1,7 @@
 """Real SQLite query contracts; no server, models, or external services."""
 import itertools
 import json
+import sqlite3
 
 import pytest
 
@@ -8,13 +9,12 @@ import db
 import tenant
 
 
-def add(i, *, participants=None, summary=None, kind=None, device=None):
+def add(i, *, participants=None, summary=None, device=None):
     start = f"2026-10-01T10:{i:02}:00"
     end = f"2026-10-01T10:{i:02}:59"
     with db.tx() as c:
         db.insert_conversation(c, dict(id=str(i), start=start, end=end,
-                                      participants=participants or [], sentences=1,
-                                      kind=kind, device=device))
+                                      participants=participants or [], sentences=1, device=device))
         if summary is not None:
             db.put_summary(dict(conversation=str(i), status="done", **summary), c)
     return start, end
@@ -28,8 +28,7 @@ def legacy_search(**filters):
             break
         if (filters.get("before") and c["start"] >= filters["before"]
                 or filters.get("who") and filters["who"] not in (c.get("participants") or [])
-                or filters.get("tag") and filters["tag"] not in (s.get("tags") or [])
-                or filters.get("kind") and c.get("kind", "对话") != filters["kind"]):
+                or filters.get("tag") and filters["tag"] not in (s.get("tags") or [])):
             continue
         q = filters.get("q", "")
         meta = json.dumps([s.get(k) for k in ("title", "summary", "tags", "todos", "decisions")], ensure_ascii=False)
@@ -45,10 +44,10 @@ def legacy_search(**filters):
 def history(tmp_path):
     db.open_db(tmp_path / "one.db")
     add(0, participants=["Alice", "我"], summary={"title": "ÄPFEL", "tags": ["work"], "todos": [{"done": True, "text": "ship"}]})
-    start, end = add(1, participants=["Bob"], kind="口述", device="phone", summary={"tags": None})
+    start, end = add(1, participants=["Bob"], device="phone", summary={"tags": None})
     add(2, participants=["Alice", "S1"], summary={"summary": "meeting", "tags": ["work", "x"], "decisions": ["yes"]})
     add(3, participants=["Bob", "S?", "我"])
-    add(4, participants=["Alice"], kind="", summary={"title": "other"})
+    add(4, participants=["Alice"], summary={"title": "other"})
     # Inclusive transcript end, case-sensitive text, and device isolation.
     db.conn().executemany("INSERT INTO sentences (id, start, end, text, source) VALUES (?, ?, ?, ?, ?)", [
         ("a", end, end, "Needle", "phone"),
@@ -61,11 +60,24 @@ def test_json1_and_combined_filters(history):
     # Exercise JSON1 on the very connection used by production queries, including
     # missing fields, Unicode, booleans and the serialized punctuation contract.
     assert db.conn().execute("SELECT json_extract('{\"a\":true}', '$.a', '$.missing')").fetchone()[0] == '[true,null]'
-    for q, who, tag, kind in itertools.product(
+    for q, who, tag in itertools.product(
             ["", "äpfel", "Needle", "needle", "foreign", "null", 'true, "text":', '", ["work"', "yes"],
-            ["", "Alice", "Bob"], ["", "work", "absent"], ["", "对话", "口述"]):
-        filters = dict(q=q, who=who, tag=tag, kind=kind, after="2026-10-01T10:00:00", before="2026-10-01T10:04:00", limit=2)
+            ["", "Alice", "Bob"], ["", "work", "absent"]):
+        filters = dict(q=q, who=who, tag=tag, after="2026-10-01T10:00:00", before="2026-10-01T10:04:00", limit=2)
         assert db.search(**filters) == legacy_search(**filters), filters
+
+
+def test_init_drops_the_dictation_kind(tmp_path):
+    """A store from before 10-24 loses conversations.kind and dictation_share at the start, its rows intact; again: a no-op."""
+    with sqlite3.connect(tmp_path / "old.db") as c:
+        c.execute("CREATE TABLE conversations (id TEXT PRIMARY KEY, start TEXT NOT NULL, end TEXT NOT NULL, participants TEXT NOT NULL,"
+                  " speech_s REAL, sentences INTEGER NOT NULL, kind TEXT, source TEXT, dictation_share REAL, device TEXT)")
+        c.execute("INSERT INTO conversations VALUES ('c1', '2026-09-29T10:00:00', '2026-09-29T10:01:00', '[\"我\"]', 30, 2, '口述', 'phone', 0.8, 'phone')")
+    db.open_db(tmp_path / "old.db")
+    db.init()
+    assert [r[1] for r in db.conn().execute("PRAGMA table_info(conversations)")] == list(db.C_COLS)
+    assert db.conversation("c1") == dict(id="c1", start="2026-09-29T10:00:00", end="2026-09-29T10:01:00", participants=["我"],
+                                         speech_s=30, sentences=2, source="phone", device="phone", state="closed")
 
 
 @pytest.mark.parametrize("limit", [0, -1, 1, 2, 30])
@@ -78,7 +90,6 @@ def test_order_pagination_and_limits(history, limit):
     assert db.search(q="needle") == []
     assert db.search(q="foreign") == []
     assert [c["id"] for c in db.search(q="äpfel")] == ["0"]
-    assert [c["id"] for c in db.search(kind="对话")] == ["3", "2", "0"]
     assert [c["id"] for c in db.conversations("2026-10-01T10:01:00", "2026-10-01T10:03:00")] == ["1", "2"]
 
 

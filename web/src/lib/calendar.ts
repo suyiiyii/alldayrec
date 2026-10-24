@@ -3,7 +3,6 @@ import { get } from "./api";
 
 export interface DayInfo {
   conversations: number;
-  dictations: number;
   speech_min: number;
   sentences: number;
 }

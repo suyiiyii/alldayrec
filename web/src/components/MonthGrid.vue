@@ -37,7 +37,7 @@ const t = today();
         :style="c.info ? { '--heat': heat(c.info.speech_min) } : {}"
         :title="
           c.info
-            ? `${c.info.conversations} 段对话 · ${c.info.dictations} 段口述 · ${Math.round(c.info.speech_min)} 分钟`
+            ? `${c.info.conversations} 段对话 · ${Math.round(c.info.speech_min)} 分钟`
             : ''
         "
         @click="emit('pick', c.day)"

@@ -49,9 +49,8 @@ def todo(t: dict) -> str:
 
 
 def brief(c: dict) -> str:
-    """ask._brief as one line: id, time, who, kind, title; its summary under it."""
-    kind = "" if c["kind"] == "对话" else f" {c['kind']}"
-    return (f"- `{c['id']}` {c['start'][5:10]} {c['start'][11:16]}-{c['end']} {'、'.join(c['participants'])}{kind} "
+    """ask._brief as one line: id, time, who, title; its summary under it."""
+    return (f"- `{c['id']}` {c['start'][5:10]} {c['start'][11:16]}-{c['end']} {'、'.join(c['participants'])} "
             f"**{c.get('title') or '（还没有摘要）'}**" + (f"\n  {c['summary']}" if c.get("summary") else ""))
 
 
@@ -65,14 +64,13 @@ def calendar(month: str = "") -> str:
     if not re.fullmatch(r"\d{4}-\d{2}", month):
         raise Bad(f"month 要写成 YYYY-MM，不是 {month!r}")
     days = ask.t_calendar(month)
-    lines = [f"- {d[5:]} " + "，".join(f"{k} {v} 段" for k, v in x.items() if k != "speech_min") + f"，说话 {x['speech_min']:.0f} 分钟"
-             for d, x in sorted(days.items())]
+    lines = [f"- {d[5:]} {x['conversations']} 段，说话 {x['speech_min']:.0f} 分钟" for d, x in sorted(days.items())]
     return f"# {month[:7]} 有对话的 {len(days)} 天\n" + "\n".join(lines)
 
 
 def day(date: str) -> str:
     d = ask.t_day(day_of(date))
-    out = [f"# {d['date']} 共 {sum(d['count'].values())} 段" + "".join(f"，{k} {v}" for k, v in d["count"].items())]
+    out = [f"# {d['date']} 共 {d['count']} 段"]
     for c in d["conversations"]:
         out.append(brief(c))
         out += [f"  待办：{'；'.join(c['todos'])}"] if c["todos"] else []
@@ -191,7 +189,7 @@ CURSOR = {"type": "string", "description": "翻页：上一页末尾给的 curso
 DATE = {"type": "string", "description": "YYYY-MM-DD"}
 READ = {"readOnlyHint": True, "openWorldHint": False}
 TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [
-    (calendar, "每天的对话段数（对话、口述分开）和说话分钟数，查库的准确数字：数段数、哪天最多这类问题用它，不要自己数 day 的结果。"
+    (calendar, "每天的对话段数和说话分钟数，查库的准确数字：数段数、哪天最多这类问题用它，不要自己数 day 的结果。"
      "不给 month 时列每个月的总数。", {"month": {"type": "string", "description": "YYYY-MM"}}, []),
     (day, "某一天开始的全部对话：每段的 id、时间、参与者、标题、摘要、待办、决定。", {"date": DATE}, ["date"]),
     (search, "按关键词找对话，最新的在前：q 是一个子串，原样匹配标题、摘要、标签、待办、决定，摘要里没有时再匹配原文；不分词，一次只放一个词，"

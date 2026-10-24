@@ -88,7 +88,6 @@ export interface Conversation {
   state?: "open" | "closed";
   participants: string[];
   sentences: number;
-  kind?: string;
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
 }
