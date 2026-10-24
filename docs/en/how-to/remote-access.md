@@ -4,7 +4,7 @@ type: how-to
 
 # How to reach the server from a phone
 
-By default the server listens only on `127.0.0.1:8770` on its own machine. To upload recordings, the phone has to reach it. This page gives two ways to do that, depending on your network.
+Run with uvx, pip or from source, the server listens only on `127.0.0.1:8770` on its own machine by default; with Docker Compose the port is published on every interface. To upload recordings, the phone has to reach it. This page gives two ways to do that, depending on your network.
 
 ::: warning App version
 Since `apk-v1.5.1` the app connects to `http://` addresses: inside Tailscale or a LAN, enter the `http://` address directly (an iOS build from main too, see [Install and connect the phone app](./install-app.md)). Older APKs (1.5.0 and before) connect only to `https://`: upgrade, or follow [The phone connects over the public internet](#the-phone-connects-over-the-public-internet) below.
@@ -15,19 +15,18 @@ Since `apk-v1.5.1` the app connects to `http://` addresses: inside Tailscale or 
 
 1. Make the server reachable on its Tailscale or LAN address.
 
-   - Docker: in `docker-compose.yml`, publish the port on all interfaces, or only on the Tailscale address, then run `docker compose up -d`:
+   - Docker: `docker-compose.yml` already publishes the port on every interface; nothing to change. To publish it only on the Tailscale address, change the port line to this, then run `docker compose up -d`:
 
      ```yaml
      ports:
-       - "8770:8770"               # all interfaces
-       # - "100.x.y.z:8770:8770"  # only on this machine's Tailscale address
+       - "100.x.y.z:8770:8770"  # only on this machine's Tailscale address
      ```
 
    - Without Docker: set `HOST=0.0.0.0` in `.env` and restart the server.
 
 2. In a browser on your computer, open the web UI at the address the phone will use, e.g. `http://100.x.y.z:8770/?token=<your token>` (a Tailscale address) or `http://192.168.1.10:8770/?token=<your token>` (a LAN address).
 
-3. Open **连接手机** (Connect phone, `/connect`) and scan the QR code with the app. The QR code carries the server address from the browser's address bar, so in step 2 you can't open the page at `127.0.0.1`.
+3. Open **连接手机** (Connect phone, `/connect`) and scan the QR code with the app. The QR code carries the address picked under 「手机用哪个地址」 (Address for the phone): with the page opened at `127.0.0.1`, the first Tailscale or LAN address the server finds is picked by default. In Docker the server can't see the computer's interfaces, so the list has only this page's own address: open the page at the computer's LAN or Tailscale address, or pick 「自己填」 (Enter it yourself).
 
 ## The phone connects over the public internet
 

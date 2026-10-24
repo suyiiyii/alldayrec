@@ -11,7 +11,9 @@ import { get, type Status } from "../lib/api";
 // Three steps for a new user: the app, the QR, the first caption. A step is ticked when the server can tell: a
 // device appears once an app uploads (so it is installed and logged in), /api/days once a sentence is in
 const REPO = "https://github.com/suyiiyii/alldayrec";
-const APP_README = { zh: "#手机-app", en: "/blob/main/README.en.md#phone-app" }; // the README's phone app section
+const DOCS = "https://suyiiyii.github.io/alldayrec";
+// building the iOS app, on the docs site
+const IOS_DOCS = { zh: `${DOCS}/how-to/install-app.html#ios`, en: `${DOCS}/en/how-to/install-app.html#ios` };
 const apk = ref(false),
   phone = ref(false),
   heard = ref(false);
@@ -163,7 +165,7 @@ async function copy(c: (typeof CLIENTS)[number]) {
           </p>
           <I18nT keypath="connect.ios" tag="p" class="muted" scope="global">
             <template #link
-              ><a :href="REPO + APP_README[lang()]" target="_blank" rel="noopener">{{
+              ><a :href="IOS_DOCS[lang()]" target="_blank" rel="noopener">{{
                 t("connect.iosLink")
               }}</a></template
             >

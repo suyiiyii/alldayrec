@@ -44,13 +44,9 @@ This page runs alldayrec long-term with Docker Compose on a Linux or macOS machi
 
    Once the log shows `ready on 0.0.0.0:8770`, the server is ready. The first start downloads the model files first (about 55 MB).
 
-5. Open `http://127.0.0.1:8770/?token=<your token>` in a browser on this machine. When the server runs on a remote machine, open an SSH tunnel from your own computer first:
+5. Open `http://<server IP>:8770/?token=<your token>` in a browser: `127.0.0.1` on this machine, this machine's LAN or Tailscale address from another computer. A cookie keeps you signed in after that.
 
-   ```bash
-   ssh -L 8770:127.0.0.1:8770 <user>@<host>
-   ```
-
-`docker-compose.yml` publishes the port on `127.0.0.1` only. To let a phone connect, see [Reach the server from a phone](./remote-access.md).
+`docker-compose.yml` publishes port 8770 on every interface of this machine, so a phone on the same LAN or Tailscale network can connect directly; see [Reach the server from a phone](./remote-access.md). The token in `data/tenants.json` is the only lock, and the server refuses to start with an empty one. To keep it on this machine only, change the line under `ports:` to `"127.0.0.1:8770:8770"`; to reach it over the public internet, put a reverse proxy with TLS in front.
 
 ## Common adjustments
 

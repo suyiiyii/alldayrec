@@ -12,7 +12,7 @@ PyPI 上的 `alldayrec` 从 v0.1.0 之后的第一个版本标签起发布；v0.
 
 ## 前提
 
-- [uv](https://docs.astral.sh/uv/)（用 uvx 时；本机没有 Python 3.11 或更新的版本，它会自己下载一个），或者 Python 3.11 或更新的版本和 pip
+- [uv](https://docs.astral.sh/uv/)（用 uvx 时；本机没有 Python 3.11 到 3.14，它会自己下载一个），或者 Python 3.11 到 3.14 和 pip
 - ffmpeg：macOS 用 `brew install ffmpeg`，Debian、Ubuntu 用 `sudo apt install ffmpeg`
 
 ## 步骤

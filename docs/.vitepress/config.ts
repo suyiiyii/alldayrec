@@ -83,7 +83,7 @@ const KEYWORDS =
 export default defineConfig({
   base,
   lastUpdated: true,
-  // the benchmark keeps its path in the repo (README links to it), and shows under 说明 on the site
+  // the benchmark keeps its path in the repo (older links point at it), and shows under 说明 on the site
   rewrites: { "asr-benchmark.md": "explanation/asr-benchmark.md" },
   srcExclude: ["**/README.md", "parts/**", "public/**"], // parts/: pieces other pages include; public/: served as is
   sitemap: { hostname: host + base },

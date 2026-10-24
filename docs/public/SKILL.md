@@ -61,20 +61,24 @@ remote machine they first run `ssh -L 8770:127.0.0.1:8770 <user>@<host>` on thei
 
 ## 4. Connect the phone
 
-`docker-compose.yml` publishes port 8770 on `127.0.0.1` only, so a phone can't reach it yet. Choose with the user:
+`docker-compose.yml` publishes port 8770 on every interface; the token in `data/tenants.json` is the only lock (the
+server refuses to start with an empty one). Choose with the user:
 
 - **HTTPS:** put a TLS reverse proxy in front of port 8770 (Caddy, nginx,
   Cloudflare Tunnel, Tailscale Serve). It must pass WebSockets (`/ws`); its health check is `GET /api/health`. With
   nginx, raise `client_max_body_size` or large imports fail with 413.
-- **Plain http on Tailscale or a LAN:** change `ports:` to `"8770:8770"` (or `"<tailscale-ip>:8770:8770"`) and run
-  `docker compose up -d`. The Android APK accepts `http://` since 1.5.1 (apk-v1.5.1).
+- **Plain http on Tailscale or a LAN:** nothing to change; the phone uses `http://<LAN or Tailscale IP>:8770`. To
+  publish only on the Tailscale address, change `ports:` to `"<tailscale-ip>:8770:8770"` and run `docker compose up -d`.
+  The Android APK accepts `http://` since 1.5.1 (apk-v1.5.1).
 
 Never expose a server whose token is empty.
 
 Then the user opens the web page **at the address the phone will use** (not `127.0.0.1`), goes to 连接手机 (Connect
 phone, `/connect`), and in the app taps 我的 › 设置 › 扫码登录 (Me › Settings › Scan to log in) to scan the QR code:
-the QR code carries the address in the browser's address bar. App install (APK from the GitHub Releases, iOS built
-with Xcode): [Install and connect the phone app](en/how-to/install-app.md). Network details:
+the QR code carries the address picked under 手机用哪个地址 (Address for the phone). In Docker the server can't list the
+computer's addresses, so open the page at the computer's LAN or Tailscale IP, or type it under 自己填 (Enter it
+yourself). App install (APK from the GitHub Releases, iOS built with Xcode):
+[Install and connect the phone app](en/how-to/install-app.md). Network details:
 [Reach the server from a phone](en/how-to/remote-access.md).
 
 ## 5. Connect an AI agent (MCP)

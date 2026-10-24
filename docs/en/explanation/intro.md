@@ -6,6 +6,22 @@ type: explanation
 
 alldayrec is a self-hosted, all-day recorder and personal memory layer. Wear a recorder (or just carry your phone) from morning to night, and your own server turns the audio into speech-to-text transcripts with speaker diarization, conversation summaries, to-dos and a daily recap, within a minute. The original audio is kept, so every line can be played back and checked, and your own agent can search your days over MCP. Think of it as a lifelog you host yourself: an open-source alternative to Plaud, Limitless, Bee or Omi, without a subscription and without your conversations living on someone else's cloud. (Product names belong to their owners; this project is not affiliated with any of them.)
 
+## What it looks like
+
+![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
+
+Live captions while the page is open (the draft layer). Below, the web UI on a phone, filled with made-up data (the screenshots show the Chinese UI; the web UI can be switched to English on the 「我的」 (Me) page).
+
+| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) | ![Transcript](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/transcript-20261024.png) |
+|:--:|:--:|:--:|:--:|
+| Today: due to-dos, yesterday's recap, the conversation going on, today's conversations, and a box to ask about today | Conversations: titles, summaries, tags, due to-dos | One conversation's summary: to-dos, decisions, per-person points | Transcript with speakers: tap a line to play from there; the line playing is highlighted |
+| ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-20261024.png) | ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask-20261024.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap-20261024.png) | ![Me](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/me-20261024.png) |
+| Live page: the live analysis of the conversation going on, drafts as words come in | Ask AI: an answer with links to the conversations it came from | Daily recap: highlights, your to-dos, the people you talked to | Me: each recorder's battery, free card space and lag, plus links to connect a phone, see progress and hook up AI agents |
+
+The conversations page on a desktop:
+
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop-20261024.png)
+
 ## Why
 
 - **The original audio stays.** OPPO's 心力球 and Bee delete the audio once it is transcribed, so a wrong transcript has nothing to be checked against. Here every line plays back, and old days can be transcribed again when a better model comes along.

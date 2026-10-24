@@ -12,7 +12,7 @@ The server is published on PyPI as `alldayrec`, with the web pages packed in: no
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (for uvx; it downloads a Python itself when there is no 3.11 or newer), or Python 3.11 or newer and pip
+- [uv](https://docs.astral.sh/uv/) (for uvx; it downloads a Python itself when there is no 3.11 to 3.14), or Python 3.11 to 3.14 and pip
 - ffmpeg: `brew install ffmpeg` on macOS, `sudo apt install ffmpeg` on Debian and Ubuntu
 
 ## Steps

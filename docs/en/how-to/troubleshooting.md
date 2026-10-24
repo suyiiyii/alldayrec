@@ -38,7 +38,7 @@ After you upload a batch of files, call `POST /api/chunks/end` once. See [Import
 
 ## The phone can't connect after scanning the QR code
 
-- The server address in the QR code is the address in the computer browser's address bar. When you open the web page at `127.0.0.1`, the phone gets `127.0.0.1` too. Open the web page again at an address the phone can reach, then scan again.
+- The server address in the QR code is the one picked under 「手机用哪个地址」 (Address for the phone) on the **连接手机** page. If it is `127.0.0.1` or another address the phone can't reach, pick one the phone can reach, or type it under 「自己填」 (Enter it yourself), then scan again.
 - With an `http://` address, APKs 1.5.0 and older can't connect: upgrade to 1.5.1 or newer. See [Reach the server from a phone](./remote-access.md).
 
 ## The app on the iPhone no longer opens

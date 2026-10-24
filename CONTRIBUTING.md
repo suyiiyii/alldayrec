@@ -1,8 +1,8 @@
 # Contributing
 
 How the server works inside, the code boundaries, the checks every PR runs, and how CI builds and archives the APK and
-the firmware. Setting up and running a server: [README.en.md](README.en.md); the local check commands are in its
-Development section.
+the firmware. Setting up and running a server: the [docs site](https://suyiiyii.github.io/alldayrec/en/); the local check
+commands are in its [How to contribute](https://suyiiyii.github.io/alldayrec/en/how-to/contribute.html) page.
 
 ## How the server works
 

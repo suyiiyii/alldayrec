@@ -6,6 +6,22 @@ type: explanation
 
 全天录是一个自己部署的全天录音和个人记忆层。戴一个录音设备（或者只带手机）从早录到晚，自己的服务器在一分钟内把音频变成带说话人的转写、对话摘要、待办和每日回顾。原始录音一直留着，每句话都能点开回放核对；你的 Agent 通过 MCP 直接查你的每一天。可以把它当成自己托管的 lifelog：Plaud、Limitless、Bee、Omi 的开源替代，没有订阅，对话也不放在别人的云上。（录音豆、心力球等产品名称归各自所有者，本项目与它们没有关联。）
 
+## 界面一览
+
+![实时字幕](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
+
+页面开着时的实时字幕（初稿层）。下面是网页在手机上的样子，示例数据都是编的（截图是中文界面；网页可以在「我的」页换成英文）。
+
+| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![Conversations](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) | ![Transcript](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/transcript-20261024.png) |
+|:--:|:--:|:--:|:--:|
+| 今天：到期待办、昨天的回顾、进行中的对话、今天的对话，底部直接问今天的事 | 对话列表：标题、摘要、标签、到期待办 | 一段对话的摘要：待办、决定、每个人的要点 | 原文：带说话人的转写，点一句就从那里播放，正在播的那句高亮 |
+| ![Live page](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-20261024.png) | ![Ask AI](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/ask-20261024.png) | ![Daily recap](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/recap-20261024.png) | ![Me](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/me-20261024.png) |
+| 实时页：正在进行的对话的实时分析，边说边出初稿 | 问 AI：回答里附带出处对话的链接 | 每日回顾：要点、你的待办、和你说过话的人 | 我的：每台录音设备的电量、存储卡剩余和延迟，以及连接手机、处理进度、接入 AI 的入口 |
+
+电脑上的对话列表页：
+
+![Conversations on a desktop](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversations-desktop-20261024.png)
+
 ## 为什么做这个
 
 - **原始录音一直留着。** 心力球和 Bee 转写完就删音频，转写错了没有底稿可对。这里每句话都能点开回放，以后有了更好的模型，还能把过去重新转写一遍。
