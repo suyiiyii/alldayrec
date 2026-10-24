@@ -12,7 +12,7 @@ import db
 import hints
 import routes_audio
 import tenant
-from routes_speakers import alias_set, apply_rename, label_suggestions, person, rename
+from routes_speakers import alias_set, apply_rename, label_suggestions, person, rename, speaker_list, speaker_one
 
 T = "2026-10-05T10:00:"
 ROWS = [dict(start=T + "01.000", end=T + "02.000", speaker="S1", text="老张，你来一下"),
@@ -83,6 +83,30 @@ def test_rename_merges_and_suggestions():
     assert [x["who"] for x in sug["names"]] == ["S3"], "老张 is 张三's alias: nothing left to offer for 张三"
     assert anyio.run(person, "张三")["aliases"] == ["老张"]
     assert anyio.run(alias_set, {"alias": "老张", "name": ""}) == {}
+
+
+def test_speaker_list_is_what_the_cards_show(tmp_path):
+    """GET /api/speakers carries what the speakers page's cards show (it was 706 KB on one instance, 10-24): samples
+    with their clip and first point, called with a count; the group's own GET has it whole."""
+    db.open_db(tmp_path / "t.db")
+    convs = [f"c2026100510000{i}" for i in range(3)]
+    with db.tx() as t:
+        for i, cid in enumerate(convs):
+            db.insert_conversation(t, {"id": cid, "start": f"{T}0{i}.000", "end": f"{T}0{i}.900", "participants": ["S1", "我"],
+                                       "sentences": 1, "speech_s": 1.0})
+            db.put_summary({"conversation": cid, "status": "done", "title": "早会", "people": [{"who": "S1", "points": ["说了一", "说了二"]}]}, t)
+            db.put_name_hints({"conv": cid, "names": [{"who": "S1", "name": "老张", "kind": "addressed", "at": f"{T}0{i}.000", "by": "我"}]}, t)
+        db.insert_voices(t, [{"conv": cid, "label": "S1", "device": "mic", "n": 3, "speech_s": 5.0, "clip_start": f"{T}0{i}.000",
+                              "clip_end": f"{T}0{i}.500", "e": np.array(e)}
+                             for i, (cid, e) in enumerate(zip(convs, ([1.0, 0, 0, 0], [1.0, 0, 0, 0], [0, 1.0, 0, 0])))])
+    g = next(g for g in anyio.run(speaker_list) if g["count"] == 2)
+    assert set(g) == {"id", "name", "count", "speech_s", "last", "co", "samples", "called", "suggested"}
+    assert g["samples"][0] == {"conv": convs[1], "label": "S1", "start": "2026-10-05T10:00:01", "clip_start": f"{T}01.000",
+                               "clip_end": f"{T}01.500", "title": "早会", "points": ["说了一"]}
+    assert g["called"] == [{"name": "老张", "n": 2}] and g["co"] == ["我"]
+    whole = anyio.run(speaker_one, g["id"])
+    assert [m["conv"] for m in whole["members"]] == convs[1::-1] and whole["members"][0]["with"] == ["我"]
+    assert whole["called"] == [{"name": "老张", "convs": convs[1::-1]}] and whole["samples"][0]["points"] == ["说了一", "说了二"]
 
 
 def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):

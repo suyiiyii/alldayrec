@@ -440,14 +440,19 @@ export interface Voice {
   points: string[];
   with: string[];
 }
+// GET /api/speakers: each group as its card shows it (GET /api/speakers/{id} has the group whole, its members too); a
+// sample is a voice with its clip and first point
+export type Sample = Pick<
+  Voice,
+  "conv" | "label" | "start" | "clip" | "clip_start" | "clip_end" | "clip_text" | "title" | "points"
+>;
 export interface VoiceSet {
   count: number;
   speech_s: number;
   last: string | null;
-  samples: Voice[];
+  samples: Sample[];
   co: string[];
-  called: { name: string; convs: string[] }[]; // what its voices were called, aliases resolved
-  members?: Voice[]; // only from /api/speakers/{id}
+  called: { name: string; n: number }[]; // what its voices were called (aliases resolved), in n conversations
 }
 export interface Speaker extends VoiceSet {
   id: string;

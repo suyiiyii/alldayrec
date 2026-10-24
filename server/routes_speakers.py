@@ -175,9 +175,21 @@ def describe(members: list[dict], convs: dict, called: dict[str, set[str]]) -> d
 
 @router.get("/api/speakers")
 async def speaker_list():
-    """Without the member lists (most of the size; the home uplink is slow): GET /api/speakers/{id} has them."""
-    bare = lambda g: {k: v for k, v in g.items() if k != "members"}
-    return [{**bare(g), "suggested": [bare(x) for x in g["suggested"]]} for g in await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)]
+    """The groups as the speakers page's cards show them (the home uplink is slow: whole groups were 706 KB on one
+    instance); GET /api/speakers/{id} has a group whole, its member voices with it."""
+    return [{**card(g), "id": g["id"], "name": g["name"], "suggested": [{**card(x), "id": x["id"], "score": x["score"]} for x in g["suggested"]]}
+            for g in await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)]
+
+
+SAMPLE = ("conv", "label", "start", "clip", "clip_start", "clip_end", "clip_text", "title")
+
+
+def card(g: dict) -> dict:
+    """A group's card: its samples with their clip and first point, what its voices were called and in how many
+    conversations."""
+    return {"count": g["count"], "speech_s": g["speech_s"], "last": g["last"], "co": g["co"],
+            "samples": [{k: v[k] for k in SAMPLE if v[k] is not None} | {"points": v["points"][:1]} for v in g["samples"]],
+            "called": [{"name": x["name"], "n": len(x["convs"])} for x in g["called"]]}
 
 
 def find_group(gid: str, sid: str | None = None) -> dict:

@@ -287,7 +287,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | Without the member lists (most of the size; the home uplink is slow): GET /api/speakers/{id} has them. | — |
+| `GET` | The groups as the speakers page's cards show them (the home uplink is slow: whole groups were 706 KB on one instance); GET /api/speakers/{id} has a group whole, its member voices with it. | — |
 
 ### `/api/speakers/{gid}`
 
