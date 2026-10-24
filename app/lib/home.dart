@@ -119,8 +119,16 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   void _open(String title, Widget body) =>
       Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: body)));
 
-  /// A web page (实时字幕: /live, 设备状态与更多: /me) in a WebView of its own, there while open.
-  void _openWeb(String title, String path) => _open(title, WebViewWidget(controller: _web()..loadRequest(_url(path))));
+  /// A web page (实时字幕: /live, 设备状态与更多: /me) in a WebView of its own, there while open;
+  /// back (the key or the app bar's arrow) goes through its history first, as in the tabs' WebViews.
+  void _openWeb(String title, String path) {
+    final c = _web()..loadRequest(_url(path));
+    _open(title, PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) async {
+      if (didPop) return;
+      if (await c.canGoBack()) return c.goBack();
+      if (mounted) Navigator.pop(context);
+    }, child: WebViewWidget(controller: c)));
+  }
 
   Future<void> _saved() async {
     await settings!.save();
