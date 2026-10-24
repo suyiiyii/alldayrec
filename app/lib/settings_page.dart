@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
 import 'qr_scan_page.dart';
 import 'settings.dart';
 
@@ -41,14 +42,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context);
+    final t = Theme.of(context), l = AppLocalizations.of(context);
     Widget section(String s) => Padding(
         padding: const EdgeInsets.fromLTRB(4, 24, 4, 8),
         child: Text(s, style: t.textTheme.labelLarge?.copyWith(color: t.colorScheme.primary)));
     return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 32), children: [
-      section('服务器'),
+      section(l.server),
       TextField(controller: server, keyboardType: TextInputType.url,
-          decoration: const InputDecoration(labelText: '地址', hintText: 'http://100.x.y.z:8770 或 https://your.server', border: OutlineInputBorder())),
+          decoration: InputDecoration(labelText: l.serverAddress, hintText: l.serverHint, border: const OutlineInputBorder())),
       const SizedBox(height: 12),
       TextField(
         controller: token,
@@ -63,21 +64,19 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       const SizedBox(height: 12),
       OutlinedButton.icon(
-          onPressed: _scan, icon: const Icon(Icons.qr_code_scanner_rounded), label: const Text('扫码登录')),
+          onPressed: _scan, icon: const Icon(Icons.qr_code_scanner_rounded), label: Text(l.scanToSignIn)),
       const SizedBox(height: 12),
       InputDecorator(
-          decoration: const InputDecoration(labelText: '设备名', helperText: '取自系统设置里的手机名称；BLE 录音硬件的音频按硬件名上传',
-              border: OutlineInputBorder()),
+          decoration: InputDecoration(labelText: l.deviceName, helperText: l.deviceNameHelp, helperMaxLines: 3,
+              border: const OutlineInputBorder()),
           child: Text(widget.settings.device)),
-      section('录音'),
+      section(l.recordingSection),
       Card.outlined(
         margin: EdgeInsets.zero,
         child: Column(children: [
           SwitchListTile(
-            title: const Text('本地保留录音'),
-            subtitle: Text(Platform.isIOS
-                ? '上传后存到「文件」App › 我的 iPhone › alldayrec › recordings › 日期'
-                : '上传后存到 Android/data/com.suyiiyii.live_record/files/recordings/日期/'),
+            title: Text(l.keepRecordings),
+            subtitle: Text(Platform.isIOS ? l.keepRecordingsIos : l.keepRecordingsAndroid),
             value: archive,
             onChanged: (v) => setState(() => archive = v),
           ),
@@ -87,17 +86,17 @@ class _SettingsPageState extends State<SettingsPage> {
             builder: (_, snap) {
               final s = snap.data ?? defaultSlices;
               return ListTile(
-                title: const Text('切片长度（服务端下发）'),
+                title: Text(l.pieceLength),
                 subtitle: Text(Platform.isIOS  // iOS has no reliable screen-off signal; background stands for it
-                    ? '前台 ${s['foreground']} 秒 · 后台 ${s['background']} 秒'
-                    : '前台 ${s['foreground']} 秒 · 后台 ${s['background']} 秒 · 熄屏 ${s['screenOff']} 秒'),
+                    ? l.piecesIos(s['foreground']!, s['background']!)
+                    : l.piecesAndroid(s['foreground']!, s['background']!, s['screenOff']!)),
               );
             },
           ),
         ]),
       ),
       const SizedBox(height: 24),
-      FilledButton(onPressed: _save, style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: const Text('保存')),
+      FilledButton(onPressed: _save, style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)), child: Text(l.save)),
     ]);
   }
 }

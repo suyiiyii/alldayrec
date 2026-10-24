@@ -1,0 +1,500 @@
+{
+  "@@locale": "zh",
+  "tabTimeline": "时间线",
+  "tabLive": "实时",
+  "tabPeople": "人物",
+  "tabMe": "我的",
+  "savedNextRecording": "已保存，下次开始录音时生效",
+  "saved": "已保存",
+  "noMicPermission": "没有麦克风权限",
+  "cannotStartRecording": "无法开始录音 {message}",
+  "@cannotStartRecording": {
+    "placeholders": {
+      "message": {}
+    }
+  },
+  "refresh": "刷新",
+  "settings": "设置",
+  "recorder": "录音设备",
+  "notSignedIn": "还没登录",
+  "deviceStatusAndMore": "设备状态与更多",
+  "deviceStatusAndMoreSub": "电量、存储卡、处理进度、接入 AI",
+  "upload": "上传",
+  "about": "关于",
+  "catchingUp": "补传中",
+  "notConnected": "未连接",
+  "paused": "已暂停",
+  "connected": "已连接",
+  "connectedBattery": "已连接 {battery}%",
+  "@connectedBattery": {
+    "placeholders": {
+      "battery": {}
+    }
+  },
+  "stopping": "停止中",
+  "recording": "录音中",
+  "notRecording": "未在录音",
+  "deviceDetails": "设备详情",
+  "starting": "正在启动",
+  "pausedMinutesLeft": "已暂停，还剩 {minutes} 分钟",
+  "@pausedMinutesLeft": {
+    "placeholders": {
+      "minutes": {}
+    }
+  },
+  "piecesPending": "待传 {count} 块",
+  "@piecesPending": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "liveUploadCatchingUp": "实时上传 · 后台补传 {done} / {total} MB",
+  "@liveUploadCatchingUp": {
+    "placeholders": {
+      "done": {},
+      "total": {}
+    }
+  },
+  "fetchingCurrentFile": "接上实时前先取正在录的这段 · 还差 {left} MB",
+  "@fetchingCurrentFile": {
+    "placeholders": {
+      "left": {}
+    }
+  },
+  "waitingLastPieces": "等最后 {count} 块传完",
+  "@waitingLastPieces": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "recordingPieceSeconds": "录音中 · {seconds} 秒一块",
+  "@recordingPieceSeconds": {
+    "placeholders": {
+      "seconds": {}
+    }
+  },
+  "sentPending": "已传 {sent} · 待传 {pending}",
+  "@sentPending": {
+    "placeholders": {
+      "sent": {},
+      "pending": {}
+    }
+  },
+  "uploadingLeftover": "正在补传 {count} 块",
+  "@uploadingLeftover": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "recordingError": "录音错误 {error}",
+  "@recordingError": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "interruptedRecovered": "{time} 被系统中断过，已恢复",
+  "@interruptedRecovered": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "stop": "停止",
+  "startRecording": "开始录音",
+  "emptyNotSignedIn": "扫码登录或填好 Token 后显示",
+  "goToSettings": "去设置",
+  "unbindTitle": "解除绑定 {name}？",
+  "@unbindTitle": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "unbindLinkedBody": "录音设备会忘掉所有手机、停止录音（卡上的录音已取回）。这台手机改用手机麦克风。",
+  "unbindAwayBody": "录音设备不在附近：只在这台手机上解除，它自己还记着绑定、会继续录音。以后可以在添加时强制绑定。",
+  "unbindIosForget": "iPhone 自己的配对记录 App 删不掉：之后到 设置 › 蓝牙 › {name} › 忽略此设备；以后要在这台 iPhone 上再绑定它，必须先忽略。",
+  "@unbindIosForget": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "cancel": "取消",
+  "unbind": "解除绑定",
+  "connectedCatchingUp": "已连接 · 补传中",
+  "syncing": "同步中",
+  "connecting": "连接中",
+  "cardFreeOf": "可用，共 {total}",
+  "@cardFreeOf": {
+    "placeholders": {
+      "total": {}
+    }
+  },
+  "addRecorder": "添加录音设备",
+  "addAgain": "重新添加",
+  "notBound": "未绑定",
+  "recorderUnboundHelp": "录音设备绑定到这台手机后开始录音：手机在附近时实时上传，不在时存进它的卡里，回来后在后台自动补传，实时上传照常。没绑定时它不录音，现在用的是手机麦克风。",
+  "kickedChip": "已被其他手机绑定",
+  "kickedHelp": "另一台手机绑定了这台录音设备，这台手机不再连它。要拿回来，就重新添加（原来那台手机会被顶掉）。",
+  "kickedIosForget": "重新添加前，先到 iPhone 设置 › 蓝牙 › {name} › 忽略此设备。",
+  "@kickedIosForget": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "recorderHelp": "录音设备开着就一直在录：手机在附近时实时上传，不在时存进它的卡里，回来后在后台自动补传，实时上传照常。需要时可以暂停。",
+  "pauseRecording": "暂停录音",
+  "pauseNeedsLink": "连上录音设备后可以暂停",
+  "pausedResumesIn": "已暂停，还剩 {minutes} 分钟，到时自动继续",
+  "@pausedResumesIn": {
+    "placeholders": {
+      "minutes": {}
+    }
+  },
+  "recordingNow": "正在录音",
+  "liveListening": "实时监听",
+  "listenOnPhone": "在这台手机上听",
+  "listenNeedsLink": "连上录音设备后可以听",
+  "listenHelp": "录音设备的声音直接在手机上播放，不经服务器，慢约半秒，离开 App 自动关闭。建议戴耳机，外放会被麦克风收回去",
+  "battery": "电量",
+  "card": "存储卡",
+  "offlineSync": "离线录音同步",
+  "fetchingCard": "正在取回卡上的录音",
+  "syncLiveHelp": "实时上传照常，卡上积压的录音在后台补传；补完前服务端定稿先停在积压处，初稿和实时分析照常",
+  "syncFirstHelp": "正在录的这段取完（还差 {left}）就开始实时上传，更早的录音之后在后台补传",
+  "@syncFirstHelp": {
+    "placeholders": {
+      "left": {}
+    }
+  },
+  "syncIdleHelp": "连上录音设备时在后台自动取回它离线录下的音频，不耽误实时上传",
+  "usbDiskMode": "U 盘模式",
+  "cardAsUsbDisk": "存储卡当 U 盘",
+  "usbDiskHelp": "录音设备插在电脑上时可用，约 20 秒后出现 OMI 盘；期间离线录音暂停",
+  "ejectFirst": "切回前先在电脑上推出 OMI 盘",
+  "deviceManagement": "设备管理",
+  "unbindAfterSync": "正在取回卡上的录音，取完再解除",
+  "unbindSub": "录音设备停止录音，这台手机改用手机麦克风",
+  "listenWaiting": "等录音设备的声音和对时……",
+  "listenTime": "时间",
+  "listenLevel": "电平",
+  "listenHum": "哼声",
+  "listenZeros": "全0",
+  "listenClipped": "满幅",
+  "listenLost": "丢失",
+  "listenDelay": "延迟",
+  "listenLegend": "每秒一行。电平、哼声（50 Hz 及谐波）：dBFS；全0：连续 10 ms 以上全是 0 的毫秒数（麦克风没数据）；满幅：削顶的样本数；丢失：蓝牙丢掉的毫秒数；延迟：从录音设备的麦克风到手机输出的毫秒数，其中 {queued} 是手机上的缓冲",
+  "@listenLegend": {
+    "placeholders": {
+      "queued": {}
+    }
+  },
+  "firmwareUpdate": "固件更新",
+  "downloadingFirmware": "正在下载固件",
+  "downloadFailed": "下载失败：{error}",
+  "@downloadFailed": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "updateFirmware": "升级固件",
+  "unknown": "未知",
+  "modelMatches": "型号一致：{model}",
+  "@modelMatches": {
+    "placeholders": {
+      "model": {}
+    }
+  },
+  "modelMismatch": "型号不符：录音设备是 {model}，固件是 {firmwareModel}，不能升级",
+  "@modelMismatch": {
+    "placeholders": {
+      "model": {},
+      "firmwareModel": {}
+    }
+  },
+  "unplugUsbFirst": "先拔掉录音设备的 USB：插着 USB 升级会卡在擦除",
+  "keepBattery": "电量保持在 30% 以上",
+  "keepBatteryNow": "电量保持在 30% 以上（现在 {battery}%）",
+  "@keepBatteryNow": {
+    "placeholders": {
+      "battery": {}
+    }
+  },
+  "updateTakesMinutes": "升级要几分钟：手机放在录音设备旁边，别关 App；期间不录音也不同步",
+  "updateFailedHelp": "中途失败、录音设备不见了：插 USB 用 lr.sh flash 刷（升级模式下的录音设备换了地址，再点升级连不上）",
+  "startUpdate": "开始升级",
+  "seconds": "{seconds} 秒",
+  "@seconds": {
+    "placeholders": {
+      "seconds": {}
+    }
+  },
+  "minutesSeconds": "{minutes} 分 {seconds} 秒",
+  "@minutesSeconds": {
+    "placeholders": {
+      "minutes": {},
+      "seconds": {}
+    }
+  },
+  "checking": "检查中",
+  "updateAvailable": "有新版本",
+  "upToDate": "已是最新",
+  "noFirmware": "没有固件",
+  "version": "版本",
+  "currentVersion": "当前版本",
+  "versionNotKnownYet": "还不知道：连上录音设备后读取",
+  "latestVersion": "最新版本",
+  "releasedAt": "发布于 {when}",
+  "@releasedAt": {
+    "placeholders": {
+      "when": {}
+    }
+  },
+  "lookupFailed": "查不到：{error}",
+  "@lookupFailed": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "askingServer": "正在查服务器",
+  "noFirmwareFor": "服务器上还没有 {model} 的固件",
+  "@noFirmwareFor": {
+    "placeholders": {
+      "model": {}
+    }
+  },
+  "lrP1UsbOnly": "LR-P1 只能插 USB 升级：lr.sh flash promicro（蓝牙升级中途一断，只能插 USB 救回）",
+  "updateToLatest": "升级到最新版本",
+  "alreadyLatest": "已是最新版本",
+  "changelog": "更新日志",
+  "noReleases": "还没有发布过的版本",
+  "tagLatest": "最新",
+  "tagCurrent": "当前",
+  "noNotes": "没有说明",
+  "recentUpdates": "最近的升级",
+  "noUpdates90Days": "最近 90 天没有升级过",
+  "succeeded": "成功",
+  "failed": "失败",
+  "noResult": "没有结果",
+  "took": "用时 {duration}",
+  "@took": {
+    "placeholders": {
+      "duration": {}
+    }
+  },
+  "serverNoTask": "服务端还没有 {device} 的处理任务",
+  "@serverNoTask": {
+    "placeholders": {
+      "device": {}
+    }
+  },
+  "serverStatusFailed": "取不到服务端状态：{error}",
+  "@serverStatusFailed": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "hoursMinutes": "{hours} 小时 {minutes} 分",
+  "@hoursMinutes": {
+    "placeholders": {
+      "hours": {},
+      "minutes": {}
+    }
+  },
+  "minutes": "{minutes} 分钟",
+  "@minutes": {
+    "placeholders": {
+      "minutes": {}
+    }
+  },
+  "recordingUploading": "录音中，边录边传",
+  "uploading": "正在上传",
+  "waitingToUpload": "等待上传",
+  "allUploaded": "已全部上传",
+  "toUpload": "待传",
+  "pieces": "{count} 块",
+  "@pieces": {
+    "placeholders": {
+      "count": {}
+    }
+  },
+  "noBacklog": "没有积压",
+  "pendingSub": "{size} · 最早录于 {when}",
+  "@pendingSub": {
+    "placeholders": {
+      "size": {},
+      "when": {}
+    }
+  },
+  "sentThisRun": "本次已传",
+  "sinceStart": "这次开机以来",
+  "uploadNow": "立即上传",
+  "serverProcessing": "服务端处理",
+  "loading": "加载中…",
+  "caughtUp": "已追上，录音都已转写",
+  "serverBehind": "还有 {span} 录音待处理 · 排队 {queued} 块",
+  "@serverBehind": {
+    "placeholders": {
+      "span": {},
+      "queued": {}
+    }
+  },
+  "finalsHeld": "定稿停在 {when}，等手机在后台补传卡里更早的录音{backlog}，补完再接着定稿；初稿和实时分析照常",
+  "@finalsHeld": {
+    "placeholders": {
+      "when": {},
+      "backlog": {}
+    }
+  },
+  "backlogLeft": "（还有 {size}）",
+  "@backlogLeft": {
+    "placeholders": {
+      "size": {}
+    }
+  },
+  "backlogLeftEta": "（还有 {size}，约 {eta}）",
+  "@backlogLeftEta": {
+    "placeholders": {
+      "size": {},
+      "eta": {}
+    }
+  },
+  "etaDone": "预计约 {span} 后完成",
+  "@etaDone": {
+    "placeholders": {
+      "span": {}
+    }
+  },
+  "received": "已收到",
+  "finalized": "已定稿",
+  "bindTitle": "绑定 {name}？",
+  "@bindTitle": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "bindForceBody": "它已经绑定了别的手机。绑定到这台手机后，原来的手机将无法再连接它。",
+  "forceBind": "强制绑定",
+  "allow": "允许",
+  "bluetoothOff": "蓝牙没有打开：打开后这里会开始找录音设备",
+  "permissions": "权限",
+  "permBluetooth": "蓝牙",
+  "permNearbyDevices": "附近的设备",
+  "permBluetoothWhy": "找到并连接录音设备",
+  "permNotifications": "通知",
+  "permNotificationsWhy": "后台连接录音设备时要显示一条通知",
+  "permBackground": "后台运行",
+  "permBackgroundWhy": "不受电池优化限制，录音设备才能整天连着",
+  "addRecorderHelp": "打开录音设备（插上充电线即可）。没绑定的录音设备蓝灯慢闪，名字印在它身上，或看标着「最近」的那台。",
+  "searchingNearby": "正在找附近的录音设备…",
+  "signalNear": "就在旁边",
+  "signalMid": "附近",
+  "signalFar": "较远",
+  "signalLost": "信号弱，暂时找不到",
+  "busyOtherPhone": "正连着其他手机：先在那台手机上解除绑定，或关掉它的蓝牙",
+  "boundOtherPhone": "已绑定其他手机",
+  "oldFirmware": "旧固件，状态未知",
+  "bind": "绑定",
+  "nearest": "最近",
+  "server": "服务器",
+  "serverAddress": "地址",
+  "serverHint": "http://100.x.y.z:8770 或 https://your.server",
+  "scanToSignIn": "扫码登录",
+  "deviceName": "设备名",
+  "deviceNameHelp": "取自系统设置里的手机名称；BLE 录音硬件的音频按硬件名上传",
+  "recordingSection": "录音",
+  "keepRecordings": "本地保留录音",
+  "keepRecordingsIos": "上传后存到「文件」App › 我的 iPhone › alldayrec › recordings › 日期",
+  "keepRecordingsAndroid": "上传后存到 Android/data/com.suyiiyii.live_record/files/recordings/日期/",
+  "pieceLength": "切片长度（服务端下发）",
+  "piecesIos": "前台 {foreground} 秒 · 后台 {background} 秒",
+  "@piecesIos": {
+    "placeholders": {
+      "foreground": {},
+      "background": {}
+    }
+  },
+  "piecesAndroid": "前台 {foreground} 秒 · 后台 {background} 秒 · 熄屏 {screenOff} 秒",
+  "@piecesAndroid": {
+    "placeholders": {
+      "foreground": {},
+      "background": {},
+      "screenOff": {}
+    }
+  },
+  "save": "保存",
+  "notSignInQr": "不是登录二维码，请在网页的「连接手机」里扫",
+  "onBattery": "用电池",
+  "charging": "充电中",
+  "charged": "已充满",
+  "cardFullTile": "已满",
+  "cardFull": "存储卡已满",
+  "cardFullSub": "离线录音已停止",
+  "cardUsbTile": "U 盘中",
+  "cardUsb": "存储卡在 U 盘模式",
+  "cardUsbSub": "离线录音暂停",
+  "cardNoneTile": "没插卡",
+  "cardNone": "没插存储卡",
+  "cardNoneSub": "没插卡或没插好：只能实时上传，手机不在旁边时录不下来",
+  "cardErrorTile": "出错",
+  "cardError": "存储卡出错",
+  "cardErrorSub": "重插或换一张卡；实时上传照常",
+  "advBattery": "电池 {volts} V",
+  "@advBattery": {
+    "placeholders": {
+      "volts": {}
+    }
+  },
+  "advCardOk": "卡正常",
+  "advCardFull": "卡满",
+  "advCardError": "卡出错",
+  "cardFreeGb": "卡剩 {gb} GB",
+  "@cardFreeGb": {
+    "placeholders": {
+      "gb": {}
+    }
+  },
+  "batteryPercent": "电量 {percent}%",
+  "@batteryPercent": {
+    "placeholders": {
+      "percent": {}
+    }
+  },
+  "allowInstalls": "在打开的设置里允许安装未知应用，回来再点这里",
+  "cannotOpenInstaller": "没法打开安装界面：{error}",
+  "@cannotOpenInstaller": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "downloadStalled": "下载卡住了，点这里重试",
+  "downloadFailedRetry": "下载失败：{error}，点这里重试",
+  "@downloadFailedRetry": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "downloadingApp": "正在下载新版本 {version} · {done} / {total} MB",
+  "@downloadingApp": {
+    "placeholders": {
+      "version": {},
+      "done": {},
+      "total": {}
+    }
+  },
+  "appUpdate": "有新版本 {version}{size}，点这里更新",
+  "@appUpdate": {
+    "placeholders": {
+      "version": {},
+      "size": {}
+    }
+  },
+  "appUpdateSize": "（{mb} MB）",
+  "@appUpdateSize": {
+    "placeholders": {
+      "mb": {}
+    }
+  },
+  "dontRemindVersion": "这个版本不再提示",
+  "resume": "继续",
+  "pause15Min": "暂停 15 分钟",
+  "oneHour": "1 小时",
+  "pause1Hour": "暂停 1 小时"
+}

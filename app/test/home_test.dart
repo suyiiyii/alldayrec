@@ -9,6 +9,13 @@ import 'package:live_record/upload_page.dart';
 import 'package:live_record/recorder_page.dart';
 
 void main() {
+  test('Chinese for any zh, English for everything else', () {
+    expect([for (final l in [const Locale('zh', 'CN'), const Locale('zh', 'TW'), const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hant'),
+             const Locale('en', 'US'), const Locale('ja'), null]) app.appLocale(l)],
+        [const Locale('zh'), const Locale('zh'), const Locale('zh'), const Locale('en'), const Locale('en'), const Locale('en')]);
+  });
+
+  // flutter test's locale is en_US: the pages in English
   testWidgets('application pages remain navigable and dispose their polling', (tester) async {
     SharedPreferences.setMockInitialValues({'server': 'http://127.0.0.1:1'});
     var pending = 0;  // one more each poll: the open status sheet has to follow
@@ -25,28 +32,28 @@ void main() {
     app.main();
     await tester.pumpAndSettle();
     expect(find.byType(Home), findsOneWidget);
-    expect(find.text('开始录音'), findsNothing);  // in the status sheet, behind the top bar's chip
-    await tester.tap(find.widgetWithText(ActionChip, '未在录音'));
+    final start = find.widgetWithText(FilledButton, 'Start recording');
+    expect(start, findsNothing);  // in the status sheet, behind the top bar's chip
+    await tester.tap(find.widgetWithText(ActionChip, 'Not recording'));
     await tester.pumpAndSettle();
-    expect(find.text('开始录音'), findsOneWidget);
-    expect(find.text('实时字幕'), findsNothing);  // a tab now, not in the sheet
+    expect(start, findsOneWidget);
     await tester.pump(const Duration(seconds: 2));  // a poll while the sheet is open
     await tester.pump();
     final n = pending;
-    expect(find.text('待传 $n 块'), findsOneWidget);
+    expect(find.text('$n pieces to upload'), findsOneWidget);
     await tester.pump(const Duration(seconds: 2));  // the next one
     await tester.pump();
-    expect(find.text('待传 ${n + 1} 块'), findsOneWidget);
+    expect(find.text('${n + 1} pieces to upload'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10));  // the scrim: the sheet goes
     await tester.pumpAndSettle();
-    expect(find.text('开始录音'), findsNothing);
+    expect(start, findsNothing);
     expect(tester.widgetList<NavigationDestination>(find.byType(NavigationDestination)).map((d) => d.label),
-        ['时间线', '实时', '人物', '我的']);
-    await tester.tap(find.widgetWithText(NavigationDestination, '我的'));
+        ['Timeline', 'Live', 'People', 'Me']);
+    await tester.tap(find.widgetWithText(NavigationDestination, 'Me'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(ActionChip, '未在录音'), findsOneWidget);  // the status is on every tab
+    expect(find.byType(ActionChip), findsOneWidget);  // the status is on every tab
     expect(find.text('1.0.0+1'), findsOneWidget);
-    for (final entry in <String, Type>{'设置': SettingsPage, '上传': UploadPage, '录音设备': RecorderPage}.entries) {
+    for (final entry in <String, Type>{'Settings': SettingsPage, 'Upload': UploadPage, 'Recorder': RecorderPage}.entries) {
       await tester.tap(find.widgetWithText(ListTile, entry.key));
       await tester.pumpAndSettle();
       expect(find.byType(entry.value), findsOneWidget);

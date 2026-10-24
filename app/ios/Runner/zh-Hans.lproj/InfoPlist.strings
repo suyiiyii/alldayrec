@@ -1,0 +1,4 @@
+/* The permission prompts in Chinese, as in Info.plist */
+"NSBluetoothAlwaysUsageDescription" = "连接录音设备，取回它录下的音频并上传";
+"NSMicrophoneUsageDescription" = "录音并上传到 alldayrec 服务端转写";
+"NSCameraUsageDescription" = "扫码登录需要使用摄像头";

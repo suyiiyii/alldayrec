@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
 import 'recorder.dart';
 import 'settings.dart';
@@ -32,7 +33,7 @@ class FirmwareTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(Icons.system_update_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
-      title: const Text('固件更新'),
+      title: Text(AppLocalizations.of(context).firmwareUpdate),
       subtitle: Text([fw ?? '—', ?dfu].join('\n')),
       trailing: dfuBusy
           ? const SizedBox.square(dimension: 24, child: CircularProgressIndicator(strokeWidth: 2.5))
@@ -115,8 +116,9 @@ class _FirmwarePageState extends State<FirmwarePage> {
 
   Future<void> _update() async {
     final m = latest!, battery = linked ? hw['battery'] as int? : null;  // as the page showed it: no battery once the link is down
+    final l = AppLocalizations.of(context);
     if (await _confirm(m, battery) != true) return;
-    setState(() { busy = true; note = '正在下载固件'; });
+    setState(() { busy = true; note = l.downloadingFirmware; });
     try {
       final res = await _get('/api/firmware/${m['model']}/${m['version']}.zip');
       if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
@@ -128,13 +130,13 @@ class _FirmwarePageState extends State<FirmwarePage> {
     } on PlatformException catch (e) {
       note = e.message;
     } catch (e) {
-      note = '下载失败：$e';
+      note = l.downloadFailed('$e');
     }
     if (mounted) setState(() => busy = false);
   }
 
   Future<bool?> _confirm(Map m, int? battery) {
-    final cs = Theme.of(context).colorScheme, model = widget.model;
+    final cs = Theme.of(context).colorScheme, model = widget.model, l = AppLocalizations.of(context);
     final same = m['model'] == model, low = battery != null && battery < 30;
     Widget line(IconData icon, String text, [Color? color]) => Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -147,22 +149,22 @@ class _FirmwarePageState extends State<FirmwarePage> {
     return showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('升级固件'),
+        title: Text(l.updateFirmware),
         content: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text('${fw ?? '未知'} → ${m['version']}'),
+            Text('${fw ?? l.unknown} → ${m['version']}'),
             line(same ? Icons.check_circle_rounded : Icons.block_rounded,
-                same ? '型号一致：$model' : '型号不符：录音设备是 $model，固件是 ${m['model']}，不能升级',
+                same ? l.modelMatches(model) : l.modelMismatch(model, '${m['model']}'),
                 same ? Colors.green.shade600 : cs.error),
-            line(Icons.usb_off_rounded, '先拔掉录音设备的 USB：插着 USB 升级会卡在擦除'),
-            line(Icons.battery_charging_full_rounded, '电量保持在 30% 以上${battery == null ? '' : '（现在 $battery%）'}', low ? cs.error : null),
-            line(Icons.phonelink_ring_rounded, '升级要几分钟：手机放在录音设备旁边，别关 App；期间不录音也不同步'),
-            line(Icons.info_outline_rounded, '中途失败、录音设备不见了：插 USB 用 lr.sh flash 刷（升级模式下的录音设备换了地址，再点升级连不上）'),
+            line(Icons.usb_off_rounded, l.unplugUsbFirst),
+            line(Icons.battery_charging_full_rounded, battery == null ? l.keepBattery : l.keepBatteryNow(battery), low ? cs.error : null),
+            line(Icons.phonelink_ring_rounded, l.updateTakesMinutes),
+            line(Icons.info_outline_rounded, l.updateFailedHelp),
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
-          FilledButton(onPressed: same ? () => Navigator.pop(c, true) : null, child: const Text('开始升级')),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.cancel)),
+          FilledButton(onPressed: same ? () => Navigator.pop(c, true) : null, child: Text(l.startUpdate)),
         ],
       ),
     );
@@ -170,9 +172,9 @@ class _FirmwarePageState extends State<FirmwarePage> {
 
   static String _when(String? iso) => iso == null ? '—' : iso.replaceFirst('T', ' ').padRight(16).substring(0, 16).trim();
 
-  static String _took(num ms) {
+  static String _took(AppLocalizations l, num ms) {
     final s = (ms / 1000).round();
-    return s < 60 ? '$s 秒' : '${s ~/ 60} 分 ${s % 60} 秒';
+    return s < 60 ? l.seconds(s) : l.minutesSeconds(s ~/ 60, s % 60);
   }
 
   Widget _tag(String text, Color color) => Container(
@@ -183,7 +185,7 @@ class _FirmwarePageState extends State<FirmwarePage> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context), cs = t.colorScheme;
+    final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
     final small = t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
     final m = latest, fw = this.fw, wait = busy || dfuBusy, dfu = (st['dfu'] ?? r['dfu']) as String?;
     final canUpdate = m != null && newer(m);
@@ -192,15 +194,15 @@ class _FirmwarePageState extends State<FirmwarePage> {
     // (LR-P2, the same board kept for tests with bootloader 0.10.0, keeps the button: its updates are the test)
     final usbOnly = widget.model == 'LR-P1';
     final (String chip, Color chipColor, IconData chipIcon) = versions == null && versionsError == null
-        ? ('检查中', cs.outline, Icons.hourglass_empty_rounded)
+        ? (l.checking, cs.outline, Icons.hourglass_empty_rounded)
         : canUpdate
-            ? ('有新版本', cs.tertiary, Icons.new_releases_rounded)
+            ? (l.updateAvailable, cs.tertiary, Icons.new_releases_rounded)
             : m != null
-                ? ('已是最新', Colors.green.shade600, Icons.check_circle_rounded)
-                : ('没有固件', cs.outline, Icons.cloud_off_rounded);
+                ? (l.upToDate, Colors.green.shade600, Icons.check_circle_rounded)
+                : (l.noFirmware, cs.outline, Icons.cloud_off_rounded);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('固件更新')),
+      appBar: AppBar(title: Text(l.firmwareUpdate)),
       body: RefreshIndicator(
         onRefresh: () => Future.wait([_poll(), _fetch()]),
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
@@ -208,26 +210,26 @@ class _FirmwarePageState extends State<FirmwarePage> {
             stateChip(chip, chipColor, chipIcon),
             Chip(label: Text(widget.model), visualDensity: VisualDensity.compact),
           ]),
-          sectionCard(context, '版本', Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          sectionCard(context, l.version, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             ListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
               leading: const Icon(Icons.memory_rounded),
-              title: const Text('当前版本'),
-              subtitle: Text(fw ?? '还不知道：连上录音设备后读取'),
+              title: Text(l.currentVersion),
+              subtitle: Text(fw ?? l.versionNotKnownYet),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               dense: true,
               leading: const Icon(Icons.cloud_download_rounded),
-              title: const Text('最新版本'),
+              title: Text(l.latestVersion),
               subtitle: Text(m != null
-                  ? '${m['version']}\n发布于 ${_when(m['uploaded'] as String?)}'
+                  ? '${m['version']}\n${l.releasedAt(_when(m['uploaded'] as String?))}'
                   : versionsError != null
-                      ? '查不到：$versionsError'
+                      ? l.lookupFailed(versionsError!)
                       : versions == null
-                          ? '正在查服务器'
-                          : '服务器上还没有 ${widget.model} 的固件'),
+                          ? l.askingServer
+                          : l.noFirmwareFor(widget.model)),
             ),
             if (wait) ...[
               const SizedBox(height: 4),
@@ -236,19 +238,19 @@ class _FirmwarePageState extends State<FirmwarePage> {
             for (final s in [?note, ?dfu]) Padding(padding: const EdgeInsets.only(top: 8), child: Text(s)),
             const SizedBox(height: 8),
             if (usbOnly)
-              Text('LR-P1 只能插 USB 升级：lr.sh flash promicro（蓝牙升级中途一断，只能插 USB 救回）', style: small)
+              Text(l.lrP1UsbOnly, style: small)
             else if (canUpdate)
               FilledButton.icon(
                 onPressed: wait ? null : _update,
                 icon: const Icon(Icons.system_update_alt_rounded),
-                label: const Text('升级到最新版本'),
+                label: Text(l.updateToLatest),
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
               )
             else if (m != null && fw != null)
-              Text('已是最新版本', style: small),
+              Text(l.alreadyLatest, style: small),
           ])),
-          sectionCard(context, '更新日志', versions == null || versions!.isEmpty
-              ? Text(versionsError != null ? '查不到：$versionsError' : versions == null ? '正在查服务器' : '还没有发布过的版本', style: small)
+          sectionCard(context, l.changelog, versions == null || versions!.isEmpty
+              ? Text(versionsError != null ? l.lookupFailed(versionsError!) : versions == null ? l.askingServer : l.noReleases, style: small)
               : Column(children: [
                   for (final v in versions!)
                     ExpansionTile(
@@ -261,12 +263,12 @@ class _FirmwarePageState extends State<FirmwarePage> {
                       initiallyExpanded: canUpdate ? newer(v) : v['version'] == fw,
                       title: Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
                         Text('${v['version']}', style: t.textTheme.bodyLarge),
-                        if (identical(v, m)) _tag('最新', cs.primary),
-                        if (v['version'] == fw) _tag('当前', Colors.green.shade700),
+                        if (identical(v, m)) _tag(l.tagLatest, cs.primary),
+                        if (v['version'] == fw) _tag(l.tagCurrent, Colors.green.shade700),
                       ]),
-                      subtitle: Text('发布于 ${_when(v['uploaded'] as String?)}', style: small),
+                      subtitle: Text(l.releasedAt(_when(v['uploaded'] as String?)), style: small),
                       children: [
-                        if ('${v['notes'] ?? ''}'.trim().isEmpty) Text('没有说明', style: small),
+                        if ('${v['notes'] ?? ''}'.trim().isEmpty) Text(l.noNotes, style: small),
                         for (final l in '${v['notes'] ?? ''}'.split('\n').where((l) => l.trim().isNotEmpty))  // a change a line (lr_release.py)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 4),
@@ -278,8 +280,8 @@ class _FirmwarePageState extends State<FirmwarePage> {
                       ],
                     ),
                 ])),
-          sectionCard(context, '最近的升级', upgrades == null || upgrades!.isEmpty
-              ? Text(upgradesError != null ? '查不到：$upgradesError' : upgrades == null ? '正在查服务器' : '最近 90 天没有升级过', style: small)
+          sectionCard(context, l.recentUpdates, upgrades == null || upgrades!.isEmpty
+              ? Text(upgradesError != null ? l.lookupFailed(upgradesError!) : upgrades == null ? l.askingServer : l.noUpdates90Days, style: small)
               : Column(children: [
                   for (final u in upgrades!.take(5))
                     ListTile(
@@ -293,8 +295,8 @@ class _FirmwarePageState extends State<FirmwarePage> {
                       title: Text('${u['from'] ?? '?'} → ${u['to'] ?? '?'}'),
                       subtitle: Text([
                         _when(u['at'] as String?),
-                        u['ok'] == true ? '成功' : u['ok'] == false ? '失败' : '没有结果',
-                        if (u['ms'] != null) '用时 ${_took(u['ms'] as num)}',
+                        u['ok'] == true ? l.succeeded : u['ok'] == false ? l.failed : l.noResult,
+                        if (u['ms'] != null) l.took(_took(l, u['ms'] as num)),
                         if (u['why'] != null) '${u['why']}',
                       ].join(' · ')),
                     ),

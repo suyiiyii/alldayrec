@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
 import 'recorder.dart';
 import 'settings.dart';
@@ -20,6 +21,7 @@ class _UploadPageState extends State<UploadPage> {
   Map st = {};  // the native side's status
   Map? server;  // this device's entry of /api/status
   String serverNote = '', dev = '';  // dev: the name its audio goes up as (the BLE recorder's own, or the setting)
+  bool serverFailed = false;  // serverNote says the server could not be asked
   Timer? timer;
 
   @override
@@ -37,7 +39,9 @@ class _UploadPageState extends State<UploadPage> {
 
   Future<void> _fetch() async {
     final s = widget.settings, phone = await Recorder.status();
-    if (mounted) setState(() => st = phone);
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);  // not before the await: initState calls this
+    setState(() => st = phone);
     if (s.token.isEmpty) return;
     try {
       final c = HttpClient()..connectionTimeout = const Duration(seconds: 10);
@@ -50,9 +54,9 @@ class _UploadPageState extends State<UploadPage> {
       final ble = s.source == 'ble' ? (await Recorder.recorder())['name'] as String? : null;
       dev = ble?.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_') ?? s.device;
       final mine = (body['devices'] as List? ?? []).cast<Map>().where((d) => d['device'] == dev).firstOrNull;
-      if (mounted) setState(() { server = mine; serverNote = mine == null ? '服务端还没有 $dev 的处理任务' : ''; });
+      if (mounted) setState(() { server = mine; serverNote = mine == null ? l.serverNoTask(dev) : ''; serverFailed = false; });
     } catch (e) {
-      if (mounted) setState(() => serverNote = '取不到服务端状态：$e');
+      if (mounted) setState(() { serverNote = l.serverStatusFailed('$e'); serverFailed = true; });
     }
   }
 
@@ -64,25 +68,25 @@ class _UploadPageState extends State<UploadPage> {
     return '${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
   }
 
-  static String _span(num s) {
+  static String _span(AppLocalizations l, num s) {
     final m = (s / 60).round();
-    return m >= 60 ? '${m ~/ 60} 小时 ${m % 60} 分' : '$m 分钟';
+    return m >= 60 ? l.hoursMinutes(m ~/ 60, m % 60) : l.minutes(m);
   }
 
   static String _size(num b) => b < 1048576 ? '${(b / 1024).round()} KB' : '${(b / 1048576).toStringAsFixed(1)} MB';
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context), cs = t.colorScheme, srv = server;
+    final t = Theme.of(context), cs = t.colorScheme, srv = server, l = AppLocalizations.of(context);
     final pending = (st['pending'] ?? 0) as int, bytes = (st['pendingBytes'] ?? 0) as num;
     final running = st['running'] == true, uploading = st['uploading'] == true;
     final (String chip, Color chipColor, IconData chipIcon) = running
-        ? ('录音中，边录边传', Colors.red.shade600, Icons.fiber_manual_record_rounded)
+        ? (l.recordingUploading, Colors.red.shade600, Icons.fiber_manual_record_rounded)
         : uploading
-            ? ('正在上传', cs.tertiary, Icons.cloud_upload_rounded)
+            ? (l.uploading, cs.tertiary, Icons.cloud_upload_rounded)
             : pending > 0
-                ? ('等待上传', Colors.orange.shade700, Icons.schedule_rounded)
-                : ('已全部上传', Colors.green.shade600, Icons.cloud_done_rounded);
+                ? (l.waitingToUpload, Colors.orange.shade700, Icons.schedule_rounded)
+                : (l.allUploaded, Colors.green.shade600, Icons.cloud_done_rounded);
     final left = (srv?['left_s'] ?? 0) as num, eta = srv?['eta_s'] as num?, hold = srv?['hold'];
     final backlogKb = (srv?['hw'] as Map?)?['backlog_kb'] as num?, backlogEta = (srv?['hw'] as Map?)?['backlog_eta_s'] as num?;
     final caughtUp = left < 30;
@@ -100,12 +104,12 @@ class _UploadPageState extends State<UploadPage> {
             statTile(context,
                 icon: Icons.inventory_2_rounded,
                 color: pending > 0 ? Colors.orange.shade700 : Colors.green.shade600,
-                label: '待传',
-                value: pending == 0 ? '0' : '$pending 块',
-                sub: pending == 0 ? '没有积压' : '${_size(bytes)} · 最早录于 ${_at(st['oldest'])}'),
+                label: l.toUpload,
+                value: pending == 0 ? '0' : l.pieces(pending),
+                sub: pending == 0 ? l.noBacklog : l.pendingSub(_size(bytes), _at(st['oldest']))),
             const SizedBox(width: 12),
             statTile(context,
-                icon: Icons.cloud_done_rounded, color: cs.primary, label: '本次已传', value: '${st['sent'] ?? 0} 块', sub: '这次开机以来'),
+                icon: Icons.cloud_done_rounded, color: cs.primary, label: l.sentThisRun, value: l.pieces(st['sent'] ?? 0), sub: l.sinceStart),
           ]),
         ),
         if (st['note'] != null)
@@ -119,16 +123,16 @@ class _UploadPageState extends State<UploadPage> {
         if (pending > 0 && !running && !uploading)
           Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: FilledButton.icon(onPressed: Recorder.upload, icon: const Icon(Icons.cloud_upload_rounded), label: const Text('立即上传'))),
+              child: FilledButton.icon(onPressed: Recorder.upload, icon: const Icon(Icons.cloud_upload_rounded), label: Text(l.uploadNow))),
         sectionCard(
             context,
-            '服务端处理',
+            l.serverProcessing,
             srv == null
                 ? Row(children: [
-                    Icon(serverNote.startsWith('取不到') ? Icons.cloud_off_rounded : Icons.hourglass_empty_rounded,
-                        color: serverNote.startsWith('取不到') ? cs.error : cs.outline),
+                    Icon(serverFailed ? Icons.cloud_off_rounded : Icons.hourglass_empty_rounded,
+                        color: serverFailed ? cs.error : cs.outline),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(serverNote.isEmpty ? '加载中…' : serverNote)),
+                    Expanded(child: Text(serverNote.isEmpty ? l.loading : serverNote)),
                   ])
                 : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
@@ -136,7 +140,7 @@ class _UploadPageState extends State<UploadPage> {
                           color: caughtUp ? Colors.green.shade600 : cs.tertiary),
                       const SizedBox(width: 8),
                       Expanded(
-                          child: Text(caughtUp ? '已追上，录音都已转写' : '还有 ${_span(left)} 录音待处理 · 排队 ${srv['queued']} 块',
+                          child: Text(caughtUp ? l.caughtUp : l.serverBehind(_span(l, left), '${srv['queued']}'),
                               style: t.textTheme.bodyLarge)),
                     ]),
                     if (!caughtUp) ...[
@@ -147,12 +151,12 @@ class _UploadPageState extends State<UploadPage> {
                       // own estimate does not know when that is in
                       Text(
                           hold != null
-                              ? '定稿停在 ${_at(hold)}，等手机在后台补传卡里更早的录音'
-                                  '${backlogKb != null && backlogKb > 0 ? '（还有 ${_size(backlogKb * 1024)}${backlogEta != null ? '，约 ${_span(backlogEta)}' : ''}）' : ''}'
-                                  '，补完再接着定稿；初稿和实时分析照常'
+                              ? l.finalsHeld(_at(hold), backlogKb == null || backlogKb <= 0 ? ''
+                                  : backlogEta == null ? l.backlogLeft(_size(backlogKb * 1024))
+                                  : l.backlogLeftEta(_size(backlogKb * 1024), _span(l, backlogEta)))
                               : eta == null
                                   ? ''
-                                  : '预计约 ${_span(eta)} 后完成',
+                                  : l.etaDone(_span(l, eta)),
                           style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
                     ],
                     const Divider(height: 24),
@@ -160,13 +164,13 @@ class _UploadPageState extends State<UploadPage> {
                         contentPadding: EdgeInsets.zero,
                         dense: true,
                         leading: const Icon(Icons.download_done_rounded),
-                        title: const Text('已收到'),
+                        title: Text(l.received),
                         trailing: Text(_at(srv['received_to']))),
                     ListTile(
                         contentPadding: EdgeInsets.zero,
                         dense: true,
                         leading: const Icon(Icons.task_alt_rounded),
-                        title: const Text('已定稿'),
+                        title: Text(l.finalized),
                         trailing: Text(_at(srv['done_to']))),
                   ])),
       ]),

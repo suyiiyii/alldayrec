@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
 import 'recorder.dart';
 import 'recorder_status.dart';
@@ -87,12 +88,13 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
 
   Future<void> _bind(Map d, bool force) async {
     if (force) {
+      final l = AppLocalizations.of(context);
       final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-        title: Text('绑定 ${d['name']}？'),
-        content: const Text('它已经绑定了别的手机。绑定到这台手机后，原来的手机将无法再连接它。'),
+        title: Text(l.bindTitle(d['name'])),
+        content: Text(l.bindForceBody),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('强制绑定')),
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.cancel)),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: Text(l.forceBind)),
         ],
       ));
       if (ok != true) return;
@@ -105,7 +107,7 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
 
   @override
   Widget build(BuildContext context) {
-    final t = Theme.of(context), cs = t.colorScheme;
+    final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
     final small = t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant);
     Widget perm(String key, String title, String why) => ListTile(
           contentPadding: EdgeInsets.zero,
@@ -113,52 +115,52 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
               color: perms[key] == true ? Colors.green.shade600 : cs.error),
           title: Text(title),
           subtitle: Text(why),
-          trailing: perms[key] == true ? null : TextButton(onPressed: () => Recorder.askPermission(key), child: const Text('允许')),
+          trailing: perms[key] == true ? null : TextButton(onPressed: () => Recorder.askPermission(key), child: Text(l.allow)),
         );
     return Scaffold(
-      appBar: AppBar(title: const Text('添加录音设备')),
+      appBar: AppBar(title: Text(l.addRecorder)),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
         if (perms['bluetoothOn'] == false)
-          Padding(padding: const EdgeInsets.only(top: 12), child: Text('蓝牙没有打开：打开后这里会开始找录音设备', style: TextStyle(color: cs.error))),
+          Padding(padding: const EdgeInsets.only(top: 12), child: Text(l.bluetoothOff, style: TextStyle(color: cs.error))),
         if (['bluetooth', 'notifications', 'battery'].any((k) => perms.isNotEmpty && perms[k] != true))
-          sectionCard(context, '权限', Column(children: [
-            perm('bluetooth', Platform.isIOS ? '蓝牙' : '附近的设备', '找到并连接录音设备'),
-            perm('notifications', '通知', '后台连接录音设备时要显示一条通知'),
-            perm('battery', '后台运行', '不受电池优化限制，录音设备才能整天连着'),
+          sectionCard(context, l.permissions, Column(children: [
+            perm('bluetooth', Platform.isIOS ? l.permBluetooth : l.permNearbyDevices, l.permBluetoothWhy),
+            perm('notifications', l.permNotifications, l.permNotificationsWhy),
+            perm('battery', l.permBackground, l.permBackgroundWhy),
           ])),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Text('打开录音设备（插上充电线即可）。没绑定的录音设备蓝灯慢闪，名字印在它身上，或看标着「最近」的那台。', style: small),
+          child: Text(l.addRecorderHelp, style: small),
         ),
         if (perms['bluetooth'] == true && found.isEmpty)
-          const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('正在找附近的录音设备…'))),
-        for (final d in found) _row(d, cs),
+          Padding(padding: const EdgeInsets.all(24), child: Center(child: Text(l.searchingNearby))),
+        for (final d in found) _row(d, cs, l),
       ]),
     );
   }
 
-  Widget _row(Map d, ColorScheme cs) {
+  Widget _row(Map d, ColorScheme cs, AppLocalizations l) {
     final state = d['state'] as int, rssi = d['rssi'] as int;
     // busy: not connectable (connected to another phone), told by the advertisement itself; the state byte comes in
     // the scan response, which a busy recorder seldom gets across
     final busy = d['busy'] == true || (state >= 0 && state & 2 != 0), bound = state >= 0 && state & 1 != 0;
-    final near = rssi > -60 ? '就在旁边' : rssi > -80 ? '附近' : '较远';
+    final near = rssi > -60 ? l.signalNear : rssi > -80 ? l.signalMid : l.signalFar;
     final (String what, Widget? action) = d['gone']
-        ? ('信号弱，暂时找不到', null)
+        ? (l.signalLost, null)
         : busy
-            ? ('正连着其他手机：先在那台手机上解除绑定，或关掉它的蓝牙', null)
+            ? (l.busyOtherPhone, null)
             : bound
-                ? ('已绑定其他手机', TextButton(onPressed: () => _bind(d, true), child: const Text('强制绑定')))
-                : (state < 0 ? '旧固件，状态未知' : '未绑定', FilledButton(onPressed: () => _bind(d, false), child: const Text('绑定')));
+                ? (l.boundOtherPhone, TextButton(onPressed: () => _bind(d, true), child: Text(l.forceBind)))
+                : (state < 0 ? l.oldFirmware : l.notBound, FilledButton(onPressed: () => _bind(d, false), child: Text(l.bind)));
     return Card.outlined(
       child: ListTile(
         enabled: !d['gone'],
         leading: Icon(Icons.mic_external_on_rounded, color: d['gone'] || busy || bound ? cs.outline : cs.primary),
         title: Row(children: [
           Flexible(child: Text(d['name'])),
-          if (d['nearest']) Padding(padding: const EdgeInsets.only(left: 8), child: Badge(label: const Text('最近'), backgroundColor: cs.primary)),
+          if (d['nearest']) Padding(padding: const EdgeInsets.only(left: 8), child: Badge(label: Text(l.nearest), backgroundColor: cs.primary)),
         ]),
-        subtitle: Text(d['gone'] ? what : [what, near, advText(d)].where((s) => s.isNotEmpty).join(' · ')),
+        subtitle: Text(d['gone'] ? what : [what, near, advText(l, d)].where((s) => s.isNotEmpty).join(' · ')),
         trailing: action,
       ),
     );

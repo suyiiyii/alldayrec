@@ -8,6 +8,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import 'l10n/app_localizations.dart';
 import 'pause_button.dart';
 import 'recorder.dart';
 import 'recorder_page.dart';
@@ -36,7 +37,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   int ticks = 0;
   String version = '';
 
-  static const titles = ['时间线', '实时', '人物', '我的'];
   static const paths = ['/', '/live', '/speakers'];
 
   @override
@@ -98,7 +98,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   bool get running => status['running'] == true;
-  bool get connected => '${status['link']}'.startsWith('已连接');  // the BLE recorder's link
+  bool get connected => status['connected'] == true;  // the BLE recorder's link
   bool get syncing => ((status['syncTotal'] as num?) ?? 0) > 0;  // its card's backlog being read
 
   /// Bumped by every setState: the status sheet is a route of its own, outside this build, and rebuilds on it.
@@ -181,8 +181,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     autoStarted = DateTime(2000);
     if (!mounted) return;
     Navigator.popUntil(context, (r) => r.isFirst);
+    final l = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(running && !changed ? '已保存，下次开始录音时生效' : '已保存'), behavior: SnackBarBehavior.floating));
+        content: Text(running && !changed ? l.savedNextRecording : l.saved), behavior: SnackBarBehavior.floating));
     setState(() => page = 0);
   }
 
@@ -211,14 +212,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   Future<void> _start() async {
-    if (settings!.source == 'mic' && !await AudioRecorder().hasPermission()) return setState(() => note = '没有麦克风权限');
+    final l = AppLocalizations.of(context);
+    if (settings!.source == 'mic' && !await AudioRecorder().hasPermission()) return setState(() => note = l.noMicPermission);
     note = '';
     try {
       final s = settings!;
       await Recorder.start(server: s.server, token: s.token, device: s.device, archive: s.archive, source: s.source,
           slices: await Slices.fetch(s) ?? await Slices.cached());
     } on PlatformException catch (e) {
-      setState(() => note = '无法开始录音 ${e.message}');
+      setState(() => note = l.cannotStartRecording('${e.message}'));
     }
   }
 
@@ -233,7 +235,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final cs = Theme.of(context).colorScheme, l = AppLocalizations.of(context);
+    final titles = [l.tabTimeline, l.tabLive, l.tabPeople, l.tabMe];
     return PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) => didPop ? null : _back(), child: Scaffold(
       appBar: AppBar(
         title: Text(titles[page]),
@@ -241,7 +244,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         actions: [
           if (settings != null) Padding(padding: const EdgeInsets.only(right: 4), child: _chip(cs)),
           if (page < webs.length && webs[page] != null)
-            IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新', onPressed: () => webs[page]!.reload()),
+            IconButton(icon: const Icon(Icons.refresh), tooltip: l.refresh, onPressed: () => webs[page]!.reload()),
         ],
       ),
       body: settings == null
@@ -253,22 +256,22 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       bottomNavigationBar: settings == null ? null : NavigationBar(
         selectedIndex: page,
         onDestinationSelected: _show,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.view_agenda_outlined), selectedIcon: Icon(Icons.view_agenda), label: '时间线'),
-          NavigationDestination(icon: Icon(Icons.subtitles_outlined), selectedIcon: Icon(Icons.subtitles), label: '实时'),
-          NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '人物'),
-          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '我的'),
+        destinations: [
+          NavigationDestination(icon: const Icon(Icons.view_agenda_outlined), selectedIcon: const Icon(Icons.view_agenda), label: titles[0]),
+          NavigationDestination(icon: const Icon(Icons.subtitles_outlined), selectedIcon: const Icon(Icons.subtitles), label: titles[1]),
+          NavigationDestination(icon: const Icon(Icons.people_outline), selectedIcon: const Icon(Icons.people), label: titles[2]),
+          NavigationDestination(icon: const Icon(Icons.person_outline), selectedIcon: const Icon(Icons.person), label: titles[3]),
         ],
       ),
     ));
   }
 
-  void _openSettings() => _open('设置', SettingsPage(settings: settings!, onSaved: _saved));
-  void _openRecorder() => _open('录音设备', RecorderPage(onSource: _setSource));
+  void _openSettings() => _open(AppLocalizations.of(context).settings, SettingsPage(settings: settings!, onSaved: _saved));
+  void _openRecorder() => _open(AppLocalizations.of(context).recorder, RecorderPage(onSource: _setSource));
 
   /// 我的: this phone, and the native pages.
   Widget _me(ColorScheme cs) {
-    final s = settings!;
+    final s = settings!, l = AppLocalizations.of(context);
     Widget entry(IconData icon, String title, VoidCallback onTap, [String? sub]) => ListTile(
         leading: Icon(icon), title: Text(title), subtitle: sub == null ? null : Text(sub), onTap: onTap,
         trailing: Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant));
@@ -276,15 +279,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ListTile(
         leading: CircleAvatar(backgroundColor: cs.primaryContainer, child: Icon(Icons.smartphone_rounded, color: cs.onPrimaryContainer)),
         title: Text(s.device),
-        subtitle: Text(s.token.isEmpty ? '还没登录' : Uri.tryParse(s.server)?.host ?? s.server),
+        subtitle: Text(s.token.isEmpty ? l.notSignedIn : Uri.tryParse(s.server)?.host ?? s.server),
       ),
       const Divider(),
-      entry(Icons.bluetooth_outlined, '录音设备', _openRecorder),
-      entry(Icons.devices_outlined, '设备状态与更多', s.token.isEmpty ? _openSettings : () => _openWeb('设备状态与更多', '/me'),
-          '电量、存储卡、处理进度、接入 AI'),
-      entry(Icons.cloud_upload_outlined, '上传', () => _open('上传', UploadPage(settings: s))),
-      entry(Icons.settings_outlined, '设置', _openSettings),
-      entry(Icons.info_outline, '关于', () => showAboutDialog(context: context, applicationName: 'alldayrec', applicationVersion: version),
+      entry(Icons.bluetooth_outlined, l.recorder, _openRecorder),
+      entry(Icons.devices_outlined, l.deviceStatusAndMore, s.token.isEmpty ? _openSettings : () => _openWeb(l.deviceStatusAndMore, '/me'),
+          l.deviceStatusAndMoreSub),
+      entry(Icons.cloud_upload_outlined, l.upload, () => _open(l.upload, UploadPage(settings: s))),
+      entry(Icons.settings_outlined, l.settings, _openSettings),
+      entry(Icons.info_outline, l.about, () => showAboutDialog(context: context, applicationName: 'alldayrec', applicationVersion: version),
           version),
     ]);
   }
@@ -293,13 +296,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// something to look at; a tap opens the sheet with all of it.
   Widget _chip(ColorScheme cs) {
     final s = status, battery = (s['hw'] as Map?)?['battery'], amber = Colors.amber.shade700, grey = cs.outline;
-    final warn = s['error'] != null || s['note'] != null || note.isNotEmpty;
+    final warn = s['error'] != null || s['note'] != null || note.isNotEmpty, l = AppLocalizations.of(context);
     final (Color dot, String text) = ble
-        ? syncing ? (connected ? recordingRed : amber, '补传中')
-            : !connected ? (amber, '未连接')
-            : pauseLeftMin(s) > 0 ? (grey, '已暂停')
-            : (recordingRed, battery == null ? '已连接' : '已连接 $battery%')  // hw keeps the last read after a disconnect
-        : stopping ? (amber, '停止中') : running ? (recordingRed, '录音中') : (grey, '未在录音');
+        ? syncing ? (connected ? recordingRed : amber, l.catchingUp)
+            : !connected ? (amber, l.notConnected)
+            : pauseLeftMin(s) > 0 ? (grey, l.paused)
+            : (recordingRed, battery == null ? l.connected : l.connectedBattery(battery))  // hw keeps the last read after a disconnect
+        : stopping ? (amber, l.stopping) : running ? (recordingRed, l.recording) : (grey, l.notRecording);
     return ActionChip(
       avatar: Center(child: Container(width: 8, height: 8, decoration: BoxDecoration(color: warn ? amber : dot, shape: BoxShape.circle))),
       label: Text(text),
@@ -326,7 +329,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               ),
               ListTile(
                 leading: const Icon(Icons.bluetooth_outlined),
-                title: const Text('设备详情'),
+                title: Text(AppLocalizations.of(sheet).deviceDetails),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () {
                   Navigator.pop(sheet);
@@ -340,8 +343,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   /// The BLE recorder as the source: nothing to start or stop, only where its audio is.
   Widget _bleBody(ColorScheme cs) {
-    final s = status, hw = (s['hw'] as Map?) ?? {};
-    final link = '${s['link'] ?? '正在启动'}';
+    final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context);
+    final link = '${s['link'] ?? l.starting}';
     final syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0, syncLive = (s['syncLive'] as num?) ?? 0;
     final (IconData icon, Color color) = syncing
         ? (Icons.sync_rounded, cs.tertiary)
@@ -351,9 +354,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final small = TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
     final pausedMin = pauseLeftMin(s);
     final detail = [
-      if (pausedMin > 0) '已暂停，还剩 $pausedMin 分钟',
-      hwLine(hw),
-      if ((s['pending'] ?? 0) > 0) '待传 ${s['pending']} 块',
+      if (pausedMin > 0) l.pausedMinutesLeft(pausedMin),
+      hwLine(l, hw),
+      if ((s['pending'] ?? 0) > 0) l.piecesPending(s['pending']),
     ].where((x) => x.isNotEmpty).join(' · ');
     return Row(children: [
       Icon(icon, color: color),
@@ -363,8 +366,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           // LIVE goes on while the backlog is read; before that only the file being recorded is waited
           // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
           Text(!syncing ? link : connected
-                  ? '实时上传 · 后台补传 ${(syncDone / 1024).toStringAsFixed(1)} / ${(syncTotal / 1024).toStringAsFixed(1)} MB'
-                  : '接上实时前先取正在录的这段 · 还差 ${(syncLive / 1024).toStringAsFixed(1)} MB',
+                  ? l.liveUploadCatchingUp((syncDone / 1024).toStringAsFixed(1), (syncTotal / 1024).toStringAsFixed(1))
+                  : l.fetchingCurrentFile((syncLive / 1024).toStringAsFixed(1)),
               style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
           if (syncing) ...[
             const SizedBox(height: 6),
@@ -385,28 +388,28 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   /// This phone's microphone as the source: started and stopped here.
   Widget _micBody(ColorScheme cs) {
-    final s = status;
+    final s = status, l = AppLocalizations.of(context);
     final small = TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
     String headline, detail = '';
     if (stopping) {
-      headline = '停止中';
-      detail = '等最后 ${s['pending'] ?? 0} 块传完';
+      headline = l.stopping;
+      detail = l.waitingLastPieces(s['pending'] ?? 0);
     } else if (running) {
-      headline = '录音中 · ${s['slice']} 秒一块';
+      headline = l.recordingPieceSeconds('${s['slice']}');
       if (s['link'] != null) headline += ' · ${s['link']}';
-      detail = '已传 ${s['sent']} · 待传 ${s['pending']}';
-      final hw = hwLine(s['hw'] as Map?);
+      detail = l.sentPending('${s['sent']}', '${s['pending']}');
+      final hw = hwLine(l, s['hw'] as Map?);
       if (hw.isNotEmpty) detail += ' · $hw';
     } else {
-      headline = note.isEmpty ? '未在录音' : note;
+      headline = note.isEmpty ? l.notRecording : note;
       final n = s['pending'] ?? 0;
-      if (n > 0) detail = s['uploading'] == true ? '正在补传 $n 块' : '待传 $n 块';
+      if (n > 0) detail = s['uploading'] == true ? l.uploadingLeftover(n) : l.piecesPending(n);
     }
     final warn = [
-      if (s['error'] != null) '录音错误 ${s['error']}',
+      if (s['error'] != null) l.recordingError('${s['error']}'),
       if (s['note'] != null) '${s['note']}',  // also when stopped: iOS reports leftovers sent after a kill
       if (running && s['interruptedAt'] != null)
-        '${TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)} 被系统中断过，已恢复',
+        l.interruptedRecovered(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)),
     ];
     return Row(children: [
       Expanded(
@@ -422,7 +425,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
         onPressed: stopping ? null : (running ? _stop : _start),
         icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
-        label: Text(running ? '停止' : '开始录音'),
+        label: Text(running ? l.stop : l.startRecording),
       ),
     ]);
   }
@@ -436,9 +439,9 @@ class _Empty extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.key_outlined, size: 40, color: Theme.of(context).colorScheme.outline),
           const SizedBox(height: 12),
-          const Text('扫码登录或填好 Token 后显示'),
+          Text(AppLocalizations.of(context).emptyNotSignedIn),
           const SizedBox(height: 12),
-          OutlinedButton(onPressed: onSetup, child: const Text('去设置')),
+          OutlinedButton(onPressed: onSetup, child: Text(AppLocalizations.of(context).goToSettings)),
         ]),
       );
 }

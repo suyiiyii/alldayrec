@@ -1,0 +1,4 @@
+/* The permission prompts in English (any language but Chinese: zh-Hans.lproj, as lib/l10n). Info.plist keeps the Chinese. */
+"NSBluetoothAlwaysUsageDescription" = "Connects to the recorder to fetch the audio it recorded and upload it";
+"NSMicrophoneUsageDescription" = "Records and uploads to your alldayrec server for transcription";
+"NSCameraUsageDescription" = "The camera scans the sign-in QR code";

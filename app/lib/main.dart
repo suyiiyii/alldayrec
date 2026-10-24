@@ -5,7 +5,11 @@
 import 'package:flutter/material.dart';
 
 import 'home.dart';
+import 'l10n/app_localizations.dart';
 import 'recorder.dart';
+
+/// The app's language from the system's: Chinese for any zh (zh-Hans, zh-Hant, zh-HK...), English for everything else.
+Locale appLocale(Locale? system) => system?.languageCode == 'zh' ? const Locale('zh') : const Locale('en');
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +24,9 @@ void main() {
   };
   runApp(MaterialApp(
     home: const Home(),
+    localizationsDelegates: AppLocalizations.localizationsDelegates,
+    supportedLocales: AppLocalizations.supportedLocales,
+    localeResolutionCallback: (system, _) => appLocale(system),
     debugShowCheckedModeBanner: false,
     theme: ThemeData(colorSchemeSeed: const Color(0xff3b4cca), useMaterial3: true),
     darkTheme: ThemeData(colorSchemeSeed: const Color(0xff3b4cca), brightness: Brightness.dark, useMaterial3: true,

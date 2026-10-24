@@ -41,6 +41,9 @@ dependencies:
   webview_flutter_android: 4.14.1
   webview_flutter_wkwebview: 3.27.0
   mobile_scanner: ^7.4.2
+  flutter_localizations:
+    sdk: flutter
+  intl: any
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -62,6 +65,7 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  generate: true  # lib/l10n: app_zh.arb (template) and app_en.arb → AppLocalizations
 
   # To add assets to your application, add an assets section, like this:
   # assets:

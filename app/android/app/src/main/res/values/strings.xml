@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Any language but Chinese (res/values-zh), as the Flutter side (lib/l10n, main.dart appLocale) -->
+<resources>
+    <string name="recording_channel">Recording</string>
+</resources>

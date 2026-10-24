@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'l10n/app_localizations.dart';
 import 'settings.dart';
 
 const _ch = MethodChannel('live_record/recorder');
@@ -76,12 +77,12 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
 
   /// /app.apk with the token, into the file MainActivity hands to the installer.
   Future<void> _download() async {
-    final size = offer!['size'] as num? ?? 0;
+    final size = offer!['size'] as num? ?? 0, l = AppLocalizations.of(context);
     setState(() { progress = 0; error = null; });
     final c = HttpClient()..connectionTimeout = const Duration(seconds: 15);
     try {
       if (await _ch.invokeMethod('allowInstalls') != true) {
-        error = '在打开的设置里允许安装未知应用，回来再点这里';
+        error = l.allowInstalls;
         return;
       }
       final s = await Settings.load(), app = await _ch.invokeMethod('app') as Map;
@@ -102,11 +103,11 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
       }
       await _ch.invokeMethod('install');
     } on PlatformException catch (e) {
-      error = '没法打开安装界面：${e.message}';
+      error = l.cannotOpenInstaller('${e.message}');
     } on TimeoutException {
-      error = '下载卡住了，点这里重试';
+      error = l.downloadStalled;
     } catch (e) {
-      error = '下载失败：$e，点这里重试';
+      error = l.downloadFailedRetry('$e');
     } finally {
       c.close(force: true);
       if (mounted) setState(() => progress = null);
@@ -117,7 +118,7 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final o = offer, p = progress;
     if (o == null) return const SizedBox.shrink();
-    final t = Theme.of(context), cs = t.colorScheme;
+    final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
     String mb(num b) => (b / 1048576).toStringAsFixed(b < 10485760 ? 1 : 0);
     final size = o['size'] as num? ?? 0;
     return Material(
@@ -133,8 +134,8 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text(p != null ? '正在下载新版本 ${o['versionName']} · ${mb(p * size)} / ${mb(size)} MB'
-                      : '有新版本 ${o['versionName']}${size > 0 ? '（${mb(size)} MB）' : ''}，点这里更新',
+                  Text(p != null ? l.downloadingApp('${o['versionName']}', mb(p * size), mb(size))
+                      : l.appUpdate('${o['versionName']}', size > 0 ? l.appUpdateSize(mb(size)) : ''),
                       style: TextStyle(color: cs.onSecondaryContainer, fontWeight: FontWeight.w500)),
                   if (p != null) ...[
                     const SizedBox(height: 6),
@@ -145,7 +146,7 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
               ),
             ),
             if (p == null)
-              IconButton(icon: const Icon(Icons.close_rounded), tooltip: '这个版本不再提示', color: cs.onSecondaryContainer, onPressed: _dismiss)
+              IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss)
             else
               const SizedBox(width: 12),
           ]),
