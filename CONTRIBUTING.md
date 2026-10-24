@@ -44,7 +44,7 @@ APK 和硬件固件使用独立构建流程；构建不等于生产发布，不�
 
 正式 tag 必须指向 `main` 历史上的提交。APK 和固件分别版本化；固件内部版本继续使用 `lr.sh` 的提交时间和 hash，不改为 APK 版本号。Release 使用构建 job 上传的同一批文件，不重新编译；审阅 Draft Release 后再决定是否发布。仓库是私有的，下载需要仓库读取权限；手机和录音器继续使用现有服务端更新入口，不直接读取 GitHub。
 
-手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit）。即使手动选择 tag，仍构建测试包，不获得正式签名或中继密钥、不创建 Release。
+手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit），其中 `sdmod` 是 LR-X1、`promicro-p3` 是 LR-P3，其余变体是维护者的测试板。即使手动选择 tag，仍构建测试包，不获得正式签名或中继密钥、不创建 Release。
 
 ```bash
 gh workflow run apk-build.yml --ref main
@@ -93,7 +93,7 @@ ESP32 二进制包含认证 key，正式固件只能在受信任的私有仓库�
 ### 下载与安装
 
 - 在 Actions 对应运行页面下载 Artifacts；正式归档在 Releases 的 Draft 中。过期 Artifacts 不是长期版本库。
-- 录音器正式型号为 `sdmod`（LR-X1）、`promicro`（LR-P1）、`promicro-p2`（LR-P2）、`promicro-p3`（LR-P3）；`expansion` 仅用于手动测试。
+- 录音器正式型号为 `sdmod`（LR-X1）和 `promicro-p3`（LR-P3）；其余变体是维护者的测试板。
 - 录音器产物提供 USB 刷写用 UF2 和蓝牙升级用 DFU ZIP；自检固件单独标识，不与录音器固件混装。
 - ESP32 产物保存刷写参数和原相对路径下的所有必需二进制，不只保存应用 `.bin`。
 - 每组产物包含源码提交、版本、型号、工具链和 SHA256。正式 APK 更新时仍需递增 `app/pubspec.yaml` 中 `+` 后的 build number。

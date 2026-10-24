@@ -13,9 +13,7 @@ The full parts list, pinout, soldering order and 3D-printed case are in [`hardwa
 | Model | Board | Firmware variant (`lr.sh`) |
 |---|---|---|
 | `LR-X1` | Seeed XIAO nRF52840 Sense (built-in mic) + SD module + battery | `sdmod` |
-| `LR-P1` | ProMicro nRF52840 (nice!nano compatible) + external PDM mic + SD module | `promicro` |
-| `LR-P2` | The same board as LR-P1, the one kept for testing | `promicro-p2` |
-| `LR-P3` | The same board as LR-P1, with an SD module, a PDM mic and a slide switch fly-wired on, in a 3D-printed case | `promicro-p3` |
+| `LR-P3` | ProMicro nRF52840 (nice!nano compatible) + SD module + PDM mic (SEL to 3V) + slide switch + battery, fly-wired and closed in a 3D-printed case | `promicro-p3` |
 
 Each device's Bluetooth name is its model plus the last two bytes of its identity address, like `LR-P3-XXXX`. The address belongs to the chip, so flashing firmware doesn't change it.
 

@@ -1,6 +1,6 @@
 # 板子自检固件（nRF52840 Pro Micro：nice!nano 及其克隆）
 
-新到的板子先刷这个，把板上能测的元件都过一遍，再刷我们的固件。它和 LR-P1 用同一套 bootloader 和分区（Adafruit UF2 bootloader + S140 6.1.1，应用从 0x26000 开始），通过 UF2 刷入，不需要 SWD。
+新到的板子先刷这个，把板上能测的元件都过一遍，再刷我们的固件。它和 LR-P3 用同一套 bootloader 和分区（Adafruit UF2 bootloader + S140 6.1.1，应用从 0x26000 开始），通过 UF2 刷入，不需要 SWD。
 
 ```bash
 python3 firmware/selftest/selftest.py build                   # 编译，NCS v2.7.0，和 lr.sh 一样

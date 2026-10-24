@@ -13,9 +13,7 @@ type: reference
 | 型号 | 板子 | 固件变体（`lr.sh`） |
 |---|---|---|
 | `LR-X1` | Seeed XIAO nRF52840 Sense（板载麦克风）+ SD 模块 + 电池 | `sdmod` |
-| `LR-P1` | ProMicro nRF52840（兼容 nice!nano）+ 外接 PDM 麦克风 + SD 模块 | `promicro` |
-| `LR-P2` | 同 LR-P1 的板子，专门用来测试的那一块 | `promicro-p2` |
-| `LR-P3` | 同 LR-P1 的板子，飞线接 SD 模块、PDM 麦克风和拨动开关，装进 3D 打印外壳 | `promicro-p3` |
+| `LR-P3` | ProMicro nRF52840（兼容 nice!nano）+ SD 模块 + PDM 麦克风（SEL 接 3V）+ 拨动开关 + 电池，飞线焊好装进 3D 打印外壳 | `promicro-p3` |
 
 每台设备的蓝牙名是型号加身份地址的末两个字节，形如 `LR-P3-XXXX`；地址跟着芯片走，刷固件不会变。
 

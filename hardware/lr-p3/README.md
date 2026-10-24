@@ -6,8 +6,6 @@ LR-P3 是全天录的蓝牙录音设备：ProMicro nRF52840 克隆板 + 3.3 V mi
 
 固件的构建、刷写和空中升级见 [`firmware/devkit/README.md`](../../firmware/devkit/README.md)（变体 `promicro-p3`：`./lr.sh build promicro-p3`、`./lr.sh flash promicro-p3`），引脚定义在 [`lr_promicro.overlay`](../../firmware/devkit/overlay/lr_promicro.overlay)。焊好以后先刷 [`firmware/selftest`](../../firmware/selftest) 跑一遍整机自检（`selftest.py run SERIAL --p3`）。
 
-> 注意：devkit README 里「接线（promicro）」一节写的是面包板上的 LR-P1，麦克风 SEL 接 GND。LR-P3 的 SEL 接 **3V**（见下面的引脚表），其余引脚相同。
-
 ## 零件
 
 | 零件 | 型号/规格 | 备注 |
