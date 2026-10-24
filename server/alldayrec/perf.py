@@ -193,12 +193,15 @@ LINE = re.compile(r"(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d),(\d{3}) .*?event loop hel
 
 def import_stalls(lines) -> int:
     """monitor.watch's log lines (a server.log, journalctl's output) as perf_stalls rows of the current store; one
-    already there (the same at) is skipped. Returns the rows added."""
+    already there is skipped: imported before, or written by the server beside its line (the same ms and frames within
+    a second). Returns the rows added."""
     rows = [(f"{m[1]}T{m[2]}.{m[3]}", int(m[4]), m[6].rstrip(), int(m[5] or 0)) for line in lines if (m := LINE.search(line))]
+    near = lambda at, s: (dt.datetime.fromisoformat(at) + dt.timedelta(seconds=s)).isoformat(timespec="milliseconds")
     with db.tx() as c:
         before = c.total_changes
-        c.executemany(STALL.replace("VALUES (?, ?, ?, ?)", "SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM perf_stalls WHERE at = ?)"),
-                      [(*r, r[0]) for r in rows])
+        c.executemany(STALL.replace("VALUES (?, ?, ?, ?)", "SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM perf_stalls "
+                                    "WHERE ms = ? AND frames = ? AND at BETWEEN ? AND ?)"),
+                      [(*r, r[1], r[2], near(r[0], -1), near(r[0], 1)) for r in rows])
         return c.total_changes - before
 
 

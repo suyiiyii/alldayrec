@@ -79,12 +79,13 @@ Oct 24 22:23:01 box python[1]: 2026-10-24 22:23:01,002 live WARNING event loop h
 
 def test_import_and_export(tmp_path):
     db.open_db(tmp_path / "live.db")
+    db.conn().execute(perf.STALL, ("2026-10-24T22:22:34.380", 217, "device_pipeline.py:72 feed > infer.py:150 detect_chunk", 2))  # the server's row of a line
     (tmp_path / "server.log").write_text(LOG)
     run = lambda *a: subprocess.run([sys.executable, "-m", "alldayrec.perf", *map(str, a)], capture_output=True, text=True, check=True).stdout
-    assert run("import-stalls", tmp_path / "live.db", tmp_path / "server.log") == "4 rows added to perf_stalls\n"
+    assert run("import-stalls", tmp_path / "live.db", tmp_path / "server.log") == "3 rows added to perf_stalls\n"
     assert run("import-stalls", tmp_path / "live.db", tmp_path / "server.log") == "0 rows added to perf_stalls\n", "once"
     out = json.loads(run("export", tmp_path / "live.db", "2026-10-24"))
     assert {k: len(v) for k, v in out.items()} == {"stalls": 3, "samples": 0, "requests": 0, "pieces": 0}
     assert [(r["at"], r["ms"], r["suppressed"]) for r in out["stalls"]] == [
-        ("2026-10-24T22:22:33.315", 348, 0), ("2026-10-24T22:22:34.379", 217, 2), ("2026-10-24T22:23:01.002", 120, 0)]
+        ("2026-10-24T22:22:33.315", 348, 0), ("2026-10-24T22:22:34.380", 217, 2), ("2026-10-24T22:23:01.002", 120, 0)]
     assert out["stalls"][1]["frames"] == "device_pipeline.py:72 feed > infer.py:150 detect_chunk"
