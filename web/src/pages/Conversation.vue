@@ -4,7 +4,8 @@
 // time opens 原文 there (QuoteAt). 原文: who spoke how
 // much, the sentences, a player at the bottom that keeps the sentence playing lit and in view. The tab is in the
 // query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from another page opens 原文 there.
-// Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu
+// Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu; a long press on a sentence
+// copies it, stars it or fixes its speaker (RowMenu)
 import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
@@ -13,6 +14,7 @@ import Icon from "../components/Icon.vue";
 import MediaFold from "../components/MediaFold.vue";
 import PlayerBar from "../components/PlayerBar.vue";
 import QuoteAt from "../components/QuoteAt.vue";
+import RowMenu from "../components/RowMenu.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
@@ -37,6 +39,7 @@ import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerColor, speakerLabel } from "../lib/speakers";
+import { loadStars } from "../lib/stars";
 import { toast } from "../lib/toast";
 import { markOf } from "../lib/todos";
 import { rowAt, talkShare } from "../lib/track";
@@ -81,6 +84,9 @@ const hit = computed(() =>
 );
 const rowEl = (start: string) => document.querySelector(`[data-start="${CSS.escape(start)}"]`);
 const seekRow = (r: Row) => trackSeek(Date.parse(r.start), true);
+const rowMenu = useTemplateRef("rowMenu");
+const press = (r: Row, x: number, y: number) => rowMenu.value?.open(r, x, y, c.value);
+const reload = () => Promise.all([load(), loadSug()]); // a sentence's speaker fixed or put back
 // a time on the summary (or a suggestion): 原文 at that sentence, playing from it (a summary item's, or a link from
 // another page: only standing there, lit)
 async function listen(at: string | null, start = true) {
@@ -102,6 +108,7 @@ const byHand = (e: Event) => {
   if (!(e.target as Element | null)?.closest?.(".player")) track.follow = false;
 };
 onMounted(() => {
+  void loadStars().catch(() => {});
   addEventListener("wheel", byHand, { passive: true });
   addEventListener("touchmove", byHand, { passive: true });
 });
@@ -581,11 +588,14 @@ async function alias(name: string, of: string) {
               :media="g.media"
               :hit="hit === g.r.start"
               :seek="seekRow"
+              :menu="press"
             />
-            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" />
+            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" />
           </template>
         </div>
       </template>
+      <!-- on 摘要 too: a fix's 撤销, tapped after a switch to it, still reloads the page -->
+      <RowMenu ref="rowMenu" @changed="reload" />
       <!-- on 摘要 too while it plays: what plays can always be stopped -->
       <PlayerBar v-if="tab === 'transcript' || track.playing" />
     </template>

@@ -370,7 +370,11 @@
     "langSub": "界面，和 AI 写的摘要、回顾、回答",
     "about": "关于",
     "version": "服务器版本 {commit}",
-    "engine": "识别引擎 {engine}"
+    "engine": "识别引擎 {engine}",
+    "stars": "收藏",
+    "starsEmpty": "长按一句话，就能复制、收藏，或者改正是谁说的",
+    "starsAll": "全部 {n} 条",
+    "starsLess": "收起"
   },
   "mediaFold": {
     "line": "媒体 {from}–{to} · {n} 句"
@@ -858,6 +862,25 @@
     "speaking": "正在说",
     "noText": "这一句没能识别出文字",
     "dictation": "口述→{to}",
-    "empty": "（空）"
+    "empty": "（空）",
+    "starred": "已收藏"
+  },
+  "rowMenu": {
+    "title": "这一句",
+    "line": "{at} {who}：{text}",
+    "copy": "复制",
+    "copied": "已复制",
+    "copyFailed": "没能复制到剪贴板",
+    "star": "收藏",
+    "unstar": "取消收藏",
+    "starred": "已收藏，在「我的」里能找到",
+    "unstarred": "已取消收藏",
+    "fix": "纠正说话人",
+    "fixWho": "这一句是谁说的？",
+    "newName": "新名字…",
+    "save": "确定",
+    "fixed": "这一句改成了 {to}",
+    "fixedLearn": "这一句改成了 {to}，会记住这句的声音",
+    "fixedBack": "这一句改回了 {to}"
   }
 }

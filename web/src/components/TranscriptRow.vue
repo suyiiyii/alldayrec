@@ -2,23 +2,29 @@
 import { t } from "../i18n";
 import { hhmmss, type Row } from "../lib/api";
 import { player, toggle } from "../lib/audio";
+import { useLongPress } from "../lib/longpress";
 import { speakerLabel } from "../lib/speakers";
+import { starred } from "../lib/stars";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
 // media: played aloud, not said in the room. seek: the page has a player (the conversation page): ▶ and a tap on
 // the row play from this sentence on; without it ▶ plays the sentence alone. caption: the live page's large text under
-// the speaker; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot
-const { row, seek } = defineProps<{
+// the speaker; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
+// long press or a right click on the row opens the page's RowMenu there; on a touch screen the row's text is not
+// selectable (no callout, no loupe: its 复制 copies it), with a mouse it still is
+const { row, seek, menu } = defineProps<{
   row: Row;
   hit?: boolean;
   media?: boolean;
   seek?: (r: Row) => void;
   caption?: boolean;
   now?: boolean;
+  menu?: (r: Row, x: number, y: number) => void;
 }>();
 // a tap, not the end of selecting text to copy
 const tap = () => seek && !getSelection()?.toString() && seek(row);
+const press = useLongPress((x, y) => menu?.(row, x, y));
 </script>
 
 <template>
@@ -31,9 +37,11 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
       seekable: seek,
       caption,
       now,
+      pressable: menu,
     }"
     :data-start="row.start"
     :title="row.state === 'draft' ? t('transcriptRow.draft') : undefined"
+    v-on="menu ? press : {}"
     @click="tap"
   >
     <div class="t">
@@ -61,7 +69,13 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
       <span v-if="row.dictation" class="dict">{{
         t("transcriptRow.dictation", { to: row.dictation })
       }}</span
-      >{{ row.text || (now ? "" : t("transcriptRow.empty")) }}<span v-if="now" class="pulse" />
+      >{{ row.text || (now ? "" : t("transcriptRow.empty")) }}<span v-if="now" class="pulse" /><span
+        v-if="starred.has(row.id)"
+        class="star"
+        role="img"
+        :aria-label="t('transcriptRow.starred')"
+        ><Icon name="star" :size="12"
+      /></span>
     </div>
   </div>
 </template>
@@ -177,6 +191,21 @@ const tap = () => seek && !getSelection()?.toString() && seek(row);
 .text .pulse {
   margin-left: 6px;
   vertical-align: middle;
+}
+.star {
+  margin-left: 6px;
+  color: var(--warn);
+}
+.star .icon {
+  fill: currentColor;
+  vertical-align: -1px;
+}
+@media (pointer: coarse) {
+  .row.pressable {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 @media (max-width: 600px) {
   .row {

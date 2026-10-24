@@ -7,6 +7,7 @@ import DeviceCard from "../components/DeviceCard.vue";
 import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
+import RowMenu from "../components/RowMenu.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
   convLink,
@@ -23,6 +24,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHideOnScroll } from "../lib/hideOnScroll";
 import { useLive } from "../lib/live";
 import { speakerLabel } from "../lib/speakers";
+import { loadStars } from "../lib/stars";
 
 // One day at a time (?day=YYYY-MM-DD; none: today, which follows the live stream)
 const GAP_MS = 5 * 60 * 1000; // a quiet stretch this long gets a mark, so conversations separate
@@ -126,14 +128,15 @@ const timeline = computed(() => {
   flush();
   return res;
 });
-const mediaOf = (r: Row) =>
-  convs.value.some(
-    (c) =>
-      (!c.device || c.device === r.source) &&
-      c.start <= r.start &&
-      r.start <= c.end &&
-      inSpans(r, c.summary?.media_spans),
+// the closed conversation a row is in (none while its conversation goes on)
+const convOf = (r: Row) =>
+  convs.value.find(
+    (c) => (!c.device || c.device === r.source) && c.start <= r.start && r.start <= c.end,
   );
+const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
+// a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu)
+const rowMenu = useTemplateRef("rowMenu");
+const press = (r: Row, x: number, y: number) => rowMenu.value?.open(r, x, y, convOf(r));
 
 const go = (d: string) => router.push({ query: d === today ? {} : { day: d } });
 watch(day, () => {
@@ -170,6 +173,7 @@ function reveal(e: Event) {
 }
 let sizer: ResizeObserver | undefined;
 onMounted(() => {
+  void loadStars().catch(() => {});
   window.addEventListener("scroll", onScroll);
   loadCalendar();
   follow.value = live.value;
@@ -230,8 +234,9 @@ function jump(start: string) {
           :hit="hit === it.r.start"
           :caption="live"
           :now="said.has(it.r)"
+          :menu="press"
         />
-        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" />
+        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" :menu="press" />
         <div v-else-if="it.k === 'conv'" class="conv">
           {{
             t(
@@ -282,6 +287,7 @@ function jump(start: string) {
         <Icon name="calendar" :size="48" />{{ t("live.empty") }}
       </div>
     </div>
+    <RowMenu ref="rowMenu" />
   </main>
   <button v-show="live && !follow" class="jump" @click="toBottom">
     <Icon name="chevron-down" :size="16" />{{ t("live.toLatest") }}

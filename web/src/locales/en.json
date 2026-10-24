@@ -370,7 +370,11 @@
     "langSub": "The pages, and the summaries, recaps and answers the AI writes",
     "about": "About",
     "version": "server version {commit}",
-    "engine": "speech engine {engine}"
+    "engine": "speech engine {engine}",
+    "stars": "Starred",
+    "starsEmpty": "Press and hold a sentence to copy it, star it or fix who said it",
+    "starsAll": "All {n}",
+    "starsLess": "Show less"
   },
   "mediaFold": {
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"
@@ -858,6 +862,25 @@
     "speaking": "Speaking",
     "noText": "No text recognized in this sentence",
     "dictation": "Dictation → {to}",
-    "empty": "(empty)"
+    "empty": "(empty)",
+    "starred": "Starred"
+  },
+  "rowMenu": {
+    "title": "This sentence",
+    "line": "{at} {who}: {text}",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy to the clipboard",
+    "star": "Star",
+    "unstar": "Unstar",
+    "starred": "Starred; find it under Me",
+    "unstarred": "Unstarred",
+    "fix": "Fix the speaker",
+    "fixWho": "Who said this?",
+    "newName": "New name…",
+    "save": "OK",
+    "fixed": "This sentence is now {to}",
+    "fixedLearn": "This sentence is now {to}; learning their voice from it",
+    "fixedBack": "Changed back to {to}"
   }
 }
