@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'recorder.dart';
 
-/// Pause the connected recorder for 15 min or 1 h, or go on: a menu (home bar) or two buttons (recorder page).
+/// Pause the connected recorder for 15 min or 1 h, or go on: a menu (status sheet) or two buttons (recorder page).
 class PauseButton extends StatelessWidget {
   final bool paused, labels;
   final void Function(String? error) onDone;

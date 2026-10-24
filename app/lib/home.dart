@@ -74,6 +74,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   @override
   void dispose() {
     ticker?.cancel();
+    rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -97,6 +98,16 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   bool get running => status['running'] == true;
+  bool get connected => '${status['link']}'.startsWith('已连接');  // the BLE recorder's link
+  bool get syncing => ((status['syncTotal'] as num?) ?? 0) > 0;  // its card's backlog being read
+
+  /// Bumped by every setState: the status sheet is a route of its own, outside this build, and rebuilds on it.
+  final rev = ValueNotifier(0);
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    rev.value++;
+  }
 
   /// The tab a web path belongs to: 今天 (and the pages under it: 日历, 进度, 设备...), 对话 (the list and one
   /// conversation), 人物 (the list and one person), 我的 (the web /me). null: none in particular (stay where it is)
@@ -215,8 +226,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     return PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) => didPop ? null : _back(), child: Scaffold(
       appBar: AppBar(
         title: Text(titles[page]),
+        actionsPadding: const EdgeInsets.only(right: 8),  // the chip alone (我的) off the edge
         actions: [
-          if (running) const Padding(padding: EdgeInsets.only(right: 4), child: _Live()),
+          if (settings != null) Padding(padding: const EdgeInsets.only(right: 4), child: _chip(cs)),
           if (page < webs.length && webs[page] != null)
             IconButton(icon: const Icon(Icons.refresh), tooltip: '刷新', onPressed: () => webs[page]!.reload()),
         ],
@@ -227,19 +239,16 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               for (final w in webs) w == null ? _Empty(onSetup: _openSettings) : WebViewWidget(controller: w),
               _me(cs),
             ]))]),
-      bottomNavigationBar: settings == null ? null : Column(mainAxisSize: MainAxisSize.min, children: [
-        if (page == 0) _controlBar(cs),
-        NavigationBar(
-          selectedIndex: page,
-          onDestinationSelected: (i) => setState(() => page = i),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '今天'),
-            NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '对话'),
-            NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '人物'),
-            NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '我的'),
-          ],
-        ),
-      ]),
+      bottomNavigationBar: settings == null ? null : NavigationBar(
+        selectedIndex: page,
+        onDestinationSelected: (i) => setState(() => page = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: '今天'),
+          NavigationDestination(icon: Icon(Icons.forum_outlined), selectedIcon: Icon(Icons.forum), label: '对话'),
+          NavigationDestination(icon: Icon(Icons.people_outline), selectedIcon: Icon(Icons.people), label: '人物'),
+          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: '我的'),
+        ],
+      ),
     ));
   }
 
@@ -270,12 +279,69 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ]);
   }
 
+  /// The top bar's recording status on every tab, in a few words: red recording, grey not, amber stopping or
+  /// something to look at; a tap opens the sheet with all of it.
+  Widget _chip(ColorScheme cs) {
+    final s = status, battery = (s['hw'] as Map?)?['battery'], amber = Colors.amber.shade700, grey = cs.outline;
+    final warn = s['error'] != null || s['note'] != null || note.isNotEmpty;
+    final (Color dot, String text) = ble
+        ? syncing ? (connected ? recordingRed : amber, '补传中')
+            : !connected ? (amber, '未连接')
+            : pauseLeftMin(s) > 0 ? (grey, '已暂停')
+            : (recordingRed, battery == null ? '已连接' : '已连接 $battery%')  // hw keeps the last read after a disconnect
+        : stopping ? (amber, '停止中') : running ? (recordingRed, '录音中') : (grey, '未在录音');
+    return ActionChip(
+      avatar: Center(child: Container(width: 8, height: 8, decoration: BoxDecoration(color: warn ? amber : dot, shape: BoxShape.circle))),
+      label: Text(text),
+      labelStyle: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      side: BorderSide(color: cs.outlineVariant),
+      onPressed: () => _statusSheet(),
+    );
+  }
+
+  /// Everything about the recording: live captions first (the first thing people use, two taps from any tab), what
+  /// the chip sums up with start/stop or pause, and the recorder page.
+  void _statusSheet() => showModalBottomSheet(
+        context: context,
+        showDragHandle: true,
+        builder: (sheet) => ListenableBuilder(
+          listenable: rev,
+          builder: (_, _) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ListTile(
+                leading: const Icon(Icons.subtitles_outlined),
+                title: const Text('实时字幕'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  settings!.token.isEmpty ? _openSettings() : _openWeb('实时字幕', '/live');
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 16, 8),
+                child: ble ? _bleBody(Theme.of(sheet).colorScheme) : _micBody(Theme.of(sheet).colorScheme),
+              ),
+              ListTile(
+                leading: const Icon(Icons.bluetooth_outlined),
+                title: const Text('设备详情'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _openRecorder();
+                },
+              ),
+            ]),
+          ),
+        ),
+      );
+
   /// The BLE recorder as the source: nothing to start or stop, only where its audio is.
-  Widget _bleBar(ColorScheme cs) {
+  Widget _bleBody(ColorScheme cs) {
     final s = status, hw = (s['hw'] as Map?) ?? {};
     final link = '${s['link'] ?? '正在启动'}';
     final syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0, syncLive = (s['syncLive'] as num?) ?? 0;
-    final connected = link.startsWith('已连接'), syncing = syncTotal > 0;
     final (IconData icon, Color color) = syncing
         ? (Icons.sync_rounded, cs.tertiary)
         : connected
@@ -288,46 +354,36 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       hwLine(hw),
       if ((s['pending'] ?? 0) > 0) '待传 ${s['pending']} 块',
     ].where((x) => x.isNotEmpty).join(' · ');
-    return Material(
-      color: cs.surfaceContainer,
-      child: InkWell(
-        onTap: _openRecorder,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
-          child: Row(children: [
-            Icon(icon, color: color),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                // LIVE goes on while the backlog is read; before that only the file being recorded is waited
-                // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
-                Text(!syncing ? link : connected
-                        ? '实时上传 · 后台补传 ${(syncDone / 1024).toStringAsFixed(1)} / ${(syncTotal / 1024).toStringAsFixed(1)} MB'
-                        : '接上实时前先取正在录的这段 · 还差 ${(syncLive / 1024).toStringAsFixed(1)} MB',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
-                if (syncing) ...[
-                  const SizedBox(height: 6),
-                  LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
-                ],
-                if (detail.isNotEmpty) Text(detail, style: small),
-                if (s['note'] != null) Text('${s['note']}', style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-                if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
-              ]),
-            ),
-            if (connected) PauseButton(paused: pausedMin > 0, onDone: _pauseNote),
-            Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
-          ]),
-        ),
+    return Row(children: [
+      Icon(icon, color: color),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          // LIVE goes on while the backlog is read; before that only the file being recorded is waited
+          // for (old firmware: up to 16 MiB; newer firmware starts a new one at connect: a moment)
+          Text(!syncing ? link : connected
+                  ? '实时上传 · 后台补传 ${(syncDone / 1024).toStringAsFixed(1)} / ${(syncTotal / 1024).toStringAsFixed(1)} MB'
+                  : '接上实时前先取正在录的这段 · 还差 ${(syncLive / 1024).toStringAsFixed(1)} MB',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis),
+          if (syncing) ...[
+            const SizedBox(height: 6),
+            LinearProgressIndicator(value: connected ? syncDone / syncTotal : null, borderRadius: BorderRadius.circular(2)),
+          ],
+          if (detail.isNotEmpty) Text(detail, style: small),
+          if (s['note'] != null) Text('${s['note']}', style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
+          if (note.isNotEmpty) Text(note, style: small.copyWith(color: cs.error)),
+        ]),
       ),
-    );
+      if (connected) PauseButton(paused: pausedMin > 0, onDone: _pauseNote),
+    ]);
   }
 
   void _pauseNote(String? error) {
     if (error != null) setState(() => note = error);
   }
 
-  Widget _controlBar(ColorScheme cs) {
-    if (ble) return _bleBar(cs);
+  /// This phone's microphone as the source: started and stopped here.
+  Widget _micBody(ColorScheme cs) {
     final s = status;
     final small = TextStyle(fontSize: 12, color: cs.onSurfaceVariant);
     String headline, detail = '';
@@ -351,40 +407,24 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       if (running && s['interruptedAt'] != null)
         '${TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(s['interruptedAt'])).format(context)} 被系统中断过，已恢复',
     ];
-    return Material(
-      color: cs.surfaceContainer,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-              Text(headline, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              if (detail.isNotEmpty) Text(detail, style: small),
-              for (final w in warn) Text(w, style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
-            ]),
-          ),
-          const SizedBox(width: 12),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-                backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
-            onPressed: stopping ? null : (running ? _stop : _start),
-            icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
-            label: Text(running ? '停止' : '开始录音'),
-          ),
+    return Row(children: [
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+          Text(headline, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+          if (detail.isNotEmpty) Text(detail, style: small),
+          for (final w in warn) Text(w, style: small.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
         ]),
       ),
-    );
+      const SizedBox(width: 12),
+      FilledButton.icon(
+        style: FilledButton.styleFrom(
+            backgroundColor: running ? recordingRed : null, minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 20)),
+        onPressed: stopping ? null : (running ? _stop : _start),
+        icon: Icon(running ? Icons.stop_rounded : Icons.mic_rounded),
+        label: Text(running ? '停止' : '开始录音'),
+      ),
+    ]);
   }
-}
-
-class _Live extends StatelessWidget {
-  const _Live();
-  @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(width: 8, height: 8, decoration: const BoxDecoration(color: recordingRed, shape: BoxShape.circle)),
-        const SizedBox(width: 6),
-        const Text('REC', style: TextStyle(color: recordingRed, fontWeight: FontWeight.w600, fontSize: 13)),
-      ]);
 }
 
 class _Empty extends StatelessWidget {
