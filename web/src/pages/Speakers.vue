@@ -5,7 +5,16 @@ import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
 import Skeleton from "../components/Skeleton.vue";
 import { lang, t } from "../i18n";
-import { errorTitle, get, hhmm, post, type Sample, type Speaker, type Voice } from "../lib/api";
+import {
+  errorTitle,
+  get,
+  hhmm,
+  post,
+  type Sample,
+  type Speaker,
+  type SpeakerList,
+  type Voice,
+} from "../lib/api";
 import { play, player } from "../lib/audio";
 import { shiftDay, today } from "../lib/calendar";
 import { useMutation } from "../lib/mutation";
@@ -13,6 +22,10 @@ import { likeness, speakerLabel } from "../lib/speakers";
 import { toast } from "../lib/toast";
 
 const groups = ref<Speaker[]>([]),
+  others = ref<Speaker[]>([]), // 其他声音: little speech or one conversation, loaded when the fold opens
+  othersN = ref(0),
+  othersOpen = ref(false),
+  shownOthers = ref(30),
   names = ref<string[]>([]),
   loaded = ref(false),
   filter = ref<"unnamed" | "all">("all"),
@@ -29,10 +42,13 @@ const card = (id: string) => cards.get(id) ?? cards.set(id, useMutation()).get(i
 
 async function load() {
   try {
-    [groups.value, names.value] = await Promise.all([
-      get<Speaker[]>("/api/speakers"),
+    const [r, n, o] = await Promise.all([
+      get<SpeakerList>("/api/speakers"),
       get<string[]>("/api/names"),
+      othersOpen.value ? get<SpeakerList>("/api/speakers?others=1") : null,
     ]);
+    [groups.value, othersN.value, names.value] = [r.cards, r.others, n];
+    if (o) others.value = o.cards;
     failed.value = null;
   } catch (e) {
     failed.value = { msg: (e as Error).message, title: errorTitle(e) };
@@ -48,6 +64,27 @@ const list = computed(() =>
     .sort((a, b) => (b.last ?? "").localeCompare(a.last ?? "")),
 );
 const unnamed = computed(() => groups.value.filter((g) => !g.name).length);
+async function fold() {
+  othersOpen.value = !othersOpen.value;
+  if (!othersOpen.value || others.value.length) return;
+  try {
+    others.value = (await get<SpeakerList>("/api/speakers?others=1")).cards;
+  } catch (e) {
+    othersOpen.value = false;
+    toast((e as Error).message);
+  }
+}
+// the cards, then the fold row (with 再显示 of the cards above it), then the folded cards once it is open
+const FOLD = { id: "\0fold", fold: true } as const;
+const rows = computed(() => [
+  ...list.value.slice(0, shown.value),
+  FOLD,
+  ...(othersOpen.value
+    ? [...others.value]
+        .sort((a, b) => (b.last ?? "").localeCompare(a.last ?? ""))
+        .slice(0, shownOthers.value)
+    : []),
+]);
 
 const mins = (s: number) =>
   s < 60 ? t("common.sec", { n: Math.round(s) }) : t("common.min", { n: Math.round(s / 60) });
@@ -65,7 +102,11 @@ function listen(v: Sample) {
     : `/api/audio?${new URLSearchParams({ start: v.clip_start!, end: v.clip_end! })}`;
   play(voiceId(v), src);
 }
-const num = (g: Speaker) => groups.value.filter((x) => !x.name).indexOf(g) + 1;
+const nums = computed(
+  () =>
+    new Map([...groups.value, ...others.value].filter((g) => !g.name).map((g, i) => [g, i + 1])),
+);
+const num = (g: Speaker) => nums.value.get(g) ?? 0;
 const title = (g: Speaker) => (g.name ? speakerLabel(g.name) : t("speakers.voice", { n: num(g) }));
 // names a voice was called, each in quotes
 const quoted = (names: string[]) =>
@@ -153,178 +194,197 @@ async function detach(g: Speaker, v: Voice) {
     <div v-else-if="failed" class="empty" :title="failed.title">
       <Icon name="alert-circle" :size="48" />{{ failed.msg }}
     </div>
-    <div v-else-if="!groups.length" class="empty">
+    <div v-else-if="!groups.length && !othersN" class="empty">
       <Icon name="users" :size="48" />
       <div>{{ t("speakers.none") }}</div>
       <RouterLink class="btn btn-primary" to="/connect">{{ t("title.connect") }}</RouterLink>
     </div>
-    <p v-else-if="!list.length" class="empty">{{ t("speakers.allNamed") }}</p>
+    <p v-else-if="!list.length && !othersN" class="empty">{{ t("speakers.allNamed") }}</p>
 
-    <section v-for="g in list.slice(0, shown)" :key="g.id" class="card">
-      <div class="head">
-        <Avatar :name="g.name ?? 'S' + num(g)" :size="32" />
-        <div class="who">
-          <RouterLink
-            v-if="g.name && g.name !== '我'"
-            class="name"
-            :to="`/p/${encodeURIComponent(g.name)}`"
-            >{{ g.name }}<Icon name="chevron-right" :size="16"
-          /></RouterLink>
-          <span v-else class="name" :class="{ anon: !g.name }">{{ title(g) }}</span>
-          <div class="meta">
-            <template v-if="g.last">{{ t("speakers.last", { at: heard(g.last) }) }} · </template
-            >{{ t("speakers.convs", { n: g.count }, g.count) }} · {{ mins(g.speech_s) }}
+    <template v-for="g in rows" :key="g.id">
+      <template v-if="'fold' in g">
+        <button v-if="list.length > shown" class="more" @click="shown += 30">
+          {{ t("speakers.more") }}
+        </button>
+        <button v-if="othersN" class="fold" :aria-expanded="othersOpen" @click="fold">
+          <Icon :name="othersOpen ? 'chevron-down' : 'chevron-right'" :size="16" />
+          <span
+            >{{ t("speakers.others", { n: othersN }) }}
+            <span class="meta">{{ t("speakers.othersWhy") }}</span></span
+          >
+        </button>
+        <p v-if="othersOpen && !others.length" class="meta">{{ t("speakers.loading") }}</p>
+      </template>
+      <section v-else class="card">
+        <div class="head">
+          <Avatar :name="g.name ?? 'S' + num(g)" :size="32" />
+          <div class="who">
+            <RouterLink
+              v-if="g.name && g.name !== '我'"
+              class="name"
+              :to="`/p/${encodeURIComponent(g.name)}`"
+              >{{ g.name }}<Icon name="chevron-right" :size="16"
+            /></RouterLink>
+            <span v-else class="name" :class="{ anon: !g.name }">{{ title(g) }}</span>
+            <div class="meta">
+              <template v-if="g.last">{{ t("speakers.last", { at: heard(g.last) }) }} · </template
+              >{{ t("speakers.convs", { n: g.count }, g.count) }} · {{ mins(g.speech_s) }}
+            </div>
           </div>
         </div>
-      </div>
-      <div class="samples">
-        <button
-          v-for="v in g.samples"
-          :key="voiceId(v)"
-          class="clip"
-          :class="{ playing: player.playing === voiceId(v) }"
-          :disabled="player.failed.has(voiceId(v))"
-          @click="listen(v)"
-        >
-          <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
-          <span>{{ v.clip_text || day(v.start) }}</span>
-        </button>
-      </div>
-      <p v-if="g.co.length" class="meta">
-        {{ t("speakers.co", { names: g.co.map(speakerLabel).join(t("common.list")) }) }}
-      </p>
-      <p v-if="g.called.some((x) => x.name !== g.name)" class="meta called">
-        {{ g.name ? t("speakers.alsoCalled") : t("speakers.called")
-        }}<template v-for="x in g.called.filter((x) => x.name !== g.name)" :key="x.name"
-          >{{ t("speakers.calledIn", { name: x.name, n: x.n }) }}
+        <div class="samples">
           <button
-            v-if="!g.name"
-            class="chip"
-            :disabled="card(g.id).busy.value"
-            @click="name(g, x.name, title(g))"
+            v-for="v in g.samples"
+            :key="voiceId(v)"
+            class="clip"
+            :class="{ playing: player.playing === voiceId(v) }"
+            :disabled="player.failed.has(voiceId(v))"
+            @click="listen(v)"
           >
-            {{ t("speakers.nameAs", { name: x.name }) }}
+            <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+            <span>{{ v.clip_text || day(v.start) }}</span>
           </button>
-          <button
-            v-else-if="g.name !== '我'"
-            class="chip"
-            :disabled="card(g.id).busy.value"
-            @click="addAlias(g, x.name, g.name)"
-          >
-            {{ t("speakers.asAlias") }}
-          </button></template
-        >
-      </p>
-      <ul class="points">
-        <li v-for="v in g.samples.filter((v) => v.points.length).slice(0, 2)" :key="voiceId(v)">
-          {{ v.points[0] }} <span class="meta">— {{ v.title }}</span>
-        </li>
-      </ul>
-
-      <div class="actions">
-        <template v-if="editing === g.id">
-          <input
-            v-model="newName"
-            :placeholder="t('speakers.namePlaceholder')"
-            list="names"
-            @keyup.enter="name(g, newName, title(g))"
-          />
-          <button :disabled="card(g.id).busy.value" @click="name(g, newName, title(g))">
-            {{ t("speakers.save") }}
-          </button>
-          <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
-        </template>
-        <template v-else>
-          <button :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
-            {{ g.name ? t("speakers.rename") : t("speakers.giveName") }}
-          </button>
-          <button v-if="!g.name" :disabled="card(g.id).busy.value" @click="name(g, '我', title(g))">
-            {{ t("speaker.isMe") }}
-          </button>
-        </template>
-        <button class="btn-ghost" @click="expand(g)">
-          {{ open === g.id ? t("speakers.collapse") : t("speakers.list", { n: g.count }) }}
-        </button>
-        <span v-if="card(g.id).busy.value" class="meta">{{ t("speakers.saving") }}</span>
-      </div>
-      <p v-if="card(g.id).error.value" class="error" role="alert" :title="card(g.id).detail.value">
-        {{ card(g.id).error.value }}
-      </p>
-      <div v-if="editing === g.id && names.length" class="chips">
-        <button
-          v-for="n in names.slice(0, 12)"
-          :key="n"
-          class="chip"
-          :disabled="card(g.id).busy.value"
-          @click="name(g, n, title(g))"
-        >
-          {{ n }}
-        </button>
-      </div>
-
-      <div v-for="(s, i) in g.suggested" :key="i" class="suggest">
-        <span
-          >{{
-            t(
-              "speakers.maybe",
-              { name: speakerLabel(g.name), like: likeness(s.score), n: s.count },
-              s.count,
-            )
-          }}<template v-if="s.called.length">{{
-            t("speakers.calledAs", { names: quoted(s.called.map((x) => x.name)) })
-          }}</template></span
-        >
-        <button v-for="v in s.samples" :key="voiceId(v)" class="clip" @click="listen(v)">
-          <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
-          <span>{{ v.clip_text || day(v.start) }}</span>
-        </button>
-        <button
-          :disabled="card(g.id).busy.value"
-          @click="name(g, g.name!, t('speakers.nConvs', { n: s.count }, s.count), s.id)"
-        >
-          {{ t("speakers.isThem", { name: speakerLabel(g.name) }) }}
-        </button>
-      </div>
-
-      <table v-if="open === g.id" class="members">
-        <tr v-if="!members.length">
-          <td class="meta">{{ t("speakers.loading") }}</td>
-        </tr>
-        <tr v-for="v in members" :key="voiceId(v)">
-          <td class="when">
-            <RouterLink :to="`/c/${v.conv}`">{{ day(v.start) }}</RouterLink>
-          </td>
-          <td>
+        </div>
+        <p v-if="g.co.length" class="meta">
+          {{ t("speakers.co", { names: g.co.map(speakerLabel).join(t("common.list")) }) }}
+        </p>
+        <p v-if="g.called.some((x) => x.name !== g.name)" class="meta called">
+          {{ g.name ? t("speakers.alsoCalled") : t("speakers.called")
+          }}<template v-for="x in g.called.filter((x) => x.name !== g.name)" :key="x.name"
+            >{{ t("speakers.calledIn", { name: x.name, n: x.n }) }}
             <button
-              class="mini"
-              :title="player.playing === voiceId(v) ? t('speakers.stop') : t('speakers.play')"
-              @click="listen(v)"
+              v-if="!g.name"
+              class="chip"
+              :disabled="card(g.id).busy.value"
+              @click="name(g, x.name, title(g))"
             >
-              <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+              {{ t("speakers.nameAs", { name: x.name }) }}
             </button>
-            {{ v.title || t("speakers.untitled") }}
-            <span class="meta"
-              >·
-              {{
-                t("speakers.member", {
-                  label: speakerLabel(v.label),
-                  n: v.n,
-                  with:
-                    v.with.map((w) => (w === "我" ? speakerLabel(w) : w)).join(t("common.list")) ||
-                    t("speakers.nobody"),
-                })
-              }}</span
+            <button
+              v-else-if="g.name !== '我'"
+              class="chip"
+              :disabled="card(g.id).busy.value"
+              @click="addAlias(g, x.name, g.name)"
             >
-          </td>
-          <td>
-            <button class="btn-ghost mini" :disabled="card(g.id).busy.value" @click="detach(g, v)">
-              {{ t("speakers.notThem") }}
+              {{ t("speakers.asAlias") }}
+            </button></template
+          >
+        </p>
+        <ul class="points">
+          <li v-for="v in g.samples.filter((v) => v.points.length).slice(0, 2)" :key="voiceId(v)">
+            {{ v.points[0] }} <span class="meta">— {{ v.title }}</span>
+          </li>
+        </ul>
+
+        <div class="actions">
+          <template v-if="editing === g.id">
+            <input
+              v-model="newName"
+              :placeholder="t('speakers.namePlaceholder')"
+              list="names"
+              @keyup.enter="name(g, newName, title(g))"
+            />
+            <button :disabled="card(g.id).busy.value" @click="name(g, newName, title(g))">
+              {{ t("speakers.save") }}
             </button>
-          </td>
-        </tr>
-      </table>
-    </section>
-    <button v-if="list.length > shown" class="more" @click="shown += 30">
+            <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
+          </template>
+          <template v-else>
+            <button :class="{ 'btn-ghost': g.name }" @click="edit(g.id)">
+              {{ g.name ? t("speakers.rename") : t("speakers.giveName") }}
+            </button>
+            <button v-if="!g.name" :disabled="card(g.id).busy.value" @click="name(g, '我', title(g))">
+              {{ t("speaker.isMe") }}
+            </button>
+          </template>
+          <button class="btn-ghost" @click="expand(g)">
+            {{ open === g.id ? t("speakers.collapse") : t("speakers.list", { n: g.count }) }}
+          </button>
+          <span v-if="card(g.id).busy.value" class="meta">{{ t("speakers.saving") }}</span>
+        </div>
+        <p v-if="card(g.id).error.value" class="error" role="alert" :title="card(g.id).detail.value">
+          {{ card(g.id).error.value }}
+        </p>
+        <div v-if="editing === g.id && names.length" class="chips">
+          <button
+            v-for="n in names.slice(0, 12)"
+            :key="n"
+            class="chip"
+            :disabled="card(g.id).busy.value"
+            @click="name(g, n, title(g))"
+          >
+            {{ n }}
+          </button>
+        </div>
+
+        <div v-for="(s, i) in g.suggested" :key="i" class="suggest">
+          <span
+            >{{
+              t(
+                "speakers.maybe",
+                { name: speakerLabel(g.name), like: likeness(s.score), n: s.count },
+                s.count,
+              )
+            }}<template v-if="s.called.length">{{
+              t("speakers.calledAs", { names: quoted(s.called.map((x) => x.name)) })
+            }}</template></span
+          >
+          <button v-for="v in s.samples" :key="voiceId(v)" class="clip" @click="listen(v)">
+            <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+            <span>{{ v.clip_text || day(v.start) }}</span>
+          </button>
+          <button
+            :disabled="card(g.id).busy.value"
+            @click="name(g, g.name!, t('speakers.nConvs', { n: s.count }, s.count), s.id)"
+          >
+            {{ t("speakers.isThem", { name: speakerLabel(g.name) }) }}
+          </button>
+        </div>
+
+        <table v-if="open === g.id" class="members">
+          <tr v-if="!members.length">
+            <td class="meta">{{ t("speakers.loading") }}</td>
+          </tr>
+          <tr v-for="v in members" :key="voiceId(v)">
+            <td class="when">
+              <RouterLink :to="`/c/${v.conv}`">{{ day(v.start) }}</RouterLink>
+            </td>
+            <td>
+              <button
+                class="mini"
+                :title="player.playing === voiceId(v) ? t('speakers.stop') : t('speakers.play')"
+                @click="listen(v)"
+              >
+                <Icon :name="player.playing === voiceId(v) ? 'square' : 'play'" :size="14" />
+              </button>
+              {{ v.title || t("speakers.untitled") }}
+              <span class="meta"
+                >·
+                {{
+                  t("speakers.member", {
+                    label: speakerLabel(v.label),
+                    n: v.n,
+                    with:
+                      v.with.map((w) => (w === "我" ? speakerLabel(w) : w)).join(t("common.list")) ||
+                      t("speakers.nobody"),
+                  })
+                }}</span
+              >
+            </td>
+            <td>
+              <button class="btn-ghost mini" :disabled="card(g.id).busy.value" @click="detach(g, v)">
+                {{ t("speakers.notThem") }}
+              </button>
+            </td>
+          </tr>
+        </table>
+      </section>
+    </template>
+    <button
+      v-if="othersOpen && others.length > shownOthers"
+      class="more"
+      @click="shownOthers += 30"
+    >
       {{ t("speakers.more") }}
     </button>
     <datalist id="names"><option v-for="n in names" :key="n" :value="n" /></datalist>
@@ -439,6 +499,24 @@ h1 {
 }
 .more {
   width: 100%;
+}
+.fold {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  margin: var(--space-2) 0 var(--space-3);
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+  color: var(--fg-2);
+  text-align: left;
+}
+.fold .meta {
+  display: block;
+  font-size: var(--fs-xs);
 }
 input {
   font-size: var(--fs-sm);

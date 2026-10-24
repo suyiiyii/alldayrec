@@ -784,7 +784,9 @@
     "member": "{label} · {n} 句 · 同场 {with}",
     "nobody": "无",
     "notThem": "不是",
-    "more": "再显示 30 个"
+    "more": "再显示 30 个",
+    "others": "其他声音（{n}）",
+    "othersWhy": "说得很少，或只在一段对话里出现过"
   },
   "timeline": {
     "start": "三步开始",

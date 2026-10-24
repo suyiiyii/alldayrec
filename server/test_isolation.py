@@ -223,7 +223,7 @@ def test_routes(two, monkeypatch):
     async def run():
         async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=server.app), base_url="http://live.test") as c:
             as_a = {"Authorization": "Bearer ta"}
-            gid = (await c.get("/api/speakers", headers=as_a)).json()[0]["id"]
+            gid = (await c.get("/api/speakers?others=1", headers=as_a)).json()["cards"][0]["id"]  # one 10 s voice: folded
             for key, (method, path, kw) in REQUESTS.items():
                 kw, path = dict(kw), path.replace("{gid}", gid)
                 if "json" in kw:

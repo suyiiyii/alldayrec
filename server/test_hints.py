@@ -102,7 +102,8 @@ def test_speaker_list_is_what_the_cards_show(tmp_path):
         db.insert_voices(t, [{"conv": cid, "label": "S1", "device": "mic", "n": 3, "speech_s": 5.0, "clip_start": f"{T}0{i}.000",
                               "clip_end": f"{T}0{i}.500", "e": np.array(e)}
                              for i, (cid, e) in enumerate(zip(convs, ([1.0, 0, 0, 0], [1.0, 0, 0, 0], [0, 1.0, 0, 0])))])
-    g = next(g for g in anyio.run(routes_speakers.speaker_list) if g["count"] == 2)
+    assert anyio.run(routes_speakers.speaker_list) == {"cards": [], "others": 2}, "10 s and 5 s: folded"
+    g = next(g for g in anyio.run(routes_speakers.speaker_list, True)["cards"] if g["count"] == 2)
     assert set(g) == {"id", "name", "count", "speech_s", "last", "co", "samples", "called", "suggested"}
     assert g["samples"][0] == {"conv": convs[1], "label": "S1", "start": "2026-10-05T10:00:01", "clip_start": f"{T}01.000",
                                "clip_end": f"{T}01.500", "title": "早会", "points": ["说了一"]}
@@ -199,7 +200,7 @@ def test_this_is_me_learns_a_centroid(tmp_path):
     dump = lambda: [sorted(map(tuple, db.conn().execute(f"SELECT * FROM {n}"))) for n in ("sentences", "conversations", "voices")]
     was = dump()
 
-    g = next(g for g in anyio.run(routes_speakers.speaker_list) if g["count"] == 2)
+    g = next(g for g in anyio.run(routes_speakers.speaker_list, True)["cards"] if g["count"] == 2)
     r = anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我"})
     assert r["renamed"] == 2 and r["learned"] and [c["participants"] for c in map(db.conversation, convs)] == [["我", "S2"]] * 2
     bank = dict(np.load(npz))
@@ -223,7 +224,7 @@ def test_this_is_me_learns_a_centroid(tmp_path):
     r = anyio.run(rename, convs[1], {"from": "S2", "to": "我"})  # 4 s of voice
     assert not r["learned"] and r["participants"] == ["S1", "我"] and list(np.load(npz)) == ["self"]
 
-    g = next(g for g in anyio.run(routes_speakers.speaker_list) if g["count"] == 2)
+    g = next(g for g in anyio.run(routes_speakers.speaker_list, True)["cards"] if g["count"] == 2)
     assert anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我"})["learned"]
     me = next(k for k in np.load(npz) if k != "self")
     assert db.kv("me_centroids") == {me: [f"{c}|我" for c in convs[::-1]]}  # the group's members, newest first

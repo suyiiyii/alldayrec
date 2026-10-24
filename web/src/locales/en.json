@@ -784,7 +784,9 @@
     "member": "{label} · {n} lines · with {with}",
     "nobody": "no one",
     "notThem": "Not them",
-    "more": "Show 30 more"
+    "more": "Show 30 more",
+    "others": "Other voices ({n})",
+    "othersWhy": "little speech, or in one conversation only"
   },
   "timeline": {
     "start": "Get started in three steps",

@@ -202,6 +202,12 @@ type: reference
 |---|---|---|
 | `POST` | A question about my own past answered from this app's data (ask.py), in 10-30 s: {answer, sources, calls, usage}. | body: JSON object |
 
+### `/api/ask/voice`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. | — |
+
 ### `/mcp`
 
 | 方法 | 说明 | 参数 |
@@ -281,19 +287,19 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | One label renamed; with a name the conversation has already, a merge. | `conv_id` (path, string)<br>body: JSON object |
+| `POST` | One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me). | `conv_id` (path, string)<br>body: JSON object |
 
 ### `/api/speakers/undo`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone. | body: JSON object |
+| `POST` | Takes back a rename or merge by the undo id its answer gave: the rows, the participants, the voices, pins and name hints as they were, the summaries redone, the centroid a 「这是我」 added to 我's voiceprint dropped. | body: JSON object |
 
 ### `/api/speakers`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | The groups as the speakers page's cards show them (the home uplink is slow: whole groups were 706 KB on one instance); GET /api/speakers/{id} has a group whole, its member voices with it. | — |
+| `GET` | The speakers page's cards of people (named, or OTHERS_MIN_S of speech over OTHERS_MIN_CONVS conversations) and how many other voices there are; ?others=1 the cards of those. | `others?` (query, boolean) |
 
 ### `/api/speakers/{gid}`
 

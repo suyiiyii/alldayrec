@@ -240,6 +240,10 @@ SPEAKER_SUGGEST = float(os.environ.get("SPEAKER_SUGGEST", "0.6"))  # cosine to o
 # cosine (device-centred) to offer merging two labels of one conversation: in the history's named voices 0.4 % of
 # two people's pairs reach 0.45, and 36 % of one person's (10-05)
 MERGE_SUGGEST = float(os.environ.get("MERGE_SUGGEST", "0.45"))
+# an unnamed group with less speech or in fewer conversations than these is folded into 其他声音 on the speakers page
+# (#295, one instance: 679 cards -> 99, 85 % of the unnamed speech still on cards; the folded are passers-by in
+# crowded talks and media played aloud)
+OTHERS_MIN_S, OTHERS_MIN_CONVS = 180, 2
 
 
 def conv_start(conv_id: str) -> str:
@@ -262,6 +266,7 @@ def speaker_groups() -> list[dict]:
         out.append({"id": g["id"], "name": g["name"], **describe(g["members"], convs, called),
                     "suggested": [{"id": speakers.key(s["members"][0]), "score": s["score"], **describe(s["members"], convs, called)}
                                   for s in g["suggested"]]})
+        out[-1]["minor"] = not g["name"] and (out[-1]["speech_s"] < OTHERS_MIN_S or out[-1]["count"] < OTHERS_MIN_CONVS)
     order = lambda g: (g["name"] is not None, g["name"] == "我", -g["count"])  # unnamed and frequent first, 我 last
     out.sort(key=order)
     _speakers.update(at=time.time(), groups=out, vec=speakers.centered(vs))
@@ -294,11 +299,14 @@ def describe(members: list[dict], convs: dict, called: dict[str, set[str]]) -> d
 
 
 @router.get("/api/speakers")
-async def speaker_list():
-    """The groups as the speakers page's cards show them (the home uplink is slow: whole groups were 706 KB on one
-    instance); GET /api/speakers/{id} has a group whole, its member voices with it."""
-    return [{**card(g), "id": g["id"], "name": g["name"], "suggested": [{**card(x), "id": x["id"], "score": x["score"]} for x in g["suggested"]]}
-            for g in await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)]
+async def speaker_list(others: bool = False):
+    """The speakers page's cards of people (named, or OTHERS_MIN_S of speech over OTHERS_MIN_CONVS conversations) and
+    how many other voices there are; ?others=1 the cards of those. Cards as the page shows them (the home uplink is slow:
+    whole groups were 706 KB on one instance); GET /api/speakers/{id} has a group whole, its member voices with it."""
+    gs = await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)
+    return {"cards": [{**card(g), "id": g["id"], "name": g["name"], "suggested": [{**card(x), "id": x["id"], "score": x["score"]} for x in g["suggested"]]}
+                      for g in gs if g["minor"] == others],
+            "others": sum(g["minor"] for g in gs)}
 
 
 SAMPLE = ("conv", "label", "start", "clip", "clip_start", "clip_end", "clip_text", "title")

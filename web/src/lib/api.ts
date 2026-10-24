@@ -478,6 +478,11 @@ export interface Speaker extends VoiceSet {
   name: string | null;
   suggested: (VoiceSet & { id: string; score: number })[];
 }
+// the people's cards and how many voices are folded into 其他声音; ?others=1 has the cards of those
+export interface SpeakerList {
+  cards: Speaker[];
+  others: number;
+}
 
 export interface Todo {
   owner?: string;
