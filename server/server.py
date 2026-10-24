@@ -1409,6 +1409,7 @@ DIST = HERE / "static/dist"  # the web app (web/, built by deploy.sh)
 @app.get("/")
 @app.get("/live")
 @app.get("/me")
+@app.get("/todos")
 @app.get("/conversations")
 @app.get("/c/{conv_id}")
 @app.get("/record")
@@ -1661,22 +1662,62 @@ async def mcp_stream():
 
 @app.get("/api/recap")
 async def recap_get(date: str = ""):
-    """A day's recap, the newest one when no day is given; null when there is none. A todo marked done or wrong since is left out."""
+    """A day's recap, the newest one when no day is given; null when there is none. Its todos as the due list has them
+    (id, the sentence, whom to), a todo marked done or wrong since left out."""
     if date:
         r = db.kv(f"recap:{date}")
     else:
         row = db.conn().execute("SELECT value FROM kv WHERE key LIKE 'recap:%' ORDER BY key DESC LIMIT 1").fetchone()
         r = json.loads(row[0]) if row else None
     if r:
-        closed = db.closed_todos()
-        r["todos"] = [t for t in r["todos"] if (t["conv"], t["text"]) not in closed]
+        closed, al, todos = db.closed_todos(), db.aliases(), []
+        for x in r["todos"]:
+            c, s = db.conversation(x["conv"]), db.summary(x["conv"]) or {}
+            t = db.todo(x["id"]) if x.get("id") else db.todo_by_text(x["conv"], x["text"])  # recaps before 10-24 hold no id
+            v = {**db.todo_view(c, s, t, closed, al), **x} if c and t else x
+            if v.get("id") not in closed:
+                todos.append(v)
+        r["todos"] = todos
     return r
 
 
 @app.get("/api/todos/due")
 async def todos_due():
-    """My todos due today or before, not marked done or wrong (完成 / 不对 go to /api/conversation/{id}/feedback)."""
+    """My todos due today or before, not marked done or wrong, with how stale each is (db.due_todos)."""
     return db.due_todos(dt.date.today().isoformat())
+
+
+MARKS = ("done", "wrong")
+
+
+@app.put("/api/todos/{todo_id}/mark")
+async def todo_mark(todo_id: str, body: dict):
+    """完成 (done) or 不对 (wrong) on one todo, by its id (db.todo_id); a mark again replaces it."""
+    if body.get("mark") not in MARKS:
+        raise HTTPException(400, "mark is done or wrong")
+    if not db.todo(todo_id):
+        raise HTTPException(404, "no such todo")
+    db.mark_todos([todo_id], body["mark"])
+    return {"id": todo_id, "mark": body["mark"]}
+
+
+@app.delete("/api/todos/{todo_id}/mark")
+async def todo_unmark(todo_id: str):
+    """The undo: the todo is open again."""
+    db.mark_todos([todo_id], None)
+    return {"id": todo_id, "mark": None}
+
+
+@app.post("/api/todos/marks")
+async def todo_marks(body: dict):
+    """Many todos at once: {ids, mark}, mark done or wrong, or null to drop their marks (the bulk undo)."""
+    ids, mark = body.get("ids"), body.get("mark")
+    if not isinstance(ids, list) or not ids or len(ids) > 500 or mark not in (*MARKS, None):
+        raise HTTPException(400, "ids is a list of todo ids, mark done, wrong or null")
+    if mark and (bad := [i for i in ids if not isinstance(i, str) or not db.todo(i)]):
+        raise HTTPException(404, f"no such todo: {bad[:5]}")
+    db.mark_todos(ids, mark)
+    return {"ids": ids, "mark": mark}
 
 
 @app.post("/api/recap/{date}")
@@ -1706,7 +1747,10 @@ async def conversation(conv_id: str):
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
-    return {**c, "summary": db.summary(conv_id), "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
+    s, closed = db.summary(conv_id), db.closed_todos()
+    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark)
+        s["todos"] = [{**t, "id": (i := db.todo_id(conv_id, t)), "mark": closed.get(i)} for t in s["todos"]]
+    return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
             "rows": conversation_rows(c)}
 
 

@@ -125,8 +125,8 @@ def test_mark_todo():
     assert "改存储" in tool("due")[0]
     assert tool("mark_todo", id=CID, text="编的", mark="done")[1] and tool("mark_todo", id=CID, text="改存储", mark="maybe")[1]
     assert tool("mark_todo", id=CID, text="改存储", mark="done") == ("好了，「改存储」标成了完成", False)
-    assert db.feedback(CID)[0]["text"] == db.TODO_MARKS[0] + "改存储" and db.due_todos(TODAY) == [], "the web page's 完成"
-    assert tool("mark_todo", id=CID, text="改存储", mark="wrong") == ("这条待办已经标记过了", False) and len(db.feedback(CID)) == 1
+    assert list(db.closed_todos().values()) == ["done"] and db.due_todos(TODAY) == [], "the web page's 完成"
+    assert tool("mark_todo", id=CID, text="改存储", mark="wrong") == ("这条待办已经标记过了", False) and list(db.closed_todos().values()) == ["done"]
     assert "（已标记）" in tool("conversation", id=CID)[0] and "到期、还没标记的待办 0 条" in tool("due")[0]
 
 

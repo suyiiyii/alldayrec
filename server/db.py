@@ -3,6 +3,7 @@ clips) stays on disk; the passes trace stays a jsonl log. One connection per thr
 work runs in threads, shared by the tenants), WAL so reads never wait for a write; every multi-step change is one `tx()`.
 """
 import datetime as dt
+import hashlib
 import json
 import re
 import sqlite3
@@ -48,6 +49,8 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
+CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_id), at: when; a row dropped is the undo
+    id TEXT PRIMARY KEY, conv TEXT NOT NULL, mark TEXT NOT NULL CHECK (mark IN ('done', 'wrong')), at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);  -- per device: finalized_to:<d>, draft_to:<d>, open_conversation:<d>, end_at:<d>, live:<d>
 CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as its phone uploads it. src 'rec': the recorder's
     device TEXT NOT NULL, src TEXT NOT NULL,  -- own event log (firmware lr_log.h), seq that log's, data its record (boot t
@@ -82,7 +85,14 @@ def init():
     """The current tenant's store made or brought up to date (the server, for each tenant at the start), its data dir
     too (a first start: an empty volume)."""
     tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
+    marks_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_marks'").fetchone() is None
     conn().executescript(SCHEMA)
+    if marks_new:  # 10-24: marks were feedback lines (TODO_MARKS) keyed by the todo's text; the lines stay, the log for the prompt
+        with tx() as c:
+            for conv, at, text in c.execute("SELECT conv, at, text FROM feedback").fetchall():
+                for mark, prefix in zip(("done", "wrong"), TODO_MARKS):
+                    if text.startswith(prefix) and (t := todo_by_text(conv, text[len(prefix):])):
+                        c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (todo_id(conv, t), conv, mark, at))
     if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
         conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")
     if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files (pack_pieces.py)
@@ -302,23 +312,63 @@ def add_feedback(conv_id: str, text: str):
     conn().execute("INSERT INTO feedback VALUES (?, ?, ?)", (conv_id, dt.datetime.now().isoformat(timespec="seconds"), text))
 
 
-TODO_MARKS = ("待办完成：", "待办不对：")  # 完成 / 不对 on one todo is a feedback line: the mark, then the todo's text (web TodoMarks.vue)
+TODO_MARKS = ("待办完成：", "待办不对：")  # before todo_marks, 完成 / 不对 were feedback lines: the mark, then the todo's text
+SAME_DAY = ("待会", "等下", "一会", "今晚", "晚上", "下午", "今天", "明天")  # a due said like this is stale 3 days after, not 7
 
 
-def closed_todos() -> set[tuple[str, str]]:
-    """(conversation, todo text) of the todos marked done or wrong: they leave the due list and the recaps."""
-    # ponytail: keyed by the todo's text, so a redone summary that rewords a todo brings it back
-    return {(r[0], r[1][len(m):]) for r in conn().execute("SELECT conv, text FROM feedback") for m in TODO_MARKS if r[1].startswith(m)}
+def todo_id(conv: str, t: dict) -> str:
+    """A todo's id: its conversation and the time it was said (one todo per time in practice), else a hash of its text."""
+    return f"{conv}:{t.get('at') or hashlib.sha1((conv + (t.get('text') or '')).encode()).hexdigest()[:16]}"
+
+
+def todo_by_text(conv: str, text: str) -> dict | None:
+    """The todo of conv's summary with this text (the recaps before ids, the marks before todo_marks name one by it)."""
+    return next((t for t in (summary(conv) or {}).get("todos") or [] if t.get("text") == text), None)
+
+
+def todo(id: str) -> dict | None:
+    """The todo with this id, from its conversation's summary."""
+    conv = id.split(":", 1)[0]
+    return next((t for t in (summary(conv) or {}).get("todos") or [] if todo_id(conv, t) == id), None)
+
+
+def closed_todos() -> dict[str, str]:
+    """Id to mark (done, wrong) of the marked todos: they leave the due list and the recaps."""
+    return {r[0]: r[1] for r in conn().execute("SELECT id, mark FROM todo_marks")}
+
+
+def mark_todos(ids: list[str], mark: str | None):
+    """Mark these todos done or wrong; None drops their marks (the undo)."""
+    with tx() as c:
+        if mark is None:
+            c.executemany("DELETE FROM todo_marks WHERE id = ?", [(i,) for i in ids])
+        else:
+            now = dt.datetime.now().isoformat(timespec="seconds")
+            c.executemany("INSERT OR REPLACE INTO todo_marks VALUES (?, ?, ?, ?)", [(i, i.split(":", 1)[0], mark, now) for i in ids])
+
+
+def todo_view(conv: dict, s: dict, t: dict, closed: dict, al: dict) -> dict:
+    """A todo as the pages show it: with its id and mark, the sentence it came from, whom it is to (an alias as its
+    person; none given: the others in the conversation), the conversation's title and start."""
+    to = al.get(t.get("to"), t.get("to"))
+    return {"id": (i := todo_id(conv["id"], t)), "mark": closed.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
+            **{k: t.get(k) for k in ("due", "due_date", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
+            "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
 
 def due_todos(day: str) -> list[dict]:
-    """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first. Only summaries from prompt v8 on date them."""
-    closed = closed_todos()
-    out = [{"conv": r[0], **{k: t.get(k) for k in ("text", "to", "due", "due_date", "at")}}
-           for r in conn().execute("SELECT s.conversation, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
-                                   " WHERE s.prompt_version >= 8 AND s.status = 'done'")
-           for t in json.loads(r[1]).get("todos") or []
-           if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and (r[0], t.get("text")) not in closed]
+    """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first, each with its age_days past due and
+    stale: past due over 7 days, over 3 for a due said as the same or the next day (SAME_DAY). Only summaries from prompt
+    v8 on date them."""
+    closed, al, out = closed_todos(), aliases(), []
+    for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
+                            " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
+        conv, s = _conversation(r), json.loads(r["body"])
+        for t in s.get("todos") or []:
+            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and todo_id(conv["id"], t) not in closed:
+                age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
+                out.append({**todo_view(conv, s, t, closed, al), "age_days": age,
+                            "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)})
     return sorted(out, key=lambda t: (t["due_date"], t["conv"]))
 
 

@@ -33,6 +33,7 @@ MS = int(dt.datetime.fromisoformat(AT).timestamp() * 1000)
 OGG = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=f=440:d=2:r=16000", "-c:a", "libopus", "-f", "ogg", "pipe:1"],
                      capture_output=True, check=True).stdout
 VEC = np.ones(4) / 2
+TODO = db.todo_id(CID, {"text": "MARKa 待办"})  # a's todo (seed); b's has another id
 
 
 def make(root: Path, id: str, token: str) -> tenant.Tenant:
@@ -116,6 +117,9 @@ REQUESTS = {
     ("GET", "/mcp"): ("GET", "/mcp", {}),
     ("GET", "/api/recap"): ("GET", "/api/recap", {}),
     ("GET", "/api/todos/due"): ("GET", "/api/todos/due", {}),
+    ("PUT", "/api/todos/{todo_id}/mark"): ("PUT", f"/api/todos/{TODO}/mark", dict(json={"mark": "done"})),
+    ("DELETE", "/api/todos/{todo_id}/mark"): ("DELETE", f"/api/todos/{TODO}/mark", {}),
+    ("POST", "/api/todos/marks"): ("POST", "/api/todos/marks", dict(json={"ids": [TODO], "mark": "wrong"})),
     ("POST", "/api/recap/{date}"): ("POST", f"/api/recap/{TODAY}", {}),
     ("GET", "/api/tags"): ("GET", "/api/tags", {}),
     ("GET", "/api/conversation/{conv_id}"): ("GET", f"/api/conversation/{CID}", {}),
@@ -141,7 +145,7 @@ REQUESTS = {
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/speakers": "page",
-    "/live": "page", "/me": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
+    "/live": "page", "/me": "page", "/todos": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
     "/assets/{name}": "the web app's files", "/app.apk": "the Android app: one for all", "/api/app/latest": "the Android app's version",
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",
     "/api/firmware/latest": "firmware", "/api/firmware/{model}/{version}.zip": "firmware",

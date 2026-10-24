@@ -1,8 +1,8 @@
 """A day's recap, for a card on the conversations page the morning after: one call over that day's summaries (ask.digest)
 and a numbered list of that day's todos of mine (only that day's: a todo is never repeated on the next days; none marked
 done or wrong). The model picks todos by number, so each is one a summary holds, owned by 我 (never 未知), with its
-conversation and its due as said that day; its text stays the summary's (完成 / 不对 name a todo by it), short is the
-model's wording. Kept in kv recap:<date> by server.py. The model is summary.py's; nothing is pushed anywhere.
+conversation and its due as said that day; its id and text stay the summary's (完成 / 不对 name a todo by its id), short
+is the model's wording. Kept in kv recap:<date> by server.py. The model is summary.py's; nothing is pushed anywhere.
 
     uv run python recap.py                          # self-check
     uv run python recap.py <live.db> <date>...      # recaps of those days from a db opened read only, as JSON lines
@@ -36,8 +36,8 @@ async def make(day: str) -> dict | None:
     if not convs:
         return None
     closed = db.closed_todos()
-    todos = [{"conv": c["id"], "text": t.get("text") or "", "to": t.get("to"), "due": t.get("due")}
-             for c in convs for t in c["summary"].get("todos") or [] if t.get("owner") == "我" and (c["id"], t.get("text") or "") not in closed]
+    todos = [{"id": db.todo_id(c["id"], t), "conv": c["id"], "text": t.get("text") or "", "to": t.get("to"), "due": t.get("due")}
+             for c in convs for t in c["summary"].get("todos") or [] if t.get("owner") == "我" and db.todo_id(c["id"], t) not in closed]
     listing = "\n".join(f"#{i}{' →' + t['to'] if t['to'] else ''} {t['text']}{'（' + t['due'] + '）' if t['due'] else ''}"
                         for i, t in enumerate(todos, 1)) or "（没有）"
     res, raw = await summary.complete([{"role": "system", "content": SYSTEM},
@@ -84,7 +84,7 @@ if __name__ == "__main__":
             if body:
                 db.put_summary({"conversation": cid, "status": "done", "title": "t" + cid[-6:], "summary": "s", **body}, c)
         db.put_summary({"conversation": "c20261004120000", "status": "pending"}, c)
-    db.add_feedback("c20261004100000", db.TODO_MARKS[0] + "已做完")
+    db.mark_todos([db.todo_id("c20261004100000", {"text": "已做完"})], "done")
     seen = []
     async def fake(msgs, timeout=300, kind=None):
         seen.append(msgs)
@@ -98,7 +98,8 @@ if __name__ == "__main__":
     assert listing == "：\n#1 改存储", "only the day's own todos of mine: not 未知, not the days before or after, not marked done"
     assert r["conversations"] == 1 and r["headline"] == "改存储" and r["model"] == "m"
     assert r["highlights"] == [{"text": "定了存储", "conv": "c20261004100000"}, {"text": "编的", "conv": None}], r["highlights"]
-    assert r["todos"] == [{"conv": "c20261004100000", "text": "改存储", "to": None, "due": None, "short": "改存储方案"}], r["todos"]
+    assert r["todos"] == [{"id": db.todo_id("c20261004100000", {"text": "改存储"}), "conv": "c20261004100000", "text": "改存储", "to": None,
+                           "due": None, "short": "改存储方案"}], r["todos"]
     assert r["people"] == [{"who": "老王", "note": "聊存储"}]
     assert anyio.run(make, "2026-10-03") is None and len(seen) == 1, "a day without summaries: no call"
     print("ok")

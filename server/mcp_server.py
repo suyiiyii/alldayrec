@@ -99,7 +99,7 @@ def conversation(id: str) -> str:
         out.append(f"\n## 话题：{t.get('title')}（{hm(t.get('at'))}）\n" + "\n".join(f"- {x}" for x in t.get("points") or []))
     if s["todos"]:
         out.append("\n## 待办\n" + "\n".join(f"- {todo(t)}  原话 {hm(t.get('at'))}：{t.get('quote', '')}"
-                                             + ("（已标记）" if (id, t.get("text")) in closed else "") for t in s["todos"]))
+                                             + ("（已标记）" if db.todo_id(id, t) in closed else "") for t in s["todos"]))
     if s["ai_requests"]:
         out.append("\n## 让 AI 做的事\n" + "\n".join(f"- {hm(t.get('at'))} {t.get('text', '')}" for t in s["ai_requests"]))
     if s["decisions"]:
@@ -148,7 +148,7 @@ def todos(after: str = "", before: str = "", owner: str = "") -> str:
     ts, closed = ask.t_todos(after, before, owner), db.closed_todos()
     more = "（只列了前 80 条，缩小时间范围再查）" if len(ts) == 80 else ""
     return (f"# {after} 起、{before} 前开始的对话里的待办 {len(ts)} 条{more}\n"
-            + "\n".join(f"- {t['date'][5:10]} {t['date'][11:16]} {todo(t)} `{t['id']}`" + ("（已标记）" if (t["id"], t["text"]) in closed else "") for t in ts))
+            + "\n".join(f"- {t['date'][5:10]} {t['date'][11:16]} {todo(t)} `{t['id']}`" + ("（已标记）" if db.todo_id(t["id"], t) in closed else "") for t in ts))
 
 
 def due() -> str:
@@ -175,15 +175,14 @@ def names() -> str:
 
 
 def mark_todo(id: str, text: str, mark: str) -> str:
-    """The web page's 完成 / 不对: a feedback line, the mark then the todo's text (TodoMarks.vue); once is enough."""
-    m = {"done": db.TODO_MARKS[0], "wrong": db.TODO_MARKS[1]}.get(mark)
-    if not m:
+    """The web page's 完成 / 不对 (db.mark_todos); once is enough."""
+    if mark not in ("done", "wrong"):
         raise Bad("mark 只能是 done 或 wrong")
-    if text not in [t.get("text") for t in (db.summary(id) or {}).get("todos") or []]:
+    if not (t := db.todo_by_text(id, text)):
         raise Bad("没有这条待办：id 和 text 要照抄 todos / due / conversation 的结果")
-    if (id, text) in db.closed_todos():
+    if db.todo_id(id, t) in db.closed_todos():
         return "这条待办已经标记过了"
-    db.add_feedback(id, m + text)
+    db.mark_todos([db.todo_id(id, t)], mark)
     return f"好了，「{text}」标成了{'完成' if mark == 'done' else '不对'}"
 
 
