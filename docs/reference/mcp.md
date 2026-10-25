@@ -1,5 +1,6 @@
 ---
 type: reference
+description: "alldayrec 远程 MCP 端点 POST /mcp 的参考：认证、协议版本、Origin 规则、分页和全部工具。"
 ---
 
 # MCP 工具

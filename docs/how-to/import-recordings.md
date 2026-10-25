@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "通过 HTTP 接口 POST /api/chunks 把已有录音导入 alldayrec：MP3、WAV、转码后的 m4a 和 Plaud 导出的文件，以及让它们转写、定稿要守的规则。"
 ---
 
 # 如何导入已有录音

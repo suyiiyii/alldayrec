@@ -1,5 +1,6 @@
 ---
 type: explanation
+description: "A self-hosted all-day recorder and memory layer, an open-source alternative to Plaud, Limitless, Bee and Omi: screenshots, features, how it compares."
 ---
 
 # What alldayrec is

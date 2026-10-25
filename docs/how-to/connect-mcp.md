@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "把 Claude Code、Codex、Cursor、Cherry Studio 接入 alldayrec 的远程 MCP 端点 /mcp，让 AI 助手查你的对话、摘要和待办。"
 ---
 
 # 如何把 AI 助手接入 MCP

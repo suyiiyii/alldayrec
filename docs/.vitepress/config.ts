@@ -9,6 +9,8 @@ import llmstxt from "vitepress-plugin-llms";
 const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
+// social card for every page, also the repo's social preview; binaries live on the assets branch, not main
+const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261025.png";
 
 type Item = [text: string, link: string];
 const group = (text: string, items: Item[]): DefaultTheme.SidebarItem => ({
@@ -88,6 +90,23 @@ export default defineConfig({
   srcExclude: ["**/README.md", "parts/**", "public/**"], // parts/: pieces other pages include; public/: served as is
   sitemap: { hostname: host + base },
   head: [["meta", { name: "keywords", content: KEYWORDS }]],
+  // per page: the canonical address (the one the sitemap lists) and the tags link previews read
+  transformHead: ({ page, siteData, title, description }) => {
+    if (page === "404.md") return [];
+    const url = host + base + page.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, ".html");
+    return [
+      ["link", { rel: "canonical", href: url }],
+      ["meta", { property: "og:type", content: "website" }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: description }],
+      ["meta", { property: "og:image", content: OG_IMAGE }],
+      ["meta", { property: "og:image:width", content: "1280" }],
+      ["meta", { property: "og:image:height", content: "640" }],
+      ["meta", { property: "og:locale", content: siteData.lang.replace("-", "_") }],
+      ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ];
+  },
   markdown: { config: (md) => void md.use(footnote) },
   vite: {
     plugins: [
@@ -130,6 +149,7 @@ export default defineConfig({
       label: "简体中文",
       lang: "zh-CN",
       title: "alldayrec 文档",
+      titleTemplate: "alldayrec（全天录）：自己部署的全天录音", // the bare name is ambiguous in search: say what it is
       description:
         "alldayrec（全天录）文档：自己部署的全天录音和个人记忆层，开源版 Plaud、Limitless、录音豆、心力球替代。部署、手机 App、硬件、API 与 MCP。",
       themeConfig: {
@@ -150,6 +170,7 @@ export default defineConfig({
       lang: "en-US",
       link: "/en/",
       title: "alldayrec docs",
+      titleTemplate: "alldayrec — self-hosted all-day recorder",
       description:
         "Docs for alldayrec (全天录), a self-hosted all-day recorder and personal memory layer: an open-source alternative to Plaud, Limitless and similar recorders. Deployment, phone app, hardware, API and MCP.",
       themeConfig: {

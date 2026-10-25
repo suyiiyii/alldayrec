@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "不用 Docker、不用克隆代码：用 uvx 或 pip 从 PyPI 运行 alldayrec 服务器，网页已经打包在里面。需要 uv 或 Python 3.11–3.14，以及 ffmpeg。"
 ---
 
 # 如何用 uvx 或 pip 运行

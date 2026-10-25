@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Install the alldayrec phone app (Android APK, or build for iOS in Xcode) and connect it to your server. It records the phone's mic or a BLE recorder."
 ---
 
 # How to install and connect the phone app

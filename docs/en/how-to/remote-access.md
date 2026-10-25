@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Let the phone reach your alldayrec server: an http:// address inside Tailscale or a LAN, or https:// from the internet via a TLS reverse proxy."
 ---
 
 # How to reach the server from a phone

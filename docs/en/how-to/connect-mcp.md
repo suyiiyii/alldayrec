@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Connect Claude Code, Codex, Cursor or Cherry Studio to alldayrec's remote MCP endpoint /mcp to search your conversations, summaries and to-dos."
 ---
 
 # How to connect an AI agent over MCP

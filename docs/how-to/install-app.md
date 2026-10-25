@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "安装 alldayrec 手机 App（安卓 APK，或用 Xcode 构建 iOS 版）并连上你的服务器。App 录手机麦克风或蓝牙录音设备，把音频上传到服务器。"
 ---
 
 # 如何安装并连接手机 App

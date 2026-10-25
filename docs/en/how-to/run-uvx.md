@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Run the alldayrec server from PyPI with uvx or pip, web pages included: no Docker, no clone of the code. Needs uv or Python 3.11–3.14, and ffmpeg."
 ---
 
 # How to run with uvx or pip

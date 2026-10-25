@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "用 .env 里的 ENGINE 更换定稿用的语音识别引擎（默认千问），或者用 ENGINE=local 在本机转写、不需要语音识别 key。也讲初稿和兜底引擎。"
 ---
 
 # 如何更换语音识别引擎

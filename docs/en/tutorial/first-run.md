@@ -1,5 +1,6 @@
 ---
 type: tutorial
+description: "Tutorial: run alldayrec with Docker on your computer, record a few sentences in the browser and see their transcript in the web UI. About 15 minutes."
 ---
 
 # Your first transcript

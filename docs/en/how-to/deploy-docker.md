@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Run alldayrec long-term with Docker Compose on Linux or macOS: fill in .env, start it, pin an image version, set the time zone, find the data."
 ---
 
 # How to deploy with Docker

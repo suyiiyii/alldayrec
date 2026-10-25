@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Import recordings you already have through POST /api/chunks: MP3, WAV, converted m4a and Plaud exports, plus the rules that get them transcribed."
 ---
 
 # How to import recordings you already have

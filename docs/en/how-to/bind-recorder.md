@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Bind a BLE recorder like LR-P3 to a phone: it records, keeps audio on its card while the phone is away and catches up later. Also force-bind, unbind."
 ---
 
 # How to bind a recorder

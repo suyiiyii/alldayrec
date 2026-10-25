@@ -1,5 +1,6 @@
 ---
 type: explanation
+description: "What stays on your server (audio, database, voiceprints), what goes to the ASR, LLM and AI-agent vendors you pick, and how to keep it all local."
 ---
 
 # Privacy: where your data goes

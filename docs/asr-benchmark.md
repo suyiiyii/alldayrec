@@ -1,5 +1,6 @@
 ---
 type: explanation
+description: "在 5 段真实录音上比较 CPU 上能跑的开源语音识别模型和云端引擎：最好的本地模型句内字错率约 19.6，默认的千问 13.5；还有在小机器上的速度。"
 ---
 
 # ASR benchmark: local engines vs cloud

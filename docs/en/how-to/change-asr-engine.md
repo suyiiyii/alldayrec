@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "Change the ASR engine for final transcripts with ENGINE in .env (default qwen), or use ENGINE=local with no ASR key. Also draft and fallback engines."
 ---
 
 # How to change the ASR engine

@@ -1,5 +1,6 @@
 ---
 type: tutorial
+description: "教程：用 Docker 在自己的电脑上跑起 alldayrec，在浏览器里录一段话，再在网页上看到它的转写，全程大约 15 分钟。"
 ---
 
 # 第一次跑起来

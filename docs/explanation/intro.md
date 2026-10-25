@@ -1,5 +1,6 @@
 ---
 type: explanation
+description: "全天录是什么：自己部署的全天录音和个人记忆层，Plaud、Limitless、Bee、Omi 的开源替代。界面截图、能做什么，以及和录音豆、心力球等产品的对比。"
 ---
 
 # 简介与定位

@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "让手机连上你的 alldayrec 服务器：在同一个 Tailscale 网络或局域网里直接用 http:// 地址，或者从公网经带 TLS 的反向代理用 https:// 访问。"
 ---
 
 # 如何让手机连上服务器

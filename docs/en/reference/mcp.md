@@ -1,5 +1,6 @@
 ---
 type: reference
+description: "Reference for alldayrec's remote MCP endpoint, POST /mcp: authentication, protocol versions, Origin rules, paging and every tool."
 ---
 
 # MCP tools

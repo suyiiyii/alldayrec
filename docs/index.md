@@ -1,6 +1,8 @@
 ---
 layout: home
-title: alldayrec 文档
+title: alldayrec（全天录）：开源录音豆，私有第二大脑
+titleTemplate: false
+description: "自己部署的全天录音和个人记忆层，开源版 Plaud 与心力球：带说话人的转写、对话摘要、待办和每日回顾，原始录音留在你自己的服务器上。"
 hero:
   name: alldayrec
   text: 全天录

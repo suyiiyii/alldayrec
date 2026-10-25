@@ -1,6 +1,8 @@
 ---
 layout: home
-title: alldayrec docs
+title: "alldayrec: the open-source Plaud & Limitless you can self-host"
+titleTemplate: false
+description: "Self-hosted all-day recorder and memory layer: transcripts with speakers, summaries, to-dos and a daily recap; your audio stays on your server."
 hero:
   name: alldayrec
   text: 全天录

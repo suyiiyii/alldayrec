@@ -1,5 +1,6 @@
 ---
 type: how-to
+description: "在 Linux 或 macOS 机器上用 Docker Compose 长期运行 alldayrec：填 .env、启动、固定镜像版本、设时区，以及数据存在哪。"
 ---
 
 # 如何用 Docker 部署
