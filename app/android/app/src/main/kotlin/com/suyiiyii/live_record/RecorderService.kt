@@ -438,13 +438,14 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
             val at = prefs.getLong(k, 0)
             val left = q.filter { deviceOf(it) == d }.map(::startMs)
             when {
-                left.any { it >= at } -> prefs.edit().remove(k).apply()  // recording again: it carries on the conversation, no end
-                left.isNotEmpty() -> {}
-                end(at, d.ifEmpty { device }) -> if (prefs.getLong(k, 0) == at) prefs.edit().remove(k).apply()
-                else -> sleep(5000)
+                left.any { it >= at } -> { endDue -= k; prefs.edit().remove(k).apply() }  // recording again: it carries on the conversation, no end
+                left.isNotEmpty() || System.currentTimeMillis() < (endDue[k] ?: 0) -> {}
+                end(at, d.ifEmpty { device }) -> { endDue -= k; if (prefs.getLong(k, 0) == at) prefs.edit().remove(k).apply() }
+                else -> endDue[k] = System.currentTimeMillis() + 5000  // the pieces meanwhile go on
             }
         }
     }
+    private val endDue = mutableMapOf<String, Long>()  // an end that failed: not tried again before (this thread only)
 
     private fun keep(f: File) {
         if (archive == null) { f.delete(); return }

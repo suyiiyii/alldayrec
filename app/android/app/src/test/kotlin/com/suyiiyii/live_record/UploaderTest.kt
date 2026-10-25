@@ -81,6 +81,7 @@ class UploaderTest {
         val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
             when (m.name) { "getLong" -> kv[a[0] as String] ?: a[1]; "getAll" -> kv; "edit" -> edit; else -> null } } as SharedPreferences
         val got = LinkedBlockingQueue<String>()
+        val at = java.util.concurrent.ConcurrentHashMap<String, Long>()  // when each came
         var failed = false
         val http = ServerSocket(0)
         Thread {
@@ -91,7 +92,7 @@ class UploaderTest {
                     .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
                 repeat(n) { r.read() }
                 val code = if (path.startsWith("/api/chunks/end?device=D3200-0A0B") && !failed) { failed = true; 500 } else 200
-                got += "$code $path"
+                at["$code $path"] = System.currentTimeMillis(); got += "$code $path"
                 c.getOutputStream().write("HTTP/1.1 $code X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
             } } catch (_: Exception) {}
         }.start()
@@ -108,6 +109,8 @@ class UploaderTest {
             assertEquals(listOf(up1, upMic, upNew, lost, end1, endMic).sorted(), all.sorted())  // no end for D3200-0C0D
             assertTrue(all.indexOf(up1) < all.indexOf(lost) && all.indexOf(lost) < all.indexOf(end1))
             assertTrue(all.indexOf(upMic) < all.indexOf(endMic))
+            assertTrue("the microphone's piece, queued as the end failed, waits for nothing", at[upMic]!! - at[lost]!! < 1000)
+            assertTrue("the end again after 5 s", at[end1]!! - at[lost]!! in 4900..7000)
             assertEquals(emptyMap<String, Long>(), kv.toMap())
         } finally { up.running = false; up.join(7000); http.close(); dir.deleteRecursively() }
     }
