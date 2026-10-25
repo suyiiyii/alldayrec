@@ -8,11 +8,9 @@ Works on every platform, no hardware to buy: your phone is the recorder.
 
 [中文](README.md) | **English**
 
-![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
 
-| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
-|:--:|:--:|
-| Timeline: the conversation going on, due to-dos, each day's conversations | One conversation: the summary, to-dos and decisions, each with its audio one tap away |
+Live captions · Timeline · One conversation
 
 The web UI switches to English on the 「我的」 (Me) page.
 
@@ -94,10 +92,10 @@ Installing and connecting the app: [Install and connect the phone app](https://s
 
 ## Hardware
 
-No hardware to buy: your phone records. For all-day wear, connect one of these recorders:
+For all-day wear, connect one of these recorders:
 
 - **Open-source recorder**: build an `LR-X1` (Seeed XIAO nRF52840 Sense) or an `LR-P3` (ProMicro nRF52840 in a 3D-printed case). It records to an SD card all the time and syncs to the phone when connected. Parts, wiring and firmware: [Recorder hardware](https://suyiiyii.github.io/alldayrec/en/reference/hardware.html), [`hardware/lr-p3/`](hardware/lr-p3/README.md), [`firmware/devkit/`](firmware/devkit/README.md).
-- **Feishu recorder bean** (飞书录音豆): the Android app (1.5.5 and later) connects to it directly from **Add recorder**. With the phone nearby it uploads as it records; when the phone is away the audio stays on the bean and is fetched when the phone is back. Recordings the server has in full are deleted from the bean.
+- **[Feishu recorder bean](https://suyiiyii.github.io/alldayrec/en/how-to/bind-recorder.html#feishu-recorder-bean)** (飞书录音豆): the Android app connects to it directly from **Add recorder**.
 
 ## Docs
 

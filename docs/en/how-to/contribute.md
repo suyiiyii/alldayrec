@@ -46,4 +46,6 @@ uv run --project server python docs/gen-api.py
 - type: `feat`, `fix`, `chore`, `ci`, `perf`, `doc`, `test`; Area: `Server`, `App`, `Firmware`, `Web`, `CI` and others, which you can stack (`[fix][Server][Web]`).
 - No `Co-authored-by`.
 
+The git history was rewritten before the repository went public, so it is short. References like `lr#123` in commit messages point at issues of the earlier private repository, not this one.
+
 Binary files such as screenshots don't go into `main`: push them to the `assets` branch first (add only, never change; name them `img/<name>-<yyyymmdd>.ext`), then link them as `https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/<file>`.

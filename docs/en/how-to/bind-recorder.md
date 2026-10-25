@@ -28,6 +28,8 @@ On the **录音设备** page, tap **解除绑定** (Unbind).
 
 The Android app connects to a Feishu recorder bean directly since 1.5.5. The iPhone app can't yet.
 
+First finish syncing in Feishu, then quit the Feishu app or turn off its Bluetooth permission. The bean connects to one phone at a time: while Feishu holds it, it is missing from the list or marked "正连着其他手机" (Connected to another phone). Recordings Feishu syncs are deleted from the bean, too.
+
 1. Open **添加录音设备** (Add recorder) and allow the permissions, as in steps 1 and 2 of [Bind](#bind).
 2. The bean shows up in the list as `D3200-XXXX`, marked "已绑定飞书" (Bound to Feishu) or "未绑定飞书" (Not bound to Feishu). Tap **绑定** (Bind) next to it.
 

@@ -46,4 +46,6 @@ uv run --project server python docs/gen-api.py
 - type：`feat`、`fix`、`chore`、`ci`、`perf`、`doc`、`test`；Area：`Server`、`App`、`Firmware`、`Web`、`CI` 等，可以叠加（`[fix][Server][Web]`）。
 - 不写 `Co-authored-by`。
 
+仓库公开前改写过 git 历史，所以历史很短。提交说明里的 `lr#123` 指以前私有仓库的 issue，不是这个仓库的。
+
 截图等二进制文件不进 `main`：先推到 `assets` 分支（只加不改，命名 `img/<名字>-<yyyymmdd>.ext`），再用 `https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/<文件>` 引用。

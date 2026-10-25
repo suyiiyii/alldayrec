@@ -8,12 +8,9 @@
 
 **中文** | [English](README.en.md)
 
-![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
 
-| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
-|:--:|:--:|
-| 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
-
+实时字幕 · 时间线 · 一段对话
 
 </div>
 
@@ -93,10 +90,10 @@ App 的安装和连接见[安装并连接手机 App](https://suyiiyii.github.io/
 
 ## 硬件
 
-不用买硬件，手机就能录。想全天佩戴，可以接这两种录音设备：
+想全天佩戴，可以接这两种录音设备：
 
 - **开源录音设备**：自己做的 `LR-X1`（Seeed XIAO nRF52840 Sense）或 `LR-P3`（ProMicro nRF52840，装在 3D 打印外壳里），一直往 SD 卡里录，连上手机就同步。零件、接线和固件：[录音设备硬件](https://suyiiyii.github.io/alldayrec/reference/hardware.html)、[`hardware/lr-p3/`](hardware/lr-p3/README.md)、[`firmware/devkit/`](firmware/devkit/README.md)。
-- **飞书录音豆**：安卓 App（1.5.5 起）在「添加录音设备」里直接连接。手机在附近时边录边传，不在时录音留在豆子里，回来后自动补传；服务器收全的录音会从豆子上删掉。
+- **[飞书录音豆](https://suyiiyii.github.io/alldayrec/how-to/bind-recorder.html#飞书录音豆)**：安卓 App 在「添加录音设备」里直接连接。
 
 ## 文档
 

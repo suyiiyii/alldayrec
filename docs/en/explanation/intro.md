@@ -11,7 +11,7 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 
 ![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
-The Live page: captions come up as people speak, and the AI live summary keeps up. Below, the web UI on a phone, filled with made-up data (the screenshots show the Chinese UI; the web UI switches to English on the 「我的」 (Me) page).
+The Live page: captions come up as people speak, and the AI live summary keeps up. Below, the web UI on a phone, filled with made-up data.
 
 | ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
 |:--:|:--:|
@@ -27,35 +27,38 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 
 ## What it does
 
-- **Records all day.** The phone app uploads short Opus pieces. A BLE recorder writes everything to its SD card and streams it to the phone, which fills gaps after a disconnection. A Feishu recorder bean (Android app) uploads as it records; while the phone is away the audio stays on the bean and is fetched when the phone is back, see [How to bind a recorder](../how-to/bind-recorder.md#feishu-recorder-bean).
-- **Takes any audio source.** Anything that can POST audio can feed the server (`POST /api/chunks`), recordings you already have too: see [importing](../how-to/import-recordings.md).
-- **Transcribes in two layers.** The final layer cuts the audio in pauses and sends pieces of up to 5 minutes to a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio); while a page is open, a draft layer shows words within seconds. Without an ASR key, `ENGINE=local` transcribes on your machine ([compared with the cloud engines](./asr-benchmark.md)).
-- **Knows who spoke.** It learns your own voice, keeps speakers apart within a conversation and remembers the names you give them.
-- **Remembers.** Conversations are closed after a silence and summarized by an LLM of your choice; to-dos with due dates, a daily recap, full-text search and "ask AI" over your history. A conversation with under 60 s of speech gets its first sentence as the title and no summary or to-dos (`MIN_SPEECH_S` in `server/alldayrec/summary.py`).
-- **Opens up.** A web UI, a remote MCP endpoint (`POST /mcp`) for Claude Code, Codex, Cursor and other agents and a small CLI (`cli/lr.py`).
-- **Stays yours.** One server, your disk, several people per server if you like (one token each).
+- **Every platform, no hardware to buy.** The Android app, the iPhone app and a browser all record directly. The Android app also connects to a [Feishu recorder bean](../how-to/bind-recorder.md#feishu-recorder-bean).
+- **Transcribes in two layers.** The final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
+- **Knows who spoke.** It learns your own voice and remembers the names you give others.
+- **Remembers.** Conversation summaries, to-dos with due dates, a daily recap, and full-text search.
+- **Opens up.** A web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
+- **Imports recordings.** Audio files you already have can be [imported](../how-to/import-recordings.md) over the HTTP API.
 
 ## How it compares
 
-| | **alldayrec** | Anker × Feishu AI recorder (录音豆) | OPPO AI 心力球 | DingTalk A1 | Plaud | Limitless / Bee | Omi |
+<div class="compare">
+
+| | **alldayrec** | Anker × Feishu AI recorder (录音豆) | OPPO AI 心力球 | DingTalk A1 | Plaud | Bee (Amazon) | Omi |
 |---|---|---|---|---|---|---|---|
-| **Price / subscription** | Free software; ASR paid by use, Qwen about ¥0.05/h; LLM extra | From ¥899; 6 months of AI credits, then ¥69/month membership[^lrd]; the membership transcribes about 50 h a month[^lrd3] | ¥499 trial price, invitation only, bought with an invite code[^xlq2][^xlq3]; OPPO, OnePlus and realme phones only[^xlq]; software pricing due at the end of November[^xlq4] | ¥499 / ¥799[^a1c]; membership ¥599 or ¥1499/year[^a1] | NotePin S $179[^plaud-dev]; free 300 min/month, Pro $17.99/month[^plaud-plan] | Limitless bought by Meta on 2025-12-05, no longer sold[^limitless]; Bee relaunched 2026-10-15, Frontier $74.99, Eclipse $99.99, Pro $11.99/month, on sale in the US[^bee] | Pendant $179 ($129 on offer); free 300 cloud min/month, Pro $269/year[^omi-price] |
-| **All-day wear** | Yes: the phone app, a Feishu recorder bean (Android), or a home-built recorder that writes to its card | 8 h per charge, 32 h with the case[^lrd] | 24 h of continuous recording[^xlq] | A card on the back of the phone, 45 h of recording[^a1] | NotePin S about 20 h[^plaud-dev] | Bee Frontier on the wrist or clipped on, 7 days[^bee-x] | Pendant |
-| **Keeps the original audio** | Yes: every line plays back and can be transcribed again | Deleted from the device after upload, kept in the cloud; download only one by one on the Minutes web page[^lrd] | No: "text only, no original audio"[^xlq] | Unknown | Yes, exports MP3 / WAV[^plaud-exp] | Bee: no, deleted after processing[^bee] | Optional, off by default[^omi-audio] |
+| **Price / subscription** | Free software; ASR paid by use, Qwen about ¥0.05/h; LLM extra | From ¥899; 6 months of AI credits, then ¥69/month membership[^lrd]; the membership transcribes about 50 h a month[^lrd3] | ¥499 trial price, invitation only, bought with an invite code[^xlq2][^xlq3]; OPPO, OnePlus and realme phones only[^xlq]; software pricing due at the end of November[^xlq4] | ¥499 / ¥799[^a1c]; membership ¥599 or ¥1499/year[^a1] | NotePin S $179[^plaud-dev]; free 300 min/month, Pro $17.99/month[^plaud-plan] | Relaunched 2026-10-15: Frontier $74.99, on sale in the US; Eclipse $99.99, no release date; Pro $11.99/month[^bee] | Pendant $179 ($129 on offer); free 300 cloud min/month, Pro $269/year[^omi-price] |
+| **All-day wear** | Yes: the phone app, a Feishu recorder bean (Android), or a home-built recorder that writes to its card | 8 h per charge, 32 h with the case[^lrd] | 24 h of continuous recording[^xlq] | A card on the back of the phone, 45 h of recording[^a1] | NotePin S about 20 h[^plaud-dev] | Frontier on the wrist or clipped on, 7 days[^bee-x] | Pendant |
+| **Keeps the original audio** | Yes: every line plays back and can be transcribed again | Deleted from the device after upload, kept in the cloud; download only one by one on the Minutes web page[^lrd] | No: "text only, no original audio"[^xlq] | Unknown | Yes, exports MP3 / WAV[^plaud-exp] | No, deleted after processing[^bee] | Optional, off by default[^omi-audio] |
 | **Where the data lives** | Your own server | Feishu cloud[^lrd] | OPPO's PCC private cloud[^xlq] | 64 GB on the device + DingTalk cloud[^a1] | Plaud cloud[^plaud-plan] | Bee's cloud (Bee Private Compute)[^bee] | Omi cloud, or your own backend[^omi-docs] |
-| **Speaker recognition** | Local voiceprints: knows your voice, remembers the names you give | Voiceprints tell speakers apart[^lrd2] | Voiceprint tells the wearer apart[^xlq] | Names after a voiceprint is registered[^a1b] | Speakers, renamable with find & replace[^plaud-rn] | Unknown | Speaker identification[^omi-docs] |
-| **Summaries / to-dos / recap** | Summaries, to-dos with due dates, decisions, daily recap | Minutes, to-dos[^lrd2] | Daily summary, to-dos, projects across days[^xlq] | Minutes, chapters, analysis and follow-ups[^a1c] | Template summaries, to-dos[^plaud-app] | Bee summaries (unlimited with Pro)[^bee] | Summaries, action items, daily recaps[^omi-home] |
-| **Ask AI / MCP** | Ask AI with sources; remote MCP | Ask across minutes[^lrd2]; MCP unknown | Ask in WeChat or Feishu; MCP[^xlq] | Unknown | Ask Plaud; MCP[^plaud-mcp] | Unknown | Chat; MCP[^omi-mcp] |
+| **Speaker recognition** | Local voiceprints: knows your voice, remembers the names you give | Voiceprints tell speakers apart[^lrd2] | Voiceprint tells the wearer apart[^xlq] | Names after a voiceprint is registered[^a1b] | Speakers, renamable with find & replace[^plaud-rn] | Knows the wearer; names other people only after they do a voice training with the wearer[^bee-gw] | Speaker identification[^omi-docs] |
+| **Summaries / to-dos / recap** | Summaries, to-dos with due dates, decisions, daily recap | Minutes, to-dos[^lrd2] | Daily summary, to-dos, projects across days[^xlq] | Minutes, chapters, analysis and follow-ups[^a1c] | Template summaries, to-dos[^plaud-app] | Summaries (unlimited with Pro)[^bee] | Summaries, action items, daily recaps[^omi-home] |
+| **Ask AI / MCP** | Ask AI with sources; remote MCP | Ask AI about a recording[^lrd2]; MCP unknown | Ask in WeChat or Feishu; MCP[^xlq] | Unknown | Ask Plaud; MCP[^plaud-mcp] | Unknown | Chat; MCP[^omi-mcp] |
 | **Open hardware** | Yes (`hardware/lr-p3/`) | No | No | No | No | No | Yes[^omi-docs] |
 | **Open source** | Yes (MIT: server, web, app, firmware) | No | No | No | No | No | Yes (MIT)[^omi-docs] |
 
-As of 2026-10-25. "No" means no published design files or source code; "Unknown" means we found no reliable source. Check each vendor's own site for prices and features.
+</div>
 
-## Name and history
+As of 2026-10-25. "No" means no published design files or source code; "Unknown" means we found no reliable source.
+
+Limitless was bought by Meta on 2025-12-05 and is no longer sold[^limitless].
+
+## Name and license
 
 "LR" / "lr" is the project's internal codename, still used in the hardware and the code: recorder names like `LR-P3`, the firmware tool `lr.sh`, the CLI `lr.py`.
-
-The git history was rewritten before publishing to remove the author's private deployment details, so it is short on purpose, and references like `lr#123` in commit messages point at issues of the earlier private repository, not this one.
 
 The project is released under the MIT license. Bundled third-party code (the Omi devkit, Opus, FireRedVAD's post-processor and others) keeps its own license: see [THIRD_PARTY_NOTICES.md](https://github.com/suyiiyii/alldayrec/blob/main/THIRD_PARTY_NOTICES.md).
 
@@ -77,6 +80,7 @@ The project is released under the MIT license. Bundled third-party code (the Omi
 [^plaud-mcp]: [Plaud MCP docs](https://docs.plaud.ai/plaud-mcp-cli/mcp)
 [^limitless]: [TechInformed, Meta acquires Limitless, which stops selling its pendant to new customers (2025-12-09)](https://techinformed.com/meta-acquires-limitless-pendant-users-moved-to-free-unlimited-plan/); [the acquisition news on X (2025-12-05)](https://x.com/LuxAlgo/status/1997019782499987471)
 [^bee]: [The Next Web, Amazon relaunches Bee (2026-10-15; prices, subscription, on sale in the US, audio deleted after processing)](https://thenextweb.com/news/amazon-bee-frontier-eclipse-subscription)
+[^bee-gw]: [GeekWire, Amazon's Bee devices: they switch off when they don't hear the wearer, and other people are named only after a voice training with the wearer (2026-10-16)](https://www.geekwire.com/2026/amazons-new-bee-ai-devices-have-a-bystander-problem-says-former-aws-security-engineer/)
 [^bee-x]: [Bee on X: Frontier is worn on the wrist or clipped on, seven-day battery (2026-10-15)](https://x.com/bee__computer/status/2110709597568897052)
 [^omi-price]: [Omi pricing](https://www.omi.me/pages/pricing)
 [^omi-docs]: [Omi docs (hardware, firmware, app and backend open source, self-hostable, speaker identification)](https://docs.omi.me/doc/get_started/introduction)

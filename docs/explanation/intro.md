@@ -11,7 +11,7 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
-实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例（中文界面；网页可以在「我的」页换成英文）。
+实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例。
 
 | ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
 |:--:|:--:|
@@ -27,35 +27,38 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ## 能做什么
 
-- **全天录音。** 手机 App 上传 Opus 短分片。蓝牙录音设备一直写 SD 卡，同时推给手机，断开期间的部分回来后补齐。飞书录音豆（安卓 App）边录边传，手机不在时录音留在豆子里，回来后补传，见[如何绑定录音设备](../how-to/bind-recorder.md#飞书录音豆)。
-- **什么音源都能接。** 能 POST 音频的东西都能给服务器送数据（`POST /api/chunks`），已有的录音文件也可以，见[如何导入已有录音](../how-to/import-recordings.md)。
-- **两层转写。** 定稿层在停顿处切开，每段最长 5 分钟交给云端语音识别引擎（默认阿里云百炼千问，约 ¥0.05/小时音频）；页面开着时，初稿层几秒内出字。没有语音识别的 key，可以用 `ENGINE=local` 在本机转写（[和云端的对比](./asr-benchmark.md)）。
-- **认人。** 认得出你自己，分得清一段对话里的不同人，记得你起的名字。
-- **记忆。** 一段安静之后对话结束，用你配置的大模型写摘要；待办和截止日期、每日回顾、全文搜索，以及对历史记录「问 AI」。说话不到 60 秒的对话不调大模型，标题取第一句，没有摘要和待办（`server/alldayrec/summary.py` 里的 `MIN_SPEECH_S`）。
-- **开放。** 网页、给 Claude Code、Codex、Cursor 等 Agent 用的远程 MCP 端点（`POST /mcp`）、一个小命令行（`cli/lr.py`）。
-- **数据归你。** 一台服务器、你自己的硬盘，愿意的话一台服务器可以给好几个人用（每人一个 token）。
+- **全平台，不用买硬件。** 安卓 App、iPhone App 和浏览器都能直接录。安卓 App 还能直接连接[飞书录音豆](../how-to/bind-recorder.md#飞书录音豆)。
+- **两层转写。** 定稿交给云端语音识别（默认阿里云百炼千问，约 ¥0.05/小时音频），页面开着时几秒内出初稿；也可以 `ENGINE=local` 在本机转写。
+- **认人。** 认得出你自己，记得你给别人起的名字。
+- **记忆。** 对话摘要、待办和截止日期、每日回顾、全文搜索。
+- **开放。** 网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
+- **导入已有录音。** 录音文件可以通过 HTTP 接口[导入](../how-to/import-recordings.md)。
 
 ## 和市面产品比
 
-| | **alldayrec** | 飞书录音豆 | OPPO 心力球 | 钉钉 A1 | Plaud | Limitless / Bee | Omi |
+<div class="compare">
+
+| | **alldayrec** | 飞书录音豆 | OPPO 心力球 | 钉钉 A1 | Plaud | Bee（Amazon） | Omi |
 |---|---|---|---|---|---|---|---|
-| **价格 / 订阅** | 软件免费；转写按量付费，千问约 ¥0.05/小时；大模型另计 | ¥899 起；送 6 个月 AI 权益，之后会员 ¥69/月[^lrd]，会员转写约 50 小时/月[^lrd3] | ¥499 体验价，邀请制，凭邀请码购买[^xlq2][^xlq3]；只配 OPPO、一加、realme 手机[^xlq]；正式软件定价预计 11 月底公布[^xlq4] | ¥499 / ¥799[^a1c]；会员 ¥599 或 ¥1499/年[^a1] | NotePin S $179[^plaud-dev]；免费 300 分钟/月，Pro $17.99/月[^plaud-plan] | Limitless 2025-12-05 被 Meta 收购后停售[^limitless]；Bee 2026-10-15 重新发布，Frontier $74.99、Eclipse $99.99，Pro $11.99/月，美国在售[^bee] | 吊坠 $179（促销 $129）；免费 300 云端分钟/月，Pro $269/年[^omi-price] |
-| **全天佩戴** | 是：手机 App、飞书录音豆（安卓），或自制录音设备边录边写卡 | 单次 8 小时，带充电仓 32 小时[^lrd] | 24 小时连续记录[^xlq] | 贴在手机背面的卡片，连续录 45 小时[^a1] | NotePin S 约 20 小时[^plaud-dev] | Bee Frontier 腕带或衣夹，7 天续航[^bee-x] | 吊坠 |
-| **保留原音** | 是，每句可回放、可重新转写 | 设备上传后删除，云端保留；只能在妙记网页逐条下载[^lrd] | 否，「只留文字、不留原音」[^xlq] | 未知 | 是，可导出 MP3 / WAV[^plaud-exp] | Bee 否，处理后删除[^bee] | 可选，默认不存[^omi-audio] |
+| **价格 / 订阅** | 软件免费；转写按量付费，千问约 ¥0.05/小时；大模型另计 | ¥899 起；送 6 个月 AI 权益，之后会员 ¥69/月[^lrd]，会员转写约 50 小时/月[^lrd3] | ¥499 体验价，邀请制，凭邀请码购买[^xlq2][^xlq3]；只配 OPPO、一加、realme 手机[^xlq]；正式软件定价预计 11 月底公布[^xlq4] | ¥499 / ¥799[^a1c]；会员 ¥599 或 ¥1499/年[^a1] | NotePin S $179[^plaud-dev]；免费 300 分钟/月，Pro $17.99/月[^plaud-plan] | 2026-10-15 重新发布：Frontier $74.99，美国在售；Eclipse $99.99，未定上市日期；Pro $11.99/月[^bee] | 吊坠 $179（促销 $129）；免费 300 云端分钟/月，Pro $269/年[^omi-price] |
+| **全天佩戴** | 是：手机 App、飞书录音豆（安卓），或自制录音设备边录边写卡 | 单次 8 小时，带充电仓 32 小时[^lrd] | 24 小时连续记录[^xlq] | 贴在手机背面的卡片，连续录 45 小时[^a1] | NotePin S 约 20 小时[^plaud-dev] | Frontier 腕带或衣夹，7 天续航[^bee-x] | 吊坠 |
+| **保留原音** | 是，每句可回放、可重新转写 | 设备上传后删除，云端保留；只能在妙记网页逐条下载[^lrd] | 否，「只留文字、不留原音」[^xlq] | 未知 | 是，可导出 MP3 / WAV[^plaud-exp] | 否，处理后删除[^bee] | 可选，默认不存[^omi-audio] |
 | **数据在哪** | 你自己的服务器 | 飞书云[^lrd] | OPPO PCC 私密云[^xlq] | 设备 64 GB + 钉钉云[^a1] | Plaud 云[^plaud-plan] | Bee 的云（Bee Private Compute）[^bee] | Omi 云，或自己部署后端[^omi-docs] |
-| **说话人识别** | 本机声纹：认得出你自己，记得你起的名字 | 声纹区分说话人[^lrd2] | 声纹区分佩戴者本人[^xlq] | 注册声纹后显示姓名[^a1b] | 区分说话人，可查找替换说话人名[^plaud-rn] | 未知 | 区分说话人[^omi-docs] |
-| **摘要 / 待办 / 回顾** | 摘要、待办和截止日期、决定、每日回顾 | 纪要、待办[^lrd2] | 今日摘要、待办、项目串联[^xlq] | 纪要、章节、分析与后续跟进[^a1c] | 模板摘要、To-dos[^plaud-app] | Bee 摘要（Pro 不限量）[^bee] | 摘要、待办、日报[^omi-home] |
-| **问 AI / MCP** | 问 AI 带出处；远程 MCP | 跨纪要 AI 问答[^lrd2]；MCP 未知 | 在微信、飞书里问；MCP[^xlq] | 未知 | Ask Plaud；MCP[^plaud-mcp] | 未知 | Chat；MCP[^omi-mcp] |
+| **说话人识别** | 本机声纹：认得出你自己，记得你起的名字 | 声纹区分说话人[^lrd2] | 声纹区分佩戴者本人[^xlq] | 注册声纹后显示姓名[^a1b] | 区分说话人，可查找替换说话人名[^plaud-rn] | 认得出佩戴者；别人和佩戴者一起做过声音训练后才标名字[^bee-gw] | 区分说话人[^omi-docs] |
+| **摘要 / 待办 / 回顾** | 摘要、待办和截止日期、决定、每日回顾 | 纪要、待办[^lrd2] | 今日摘要、待办、项目串联[^xlq] | 纪要、章节、分析与后续跟进[^a1c] | 模板摘要、To-dos[^plaud-app] | 摘要（Pro 不限量）[^bee] | 摘要、待办、日报[^omi-home] |
+| **问 AI / MCP** | 问 AI 带出处；远程 MCP | AI 问答[^lrd2]；MCP 未知 | 在微信、飞书里问；MCP[^xlq] | 未知 | Ask Plaud；MCP[^plaud-mcp] | 未知 | Chat；MCP[^omi-mcp] |
 | **开放硬件** | 是（`hardware/lr-p3/`） | 否 | 否 | 否 | 否 | 否 | 是[^omi-docs] |
 | **开源** | 是（MIT：服务端、网页、App、固件） | 否 | 否 | 否 | 否 | 否 | 是（MIT）[^omi-docs] |
 
-截至 2026-10-25。「否」指没有公开的设计文件或源码，「未知」指没查到可靠资料；价格和功能以各家官网为准。
+</div>
 
-## 名字和历史
+截至 2026-10-25。「否」指没有公开的设计文件或源码，「未知」指没查到可靠资料。
+
+Limitless 2025-12-05 被 Meta 收购后停售[^limitless]。
+
+## 名字和许可
 
 「LR」「lr」是项目的内部代号，硬件和代码里还在用：录音设备型号 `LR-P3`、固件工具 `lr.sh`、命令行 `lr.py`。
-
-仓库公开前改写过 git 历史，去掉了作者私人部署的细节，所以历史很短；提交说明里的 `lr#123` 指的是以前私有仓库的 issue，不是这个仓库的。
 
 项目以 MIT 许可发布，打包进来的第三方代码（Omi devkit、Opus、FireRedVAD 的后处理等）保留各自的许可，见 [THIRD_PARTY_NOTICES.md](https://github.com/suyiiyii/alldayrec/blob/main/THIRD_PARTY_NOTICES.md)。
 
@@ -77,6 +80,7 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 [^plaud-mcp]: [Plaud MCP 文档](https://docs.plaud.ai/plaud-mcp-cli/mcp)
 [^limitless]: [TechInformed，Meta 收购 Limitless，吊坠停止向新用户销售（2025-12-09）](https://techinformed.com/meta-acquires-limitless-pendant-users-moved-to-free-unlimited-plan/)；[X 上的收购消息（2025-12-05）](https://x.com/LuxAlgo/status/1997019782499987471)
 [^bee]: [The Next Web，Amazon 重新推出 Bee（2026-10-15；价格、订阅、美国在售、音频处理后删除）](https://thenextweb.com/news/amazon-bee-frontier-eclipse-subscription)
+[^bee-gw]: [GeekWire，Amazon 的 Bee 设备：检测不到佩戴者的声音会自动关机，别人要和佩戴者一起做声音训练才标名字（2026-10-16）](https://www.geekwire.com/2026/amazons-new-bee-ai-devices-have-a-bystander-problem-says-former-aws-security-engineer/)
 [^bee-x]: [Bee 官方 X：Frontier 腕戴或夹在衣服上，7 天续航（2026-10-15）](https://x.com/bee__computer/status/2110709597568897052)
 [^omi-price]: [Omi 价格](https://www.omi.me/pages/pricing)
 [^omi-docs]: [Omi 文档（硬件、固件、App、后端全部开源，可自己部署，说话人识别）](https://docs.omi.me/doc/get_started/introduction)

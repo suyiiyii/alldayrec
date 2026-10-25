@@ -35,3 +35,12 @@
 .VPHero .text {
   word-break: keep-all;
 }
+/* The intro's comparison table: wide enough cells to read, scrolling sideways on a phone */
+.compare table th,
+.compare table td {
+  min-width: 9em;
+}
+.compare table th:first-child,
+.compare table td:first-child {
+  min-width: 6em;
+}
