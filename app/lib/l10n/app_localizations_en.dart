@@ -947,7 +947,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanRecorderHelp =>
-      'When the phone connects, it starts the bean recording; a press of its button stops it until the next connection. With the phone nearby it uploads as it records; when the phone is away the audio stays on the bean and is fetched when the phone is back. Recordings the server has in full are deleted from the bean.';
+      'The phone starts the bean recording when it connects. Press its button to stop it. With the phone nearby it uploads as it records. What it records while the phone is away is fetched after you stop it. Recordings the server has in full are deleted from the bean.';
 
   @override
   String get beanFetching => 'Fetching the recordings on the bean';

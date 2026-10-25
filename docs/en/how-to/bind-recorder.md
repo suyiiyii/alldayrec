@@ -35,9 +35,9 @@ First finish syncing in Feishu, then quit the Feishu app or turn off its Bluetoo
 
 The binding is kept on this phone only. From then on:
 
-- When the phone connects, it starts the bean recording. A press of its button stops it until the phone next connects.
+- The phone starts the bean recording when it connects. A press of its button stops it until the phone next connects.
 - With the phone nearby, it uploads as it records.
-- With the phone away, the audio stays on the bean. Once the phone is back, it fetches the audio while the bean is not recording. Only files recorded after the binding are fetched.
+- With the phone away, the audio stays on the bean. Once the phone is back, it is fetched when you stop the bean with its button. Only files recorded after the binding are fetched.
 - Files the server has in full are deleted from the bean, one at a time, only while the bean is not recording.
 
 The **录音设备** (Recorders) page has no pause, live listening, USB drive mode or firmware update for a bean.

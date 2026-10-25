@@ -251,6 +251,7 @@ class BeanTest {
         assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false), Triple(c, 7323L, false)), bean.transfers)
         assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
         assertEquals("the cut is not a try", 0, sync.files[c]!!.tries)
+        assertEquals("recording at connect: no start", 0, bean.starts)
     }
 
     /** 10-25 T2: live, the link drops (the phone's Bluetooth off 30 s), live again from where the bean is, the bean
@@ -325,7 +326,7 @@ class BeanTest {
 
     /** The owner, 10-26: a bean connected records. An idle bean is started once a connection (18/82 01, nothing
      *  else of the button), goes live from its new file; stopped by hand, it is not started again in the connection,
-     *  nor in the reconnect that cuts the head's re-pull; the next connection starts it again (here the bean says no:
+     *  nor in the reconnect that cuts the head's re-pull; the next connection starts it again (here the bean only echoes:
      *  logged, not asked again). */
     @Test fun autoStart() {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -351,10 +352,56 @@ class BeanTest {
         assertEquals(1, bean.starts)
         assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
         bean.startable = false
+        bean.script += {}  // the wait for its new file
         assertThrows(IOException::class.java) { sync.session(since, "") }  // a new connection
         assertEquals(2, bean.starts)
         assertTrue(bean.logs.last { it.first == "bean_start" }.second.startsWith("自动开始录音没成功"))
         assertTrue(bean.sent.filter { it[5] == 0x18.toByte() }.all { it.contentEquals(Bean.start()) })
+    }
+
+    /** The bean echoes the start and records nothing (03.44 does, per ws/soundcore): not taken for a start; logged,
+     *  not asked again, and the backlog goes on. */
+    @Test fun startEchoedOnly() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val p = t0 / 1000 - 600
+        bean.listed[p] = 200
+        bean.onTransfer = { file, _, _ -> bean.header(file, 10L * Bean.UNIT); bean.units(file, (0L..9L).toList(), last = 9); bean.complete(file) }
+        repeat(3) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(1, bean.starts)
+        assertEquals(listOf("自动开始录音没成功（答了，3 s 内没开始录新文件），这次连接不再试"), bean.logs.filter { it.first == "bean_start" }.map { it.second })
+        assertFalse(sync.recording)
+        assertEquals(listOf(Triple(p, 0L, false)), bean.transfers)
+    }
+
+    /** A transfer stalled 30 s ends the session (the link is let go), as a cut does: no new connection either, so a
+     *  stop by hand still holds. */
+    @Test fun stopHoldsAfterAStall() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val since = t0 - 3_600_000
+        val bean = FakeBean(t0)
+        bean.startable = true
+        var pulls = 0
+        bean.onTransfer = { file, from, live ->
+            if (live) {
+                bean.header(file, 0xFFFFFFFFL)
+                bean.units(file, (36L..1999L).toList())
+                bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
+                bean.recording = false; bean.open = 0; bean.listed[file] = 2000L * 20
+            } else if (pulls++ == 0) { bean.header(file, 2000L * Bean.UNIT); bean.units(file, (0L..9L).toList()) }  // then nothing
+            else { bean.header(file, 2000L * Bean.UNIT); bean.units(file, (from..1999L).toList(), last = 1999); bean.complete(file) }
+        }
+        repeat(40) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertEquals("file ${t0 / 1000}: no audio for 30 s", assertThrows(Exception::class.java) { sync.session(since, "") }.message)
+        assertEquals(1, bean.starts)
+        bean.script.clear()
+        assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }  // back for the rest of the head
+        assertEquals("the bean stays stopped", 1, bean.starts)
     }
 
     /** Off the bean go only files the server has whole: not one with a hole, one with a piece the server refused or
@@ -408,7 +455,7 @@ class BeanTest {
 }
 
 /** A bean as the protocol has it, scripted, for BeanSync: it answers the five commands and the start (`startable`: it
- *  records in a new file, else it stays idle), wraps file keys in the session key of each connection and encrypts each
+ *  records in a new file, else it only echoes it), wraps file keys in the session key of each connection and encrypts each
  *  unit as a bean does; `onTransfer` says what a 1A/07 starts and `script` what happens when the phone waits a second
  *  or more and nothing is on its way (out of script: the link goes). */
 class FakeBean(var now: Long) : BeanSync.Io {
@@ -458,11 +505,10 @@ class FakeBean(var now: Long) : BeanSync.Io {
                 deleted += it
                 if (it in refuseDelete) push(0x1A10, ByteArray(0), status = 2) else { listed.remove(it); push(0x1A10, ByteArray(0)) }
             }
-            0x1882 -> {  // as the owner's bean (10-25): its new state at once, the new file 850 ms on
+            0x1882 -> {  // as the owner's bean (10-25): the command echoed (01 9c) whatever it does, the new file 850 ms on
                 starts++
-                if (startable) { recording = true; open = now / 1000 }
-                push(0x1882, byteArrayOf(if (recording) 1 else 0))
-                if (startable) rotation(open, wait = 850)
+                push(0x1882, byteArrayOf(p[0], frame.last()))
+                if (startable) { recording = true; open = now / 1000; rotation(open, wait = 850) }
             }
             0x1A07 -> Triple(Bean.u32(p, 4), Bean.u32(p, 0) / Bean.UNIT, p[8] == 1.toByte()).let { transfers += it; onTransfer(it.first, it.second, it.third) }
         }

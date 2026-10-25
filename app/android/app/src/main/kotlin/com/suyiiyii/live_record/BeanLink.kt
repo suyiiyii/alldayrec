@@ -19,6 +19,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.io.Writer
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
@@ -60,7 +61,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     private var capture: Writer? = null
     private var captured = 0L
 
-    private class Gone : Exception("link gone")
+    private class Gone : IOException("link gone")  // an IOException: BeanSync starts the bean again on the next connection
     private val GONE = ByteArray(0)
     private val notes = LinkedBlockingQueue<ByteArray>()
 

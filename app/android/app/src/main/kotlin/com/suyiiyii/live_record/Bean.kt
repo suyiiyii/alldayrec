@@ -3,6 +3,7 @@ package com.suyiiyii.live_record
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -320,8 +321,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private val run = mutableListOf<ByteArray>()
     private var runFile = -1L
     private var runFrom = 0L
-    private var startDone = false  // this connection's start is settled (sent, or the bean was recording): a stop by hand
-                                   // then holds until the next one; the reconnect that cuts a re-pull (Again) is this one
+    private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
+                                   // pressed): a stop by hand holds until the link goes (an IOException), not across the
+                                   // app's own reconnects (a cut re-pull, a stalled transfer)
 
     init {
         chunks.mkdirs()
@@ -372,8 +374,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             io.report(hw)
             if (!startDone) { startDone = true; if (!recording) start() }
             loop()
-        } catch (e: Exception) {
-            if (e !is Again) startDone = false  // the link went: the next connection starts the bean again
+        } catch (e: IOException) {
+            startDone = false  // the link went: the next connection starts the bean again
             throw e
         } finally {
             flush()
@@ -418,14 +420,17 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
     }
 
-    /** The owner, 10-26: a bean connected records. Its answer is its button's state (0x1882 as when pressed, 1:
-     *  recording); the new file follows (1A/06). Not asked again in the connection; never stopped or paused by the app. */
+    /** The owner, 10-26: a bean connected records. Its answer only echoes the command (01 9c, 10-25); it has started
+     *  once its new file comes (1A/06, 850 ms on, 10-25) or its button's state says so (take()). Not asked again in the
+     *  connection; never stopped or paused by the app. */
     private fun start() {
         val why = try {
-            val s = ask(Bean.start(), Bean.START, 3000).payload.getOrNull(0)?.toInt()
-            if (s == 1) { recording = true; io.log("bean_start", "自动开始录音"); return }
-            "豆子答 $s"
-        } catch (e: Exception) { e.message }
+            ask(Bean.start(), Bean.START, 3000)
+            val until = io.now() + 3000
+            while (!recording) take(next(until - io.now()) ?: break)
+            if (recording) { io.log("bean_start", "自动开始录音"); return }
+            "答了，3 s 内没开始录新文件"
+        } catch (e: IOException) { throw e } catch (e: InterruptedException) { throw e } catch (e: Exception) { e.message }
         io.log("bean_start", "自动开始录音没成功（$why），这次连接不再试", "warn")
     }
 
@@ -542,9 +547,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.log("bean_file", "豆子开始录新文件 ${listing.open}", fields = mapOf("file" to listing.open, "pre" to (p.getOrNull(if (p.size > 8) 8 else 4)?.toInt() ?: -1)))
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
-                0 -> { recording = false; io.log("bean_stop", "豆子停止录音") }
+                0 -> { recording = false; startDone = true; io.log("bean_stop", "豆子停止录音") }
                 1 -> { if (!recording) needList = true; recording = true; io.log("bean_record", "豆子开始录音") }
-                2 -> io.log("bean_pause", "豆子暂停录音")
+                2 -> { startDone = true; io.log("bean_pause", "豆子暂停录音") }
             }
             0x0103 -> if (p.size >= 2) hw = hw + mapOf("battery" to Bean.pct(p[0]), "case_battery" to Bean.pct(p[1]))
             0x0104 -> if (p.isNotEmpty()) hw = hw + mapOf("charge" to if (p[0] == 1.toByte()) "charging" else "battery")

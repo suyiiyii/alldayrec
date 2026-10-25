@@ -920,7 +920,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanRecorderHelp =>
-      '手机连上录音豆就让它开始录音，按一下按键停止，直到下次连上。手机在附近时边录边传；不在时录音留在豆子里，回来后自动补传。服务端收全的录音会从豆子上删掉。';
+      '手机连上录音豆就让它开始录音，按一下按键停止。手机在附近时边录边传。手机不在时录的，按键停下后补传。服务端收全的录音会从豆子上删掉。';
 
   @override
   String get beanFetching => '正在取回录音豆里的录音';
