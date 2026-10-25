@@ -389,6 +389,9 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                             "（起于 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startMs(b[0])))}，${bytes / 1024} KB），已丢弃",
                             "error", mapOf("start" to startMs(b[0]), "pieces" to b.size, "bytes" to bytes))
                         b.forEach { it.delete() }; note = say("rejected")
+                        // a bean's file with these in it stays on the bean (BeanSync.confirmed)
+                        val k = "refused:${deviceOf(b[0])}"
+                        prefs.edit().putStringSet(k, prefs.getStringSet(k, null).orEmpty() + b.map { "${startMs(it)}" }).apply()
                     }
                     else -> throw Exception("HTTP $code")
                 }

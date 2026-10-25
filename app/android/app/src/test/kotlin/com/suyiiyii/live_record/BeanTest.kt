@@ -45,6 +45,14 @@ class BeanTest {
         assertFalse(Bean.allowed(bind + bind.sum().toByte()))
         val info = Bean.info()
         assertFalse(Bean.allowed(info.copyOf().also { it[9] = 0 }))  // a wrong sum
+        // a delete: only of a file the server has whole, framed and sent for that file alone (ws/soundcore's vector)
+        assertThrows(IllegalArgumentException::class.java) { Bean.delete(0x01020304, emptySet()) }
+        assertThrows(IllegalArgumentException::class.java) { Bean.delete(0x01020304, setOf(7)) }
+        val del = Bean.delete(0x01020304, setOf(0x01020304))
+        assertEquals("08ee0000001a100e00" + "04030201", Bean.hex(del).dropLast(2))
+        assertTrue(Bean.allowed(del, setOf(0x01020304)))
+        assertFalse(Bean.allowed(del))
+        assertFalse(Bean.allowed(del, setOf(7)))
     }
 
     @Test fun reader() {  // ws/soundcore's framing vectors: one frame, and one split over notifications after junk
@@ -147,6 +155,7 @@ class BeanTest {
         val one = BeanSync("D3200-0A0B", state, chunks, bean)
         assertEquals("link dropped", assertThrows(IOException::class.java) { one.session(since, "") }.message)
         val anchorA = one.files[a]!!.anchor
+        val anchors = one.files.mapValues { it.value.anchor }  // the files go once deleted on the bean
         assertTrue("the phone's clock, near the bean's", anchorA - a * 1000 in 0L..3000L)
         assertEquals("live began past the file's start: the hold", anchorA + 1500 * 20 - 60_000, bean.held)
         assertTrue(Bean.u32(bean.sentOf(0x01A6), 0) in t0 / 1000 - 1..t0 / 1000 + 1)
@@ -159,6 +168,7 @@ class BeanTest {
         }
         bean.script += { bean.now += 6000 }
         val two = BeanSync("D3200-0A0B", state, chunks, bean)
+        bean.confirmed = { two.deletable }
         assertThrows(IOException::class.java) { two.session(since, "") }
         assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(b, 200L, true), Triple(a, 0L, false), Triple(b, 250L, false)), bean.transfers)
         assertTrue(bean.logs.any { it.first == "bean_gap" && "250..259" in it.second })
@@ -170,15 +180,16 @@ class BeanTest {
                 val seq = ByteBuffer.wrap(p, 1, 4).int.toLong()
                 val file = if (p[5] == (a % 251).toByte()) a else b
                 assertEquals(0xBC.toByte(), p[0])  // decrypted
-                assertEquals("dated by its seq", two.files[file]!!.anchor + seq * 20, start + i * 20)
+                assertEquals("dated by its seq", anchors[file]!! + seq * 20, start + i * 20)
                 seen.getOrPut(file) { mutableListOf() } += seq
             }
         }
         assertEquals("each unit once", (0L..1749L).toList(), seen[a]!!.sorted())
         assertEquals((0L..299L).toList(), seen[b]!!.sorted())
         assertNull("all up: no hold", bean.held)
-        assertEquals(listOf(two.files[b]!!.anchor + 300 * 20), bean.ends)
+        assertEquals(listOf(anchors[b]!! + 300 * 20), bean.ends)
         assertFalse(bean.transfers.any { it.first == old })
+        assertEquals("whole on the server: off the bean, once", listOf(a, b), bean.deleted)
     }
 
     /** A transfer asked for right after the one before ended got code 4 (10-25): the next waits 200 ms as the SDK does,
@@ -231,6 +242,38 @@ class BeanTest {
         assertTrue(bean.logs.any { "断开连接" in it.second })
     }
 
+    /** Off the bean go only files the server has whole: not one with a hole, one with a piece the server refused or
+     *  still queued, the file being recorded, or one from before the bean was added here; a whole one, once. */
+    @Test fun prune() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks").apply { mkdirs() }; val state = File(dir, "state.json")
+        val t0 = 1_793_000_000_000L
+        val since = t0 - 3_600_000
+        val old = since / 1000 - 100; val hole = t0 / 1000 - 900; val refused = hole + 100; val queued = hole + 200
+        val whole = hole + 300; val open = hole + 400; val nay = hole + 500
+        fun f(id: Long, h: String, tries: Int = 0) = "\"$id\":{\"a\":${id * 1000},\"t\":10,\"r\":$tries,\"h\":$h}"
+        state.writeText("{" + listOf(f(old, "[[0,10]]"), f(hole, "[[0,4],[6,10]]", tries = 4), f(refused, "[[0,10]]"), f(queued, "[[0,10]]"),
+            f(whole, "[[0,10]]"), f(open, "[[0,10]]"), f(nay, "[[0,10]]")).joinToString(",") + "}")
+        File(chunks, "${queued * 1000}@D3200-0A0B.ogg").writeBytes(ByteArray(8))
+        val bean = FakeBean(t0)
+        for (id in listOf(old, hole, refused, queued, whole, nay)) bean.listed[id] = 200
+        bean.refuseDelete = setOf(nay)  // the bean says no: it stays, and is not asked again
+        bean.open = open
+        bean.refused = setOf(refused * 1000 + 60)
+        val sync = BeanSync("D3200-0A0B", state, chunks, bean)
+        bean.confirmed = { sync.deletable }
+        repeat(6) { bean.script += {} }
+        bean.script += { File(chunks, "${queued * 1000}@D3200-0A0B.ogg").delete() }  // its last piece up
+        repeat(12) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(since, "") }
+        assertEquals(listOf(whole, nay, queued), bean.deleted)
+        assertEquals(setOf(old, hole, refused, nay), bean.listed.keys)
+        assertTrue(nay in sync.files)
+        assertTrue(bean.logs.any { it.first == "bean_delete" && "$whole" in it.second && "10 个单元" in it.second })
+        assertFalse(whole in sync.files)
+        assertTrue(sync.deletable.isEmpty())
+    }
+
     /** An Ogg file's packets (OpusHead, OpusTags, then the audio). */
     private fun packets(f: File): List<ByteArray> {
         val b = f.readBytes(); val out = mutableListOf<ByteArray>(); var cur = ByteArrayOutputStream(); var p = 0
@@ -272,11 +315,15 @@ class FakeBean(var now: Long) : BeanSync.Io {
     val logs = mutableListOf<Pair<String, String>>()
     var held: Long? = null
     val ends = mutableListOf<Long>()
+    var refused = emptySet<Long>()
+    val deleted = mutableListOf<Long>()  // each 1A/10 asked
+    var refuseDelete = emptySet<Long>()
+    var confirmed: () -> Set<Long> = { emptySet() }  // what the phone may delete (BeanSync.deletable)
 
     fun sentOf(cmd: Int) = sent.last { (it[5].toInt() and 255) shl 8 or (it[6].toInt() and 255) == cmd }.let { it.copyOfRange(9, it.size - 1) }
 
     override fun send(frame: ByteArray) {
-        assertTrue("only the five commands reach the bean", Bean.allowed(frame))
+        assertTrue("only the five commands, and a delete of a confirmed file, reach the bean", Bean.allowed(frame, confirmed()))
         sent += frame; sentAt += now
         val p = frame.copyOfRange(9, frame.size - 1)
         when ((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255)) {
@@ -289,6 +336,10 @@ class FakeBean(var now: Long) : BeanSync.Io {
             0x01A6 -> push(0x01A6, ByteArray(0))
             0x1A0E -> push(0x1A0E, if (Bean.u16(p, 0) > 0) Bean.u16le(0) + Bean.le32(open) + ByteArray(4)
                 else listed.entries.fold(Bean.u16le(listed.size)) { acc, (id, ms) -> acc + Bean.le32(id) + Bean.le32(ms) } + Bean.le32(open) + ByteArray(4))
+            0x1A10 -> Bean.u32(p, 0).let {
+                deleted += it
+                if (it in refuseDelete) push(0x1A10, ByteArray(0), status = 2) else { listed.remove(it); push(0x1A10, ByteArray(0)) }
+            }
             0x1A07 -> Triple(Bean.u32(p, 4), Bean.u32(p, 0) / Bean.UNIT, p[8] == 1.toByte()).let { transfers += it; onTransfer(it.first, it.second, it.third) }
         }
     }
@@ -310,6 +361,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun held() = held
     override fun end(at: Long) { ends += at }
     override fun piece() {}
+    override fun refused() = refused
 
     fun info() = ByteArray(57).also { b ->
         b[0] = 1; b[1] = 7; b[38] = 5
@@ -319,10 +371,10 @@ class FakeBean(var now: Long) : BeanSync.Io {
         b[50] = if (recording) 1 else 0
     }
 
-    /** A frame from the bean (status 1), in notifications of up to 200 B. */
-    fun push(cmd: Int, payload: ByteArray, wait: Long = 0) {
+    /** A frame from the bean (status 1: done), in notifications of up to 200 B. */
+    fun push(cmd: Int, payload: ByteArray, wait: Long = 0, status: Int = 1) {
         val n = payload.size + 10
-        val f = byteArrayOf(0x09, 0xFF.toByte(), 0, 0, 1, (cmd shr 8).toByte(), cmd.toByte(), n.toByte(), (n shr 8).toByte()) + payload
+        val f = byteArrayOf(0x09, 0xFF.toByte(), 0, 0, status.toByte(), (cmd shr 8).toByte(), cmd.toByte(), n.toByte(), (n shr 8).toByte()) + payload
         val whole = f + f.sum().toByte()
         for ((i, c) in whole.toList().chunked(200).withIndex()) out += c.toByteArray() to if (i == 0) wait else 0L
     }

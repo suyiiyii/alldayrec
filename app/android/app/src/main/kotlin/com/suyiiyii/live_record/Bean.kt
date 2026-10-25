@@ -37,10 +37,12 @@ object Bean {
     const val PIECE_UNITS = 3000  // a backlog piece: 60 s
     const val MAX_SEQ = 429_496_729L  // seq × 10 still fits the counter's 32 bits
 
-    /** The only commands a bean is ever sent: its info (01/01), its clock (01/A6), the key exchange (2E/01), its files
-     *  (1A/0E), a file's audio (1A/07). Nothing that binds or unbinds (0B/xx), records or stops (18/82), deletes (1A/10),
-     *  turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and never the OTA service) or reads device logs. */
+    /** The commands a bean is sent: its info (01/01), its clock (01/A6), the key exchange (2E/01), its files (1A/0E),
+     *  a file's audio (1A/07); and a delete (1A/10, DELETE) only of a file the server has whole (delete()). Nothing that
+     *  binds or unbinds (0B/xx), records or stops (18/82), turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and
+     *  never the OTA service) or reads device logs. */
     val SENDS = setOf(0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07)
+    const val DELETE = 0x1A10
 
     fun isBean(name: String?) = name != null && Regex("D3200-[0-9A-F]{4}").matches(name)
 
@@ -67,14 +69,20 @@ object Bean {
 
     fun frame(type: Int, id: Int, payload: ByteArray = ByteArray(0)): ByteArray {
         require(type shl 8 or id in SENDS) { "%02X/%02X is never sent to a bean".format(type, id) }
+        return build(type, id, payload)
+    }
+
+    private fun build(type: Int, id: Int, payload: ByteArray): ByteArray {
         val n = payload.size + 10
         val b = byteArrayOf(0x08, 0xEE.toByte(), 0, 0, 0, type.toByte(), id.toByte(), n.toByte(), (n shr 8).toByte()) + payload
         return b + sum(b, 0, b.size)
     }
 
-    /** A frame on its way to the radio is one of SENDS: checked again right before the write (BeanSync.send). */
-    fun allowed(f: ByteArray) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
-        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)) in SENDS && u16(f, 7) == f.size && f.last() == sum(f, 0, f.size - 1)
+    /** A frame on its way to the radio is one of SENDS, or the delete of a file in `confirmed`: checked again right
+     *  before the write (BeanSync.send, BeanLink.write). */
+    fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet()) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
+        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || it == DELETE && f.size == 14 && u32(f, 9) in confirmed } &&
+        u16(f, 7) == f.size && f.last() == sum(f, 0, f.size - 1)
 
     private fun sum(b: ByteArray, from: Int, to: Int): Byte {
         var s = 0
@@ -89,6 +97,11 @@ object Bean {
     fun list(page: Int) = frame(0x1A, 0x0E, u16le(page))
     /** A file's audio from `offset` bytes on (whole units); realtime: the file being recorded, as it is. */
     fun transfer(file: Long, offset: Long, realtime: Boolean) = frame(0x1A, 0x07, le32(offset) + le32(file) + (if (realtime) 1 else 0).toByte())
+    /** Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable). */
+    fun delete(file: Long, confirmed: Set<Long>): ByteArray {
+        require(file in confirmed) { "file $file is not whole on the server: never deleted" }
+        return build(0x1A, 0x10, le32(file))
+    }
 
     /** Frames out of notifications: one may span several, junk before one is skipped, as is a frame whose sum is off. */
     class Reader {
@@ -222,8 +235,10 @@ object Bean {
  * the bean's clock as it began, set at each connect; the phone's own clock when the file is first met live and the two
  * agree within seconds) and which units are in pieces already. A unit's time is its anchor + seq × 20 ms; a transfer
  * after a drop starts at the first unit missing (its byte offset), units had already are dropped, a hole is asked
- * for again (three times). Pieces of what is said now go up ahead of a backlog (the hold, as BleLink's); the end of
- * the last recording goes to the server once its pieces are up.
+ * for again (three times); one that the bean would only fill by sending the rest of the file again ends the session
+ * once it is in (rest()). Pieces of what is said now go up ahead of a backlog (the hold, as BleLink's); the end of
+ * the last recording goes to the server once its pieces are up. A file the server has whole is then deleted on the
+ * bean (prune()); nothing else is.
  */
 class BeanSync(private val tag: String, private val stateFile: File, private val chunks: File, private val io: Io) {
     interface Io {
@@ -240,6 +255,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun held(): Long?
         fun end(at: Long)
         fun piece()
+        /** Starts of this bean's pieces the server refused (Uploader: HTTP 400): their files stay on the bean. */
+        fun refused(): Set<Long>
         /** A debug capture of the session (off unless asked for: BeanLink). */
         fun trace(what: String, v: Map<String, Any?>) {}
     }
@@ -266,6 +283,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     @Volatile var syncTotalKb = 0L
     @Volatile var recording = false
         private set
+    /** The file being deleted, while it is: the one id a 1A/10 may carry (Bean.allowed). */
+    @Volatile var deletable: Set<Long> = emptySet()
+        private set
+    private val kept = mutableSetOf<Long>()  // a delete the bean did not confirm: not asked again until the app restarts
     val files = sortedMapOf<Long, F>()
     private var key = ByteArray(0)
     private var reader = Bean.Reader()
@@ -372,7 +393,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 if (r && !recording) needList = true
                 recording = r
             }
-            if (now - settled >= 5000) { settled = now; settle() }
+            if (now - settled >= 5000) { settled = now; settle(); if (xfer == null && !recording) prune() }
             if (now - reported >= 60_000) { reported = now; io.report(hw) }
         }
     }
@@ -442,6 +463,36 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs)
         io.held()?.let { h -> if (q.none { it < h + HOLD_MARGIN_MS }) { io.hold(null); io.log("hold", "补传完了，不再压住定稿") } }
         if (!recording && xfer == null && pendingEnd > 0 && q.isEmpty()) { io.end(pendingEnd); pendingEnd = 0 }
+    }
+
+    /** Files the server has whole: begun since the bean was added here, closed on the bean, every unit on the phone and
+     *  every piece of them taken by the server (none queued still, none refused). */
+    private fun confirmed(): List<Long> {
+        val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs) + io.refused()
+        return listing.files.map { it.first }.filter { id ->
+            val f = files[id]
+            f != null && id * 1000 >= since && id != listing.open && gap(f) == null && q.none { it in f.anchor until f.anchor + f.total * Bean.FRAME_MS }
+        }
+    }
+
+    /** The files the server has whole go off the bean, one at a time, each once (the owner, 10-25: what stays on it can
+     *  be read by anyone near while no phone is connected; Feishu deletes too). An unclear answer leaves the file. */
+    private fun prune() {
+        for (id in confirmed() - kept) {
+            val f = files[id]!!
+            deletable = setOf(id)
+            try { ask(Bean.delete(id, deletable), Bean.DELETE, 3000) }  // the SDK's 3 s
+            catch (e: Exception) {
+                kept += id
+                io.log("bean_delete", "豆子上的文件 $id 没删掉（${e.message}），留在豆子上", "warn", mapOf("file" to id))
+                continue
+            } finally { deletable = emptySet() }
+            files.remove(id)
+            listing = Bean.Listing(listing.files.filter { it.first != id }, listing.open)
+            save()
+            io.log("bean_delete", "豆子上的文件 $id 删了：服务端都有了（${f.total} 个单元，${f.total * Bean.FRAME_MS / 1000} 秒）",
+                fields = mapOf("file" to id, "units" to f.total, "s" to f.total * Bean.FRAME_MS / 1000))
+        }
     }
 
     private fun take(f: Bean.Frame) {
@@ -614,7 +665,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     class Again(why: String) : Exception(why)
 
     private fun send(frame: ByteArray) {
-        check(Bean.allowed(frame)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
+        check(Bean.allowed(frame, deletable)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
         io.trace("tx", mapOf("hex" to Bean.hex(frame)))
         io.send(frame)
     }

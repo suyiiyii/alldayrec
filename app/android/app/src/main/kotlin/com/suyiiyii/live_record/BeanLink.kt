@@ -81,6 +81,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun report(hw: Map<String, Any?>) = onReport(name, hw + mapOf("name" to name, "rssi" to rssi))
         override fun hold(at: Long?) = prefs.edit().apply { if (at == null) remove("hold:$name") else putLong("hold:$name", at) }.apply()
         override fun held() = prefs.getLong("hold:$name", -1).takeIf { it >= 0 }
+        override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
         override fun end(at: Long) = onEnd(name, at)
         override fun piece() = onPiece(1)
         override fun trace(what: String, v: Map<String, Any?>) {
@@ -224,7 +225,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     /** To the bean's command characteristic only (never the OTA service), and only what BeanSync lets through. */
     @Suppress("DEPRECATION")
     private fun write(g: BluetoothGatt, v: ByteArray) {
-        check(Bean.allowed(v) && v.size <= mtu - 3) { "not sent: ${v.size} B" }
+        check(Bean.allowed(v, sync.deletable) && v.size <= mtu - 3) { "not sent: ${v.size} B" }
         val ch = cmd ?: throw Gone()
         op("write") {
             if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(ch, v, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS

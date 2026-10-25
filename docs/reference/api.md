@@ -90,7 +90,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | The phone no longer has the recorder (unbound, or another bound in its place): the older audio on its card will not come from it, so finalization stops waiting for it now, not HOLD_MAX_S after the phone last said the hold. | `device` (query, string) |
+| `POST` | No older audio of the recorder is coming from the phone: it no longer has the recorder (unbound, or another bound in its place), or its backlog is all up and no upload follows to let go (a recorder that stopped). | `device` (query, string) |
 
 ### `/api/device-status`
 
