@@ -14,11 +14,11 @@ Works on every platform, no hardware to buy: your phone is the recorder.
 |:--:|:--:|
 | Timeline: the conversation going on, due to-dos, each day's conversations | One conversation: the summary, to-dos and decisions, each with its audio one tap away |
 
-The animation is the Live page: captions come up as people speak, and the AI live summary keeps up. The screenshots show made-up data in the Chinese UI; the web UI switches to English on the 「我的」 (Me) page.
+The web UI switches to English on the 「我的」 (Me) page.
 
 </div>
 
-alldayrec is an all-day recording and memory service that runs on your own server. Record from morning to night with your phone, an open-source recorder or a Feishu recorder bean, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back, and your agent can search your days over MCP.
+alldayrec is an all-day recording and memory service that runs on your own server. Record from morning to night with your phone, an open-source recorder or a Feishu recorder bean, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back. Your agent can search your days over MCP.
 
 ## What it does
 
