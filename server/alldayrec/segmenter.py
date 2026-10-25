@@ -4,9 +4,11 @@ import copy
 import datetime as dt
 import os
 
+import anyio.to_thread
 import numpy as np
 
 from alldayrec import infer
+from alldayrec import threads
 
 
 SR = 16000
@@ -35,30 +37,44 @@ class Segmenter:
         self.samples = 0
         self.frames = 0
         self.pending = None                   # utterance waiting for a possible merge
+        self.silent = True                    # the VAD's state at self.frames is SILENCE (apush's thread runs it further)
 
     def time_at(self, sample: int) -> dt.datetime:
         idx, t = next((a for a in reversed(self.anchors) if a[0] <= sample), self.anchors[0])
         return t + dt.timedelta(seconds=(sample - idx) / SR)
 
     def push(self, t: dt.datetime, x: np.ndarray) -> list:
+        return self._apply(t, x, *self._detect(x))
+
+    async def apush(self, t: dt.datetime, x: np.ndarray) -> list:
+        """push with the VAD in a thread (threads.VAD), off the event loop: one at a time per segmenter (its caller awaits
+        each). The thread changes only the VAD's own state; the segmenter's changes on the loop after it, all at once, so
+        while the VAD runs the loop's readers (window, sample_at, speaking, the final cut) see it as before this push."""
+        return self._apply(t, x, *await anyio.to_thread.run_sync(self._detect, x, limiter=threads.VAD))
+
+    def _detect(self, x: np.ndarray) -> tuple[np.ndarray, int, list]:
+        """The VAD over the whole frames of buf + x: what is left for the next call, how many frames, their results."""
+        b = np.concatenate([self.buf, x])
+        # Only whole frames, keeping the overlap for the next call: splitting at arbitrary
+        # sample counts drops frames at every boundary and the clock drifts ~2 %.
+        k = max(0, (len(b) - FRAME_LEN) // FRAME_SHIFT + 1)
+        return b[k * FRAME_SHIFT:], k, self.vad.detect_chunk(b[:(k - 1) * FRAME_SHIFT + FRAME_LEN]) if k else []
+
+    def _apply(self, t: dt.datetime, x: np.ndarray, buf: np.ndarray, k: int, results: list) -> list:
         if not self.anchors or abs((self.time_at(self.samples) - t).total_seconds()) > 0.5:
             self.anchors.append((self.samples, t))  # new file or a gap: re-anchor the clock
         self.samples += len(x)
         self.audio = np.concatenate([self.audio, x])
-        self.buf = np.concatenate([self.buf, x])
+        self.buf = buf
         out = []
-        if len(self.buf) >= FRAME_LEN:
-            k = (len(self.buf) - FRAME_LEN) // FRAME_SHIFT + 1
-            # Only whole frames, keeping the overlap for the next call: splitting at arbitrary
-            # sample counts drops frames at every boundary and the clock drifts ~2 %.
-            for r in self.vad.detect_chunk(self.buf[:(k - 1) * FRAME_SHIFT + FRAME_LEN]):
-                q = self.loose.process_one_frame(r.raw_prob)
-                if q.is_speech_end:
-                    self.speech.append(((q.speech_start_frame - 1) * FRAME_SHIFT, (q.speech_end_frame - 1) * FRAME_SHIFT))
-                if r.is_speech_end:
-                    out += self._utterance(r.speech_start_frame - 1, r.speech_end_frame - 1)
-            self.frames += k
-            self.buf = self.buf[k * FRAME_SHIFT:]
+        for r in results:
+            q = self.loose.process_one_frame(r.raw_prob)
+            if q.is_speech_end:
+                self.speech.append(((q.speech_start_frame - 1) * FRAME_SHIFT, (q.speech_end_frame - 1) * FRAME_SHIFT))
+            if r.is_speech_end:
+                out += self._utterance(r.speech_start_frame - 1, r.speech_end_frame - 1)
+        self.frames += k
+        self.silent = self.vad.postprocessor.state.name == "SILENCE"
         out += self._flush_if_quiet()
         keep = self.samples - BUFFER_S * SR
         if keep > self.audio_base:
@@ -69,7 +85,7 @@ class Segmenter:
 
     def speaking(self) -> bool:
         """An utterance is still open (the VAD is in speech, or one waits for a merge): last_speech does not cover it yet."""
-        return self.pending is not None or self.vad.postprocessor.state.name != "SILENCE"
+        return self.pending is not None or not self.silent
 
     def open_speech(self) -> int | None:
         """Stream sample where the loose VAD's speech still running started (None in silence)."""

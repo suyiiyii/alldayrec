@@ -25,7 +25,7 @@ from alldayrec.tenant import T
 KEEP_DAYS = 90
 SLOW_MS = 50  # a request this slow is a row of its own; every one is in its minute's row
 TABLES = ("perf_stalls", "perf_samples", "perf_requests", "perf_pieces")
-POOLS = {"infer": threads.INFER, "asr": threads.ASR, "media": threads.MEDIA, "db": threads.DB}
+POOLS = {"infer": threads.INFER, "asr": threads.ASR, "media": threads.MEDIA, "db": threads.DB, "vad": threads.VAD}
 
 
 def now() -> str:

@@ -72,7 +72,7 @@ async def pipeline(device: str):
             st.audio_end = t + dt.timedelta(seconds=len(x) / SR)
             with perf.timed(fcost, "vad_ms"):
                 try:
-                    st.utts += [(u[0], u[1]) for u in seg.push(t, x)]
+                    st.utts += [(u[0], u[1]) for u in await seg.apush(t, x)]
                 except Exception:
                     log.exception("%s: segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
 
@@ -84,7 +84,7 @@ async def pipeline(device: str):
             st.edge_end = t + dt.timedelta(seconds=len(x) / SR)
             with perf.timed(dcost, "vad_ms"):
                 try:
-                    utts = dseg.push(t, x)
+                    utts = await dseg.apush(t, x)
                 except Exception:
                     log.exception("%s: draft segmenter failed on %.1f s at %s", device, len(x) / SR, t.time())
                     continue

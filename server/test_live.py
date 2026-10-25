@@ -6,6 +6,7 @@ import subprocess
 
 import anyio
 import numpy as np
+import pytest
 
 from alldayrec.segmenter import CHUNK_S, QUIET_S, SR, Segmenter, next_cut, speech_in
 from alldayrec.transcript import clip_turns, final_rows, merge_drafts, overlaps
@@ -281,3 +282,60 @@ def test_speech_in():
     s.loose.state.name, s.loose.frame_cnt, s.loose.speech_cnt = "POSSIBLE_SPEECH", 11500, 3  # 3 frames in, 5 padded
     assert speech_in(s, a0, n)[-1] == ((11500 - 3 - 5 - a0 // 160) / 100, 40)
     assert speech_in(s, a0, 20 * SR)[-1][0] > 20, "speech after the window: nothing to keep"
+
+
+@pytest.mark.parametrize("vad", ["energy", "model"])
+def test_apush_same_as_push(vad, monkeypatch):
+    """The VAD in a thread (apush, as the pipelines feed it) finds exactly what push finds on the loop: the same
+    utterances and loose speech, two segmenters fed at once. Meanwhile the loop never sees a segmenter whose audio ran
+    ahead of its VAD (the final cut would take that audio for silence). The energy VAD runs in CI, the model where its
+    files are (MODELS_DIR)."""
+    from alldayrec import infer
+    from test_backlog import EnergyVad
+    from test_vad_gain import at, speech
+    if vad == "energy":
+        monkeypatch.setattr(infer, "StreamVad", EnergyVad)
+    elif not all((infer.DIR / n).is_file() for n in (infer.VAD, infer.CMVN)):
+        pytest.skip("no VAD model files (CI)")
+    x = at(speech(120), -20)
+    sizes = {"recorder": [20 * SR], "odd": [977, 16001, 333, 8000, 12345]}
+
+    def pieces(sz):
+        i, k = 0, 0
+        while i < len(x):
+            n = sz[k % len(sz)]
+            yield T0 + dt.timedelta(seconds=i / SR), x[i:i + n]
+            i, k = i + n, k + 1
+
+    def sync(sz):
+        seg = Segmenter()
+        return [(a, b, len(u)) for t, c in pieces(sz) for a, b, u in seg.push(t, c)], seg.speech
+
+    segs, got, torn = {}, {}, []
+
+    async def feed(name):
+        seg = segs[name] = Segmenter()
+        out = []
+        for t, c in pieces(sizes[name]):
+            out += [(a, b, len(u)) for a, b, u in await seg.apush(t, c)]
+        got[name] = out, seg.speech
+
+    async def watch():
+        while True:
+            torn.extend(n for n, s in segs.items() if s.samples >= 400 and s.frames != (s.samples - 400) // 160 + 1)
+            await anyio.sleep(0.002)
+
+    async def main():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(watch)
+            async with anyio.create_task_group() as feeds:
+                for name in sizes:
+                    feeds.start_soon(feed, name)
+            tg.cancel_scope.cancel()
+
+    anyio.run(main)
+    for name, sz in sizes.items():
+        want = sync(sz)
+        assert len(want[0]) >= 5 and len(want[1]) >= 20, (name, len(want[0]), len(want[1]))
+        assert got[name] == want, (name, got[name][0][:3], want[0][:3])
+    assert not torn, torn[:3]
