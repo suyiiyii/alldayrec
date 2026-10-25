@@ -25,6 +25,7 @@ void main() {
       'syncing': (Icons.sync_rounded, null, '63%', 'Catching up · about 20 min left'),
       'paused': (Icons.pause_rounded, null, '12 min', 'Paused · resumes in 12 min'),
       'disconnected': (Icons.bluetooth_searching_rounded, Icons.battery_6_bar_rounded, '87%', 'Recorder out of reach · last seen'),
+      'pausedAway': (Icons.bluetooth_searching_rounded, Icons.battery_6_bar_rounded, '87%', 'Paused · out of reach (last seen'),
     };
     for (final MapEntry(key: name, value: (icon, battery, number, words)) in cases.entries) {
       await pump(tester, cannedStatus(name));
@@ -76,6 +77,8 @@ void main() {
     await pump(tester, cannedStatus('paused'), locale: const Locale('zh'));
     expect(find.text('12 分钟'), findsOneWidget);
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '已暂停 · 12 分钟后继续');
+    await pump(tester, cannedStatus('pausedAway'), locale: const Locale('zh'));
+    expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, matches(r'^已暂停 · 不在附近（上次 .+ 在线） · 电量 87%$'));
     await pump(tester, cannedStatus('recording'), locale: const Locale('zh'));
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '正在录音 · 电量 87%');
   });

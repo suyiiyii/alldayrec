@@ -45,6 +45,13 @@
       "time": {}
     }
   },
+  "statePausedAway": "已暂停 · 不在附近",
+  "statePausedAwaySince": "已暂停 · 不在附近（上次 {time} 在线）",
+  "@statePausedAwaySince": {
+    "placeholders": {
+      "time": {}
+    }
+  },
   "awayHelp": "它照常录到自己的卡里，回到手机附近后自动补传",
   "phoneMic": "手机麦克风",
   "backlog": "待补传",

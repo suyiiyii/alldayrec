@@ -89,7 +89,7 @@ String durationText(AppLocalizations l, num s) {
             ? (icon: Icons.mic_rounded, color: recordingRed, battery: null, number: null, numberColor: low, spin: false, line: l.recordingNow)
             : (icon: Icons.mic_off_rounded, color: cs.outline, battery: null, number: null, numberColor: low, spin: false, line: l.notRecording);
   }
-  if (pausedMin > 0) {
+  if (pausedMin > 0 && connected) {  // a paused recorder that went away shows as away (the pause's line says both)
     return (icon: Icons.pause_rounded, color: cs.outline, battery: null, number: l.minutes(pausedMin), numberColor: cs.onSurfaceVariant,
         spin: false, line: l.statePaused(pausedMin));
   }
@@ -104,8 +104,9 @@ String durationText(AppLocalizations l, num s) {
     return (icon: Icons.bluetooth_searching_rounded, color: amber, battery: glyph(), number: pct, numberColor: cs.outline, spin: false,
         line: link == null ? (s['running'] == true ? l.starting : l.notConnected)
             : link['code'] != 'away' ? nativeText(context, link)
-            : lastSeen == null ? l.stateAway
-            : l.stateAwaySince(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(lastSeen)).format(context)));
+            : lastSeen == null ? (pausedMin > 0 ? l.statePausedAway : l.stateAway)
+            : (pausedMin > 0 ? l.statePausedAwaySince : l.stateAwaySince)(
+                TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(lastSeen)).format(context)));
   }
   return (icon: Icons.mic_rounded, color: recordingRed, battery: glyph(), number: pct, numberColor: low, spin: false, line: l.recordingNow);
 }

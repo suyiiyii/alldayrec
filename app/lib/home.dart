@@ -20,8 +20,8 @@ import 'settings_page.dart';
 import 'update.dart';
 import 'upload_page.dart';
 
-/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, paused, disconnected, low, charging, mic, warning)
-/// shows that canned status instead of the recorder's, for screenshots of the chip and its panel.
+/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, paused, disconnected, pausedAway, low,
+/// charging, mic, warning) shows that canned status instead of the recorder's, for screenshots of the chip and its panel.
 const fakeStatus = kDebugMode ? String.fromEnvironment('FAKE_STATUS') : '';
 
 /// A canned native status (Recorder.status) by name, as the BLE link or the microphone would report it.
@@ -36,6 +36,7 @@ Map cannedStatus(String name) {
     'fetching' => {...cannedStatus('syncing'), 'connected': false, 'link': {'code': 'joining'}},  // the file being recorded, before LIVE
     'paused' => {...ble, 'pausedUntil': now + 12 * 60000 - 1000},
     'disconnected' => {...ble, 'connected': false, 'link': {'code': 'away', 'lastSeen': now - 47 * 60000}},
+    'pausedAway' => {...cannedStatus('disconnected'), 'pausedUntil': now + 12 * 60000 - 1000},
     'low' => {...ble, 'hw': {...hw, 'battery': 14, 'rssi': -84}},
     'charging' => {...ble, 'hw': {...hw, 'battery': 62, 'charge': 'charging'}},
     'mic' => {'running': true, 'source': 'mic', 'pending': 2, 'pendingBytes': 61000, 'sent': 312, 'slice': 10},
@@ -380,7 +381,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           Text(ble ? (hw['name'] ?? hw['model'] ?? l.recorder) as String : l.phoneMic,
               style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           Text(c.line, style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-          if (away) Text(l.awayHelp, style: small),  // it records to its card meanwhile: nothing is lost
+          if (away && pauseLeftMin(s) == 0) Text(l.awayHelp, style: small),  // it records to its card meanwhile (not while paused)
           if (ble && syncing) ...[  // LIVE goes on while the backlog is read; before LIVE only the file being recorded
             const SizedBox(height: 8),
             LinearProgressIndicator(value: connected ? (status['syncDone'] ?? 0) / status['syncTotal'] : null, borderRadius: BorderRadius.circular(2)),

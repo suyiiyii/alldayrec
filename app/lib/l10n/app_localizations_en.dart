@@ -94,6 +94,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get statePausedAway => 'Paused · out of reach';
+
+  @override
+  String statePausedAwaySince(Object time) {
+    return 'Paused · out of reach (last seen $time)';
+  }
+
+  @override
   String get awayHelp =>
       'It keeps recording to its own card and catches up once it is near the phone again';
 

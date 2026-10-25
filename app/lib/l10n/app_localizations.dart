@@ -248,6 +248,18 @@ abstract class AppLocalizations {
   /// **'录音设备不在附近 · 上次 {time} 在线'**
   String stateAwaySince(Object time);
 
+  /// No description provided for @statePausedAway.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停 · 不在附近'**
+  String get statePausedAway;
+
+  /// No description provided for @statePausedAwaySince.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停 · 不在附近（上次 {time} 在线）'**
+  String statePausedAwaySince(Object time);
+
   /// No description provided for @awayHelp.
   ///
   /// In zh, this message translates to:

@@ -93,6 +93,14 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get statePausedAway => '已暂停 · 不在附近';
+
+  @override
+  String statePausedAwaySince(Object time) {
+    return '已暂停 · 不在附近（上次 $time 在线）';
+  }
+
+  @override
   String get awayHelp => '它照常录到自己的卡里，回到手机附近后自动补传';
 
   @override

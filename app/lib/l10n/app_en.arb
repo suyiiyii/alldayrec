@@ -25,6 +25,8 @@
   "stateCatchingUp": "Catching up · about {time} left",
   "stateAway": "Recorder out of reach",
   "stateAwaySince": "Recorder out of reach · last seen {time}",
+  "statePausedAway": "Paused · out of reach",
+  "statePausedAwaySince": "Paused · out of reach (last seen {time})",
   "awayHelp": "It keeps recording to its own card and catches up once it is near the phone again",
   "phoneMic": "Phone microphone",
   "backlog": "To sync",
