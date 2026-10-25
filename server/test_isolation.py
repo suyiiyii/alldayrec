@@ -270,7 +270,7 @@ def test_health(two):
 def test_websocket(two):
     """Each page gets its own tenant's pushes; a watch is its tenant's."""
     a, b = two
-    c = TestClient(server.app)  # no `with`: the lifespan (the model, the tenants' loops) does not start
+    c = TestClient(server.app)  # no `with`: the lifespan (the tenants' loops) does not start
     with c.websocket_connect("/ws", headers={"Authorization": "Bearer ta"}) as wa, \
             c.websocket_connect("/ws", headers={"Cookie": "token=tb"}) as wb:
         wa.send_json({"type": "watch", "wake": True})

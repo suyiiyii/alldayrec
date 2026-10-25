@@ -381,8 +381,10 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         else:
             last = db.conn().execute("SELECT start_ms + seconds * 1000 FROM pieces WHERE device = ? ORDER BY start_ms DESC LIMIT 1", (device,)).fetchone()
             lo = max(last[0] if last else 0, time.time() * 1000) - edge_s * 1000
-        p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms > ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1",
-                              (device, at, lo)).fetchone()
+        # the edge reader by the end (pieces_end: its last edge_s); by start (pieces_device), an idle device's reader
+        # (at 0: nothing handed out yet) walked all its pieces each second
+        p = db.conn().execute(f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
+                              "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, at, lo)).fetchone()
         if p is not None and edge_s is None and (h := held(device)) is not None and p["start_ms"] >= h:
             p = None  # older audio is still on its way: it goes first
         if p is None:

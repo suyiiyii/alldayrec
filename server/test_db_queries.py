@@ -3,8 +3,10 @@ import itertools
 import json
 import datetime as dt
 import sqlite3
+import time
 
 import anyio
+import numpy as np
 import pytest
 
 from alldayrec import audio
@@ -178,3 +180,36 @@ def test_pieces_by_end(tmp_path):
     for q in ends:
         plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q))
         assert "pieces_end" in plan, (q, plan)
+
+
+def test_edge_reader(tmp_path, monkeypatch):
+    """The draft layer's reader (stream with edge_s) hands out the pieces that end in the device's newest edge_s, in
+    start order (an import hours long that ends there first), then the ones arriving; its queries go by pieces_end:
+    by start_ms, a reader with nothing handed out yet walked every piece of an idle device each second (~300 ms at
+    1.3 M pieces)."""
+    db.open_db(tmp_path / "t.db")
+    monkeypatch.setattr(audio, "samples", lambda p: np.zeros(round(p["seconds"] * audio.SR), np.int16))
+    now = int(time.time()) * 1000
+    put = lambda a, s: db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES ('d', ?, ?, 'x')", (now + a * 1000, s))
+    for i in range(180):
+        put(-18000 + 20 * i, 20)  # older than the edge
+    put(-14400, 14150)  # an import, ending 250 s ago
+    for i in range(9):
+        put(-240 + 20 * i, 20)
+    want = [now - 14400_000] + [now + (-240 + 20 * i) * 1000 for i in range(9)] + [now - 60_000]
+    got, seen = [], []
+
+    async def read():
+        with anyio.move_on_after(10):
+            async for t, _ in audio.stream("d", None, edge_s=300):
+                got.append(round(t.timestamp() * 1000))
+                if len(got) == 10:
+                    put(-60, 20)  # one arrives
+                if len(got) == len(want):
+                    break
+    db.conn().set_trace_callback(seen.append)
+    anyio.run(read)
+    db.conn().set_trace_callback(None)
+    assert got == want, (got, want)
+    qs = [q for q in seen if "start_ms > " in q and "ORDER BY start_ms LIMIT 1" in q]
+    assert qs and all("pieces_end" in " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q)) for q in qs), qs[:2]

@@ -647,9 +647,9 @@ async def voices_loop():
         await anyio.sleep(300)
         if not state.get("embed"):
             continue
-        seen = db.voiced_conversations()
+        seen, convs = await anyio.to_thread.run_sync(lambda: (db.voiced_conversations(), all_conversations()), limiter=threads.DB)
         since = (dt.date.today() - dt.timedelta(days=3)).isoformat()
-        for c in all_conversations():
+        for c in convs:
             s = c["summary"]
             if c["start"] < since or c["id"] in seen or not s or s["status"] == "pending":  # the summary tells media apart
                 continue
@@ -698,7 +698,7 @@ CLIP_CONVS = 6  # a candidate's clips come from its biggest conversations: a sen
 async def self_round():
     """After the voices of closed conversations came in: pop the card when it is due (selfvoice.due). Off while 我 has a
     voiceprint (a hand-made npz, or the one picked here)."""
-    st = db.kv("selfvoice") or {}
+    st = await anyio.to_thread.run_sync(db.kv, "selfvoice", limiter=threads.DB) or {}
     if owner_npz().exists() or st.get("card"):  # the card up waits for the user; nothing else changes st meanwhile
         return
     vs = db.voices()

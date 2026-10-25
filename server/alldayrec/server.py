@@ -62,10 +62,9 @@ log = logging.getLogger("live")
 
 @contextlib.asynccontextmanager
 async def lifespan(app):
-    """The process's tasks (the voiceprint model, the metrics, the balance) and each tenant's (run_tenant), until the
-    server stops: then all of them are cancelled."""
+    """The process's tasks (the metrics, the balance) and each tenant's (run_tenant), until the server stops: then all
+    of them are cancelled."""
     async with anyio.create_task_group() as tg:
-        tg.start_soon(load_model, name="model")
         tg.start_soon(supervised, "metrics", metrics_loop, name="metrics")
         if os.environ.get("STEPFUN_API_KEY"):
             tg.start_soon(supervised, "balance", balance_loop, name="balance")
@@ -80,14 +79,6 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.include_router(firmware.router)  # the recorders' firmware packages (firmware.DIR: the first tenant's, set by main)
 app.include_router(addresses.router)  # GET /api/addresses: where phones reach this server (the 连接手机 page)
-MODEL = anyio.Event()  # the model is loaded
-
-
-async def load_model():
-    from alldayrec.diarist import load_embedder
-    state["embed"] = await anyio.to_thread.run_sync(load_embedder, limiter=threads.INFER)
-    state["music"] = music.heard if music.ON else None
-    MODEL.set()
 
 
 async def run_tenant(t: tenant.Tenant):
@@ -118,7 +109,6 @@ async def pipelines():
     """One pipeline per device with audio after its finalized time: a phone sending last night's backlog while an
     iPhone records today is transcribed on its own timeline. A device's pipeline lives on once started, in the
     tenant's task group."""
-    await MODEL.wait()
     while True:
         for d in await anyio.to_thread.run_sync(audio.pending, set(T().pipelines), limiter=threads.DB):
             T().pipelines.add(d)
@@ -195,6 +185,10 @@ def main():
     infer.fetch()  # a first start: the missing model files, downloaded
     infer.check()  # every model file there and the pinned one, before anything starts
     log.info("models ok: %d files in %s", len(infer.MODELS), infer.DIR)
+    from alldayrec.diarist import load_embedder
+    # before the event loop: building the session keeps the GIL ~0.3 s, which in a thread held up the loop at each start
+    state["embed"] = load_embedder()
+    state["music"] = music.heard if music.ON else None
     if not tenant.FILE.exists():
         token = tenant.create()
         log.info("first start: %s made, one tenant; on this machine open http://127.0.0.1:%d/connect?token=%s",
