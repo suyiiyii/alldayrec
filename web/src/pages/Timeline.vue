@@ -25,6 +25,7 @@ import {
 import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useSocket, useWatch } from "../lib/socket";
+import { toast } from "../lib/toast";
 
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
 // one tag filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
@@ -190,7 +191,10 @@ async function restart() {
   try {
     cs = await search("");
   } catch (e) {
-    if (my === seq) fail(e);
+    if (my !== seq) return;
+    // what is on screen stays; 重试 (or the socket's resync) loads it again
+    loading.value = false;
+    failed.value = { msg: (e as Error).message, title: errorTitle(e) };
     return;
   }
   if (my !== seq) return; // a newer search started meanwhile
@@ -208,19 +212,17 @@ async function page() {
   try {
     cs = await search(items.value.at(-1)?.start ?? "");
   } catch (e) {
-    if (my === seq) fail(e);
+    // said where it was asked (the card is pages above); 更早 again is the retry, the pages loaded stay
+    if (my === seq) {
+      loading.value = false;
+      toast((e as Error).message);
+    }
     return;
   }
   if (my !== seq) return;
   items.value.push(...cs);
   done.value = cs.length < PAGE;
   loading.value = false;
-  failed.value = null;
-}
-// what is on screen stays; 重试 (or the socket's resync) loads it again
-function fail(e: unknown) {
-  loading.value = false;
-  failed.value = { msg: (e as Error).message, title: errorTitle(e) };
 }
 
 // the list by day, newest first
@@ -306,7 +308,10 @@ watch(more, (el, old) => {
 // the page's loads (重试 again); only the list's failure is said: the socket pushes the status every 2 s, and the
 // calendar only marks the picker's days
 async function init() {
-  get<Due[]>("/api/todos/due").then((d) => (due.value = d), () => {});
+  get<Due[]>("/api/todos/due").then(
+    (d) => (due.value = d),
+    () => {},
+  );
   get<Record<string, number>>("/api/tags").then(
     (ts) => (tags.value = Object.entries(ts).slice(0, 40)),
     () => {},
@@ -467,7 +472,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <div>{{ t("timeline.none") }}</div>
         </div>
       </template>
-      <!-- after a page that failed it is there again to try; with nothing loaded, 重试 above is -->
+      <!-- not while the first load failed: 重试 above is the way then -->
       <button
         v-show="!done && !(failed && !items.length)"
         ref="more"

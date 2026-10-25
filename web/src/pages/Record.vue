@@ -125,6 +125,8 @@ async function startMic() {
       autoGainControl: false,
     },
   });
+  // stopped, or the page left, while the permission prompt was open: no recorder (it would leave an empty piece)
+  if (!recording.value) return stream.getTracks().forEach((t) => t.stop());
   const track = stream.getAudioTracks()[0];
   track.onended = () => note(t("record.micEnded"));
   rec = piece();
@@ -258,6 +260,7 @@ async function onDrop() {
 }
 async function startBle() {
   ble = await navigator.bluetooth.requestDevice({ filters: [{ services: [STORE] }], optionalServices: ["battery_service"] });
+  if (!recording.value) return void (ble = null); // the same, with the chooser open
   ble.addEventListener("gattserverdisconnected", () => void onDrop());
   follower.follow(-1, 0);
   packets.value = 0;

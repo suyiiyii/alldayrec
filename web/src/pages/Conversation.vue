@@ -69,13 +69,16 @@ const segs = computed(() => fold(c.value?.rows ?? [], media));
 
 // a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
 async function load() {
+  const id = props.id;
   try {
-    const x = await get<NonNullable<typeof c.value>>(`/api/conversation/${encodeURIComponent(props.id)}`);
+    const x = await get<NonNullable<typeof c.value>>(`/api/conversation/${encodeURIComponent(id)}`);
+    if (id !== props.id) return; // another conversation opened meanwhile (back/forward): not its
     c.value = x;
     missing.value = false;
     failed.value = null;
     trackOpen(Date.parse(x.start), Date.parse(x.end), x.device ?? x.rows.find((r) => r.source)?.source ?? "");
   } catch (e) {
+    if (id !== props.id) return;
     if (e instanceof ApiError && e.status === 404) missing.value = true;
     else if (!c.value) failed.value = { msg: (e as Error).message, title: errorTitle(e) };
   }
