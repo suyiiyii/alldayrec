@@ -35,7 +35,7 @@ First finish syncing in Feishu, then quit the Feishu app or turn off its Bluetoo
 
 The binding is kept on this phone only. From then on:
 
-- The bean records when its button is pressed; the phone can't start or stop it.
+- When the phone connects, it starts the bean recording. A press of its button stops it until the phone next connects.
 - With the phone nearby, it uploads as it records.
 - With the phone away, the audio stays on the bean. Once the phone is back, it fetches the audio while the bean is not recording. Only files recorded after the binding are fetched.
 - Files the server has in full are deleted from the bean, one at a time, only while the bean is not recording.

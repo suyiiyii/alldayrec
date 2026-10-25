@@ -41,11 +41,12 @@ object Bean {
     const val MAX_SEQ = 429_496_729L  // seq × 10 still fits the counter's 32 bits
 
     /** The commands a bean is sent: its info (01/01), its clock (01/A6), the key exchange (2E/01), its files (1A/0E),
-     *  a file's audio (1A/07); and a delete (1A/10, DELETE) only of a file the server has whole (delete()). Nothing that
-     *  binds or unbinds (0B/xx), records or stops (18/82), turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and
-     *  never the OTA service) or reads device logs. */
+     *  a file's audio (1A/07); a delete (1A/10, DELETE) only of a file the server has whole (delete()); and the start of
+     *  a recording (18/82 01, START: start()), never its stop (00) or pause (02). Nothing that binds or unbinds (0B/xx),
+     *  turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and never the OTA service) or reads device logs. */
     val SENDS = setOf(0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07)
     const val DELETE = 0x1A10
+    const val START = 0x1882
 
     fun isBean(name: String?) = name != null && Regex("D3200-[0-9A-F]{4}").matches(name)
 
@@ -81,10 +82,11 @@ object Bean {
         return b + sum(b, 0, b.size)
     }
 
-    /** A frame on its way to the radio is one of SENDS, or the delete of a file in `confirmed`: checked again right
-     *  before the write (BeanSync.send, BeanLink.write). */
+    /** A frame on its way to the radio is one of SENDS, the delete of a file in `confirmed`, or the start: checked again
+     *  right before the write (BeanSync.send, BeanLink.write). */
     fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet()) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
-        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || it == DELETE && f.size == 14 && u32(f, 9) in confirmed } &&
+        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || it == DELETE && f.size == 14 && u32(f, 9) in confirmed ||
+            it == START && f.size == 11 && f[9] == 1.toByte() } &&
         u16(f, 7) == f.size && f.last() == sum(f, 0, f.size - 1)
 
     private fun sum(b: ByteArray, from: Int, to: Int): Byte {
@@ -105,6 +107,8 @@ object Bean {
         require(file in confirmed) { "file $file is not whole on the server: never deleted" }
         return build(0x1A, 0x10, le32(file))
     }
+    /** Starts recording, as a press of the button does when the bean is idle, but silently (10-25: no vibration). */
+    fun start() = build(0x18, 0x82, byteArrayOf(1))
 
     /** Frames out of notifications: one may span several, junk before one is skipped, as is a frame whose sum is off. */
     class Reader {
@@ -230,9 +234,10 @@ object Bean {
 
 /**
  * One bean, session after session (BeanLink connects, then calls session()): the key exchange, its info and clock, its
- * files, then one transfer at a time, as the bean allows no more and cannot be stopped mid-file: the file being
- * recorded, as it is recorded (realtime), else the oldest file this phone lacks units of (the backlog, files begun
- * after the bean was added here: `since`). Units go into dated Ogg pieces in `chunks` (the Uploader's queue).
+ * files, its start when idle (start(), once a connection), then one transfer at a time, as the bean allows no more
+ * and cannot be stopped mid-file: the file being recorded, as it is recorded (realtime), else the oldest file this
+ * phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units go into dated Ogg
+ * pieces in `chunks` (the Uploader's queue).
  *
  * Per file (`state`, JSON, kept after every piece): when its unit 0 was on the phone's clock (its anchor: the file id,
  * the bean's clock as it began, set at each connect; the phone's own clock when the file is first met live and the two
@@ -315,6 +320,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private val run = mutableListOf<ByteArray>()
     private var runFile = -1L
     private var runFrom = 0L
+    private var startDone = false  // this connection's start is settled (sent, or the bean was recording): a stop by hand
+                                   // then holds until the next one; the reconnect that cuts a re-pull (Again) is this one
 
     init {
         chunks.mkdirs()
@@ -363,7 +370,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 (if (recording) "在录音（文件 ${listing.open}）" else "没在录音") + "，豆子上 ${listing.files.size} 个文件",
                 fields = hw + mapOf("files" to listing.files.size, "open" to listing.open))
             io.report(hw)
+            if (!startDone) { startDone = true; if (!recording) start() }
             loop()
+        } catch (e: Exception) {
+            if (e !is Again) startDone = false  // the link went: the next connection starts the bean again
+            throw e
         } finally {
             flush()
             xfer = null
@@ -405,6 +416,17 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (now - settled >= 5000) { settled = now; settle(); if (xfer == null && !recording) prune() }
             if (now - reported >= 60_000) { reported = now; io.report(hw) }
         }
+    }
+
+    /** The owner, 10-26: a bean connected records. Its answer is its button's state (0x1882 as when pressed, 1:
+     *  recording); the new file follows (1A/06). Not asked again in the connection; never stopped or paused by the app. */
+    private fun start() {
+        val why = try {
+            val s = ask(Bean.start(), Bean.START, 3000).payload.getOrNull(0)?.toInt()
+            if (s == 1) { recording = true; io.log("bean_start", "自动开始录音"); return }
+            "豆子答 $s"
+        } catch (e: Exception) { e.message }
+        io.log("bean_start", "自动开始录音没成功（$why），这次连接不再试", "warn")
     }
 
     private fun clock() {
