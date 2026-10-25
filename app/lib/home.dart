@@ -57,6 +57,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   bool stopping = false;
   int page = 0;  // the bottom bar's: 0 时间线, 1 实时, 2 人物 (web pages), 3 我的 (its entries open over it)
   final webs = <WebViewController?>[null, null, null];  // one per web page: each keeps its scroll while another is shown
+  // WebViews whose page iOS took away while the app was in the background (it reclaims web processes idle for hours:
+  // the three tabs stayed blank, 10-25): loaded again when the app comes back to the front
+  final dropped = <WebViewController>{};
   Timer? ticker;
   int ticks = 0;
   String version = '';
@@ -110,7 +113,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     Recorder.foreground(state == AppLifecycleState.resumed);
-    if (state == AppLifecycleState.resumed) _slices();
+    if (state == AppLifecycleState.resumed) {
+      _slices();
+      for (final c in dropped) {
+        c.reload();
+      }
+      dropped.clear();
+    }
     if (state == AppLifecycleState.paused) Recorder.listen(false);  // listening is for the app in front only
   }
 
@@ -179,6 +188,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       // the web page hides its own navigation in the app: Android's WebView says so in its user agent, iOS's does not
       ..setNavigationDelegate(NavigationDelegate(
           onPageFinished: (_) => c.runJavaScript("document.documentElement.classList.add('in-app')").ignore(),
+          // iOS ended the page's web process (memory, or idle for hours): reload, in front now, else on coming back
+          onWebResourceError: (e) {
+            if (e.errorType != WebResourceErrorType.webContentProcessTerminated) return;
+            if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+              c.reload();
+            } else {
+              dropped.add(c);
+            }
+          },
           onUrlChange: tab == null ? null : (u) => u.url != null ? _follow(tab, u.url!) : null));
   }
 
