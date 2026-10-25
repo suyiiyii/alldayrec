@@ -177,7 +177,7 @@ class RecorderService : Service() {
             return START_STICKY
         }
         if (intent?.action == "upload") {  // from the UI: pieces left (and maybe an end) after a kill or a lost network
-            if (slicer == null) uploadOnly(prefs, dir, prefs.getLong("endAt", 0L).takeIf { it > 0 })
+            if (slicer == null) uploadOnly(prefs, dir)
             return START_STICKY
         }
         // a start from the UI carries a fresh nonce; after a kill the system restarts us with no intent or
@@ -198,7 +198,7 @@ class RecorderService : Service() {
                 putBoolean("archive", intent.getBooleanExtra("archive", true))
             }.apply()
         } else if (!prefs.getBoolean("active", false)) {  // restarted after a kill while only uploading, or nothing to do
-            uploadOnly(prefs, dir, prefs.getLong("endAt", 0L).takeIf { it > 0 })
+            uploadOnly(prefs, dir)
             return START_STICKY
         }
         prefs.edit().putBoolean("active", true).putInt("pid", Process.myPid()).apply()
@@ -216,7 +216,7 @@ class RecorderService : Service() {
                 { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) }).also { it.start() }
             else if (ble) link = BleLink(this, prefs, dir, File(getExternalFilesDir(null), "undated"), { slicer?.sliceS() ?: 20 },
                 { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) }).also { it.start() }
-            prefs.edit().remove("endAt").remove("endDevice").apply()  // a new recording carries on the conversation: no end for the old stop
+            prefs.edit().remove("end:${prefs.getString("endDevice", "")}").remove("endDevice").apply()  // a new recording carries on the conversation: no end for the old stop
             ensureUploader(prefs, dir)
             refresh()  // recording now, not the upload foreground() saw a moment ago
         }
@@ -230,29 +230,28 @@ class RecorderService : Service() {
             .also { uploader = it; it.start() }
     }
 
-    /** The microphone goes now; the queue keeps uploading, the end signal goes after its last piece. */
+    /** The microphone goes now; the queue keeps uploading, the end signal goes after its last piece (Uploader.ends). */
     private fun stopRecording(prefs: android.content.SharedPreferences, dir: File) {
-        val at = System.currentTimeMillis()
-        prefs.edit().putBoolean("active", false).putLong("endAt", at).putString("endDevice", slicer?.tag).apply()  // kept: a kill before the queue empties still ends it
+        val tag = slicer?.tag ?: ""  // the pieces' device: "" for the microphone's
+        prefs.edit().putBoolean("active", false).putLong("end:$tag", System.currentTimeMillis()).putString("endDevice", tag).apply()
         link?.stop(); link = null
         bean?.stop(); bean = null
         slicer?.stop(); slicer = null
-        uploadOnly(prefs, dir, at)
+        uploadOnly(prefs, dir)
     }
 
-    /** Stays up while pieces are left and nothing records; then sends `endAt` (if any) and stops. */
-    private fun uploadOnly(prefs: android.content.SharedPreferences, dir: File, endAt: Long?) {
-        if (Uploader.queue(dir).isEmpty() && endAt == null) { background(); stopSelf(); return }
+    /** Stays up while pieces or an end (Uploader.ends) are left and nothing records; then stops. */
+    private fun uploadOnly(prefs: android.content.SharedPreferences, dir: File) {
+        val left = { Uploader.queue(dir).isNotEmpty() || prefs.all.keys.any { it.startsWith("end:") } }
+        if (!left()) { background(); stopSelf(); return }
         foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         val u = ensureUploader(prefs, dir)
         if (draining) return
         draining = true
         Thread {
-            while (slicer == null && Uploader.queue(dir).isNotEmpty()) Thread.sleep(2000)
+            while (slicer == null && left()) Thread.sleep(2000)
             draining = false
             if (slicer != null) return@Thread  // recording again: the service carries on as before
-            endAt?.let { u.end(it, prefs.getString("endDevice", null)) }  // the server may close the conversation now
-            prefs.edit().remove("endAt").remove("endDevice").apply()
             u.running = false; uploader = null
             background(); stopSelf()
         }.start()
@@ -421,9 +420,8 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                      "upload_fails" to fails, "upload_ok_s" to okAt.takeIf { it > 0 }?.let { (now - it) / 1000 })
     }
 
-    /** Tells the server the recorder stopped at `atMs`; true: it took it. */
-    fun end(atMs: Long, bleName: String? = null): Boolean {
-        val d = bleName ?: device
+    /** Tells the server device `d` stopped at `atMs`; true: it took it. */
+    private fun end(atMs: Long, d: String): Boolean {
         val code = try { post("$server/api/chunks/end?device=${enc(d)}&t=$atMs", ByteArray(0), null) }
                    catch (e: Exception) { Log.w("live-record", "end of $d not sent: ${e.message}"); note = say("endFailed", "detail" to e.message); return false }
         Log.i("live-record", "end of $d at $atMs: HTTP $code")
@@ -431,8 +429,9 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         return code == 200
     }
 
-    /** A recorder that ended on its own (BeanLink: `end:<device>`): told once none of its pieces is left, again until the
-     *  server takes it (10-25: a bean's end never reached the server; it had one request, no retry, no log). */
+    /** A recording's end (`end:<device of its pieces>`: a stop on the phone, or BeanLink's bean that stopped): told once
+     *  none of its pieces is left, again until the server takes it (10-25: a bean's end never reached the server; it had
+     *  one request, no retry, no log). */
     private fun ends(q: List<File>) {
         for (k in prefs.all?.keys.orEmpty().filter { it.startsWith("end:") }) {
             val d = k.removePrefix("end:")
@@ -441,7 +440,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
             when {
                 left.any { it >= at } -> prefs.edit().remove(k).apply()  // recording again: it carries on the conversation, no end
                 left.isNotEmpty() -> {}
-                end(at, d) -> if (prefs.getLong(k, 0) == at) prefs.edit().remove(k).apply()
+                end(at, d.ifEmpty { device }) -> if (prefs.getLong(k, 0) == at) prefs.edit().remove(k).apply()
                 else -> sleep(5000)
             }
         }
