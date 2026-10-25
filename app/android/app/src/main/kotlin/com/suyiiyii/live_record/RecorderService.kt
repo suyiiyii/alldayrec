@@ -388,10 +388,10 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                         DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_rejected", "服务端无法解码 ${b.size} 块" +
                             "（起于 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startMs(b[0])))}，${bytes / 1024} KB），已丢弃",
                             "error", mapOf("start" to startMs(b[0]), "pieces" to b.size, "bytes" to bytes))
-                        b.forEach { it.delete() }; note = say("rejected")
-                        // a bean's file with these in it stays on the bean (BeanSync.confirmed)
+                        // a bean's file with these in it stays on the bean (BeanSync.confirmed): said before they leave the queue
                         val k = "refused:${deviceOf(b[0])}"
-                        prefs.edit().putStringSet(k, prefs.getStringSet(k, null).orEmpty() + b.map { "${startMs(it)}" }).apply()
+                        prefs.edit().putStringSet(k, prefs.getStringSet(k, null).orEmpty() + b.map { "${startMs(it)}" }).commit()
+                        b.forEach { it.delete() }; note = say("rejected")
                     }
                     else -> throw Exception("HTTP $code")
                 }

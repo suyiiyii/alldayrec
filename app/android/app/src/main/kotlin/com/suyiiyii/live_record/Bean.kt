@@ -335,7 +335,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** One connection, from the key exchange until the link goes (io.receive throws). `steps`: the link's own, for the log. */
     fun session(since: Long, steps: String) {
         this.since = since
-        reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now()
+        reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now(); busy = 0
         val t = StringBuilder(steps)
         fun <T> step(code: String, what: String, block: () -> T): T {
             state = say(code)
