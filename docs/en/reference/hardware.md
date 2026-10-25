@@ -8,6 +8,8 @@ The phone alone can record. For all-day wear you can use the open BLE recorder: 
 
 The full parts list, pinout, soldering order and 3D-printed case are in [`hardware/lr-p3/README.md`](https://github.com/suyiiyii/alldayrec/blob/main/hardware/lr-p3/README.md); firmware, building and over-the-air updates are in [`firmware/devkit/README.md`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/README.md). This page is a summary.
 
+Since 1.5.5 the Android app also connects to a Feishu recorder bean directly, see [How to bind a recorder](../how-to/bind-recorder.md#feishu-recorder-bean).
+
 ## Models
 
 | Model | Board | Firmware variant (`lr.sh`) |

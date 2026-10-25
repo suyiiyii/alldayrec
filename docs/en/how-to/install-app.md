@@ -8,7 +8,7 @@ description: "Install the alldayrec phone app (Android APK, or build for iOS in 
 The app records the phone's mic or a BLE recorder, uploads the audio to your server and shows the server's web pages. Its UI follows the phone's system language: Chinese or English (since 1.5.1).
 
 ::: info Version
-The newest Android APK on Releases is `apk-v1.5.1` (1.5.1+26). It connects to `https://` and to `http://` servers (Tailscale, LAN), see [Reach the server from a phone](./remote-access.md).
+Install the newest `apk-v*` release from [Releases](https://github.com/suyiiyii/alldayrec/releases). APKs since 1.5.1 connect to `https://` and to `http://` servers (Tailscale, LAN), see [Reach the server from a phone](./remote-access.md).
 :::
 
 ## Install

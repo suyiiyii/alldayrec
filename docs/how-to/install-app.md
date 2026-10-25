@@ -8,7 +8,7 @@ description: "安装 alldayrec 手机 App（安卓 APK，或用 Xcode 构建 iOS
 App 录手机麦克风或蓝牙录音设备，把音频上传到你的服务器，并显示服务器的网页。界面跟随手机的系统语言：中文或英文（1.5.1 起）。
 
 ::: info 适用版本
-Releases 里最新的安卓 APK 是 `apk-v1.5.1`（1.5.1+26），能连 `https://` 和 `http://`（Tailscale、局域网）服务器，见[如何让手机连上服务器](./remote-access.md)。
+安装 [Releases](https://github.com/suyiiyii/alldayrec/releases) 里最新的 `apk-v*` 版本。1.5.1 起的 APK 能连 `https://` 和 `http://`（Tailscale、局域网）服务器，见[如何让手机连上服务器](./remote-access.md)。
 :::
 
 ## 安装

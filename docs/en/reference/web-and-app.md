@@ -39,7 +39,7 @@ Of the app's four bottom tabs, **今天** (Today), **对话** (Conversations) an
 
 | Entry | Content |
 |---|---|
-| 录音设备 (Recorders) | Bound Bluetooth recorders: battery, card, offline catch-up, firmware updates, USB drive mode, unbind |
+| 录音设备 (Recorders) | Bound Bluetooth recorders: battery, card, offline catch-up, firmware updates, USB drive mode, unbind (a Feishu recorder bean has no firmware updates or USB drive mode) |
 | 实时字幕 (Live captions) | The web page `/live` |
 | 设备状态与更多 (Device status and more) | The web page `/me`: battery, card, progress, connecting AI |
 | 上传 (Upload) | The phone's upload queue, and how far the server has processed this device's audio |

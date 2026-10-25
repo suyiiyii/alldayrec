@@ -8,6 +8,8 @@ type: reference
 
 完整的零件、引脚、焊接顺序和 3D 打印外壳在 [`hardware/lr-p3/README.md`](https://github.com/suyiiyii/alldayrec/blob/main/hardware/lr-p3/README.md)；固件、构建和空中升级在 [`firmware/devkit/README.md`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/README.md)。这一页是摘要。
 
+安卓 App 1.5.5 起也能直接连接飞书录音豆，见[如何绑定录音设备](../how-to/bind-recorder.md#飞书录音豆)。
+
 ## 型号
 
 | 型号 | 板子 | 固件变体（`lr.sh`） |

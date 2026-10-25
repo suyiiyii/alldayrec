@@ -2,30 +2,11 @@
 
 # alldayrec（全天录）
 
-### The open-source Limitless: a private second brain.
+### An open-source Plaud for your whole day: a private second brain.
 
 Works on every platform, no hardware to buy: your phone is the recorder.
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
-[![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)
-[![Android APK](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=apk-v*&label=Android%20APK)](https://github.com/suyiiyii/alldayrec/releases)
-[![Docker image](https://img.shields.io/badge/ghcr.io-alldayrec-2496ed?logo=docker&logoColor=white)](https://github.com/suyiiyii/alldayrec/pkgs/container/alldayrec)
-[![GitHub stars](https://img.shields.io/github/stars/suyiiyii/alldayrec?style=flat)](https://github.com/suyiiyii/alldayrec)
-
 [中文](README.md) | **English**
-
-[Docs](https://suyiiyii.github.io/alldayrec/en/) · [Quickstart](#quickstart) · [How it compares](https://suyiiyii.github.io/alldayrec/en/explanation/intro.html#how-it-compares) · [Hardware](#hardware) · [Roadmap](https://suyiiyii.github.io/alldayrec/en/explanation/roadmap.html)
-
-Let an AI agent deploy it for you: [SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
-
-`#self-hosted` `#lifelog` `#speaker-diarization` `#MCP` `#open-hardware`
-
-</div>
-
-alldayrec is an all-day recording and memory service that runs on your own server. Record from morning to night with your phone, an open-source recorder or a Feishu recorder bean, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back, and your agent can search your days over MCP.
-
-<div align="center">
 
 ![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
@@ -37,6 +18,8 @@ The animation is the Live page: captions come up as people speak, and the AI liv
 
 </div>
 
+alldayrec is an all-day recording and memory service that runs on your own server. Record from morning to night with your phone, an open-source recorder or a Feishu recorder bean, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back, and your agent can search your days over MCP.
+
 ## What it does
 
 - **Every platform, no hardware to buy**: the Android app, the iPhone app and a browser all record directly.
@@ -45,6 +28,21 @@ The animation is the Live page: captions come up as people speak, and the AI liv
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
 - **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
 - **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
+
+<div align="center">
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
+[![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)
+[![Android APK](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=apk-v*&label=Android%20APK)](https://github.com/suyiiyii/alldayrec/releases)
+[![Docker image](https://img.shields.io/badge/ghcr.io-alldayrec-2496ed?logo=docker&logoColor=white)](https://github.com/suyiiyii/alldayrec/pkgs/container/alldayrec)
+[![GitHub stars](https://img.shields.io/github/stars/suyiiyii/alldayrec?style=flat)](https://github.com/suyiiyii/alldayrec)
+
+[Docs](https://suyiiyii.github.io/alldayrec/en/) · [Quickstart](#quickstart) · [How it compares](https://suyiiyii.github.io/alldayrec/en/explanation/intro.html#how-it-compares) · [Hardware](#hardware) · [Roadmap](https://suyiiyii.github.io/alldayrec/en/explanation/roadmap.html) · [Let an AI agent deploy it (SKILL.md)](https://suyiiyii.github.io/alldayrec/SKILL.md)
+
+`#self-hosted` `#lifelog` `#speaker-diarization` `#MCP` `#open-hardware`
+
+</div>
 
 ## Quickstart
 
@@ -119,7 +117,7 @@ Issues and PRs are welcome: [issues](https://github.com/suyiiyii/alldayrec/issue
 
 You are recording other people. Tell them, ask for consent where it is needed, and follow the law where you live; some places require every party's consent. The data stays on your server; audio and text go to the ASR service and the LLM you choose, see [Privacy: where your data goes](https://suyiiyii.github.io/alldayrec/en/explanation/privacy.html).
 
-Feishu, Limitless and other product names belong to their owners; this project is not affiliated with any of them.
+Feishu, Plaud and other product names belong to their owners; this project is not affiliated with any of them.
 
 ## License
 

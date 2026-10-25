@@ -10,7 +10,9 @@ const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
-const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261025.png";
+const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261026.png";
+// the English README tagline; en/index.md repeats it in its title and hero
+const EN_TAGLINE = "An open-source Plaud for your whole day: a private second brain";
 
 type Item = [text: string, link: string];
 const group = (text: string, items: Item[]): DefaultTheme.SidebarItem => ({
@@ -80,7 +82,7 @@ const nav = (en: boolean): DefaultTheme.NavItem[] =>
   SECTIONS.map(([zh, e, pages]) => ({ text: en ? e : zh, link: `${en ? "/en/" : "/"}${pages[0][2]}` }));
 
 const KEYWORDS =
-  "alldayrec, 全天录, self-hosted all-day recorder, lifelog, speech-to-text, speaker diarization, MCP, open-source Plaud alternative, Limitless alternative, 录音豆, 心力球, 开源录音豆";
+  "alldayrec, 全天录, self-hosted all-day recorder, lifelog, speech-to-text, speaker diarization, MCP, open-source Plaud alternative, Limitless alternative, 录音豆, 心力球, 开源心力球";
 
 export default defineConfig({
   base,
@@ -151,7 +153,7 @@ export default defineConfig({
       title: "alldayrec 文档",
       titleTemplate: "alldayrec（全天录）：自己部署的全天录音", // the bare name is ambiguous in search: say what it is
       description:
-        "alldayrec（全天录）文档：自己部署的全天录音和个人记忆层，开源版 Plaud、Limitless、录音豆、心力球替代。部署、手机 App、硬件、API 与 MCP。",
+        "alldayrec（全天录）：开源心力球，私有第二大脑。全平台可用，不用买硬件，手机就能录。",
       themeConfig: {
         nav: nav(false),
         sidebar: sidebar(false),
@@ -171,8 +173,7 @@ export default defineConfig({
       link: "/en/",
       title: "alldayrec docs",
       titleTemplate: "alldayrec — self-hosted all-day recorder",
-      description:
-        "Docs for alldayrec (全天录), a self-hosted all-day recorder and personal memory layer: an open-source alternative to Plaud, Limitless and similar recorders. Deployment, phone app, hardware, API and MCP.",
+      description: `alldayrec (全天录): ${EN_TAGLINE}. Works on every platform, no hardware to buy: your phone is the recorder.`,
       themeConfig: {
         nav: nav(true),
         sidebar: sidebar(true),

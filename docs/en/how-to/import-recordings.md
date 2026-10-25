@@ -14,7 +14,7 @@ The app and the web UI have no import button yet. Importing goes through the HTT
 | A voice recorder or phone recordings (MP3, WAV) | Yes | Upload as is |
 | `.m4a` (e.g. iPhone Voice Memos) | Yes, after converting | A long `.m4a` can't be decoded from a pipe; run `ffmpeg -i in.m4a out.mp3` first |
 | Plaud | Yes | Export MP3 or WAV in the Plaud app, then upload it |
-| Anker × Feishu 录音豆 | Tedious | The audio downloads only one recording at a time from the Feishu Minutes web page; download it, then upload it |
+| Anker × Feishu 录音豆 | Yes, connect it directly | The Android app connects to the bean directly and uploads what it records after the binding, see [How to bind a recorder](./bind-recorder.md#feishu-recorder-bean). For recordings from before the binding, download them one at a time from the Feishu Minutes web page, then upload them |
 | OPPO 心力球 | No | It keeps no original audio, so there is no audio to import |
 
 The sources for the third-party products are in [What alldayrec is](../explanation/intro.md#how-it-compares).

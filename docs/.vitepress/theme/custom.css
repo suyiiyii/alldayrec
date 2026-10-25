@@ -1,0 +1,37 @@
+/* The home hero's picture is a phone screen, not a logo: readable size, beside the text on a desktop and below the
+   buttons on a phone (the default theme puts a 192 px logo above the text there). */
+.VPHero.has-image .image {
+  order: 3;
+  margin: 40px 0 0;
+}
+.VPHero.has-image .image .image-container {
+  width: auto;
+  height: auto;
+  transform: none;
+}
+.VPHero.has-image .image .image-bg {
+  display: none;
+}
+.VPHero.has-image .image-container .image-src {
+  position: static;
+  transform: none;
+  width: 260px;
+  max-width: 100%;
+  max-height: none;
+  border-radius: 24px;
+  border: 1px solid var(--vp-c-divider);
+  box-shadow: var(--vp-shadow-3);
+}
+@media (min-width: 960px) {
+  .VPHero.has-image .image {
+    order: 2;
+    margin: 0;
+  }
+  .VPHero.has-image .image-container .image-src {
+    width: 290px;
+  }
+}
+/* Chinese taglines wrap at their commas, not mid-word */
+.VPHero .text {
+  word-break: keep-all;
+}

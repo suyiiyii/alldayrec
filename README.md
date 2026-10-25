@@ -6,26 +6,7 @@
 
 全平台可用，不用买硬件，手机就能录。
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
-[![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)
-[![Android APK](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=apk-v*&label=Android%20APK)](https://github.com/suyiiyii/alldayrec/releases)
-[![Docker image](https://img.shields.io/badge/ghcr.io-alldayrec-2496ed?logo=docker&logoColor=white)](https://github.com/suyiiyii/alldayrec/pkgs/container/alldayrec)
-[![GitHub stars](https://img.shields.io/github/stars/suyiiyii/alldayrec?style=flat)](https://github.com/suyiiyii/alldayrec)
-
 **中文** | [English](README.en.md)
-
-[文档](https://suyiiyii.github.io/alldayrec/) · [快速开始](#快速开始) · [和市面产品比](https://suyiiyii.github.io/alldayrec/explanation/intro.html#和市面产品比) · [硬件](#硬件) · [路线图](https://suyiiyii.github.io/alldayrec/explanation/roadmap.html)
-
-让 AI Agent 帮你部署：[SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
-
-`#自部署` `#全天录音` `#说话人识别` `#MCP` `#开源硬件`
-
-</div>
-
-全天录是跑在你自己服务器上的全天录音和记忆服务。用手机、开源录音设备或飞书录音豆从早录到晚，服务器在一分钟内把音频变成带说话人的转写，再整理成一天的时间线：对话摘要、认出的人、待办和每日回顾。原始录音一直留着，每句话都能点开听原声；你的 Agent 通过 MCP 查你的每一天。
-
-<div align="center">
 
 ![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
@@ -37,6 +18,8 @@
 
 </div>
 
+全天录是跑在你自己服务器上的全天录音和记忆服务。用手机、开源录音设备或飞书录音豆从早录到晚，服务器在一分钟内把音频变成带说话人的转写，再整理成一天的时间线：对话摘要、认出的人、待办和每日回顾。原始录音一直留着，每句话都能点开听原声；你的 Agent 通过 MCP 查你的每一天。
+
 ## 能做什么
 
 - **全平台，不用买硬件**：安卓 App、iPhone App 和浏览器都能直接录。
@@ -45,6 +28,21 @@
 - **记忆**：对话摘要、待办和截止日期、每日回顾、全文搜索。
 - **开放**：网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
 - **导入已有录音**：录音文件可以通过 HTTP 接口[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
+
+<div align="center">
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
+[![Release](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=v*&label=release)](https://github.com/suyiiyii/alldayrec/releases)
+[![Android APK](https://img.shields.io/github/v/release/suyiiyii/alldayrec?filter=apk-v*&label=Android%20APK)](https://github.com/suyiiyii/alldayrec/releases)
+[![Docker image](https://img.shields.io/badge/ghcr.io-alldayrec-2496ed?logo=docker&logoColor=white)](https://github.com/suyiiyii/alldayrec/pkgs/container/alldayrec)
+[![GitHub stars](https://img.shields.io/github/stars/suyiiyii/alldayrec?style=flat)](https://github.com/suyiiyii/alldayrec)
+
+[文档](https://suyiiyii.github.io/alldayrec/) · [快速开始](#快速开始) · [和市面产品比](https://suyiiyii.github.io/alldayrec/explanation/intro.html#和市面产品比) · [硬件](#硬件) · [路线图](https://suyiiyii.github.io/alldayrec/explanation/roadmap.html) · [让 AI Agent 帮你部署（SKILL.md）](https://suyiiyii.github.io/alldayrec/SKILL.md)
+
+`#自部署` `#全天录音` `#说话人识别` `#MCP` `#开源硬件`
+
+</div>
 
 ## 快速开始
 
