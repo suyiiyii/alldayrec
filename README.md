@@ -2,9 +2,9 @@
 
 # alldayrec（全天录）
 
-### 开源录音豆，私有第二大脑。
+### 开源心力球，私有第二大脑。
 
-开源版 Plaud 与心力球：全天录音私有化，每小时转写只要五分钱。
+全平台可用，不用买硬件，手机就能录。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
@@ -19,34 +19,32 @@
 
 让 AI Agent 帮你部署：[SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
 
-`#自部署` `#全天录音` `#说话人识别` `#MCP` `#Plaud替代` `#开源硬件`
+`#自部署` `#全天录音` `#说话人识别` `#MCP` `#开源硬件`
 
 </div>
 
-全天录是一个开源的全天录音设备加服务器，跑在你自己的机器上。戴一个录音设备（或者只带手机）从早录到晚，你的服务器在一分钟内把音频变成带说话人的转写，再整理成一天的时间线：对话摘要、认出的人、待办和每日回顾。原始录音一直留着，每句话都能点开回放核对；你的 Agent 通过 MCP 直接查你的每一天。没有订阅，对话也不放在别人的云上。（录音豆、心力球等产品名称归各自所有者，本项目与它们没有关联。）
+全天录是跑在你自己服务器上的全天录音和记忆服务。用手机、开源录音设备或飞书录音豆从早录到晚，服务器在一分钟内把音频变成带说话人的转写，再整理成一天的时间线：对话摘要、认出的人、待办和每日回顾。原始录音一直留着，每句话都能点开听原声；你的 Agent 通过 MCP 查你的每一天。
 
 <div align="center">
 
-![实时字幕](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
+![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
-| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) |
+| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
 |:--:|:--:|
-| 今天：到期待办、昨天的回顾、今天的对话 | 一段对话的摘要：待办、决定、每个人的要点 |
+| 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
 
-页面开着时的实时字幕，以及网页在手机上的样子。示例数据都是编的；[更多截图](https://suyiiyii.github.io/alldayrec/explanation/intro.html#界面一览)。
+动图是实时页：边说边出字幕，AI 实时摘要跟着更新。截图里都是示例数据。
 
 </div>
 
 ## 能做什么
 
-- **全天录音**：手机 App 录手机麦克风，或者连一个蓝牙录音设备；离线时在设备上排队，回来后补传。
+- **全平台，不用买硬件**：安卓 App、iPhone App 和浏览器都能直接录；离线时在设备上排队，回来后补传。
 - **两层转写**：定稿交给云端语音识别（默认阿里云百炼千问，约 ¥0.05/小时音频），页面开着时几秒内出初稿；也可以 `ENGINE=local` 在本机转写。
 - **认人**：语音检测和声纹在本机 CPU 上跑，认得出你自己，记得你给别人起的名字。
 - **记忆**：对话摘要、待办和截止日期、每日回顾、全文搜索，「问 AI」的回答带出处对话的链接。
-- **开放**：网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行；数据就是 SQLite 加原始录音，自己就能读。
-- **什么音源都能接**：已有的录音文件可以通过 HTTP 接口[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
-
-为什么做、和录音豆、心力球、Plaud、Omi 等产品的对比：[简介与定位](https://suyiiyii.github.io/alldayrec/explanation/intro.html)。
+- **开放**：网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行；数据就是 SQLite 加原始录音。
+- **导入已有录音**：录音文件可以通过 HTTP 接口[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
 
 ## 快速开始
 
@@ -86,12 +84,22 @@ git clone https://github.com/suyiiyii/alldayrec && cd alldayrec && cp .env.examp
 cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
 ```
 
-详见[如何从源码运行](https://suyiiyii.github.io/alldayrec/how-to/deploy-without-docker.html)。服务跑起来以后：[让手机连上服务器](https://suyiiyii.github.io/alldayrec/how-to/remote-access.html)，[安装并连接手机 App](https://suyiiyii.github.io/alldayrec/how-to/install-app.html)。
+详见[如何从源码运行](https://suyiiyii.github.io/alldayrec/how-to/deploy-without-docker.html)。
+
+### 开始录音
+
+- 安卓：在 [Releases](https://github.com/suyiiyii/alldayrec/releases) 下载最新的 `apk-v*` APK。
+- iPhone：用 Xcode 从源码构建安装。
+- 浏览器：打开网页的 `/record` 页。
+
+App 的安装和连接见[安装并连接手机 App](https://suyiiyii.github.io/alldayrec/how-to/install-app.html)，从别的设备访问服务器见[让手机连上服务器](https://suyiiyii.github.io/alldayrec/how-to/remote-access.html)。
 
 ## 硬件
 
-只用手机也可以。全天佩戴可以自己做开源的蓝牙录音设备：`LR-X1`（Seeed XIAO nRF52840 Sense）或 `LR-P3`（ProMicro nRF52840，装在 3D 打印外壳里），一直往 SD 卡里录，连上手机就同步。
-零件、接线和固件：[录音设备硬件](https://suyiiyii.github.io/alldayrec/reference/hardware.html)、[`hardware/lr-p3/`](hardware/lr-p3/README.md)、[`firmware/devkit/`](firmware/devkit/README.md)。
+不用买硬件，手机就能录。想全天佩戴，可以接这两种录音设备：
+
+- **开源录音设备**：自己做的 `LR-X1`（Seeed XIAO nRF52840 Sense）或 `LR-P3`（ProMicro nRF52840，装在 3D 打印外壳里），一直往 SD 卡里录，连上手机就同步。零件、接线和固件：[录音设备硬件](https://suyiiyii.github.io/alldayrec/reference/hardware.html)、[`hardware/lr-p3/`](hardware/lr-p3/README.md)、[`firmware/devkit/`](firmware/devkit/README.md)。
+- **飞书录音豆**：安卓 App（1.5.5 起）在「添加录音设备」里直接连接。手机在附近时边录边传，不在时录音留在豆子里，回来后自动补传；服务器收全的录音会从豆子上删掉。
 
 ## 文档
 
@@ -110,6 +118,8 @@ cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
 ## 隐私与法律
 
 录音会录到别人。请告知对方，需要时取得同意，遵守当地法律；有些地方要求所有参与方都同意。数据在你自己的服务器上，音频和文字会发给你选的语音识别服务和大模型，见[隐私与数据去向](https://suyiiyii.github.io/alldayrec/explanation/privacy.html)。
+
+飞书、心力球等名称归各自所有者，本项目与它们没有关联。
 
 ## 许可
 

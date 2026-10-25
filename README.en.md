@@ -2,9 +2,9 @@
 
 # alldayrec（全天录）
 
-### The open-source Plaud & Limitless you can self-host and truly own.
+### The open-source Limitless: a private second brain.
 
-Wear it all day: what you say becomes transcripts, summaries and to-dos, with the original audio and all the data on your own server.
+Works on every platform, no hardware to buy: your phone is the recorder.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/alldayrec)](https://pypi.org/project/alldayrec/)
@@ -19,34 +19,32 @@ Wear it all day: what you say becomes transcripts, summaries and to-dos, with th
 
 Let an AI agent deploy it for you: [SKILL.md](https://suyiiyii.github.io/alldayrec/SKILL.md)
 
-`#self-hosted` `#lifelog` `#speaker-diarization` `#MCP` `#plaud-alternative` `#open-hardware`
+`#self-hosted` `#lifelog` `#speaker-diarization` `#MCP` `#open-hardware`
 
 </div>
 
-alldayrec is an open-source all-day recorder and server that runs on your own machine. Wear a recorder (or just carry your phone) from morning to night, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back and checked, and your own agent can search your days over MCP. No subscription, and your conversations don't live on someone else's cloud. (Product names belong to their owners; this project is not affiliated with any of them.)
+alldayrec is an all-day recording and memory service that runs on your own server. Record from morning to night with your phone, an open-source recorder or a Feishu recorder bean, and within a minute your server turns the audio into transcripts with speakers, then into a timeline of your day: conversation summaries, the people you talked to, to-dos and a daily recap. The original audio is kept, so every line can be played back, and your agent can search your days over MCP.
 
 <div align="center">
 
-![Live captions](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261024.gif)
+![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
 
-| ![Today](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/today-20261024.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261024.png) |
+| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
 |:--:|:--:|
-| Today: due to-dos, yesterday's recap, today's conversations | One conversation's summary: to-dos, decisions, per-person points |
+| Timeline: the conversation going on, due to-dos, each day's conversations | One conversation: the summary, to-dos and decisions, each with its audio one tap away |
 
-Live captions while the page is open, and the web UI on a phone, filled with made-up data (the screenshots show the Chinese UI; the web UI can be switched to English on the 「我的」 (Me) page). [More screenshots](https://suyiiyii.github.io/alldayrec/en/explanation/intro.html#what-it-looks-like).
+The animation is the Live page: captions come up as people speak, and the AI live summary keeps up. The screenshots show made-up data in the Chinese UI; the web UI switches to English on the 「我的」 (Me) page.
 
 </div>
 
 ## What it does
 
-- **Records all day**: the phone app records the phone's mic or a BLE recorder; while offline, audio queues on the device and goes up later.
+- **Every platform, no hardware to buy**: the Android app, the iPhone app and a browser all record directly; while offline, audio queues on the device and goes up later.
 - **Transcribes in two layers**: the final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
 - **Knows who spoke**: speech detection and voiceprints run locally on the CPU; it learns your own voice and remembers the names you give others.
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, full-text search, and "ask AI" answers with links to the conversations they came from.
-- **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI; the data is SQLite plus the original audio, readable by you.
-- **Takes any audio source**: recordings you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
-
-Why it exists and how it compares with Plaud, Omi, Anker's 录音豆, OPPO's 心力球 and others: [What alldayrec is](https://suyiiyii.github.io/alldayrec/en/explanation/intro.html).
+- **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI; the data is SQLite plus the original audio.
+- **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
 
 ## Quickstart
 
@@ -86,12 +84,22 @@ git clone https://github.com/suyiiyii/alldayrec && cd alldayrec && cp .env.examp
 cd server && uv sync && set -a && . ../.env && set +a && uv run alldayrec
 ```
 
-Details: [How to run from source](https://suyiiyii.github.io/alldayrec/en/how-to/deploy-without-docker.html). Once the server runs: [reach it from a phone](https://suyiiyii.github.io/alldayrec/en/how-to/remote-access.html) and [install and connect the phone app](https://suyiiyii.github.io/alldayrec/en/how-to/install-app.html).
+Details: [How to run from source](https://suyiiyii.github.io/alldayrec/en/how-to/deploy-without-docker.html).
+
+### Start recording
+
+- Android: download the latest `apk-v*` APK from [Releases](https://github.com/suyiiyii/alldayrec/releases).
+- iPhone: build and install the app from source with Xcode.
+- Browser: open the web UI's `/record` page.
+
+Installing and connecting the app: [Install and connect the phone app](https://suyiiyii.github.io/alldayrec/en/how-to/install-app.html). Reaching the server from other devices: [Reach the server from a phone](https://suyiiyii.github.io/alldayrec/en/how-to/remote-access.html).
 
 ## Hardware
 
-The phone alone is enough. For all-day wear, build an open BLE recorder: `LR-X1` (Seeed XIAO nRF52840 Sense) or `LR-P3` (ProMicro nRF52840 in a 3D-printed case); it records to an SD card all the time and syncs to the phone when connected.
-Parts, wiring and firmware: [Recorder hardware](https://suyiiyii.github.io/alldayrec/en/reference/hardware.html), [`hardware/lr-p3/`](hardware/lr-p3/README.md), [`firmware/devkit/`](firmware/devkit/README.md).
+No hardware to buy: your phone records. For all-day wear, connect one of these recorders:
+
+- **Open-source recorder**: build an `LR-X1` (Seeed XIAO nRF52840 Sense) or an `LR-P3` (ProMicro nRF52840 in a 3D-printed case). It records to an SD card all the time and syncs to the phone when connected. Parts, wiring and firmware: [Recorder hardware](https://suyiiyii.github.io/alldayrec/en/reference/hardware.html), [`hardware/lr-p3/`](hardware/lr-p3/README.md), [`firmware/devkit/`](firmware/devkit/README.md).
+- **Feishu recorder bean** (飞书录音豆): the Android app (1.5.5 and later) connects to it directly from **Add recorder**. With the phone nearby it uploads as it records; when the phone is away the audio stays on the bean and is fetched when the phone is back. Recordings the server has in full are deleted from the bean.
 
 ## Docs
 
@@ -110,6 +118,8 @@ Issues and PRs are welcome: [issues](https://github.com/suyiiyii/alldayrec/issue
 ## Privacy and the law
 
 You are recording other people. Tell them, ask for consent where it is needed, and follow the law where you live; some places require every party's consent. The data stays on your server; audio and text go to the ASR service and the LLM you choose, see [Privacy: where your data goes](https://suyiiyii.github.io/alldayrec/en/explanation/privacy.html).
+
+Feishu, Limitless and other product names belong to their owners; this project is not affiliated with any of them.
 
 ## License
 
