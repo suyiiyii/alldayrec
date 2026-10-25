@@ -62,8 +62,8 @@ defineEmits<{ jump: [start: string]; flip: [i: number] }>();
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
-/* a long title wraps (even a long word or link), the badge after it stays whole */
-.head > b {
+/* a long title wraps (even a long word or link, folding or not), the badge after it stays whole */
+.head b {
   min-width: 0;
   overflow-wrap: anywhere;
 }
