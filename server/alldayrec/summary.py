@@ -14,9 +14,9 @@ from alldayrec import net
 from alldayrec.tenant import T
 
 MIN_SPEECH_S = 60
-PROMPT_VERSION = 9  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
-                    # 7: a todo's owner is who does it (not who said it), what I tell an AI is never a todo, 8: a todo's due_date (its due on the calendar),
-                    # 9: each person's point has its sentence (people[].points_at)
+PROMPT_VERSION = 10  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
+                     # 7: a todo's owner is who does it (not who said it), what I tell an AI is never a todo, 8: a todo's due_date (its due on the calendar),
+                     # 9: each person's point has its sentence (people[].points_at), 10: shorter: summary 2~4 sentences, points and AI requests ≤ 30 字
 SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[时间] 说话人: 文本」。说话人标签来自声纹聚类：「我」是录音者本人，S1、S2… 是其他人，同一个人可能被拆成多个标签，S? 是太短没认出来的句子。转写有错别字和同音误识别，按意图理解。
 「我」说的话有两种听众，先分清再整理：
 - 对人：说给在场或线上的人听，有来有回，别人会接话、回应、提问
@@ -27,11 +27,11 @@ SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[�
 {"title": "不超过 20 字的标题",
  "ai_spans": [{"from": "HH:MM:SS", "to": "HH:MM:SS"}],
  "media_spans": [{"from": "HH:MM:SS", "to": "HH:MM:SS"}],
- "summary": "3~6 句话的摘要，第一人称写「我」",
- "people": [{"who": "说话人标签，原样照抄", "points": [{"text": "这个人在这段里说了什么：观点、提供的信息、提出的问题、表的态，2~5 条", "at": "依据的那一行的时间 HH:MM:SS"}]}],
+ "summary": "2~4 句话的摘要，最重要的事放第一句，第一人称写「我」",
+ "people": [{"who": "说话人标签，原样照抄", "points": [{"text": "这个人在这段里说了什么：观点、提供的信息、提出的问题、表的态，1~3 条，每条不超过 30 字", "at": "依据的那一行的时间 HH:MM:SS"}]}],
  "tags": ["2~5 个标签：这段对话和什么相关（项目、领域、活动、人际场合），优先沿用已有标签"],
- "topics": [{"title": "议题", "points": ["要点"], "at": "议题开始那一行的时间 HH:MM:SS"}],
- "ai_requests": [{"text": "我让 AI 做的事", "at": "原句那一行的时间 HH:MM:SS"}],
+ "topics": [{"title": "议题", "points": ["要点，一行、不超过 30 字，每个议题最多 4 条"], "at": "议题开始那一行的时间 HH:MM:SS"}],
+ "ai_requests": [{"text": "我让 AI 做的事，一行、不超过 30 字：做什么，不抄整段指令", "at": "原句那一行的时间 HH:MM:SS"}],
  "todos": [{"owner": "去做这件事的人：我 | S1 | 未知", "to": "答应给谁或替谁做，写说话人标签；不是对人的就写 null", "text": "要做的事", "due": "原话里的时间，没有写 null", "due_date": "due 换算成的日期 YYYY-MM-DD，说不准写 null", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}],
  "decisions": [{"text": "定下来的事", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}]}
 ai_spans 是我对 AI 说话的连续时间段（第一句和最后一句的时间）。段内只能是我对 AI 说的话：中间夹着别人说话、或我对人说的短句（嗯、对、这个、你让他们上去吧），就在那里断开分成两段；没有就给空数组。
@@ -43,6 +43,7 @@ due_date 按这段对话的日期换算（最后一行写了这段对话哪天�
 我对 AI 助手的吩咐（帮我查、改、跑、开分支、合并、部署、派人去调研……）说得再像吩咐人，也只进 ai_requests，不是任何人的待办。这种话前后没有人用人的口吻接话，常常是一个人连着说一长段；我的声音有时会被认成 S1 这样的别的标签，同样按对 AI 处理。
 people 只列在这段里说了实质内容的标签（观点、信息、经历、提问、表态），「我」在最前；S?、只有附和的、只说了一两句零碎话（问一句、喊人、接一句玩笑、递东西）的都不列。人多的闲聊挑主要说话的几个，一般不超过 8 个。按这个人自己的话写，不要写成别人对他的评价。
 summary 只写这段里有的事：没有媒体、没有对 AI 说话、没有待办时不要提「没有」。
+写短：要点只写结论和关键信息，不复述过程；次要的议题并进相关的议题，不单列。字数限制只管 summary、要点和 ai_requests：title、todos、decisions 照旧，一条待办、一个决定都不能少。
 没有就给空数组，不编造原文里没有的内容。"""
 
 
@@ -51,7 +52,7 @@ summary 只写这段里有的事：没有媒体、没有对 AI 说话、没有�
 ZH = "用中文写；名字、说话人标签和原句（quote）照原文。"
 EN = ("Write everything in English, though these instructions are in Chinese. Never translate, keep exactly as given: "
       "JSON keys, speaker labels (我, S1, S2, S?, 未知), names, quotes, times (HH:MM:SS) and dates (YYYY-MM-DD). "
-      "我 is the recorder: \"I\" in prose. A title is at most 8 words.")
+      "我 is the recorder: \"I\" in prose. A title is at most 8 words; a point or an AI request (30 字 above) at most 15 words.")
 
 
 def lang_line() -> str:
@@ -209,7 +210,7 @@ if __name__ == "__main__":
         {"who": "我", "points": [{"text": "先定一下", "at": "10:00:01"}, {"text": "没对上", "at": "10:00:02"}, {"at": "10:02:00"}]},
         {"who": "S1", "points": [{"text": "同意", "at": "10:02:00"}]}, {"who": "我", "points": ["旧格式", {"text": "再说", "at": None}]}]}
     s = result({"id": "c1"}, rows, reply, {"model": "m"})
-    assert s["prompt_version"] == 9 and s["people"] == [
+    assert s["prompt_version"] == 10 and s["people"] == [
         {"who": "我", "points": ["先定一下", "没对上", "旧格式", "再说"], "points_at": [rows[0]["start"], None, None, None]},
         {"who": "S1", "points": ["同意"], "points_at": [rows[1]["start"]]}], s["people"]
     s = anyio.run(summarize, {"id": "c1", "speech_s": 12}, rows)
