@@ -39,6 +39,10 @@ DRAFT_BACK_S = 300                         # a page that opens gets drafts this 
 RELABEL_GROUPS = True                      # relabel at a close: the engine's speaker ids in a piece as units, split when their voices disagree
 LIVE_AUDIO_S = 120                         # a device whose audio came this recently is recording now: drafts and live analysis
 LIVE_EVERY_S = int(os.environ.get("LIVE_EVERY_S", "120"))  # new speech in the open conversation before the live analysis is redone
+# qwen-stream: a session given no new audio this long is finished by us; the server fails one after 23 s without audio
+# (10-25: "request timeout after 23 seconds" between the 60 s pieces of a phone with its screen off). Far above the
+# gaps between 1 s pieces in front (~2 s: audio.stream polls each second), 11 s below the server's limit
+STREAM_IDLE_S = 12
 
 
 async def pipeline(device: str):
@@ -561,8 +565,11 @@ async def pipeline(device: str):
     async def stream_loop():
         """DRAFT_ENGINE qwen-stream: while drafting(), one streaming session (qwen_stream) fed the draft stream's audio as
         it comes, every 0.2 s, from where drafts or final rows stop (as draft_loop); each sentence it ends is a draft row
-        at once, the one still being said is shown as `partial`. A session that ends (the page went, the server closed
-        it, it failed) is one call in the calls table; the next starts again at the end of the last draft row."""
+        at once, the one still being said is shown as `partial`. A session opens only when there is audio past that
+        point and is finished once STREAM_IDLE_S pass without new audio (a phone with its screen off sends a minute at
+        once: a session a minute). A session that ends (idle, the page went, the server closed it, it failed) is one
+        call in the calls table; the next starts again at the end of the last draft row, or of the audio a finished
+        session heard."""
         while True:
             await anyio.sleep(1)
             if not drafting():
@@ -572,24 +579,33 @@ async def pipeline(device: str):
             st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
             if not st.drafting:
                 st.drafting = True
+                st.latency.clear()  # counted afresh: the rows of an earlier watch say nothing of this one
                 ws.note(f"{device}：页面在看，开始出初稿（实时流，从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
             base = max(dseg.audio_base, dseg.sample_at(st.draft_to))
-            sent, t, err = base, time.perf_counter(), None
-            st.latency.clear()  # counted afresh: the last session's rows (an earlier watch, a timeout) say nothing of this one
+            if dseg.samples <= base:
+                continue  # nothing to send: the server would end the session after 23 s and count it failed
+            sent, t, err, finished = base, time.perf_counter(), None, False
             try:
                 async with qwen_stream.Session() as s, anyio.create_task_group() as tg:
                     async def pump():
-                        nonlocal sent
-                        while drafting():
+                        nonlocal sent, finished
+                        new = time.perf_counter()
+                        while drafting() and time.perf_counter() - new < STREAM_IDLE_S:
                             if dseg.samples > sent:
                                 lo, sent = max(sent, dseg.audio_base), dseg.samples
                                 await s.send(dseg.audio[lo - dseg.audio_base:sent - dseg.audio_base].tobytes())
+                                new = time.perf_counter()
                             await anyio.sleep(0.2)
                         await s.finish()
+                        finished = True
                     tg.start_soon(pump)
                     async for g in s.results():
                         await stream_sentence(g, base)
                     tg.cancel_scope.cancel()  # the task finished: no more audio into it
+                if finished:  # every sentence of what it heard is a draft row, after the last one no speech: not sent again
+                    st.draft_to = max(st.draft_to, dseg.time_at(sent))
+                    db.put_kv(f"draft_to:{device}", iso(st.draft_to))
+                log.info("%s draft stream ended after %.0f s, %.0f s of audio", device, time.perf_counter() - t, (sent - base) / SR)
             except Exception as e:
                 err = threads.first(e)
                 log.warning("%s draft stream failed after %.0f s: %r", device, time.perf_counter() - t, err)
