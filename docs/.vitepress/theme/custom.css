@@ -44,3 +44,9 @@
 .compare table td:first-child {
   min-width: 6em;
 }
+/* A diagram with a light and a dark version (explanation/architecture.md): show the one that matches the site's
+   theme toggle, which sets html.dark (prefers-color-scheme only follows the system) */
+html:not(.dark) .only-dark,
+html.dark .only-light {
+  display: none;
+}

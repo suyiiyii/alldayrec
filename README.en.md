@@ -44,12 +44,16 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 
 ## Architecture
 
+<a href="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-wide-en-light-20261026.png">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-en-dark-20261026.png">
-  <img alt="Architecture: the open recorder, the Feishu bean and the phone mic upload through the phone app, the browser's /record page uploads directly; the self-hosted server stores the audio, then runs VAD, ASR and speakers, and an LLM writes summaries; the web UI, MCP and CLI read the results" src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-en-light-20261026.png">
+  <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-narrow-en-dark-20261026.png">
+  <source media="(max-width: 600px)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-narrow-en-light-20261026.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-wide-en-dark-20261026.png">
+  <img alt="Architecture: the open recorder, the Feishu bean and the phone mic upload through the phone app, the browser's /record page uploads directly; the self-hosted server stores the audio, then runs VAD, ASR and speakers, and an LLM writes summaries; the web UI, MCP and CLI read the results" src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-wide-en-light-20261026.png">
 </picture>
+</a>
 
-Recorders and phones send audio to your own server, which runs speech detection and voiceprints locally, transcribes with a cloud or local ASR engine and summarizes with the LLM you configure; see [Architecture and data flow](https://suyiiyii.github.io/alldayrec/en/explanation/architecture.html).
+What each part does and how the data flows: [Architecture and data flow](https://suyiiyii.github.io/alldayrec/en/explanation/architecture.html).
 
 ## Quickstart
 
