@@ -26,6 +26,15 @@ router = APIRouter()
 SLICE_FOREGROUND_S = int(os.environ.get("SLICE_FOREGROUND_S", "1"))   # the apps' piece seconds with the app in front: 1 s
 SLICE_BACKGROUND_S = int(os.environ.get("SLICE_BACKGROUND_S", "20"))  # ... in the background             (drafts ~8 s vs ~13 s at 5 s)
 SLICE_SCREEN_OFF_S = int(os.environ.get("SLICE_SCREEN_OFF_S", "60"))  # ... screen off (Android)
+SLICE_WATCHED_S = int(os.environ.get("SLICE_WATCHED_S", "2"))  # at most this in the background and screen off while a page watches
+
+
+def slices() -> dict:
+    """The piece lengths the apps cut now, per app state. While a page of the tenant watches (ws: a page showing today
+    in front), the background and screen-off ones are at most SLICE_WATCHED_S, so its drafts come within seconds also
+    from a phone in a pocket; they are back to theirs within a minute of the last page leaving."""
+    cap = (lambda s: min(s, SLICE_WATCHED_S)) if time.time() < T().watch_until else (lambda s: s)
+    return {"foreground": SLICE_FOREGROUND_S, "background": cap(SLICE_BACKGROUND_S), "screenOff": cap(SLICE_SCREEN_OFF_S)}
 
 
 @router.post("/api/chunks")
@@ -36,7 +45,8 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     with, so a client back from an outage sends its whole backlog at once, whatever other devices are doing. `hold`
     (unix ms): the client still has older audio of this device than that to send (it sends what is said now while it
     reads a backlog off the recorder's card): finalization waits there for it, drafts go on (audio.hold); an upload
-    without it lets go."""
+    without it lets go. The answer has the piece's seconds and the piece lengths now (`slice`, slices()): the apps'
+    native uploaders take them from here, as Dart does not run in the background to ask /api/client-config."""
     audio.hold(device, hold)  # before the piece is in: the queue must not hand it out ahead of the older audio
     body, kind = await request.body(), request.headers.get("content-type", "")
     seconds = await anyio.to_thread.run_sync(audio.save, device, start, body, kind, n, limiter=threads.MEDIA)
@@ -47,7 +57,7 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     T().chunks = {"device": device, "at": time.time()}
     late = "（早于这台设备已处理的位置，只存不转写）" if start <= T().read_to.get(device, -1) else ""
     ws.note(f"收到 {device} 的块 {seconds:.1f} s，起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}{late}", "warn" if late else "info")
-    return {"seconds": round(seconds, 2)}
+    return {"seconds": round(seconds, 2), "slice": slices()}
 
 
 @router.post("/api/chunks/end")
@@ -132,8 +142,9 @@ async def upgrades(device: str, since: str):
 @router.get("/api/client-config")
 async def client_config():
     """What the apps ask on start and while recording: piece lengths per app state (the server changes them without
-    a new build; short pieces in front make drafts quick, long ones in the background save requests)."""
-    return {"slice": {"foreground": SLICE_FOREGROUND_S, "background": SLICE_BACKGROUND_S, "screenOff": SLICE_SCREEN_OFF_S}}
+    a new build; short pieces in front make drafts quick, long ones in the background save requests). The lengths now
+    (slices()), shortened while a page watches, the same as /api/chunks answers: the app's poll never undoes them."""
+    return {"slice": slices()}
 
 
 @router.get("/api/app-setup")

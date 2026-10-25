@@ -368,7 +368,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                 val held = hold(deviceOf(b[0]))
                 val code = post("$server/api/chunks?device=${enc(deviceOf(b[0]).ifEmpty { device })}&start=${startMs(b[0])}" +
                                 (held?.let { "&hold=$it" } ?: ""),
-                                b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg")
+                                b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg", ::slices)
                 Log.i("live-record", "upload ${b.size} pieces of ${deviceOf(b[0]).ifEmpty { device }} from ${startMs(b[0])}: HTTP $code")
                 if (code == 200 || code == 400) { if (held != null) holding += deviceOf(b[0]) else holding -= deviceOf(b[0]) }  // the server took the hold either way
                 when {
@@ -447,6 +447,19 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     }
     private val endDue = mutableMapOf<String, Long>()  // an end that failed: not tried again before (this thread only)
 
+    /** The piece lengths in the server's answer to an upload (`slice`, shorter while a page watches): the running slicer
+     *  cuts with them and a restart reads them, as the app's "slices" call does. From here because the Dart side that
+     *  asks /api/client-config does not run in the background or with the screen off. */
+    private fun slices(reply: ByteArray) {
+        val s = try { org.json.JSONObject(String(reply)).optJSONObject("slice") } catch (_: Exception) { null } ?: return
+        val fg = s.optInt("foreground"); val bg = s.optInt("background"); val off = s.optInt("screenOff")
+        if (minOf(fg, bg, off) < 1) return
+        RecorderService.slicer?.apply { fgS = fg; bgS = bg; offS = off }
+        if (prefs.getInt("foreground", 0) == fg && prefs.getInt("background", 0) == bg && prefs.getInt("screenOff", 0) == off) return
+        prefs.edit().putInt("foreground", fg).putInt("background", bg).putInt("screenOff", off).apply()  // on a change only: an answer a second
+        Log.i("live-record", "slices from the server: fg=$fg bg=$bg off=$off")
+    }
+
     private fun keep(f: File) {
         if (archive == null) { f.delete(); return }
         val day = File(archive, SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(startMs(f)))).apply { mkdirs() }
@@ -454,14 +467,16 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         f.delete()
     }
 
-    private fun post(url: String, body: ByteArray, type: String?): Int {
+    /** `reply` gets the body of a 2xx answer. */
+    private fun post(url: String, body: ByteArray, type: String?, reply: (ByteArray) -> Unit = {}): Int {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.connectTimeout = 15_000; c.readTimeout = 60_000; c.doOutput = true
         c.setRequestProperty("Authorization", "Bearer $token")
         if (type != null) c.setRequestProperty("Content-Type", type)
         c.outputStream.use { it.write(body) }
         val code = c.responseCode
-        (if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes() }  // read to the end: the connection is reused
+        val got = (if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes() }  // read to the end: the connection is reused
+        if (code in 200..299 && got != null) reply(got)
         return code
     }
 

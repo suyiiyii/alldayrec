@@ -114,4 +114,45 @@ class UploaderTest {
             assertEquals(emptyMap<String, Long>(), kv.toMap())
         } finally { up.running = false; up.join(7000); http.close(); dir.deleteRecursively() }
     }
+
+    /** The piece lengths in an upload's answer (shorter while a page watches) go to the running slicer and to the prefs
+     *  a restart reads; an answer without them changes nothing. */
+    @Test fun slices() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        val kv = java.util.concurrent.ConcurrentHashMap<String, Int>(mapOf("foreground" to 1, "background" to 20, "screenOff" to 60))
+        lateinit var edit: SharedPreferences.Editor
+        edit = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { _, m, a ->
+            if (m.name == "putInt") kv[a[0] as String] = a[1] as Int
+            edit } as SharedPreferences.Editor
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            when (m.name) { "getInt" -> kv[a[0] as String] ?: a[1]; "getLong" -> a[1]; "edit" -> edit; else -> null } } as SharedPreferences
+        val http = ServerSocket(0)
+        Thread {  // one request per connection; the piece at 5000 is answered while a page watches
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                val body = if ("start=5000" in path) """{"seconds":1.0,"slice":{"foreground":1,"background":2,"screenOff":2}}""" else """{"seconds":1.0}"""
+                c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val slicer = Slicer(dir, 1, 20, 60).also { RecorderService.slicer = it }
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        fun sent(start: Long) {  // gone from the queue: taken, and its answer applied
+            val f = File(dir, "$start.ogg").apply { writeBytes(ByteArray(64)) }
+            val until = System.currentTimeMillis() + 5000
+            while (f.exists() && System.currentTimeMillis() < until) Thread.sleep(20)
+            assertEquals(false, f.exists())
+        }
+        try {
+            sent(1000)
+            assertEquals(listOf(1, 20, 60), listOf(slicer.fgS, slicer.bgS, slicer.offS))
+            assertEquals(mapOf("foreground" to 1, "background" to 20, "screenOff" to 60), kv.toMap())
+            sent(5000)
+            assertEquals(listOf(1, 2, 2), listOf(slicer.fgS, slicer.bgS, slicer.offS))
+            assertEquals(mapOf("foreground" to 1, "background" to 2, "screenOff" to 2), kv.toMap())
+        } finally { up.running = false; up.join(2000); http.close(); RecorderService.slicer = null; dir.deleteRecursively() }
+    }
 }

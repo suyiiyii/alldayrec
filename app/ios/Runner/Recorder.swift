@@ -37,10 +37,7 @@ enum Recorder {
         slicer?.foreground = foregroundApp
         if foregroundApp { slicer?.resume() }  // a recording the system stopped and did not give back (from the background iOS may refuse)
         result(nil)
-      case "slices":  // new lengths from the server: the running slicer cuts its next piece with them, the link reads them
-        slicer?.setSlices(fg: a["foreground"] as? Int ?? 1, bg: a["background"] as? Int ?? 20)
-        for k in ["foreground", "background"] { defaults.set(a[k] as? Int ?? 20, forKey: k) }
-        result(nil)
+      case "slices": slices(a); result(nil)
       case "status": result(status())
       case "version": result(DeviceLog.version)  // 我的 › 关于
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message
@@ -142,6 +139,13 @@ enum Recorder {
     guard slicer == nil, link == nil, defaults.string(forKey: "source") == "ble" else { return }
     _ = start(Dictionary(uniqueKeysWithValues: ["server", "token", "device", "source", "archive", "foreground", "background"]
       .compactMap { k in defaults.object(forKey: k).map { (k, $0) } }))
+  }
+
+  /// New lengths from the server (the "slices" call, or Uploader from an upload's answer): the running slicer cuts its
+  /// next piece with them, the link reads them. On the main thread.
+  static func slices(_ a: [String: Any]) {
+    slicer?.setSlices(fg: a["foreground"] as? Int ?? 1, bg: a["background"] as? Int ?? 20)
+    for k in ["foreground", "background"] { defaults.set(a[k] as? Int ?? 20, forKey: k) }
   }
 
   /// The piece length the BLE link cuts the live file into (the microphone's Slicer has its own).
@@ -543,7 +547,8 @@ final class Uploader: Thread {
     let hold = p.device.flatMap(Recorder.hold).map { "&hold=\($0)" } ?? ""
     do {
       let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold,
-                          try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac")
+                          try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac",
+                          reply: Uploader.slices)
       switch code {
       case 200:
         b.forEach(keep); sent += b.count; note = nil
@@ -570,6 +575,17 @@ final class Uploader: Thread {
       note = ["code": "uploadFailed", "detail": error.localizedDescription]
       Thread.sleep(forTimeInterval: 5 * Double(min(fails, 6)))
     }
+  }
+
+  /// The piece lengths in the server's answer to an upload (`slice`, shorter while a page watches; iOS cuts only by
+  /// foreground and background): from here because Dart, which asks /api/client-config, does not run in the background.
+  private static func slices(_ reply: Data) {
+    let d = Recorder.defaults
+    guard let s = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["slice"] as? [String: Any],
+          let fg = s["foreground"] as? Int, let bg = s["background"] as? Int, min(fg, bg) >= 1,
+          fg != d.integer(forKey: "foreground") || bg != d.integer(forKey: "background") else { return }  // on a change only: an answer a second
+    NSLog("live-record slices from the server: fg=%d bg=%d", fg, bg)
+    DispatchQueue.main.async { Recorder.slices(s) }
   }
 
   func end(_ atMs: Int64, device ble: String? = nil) {
@@ -607,7 +623,8 @@ final class Uploader: Thread {
     } catch { note = ["code": "archiveFailed", "detail": error.localizedDescription]; try? fm.removeItem(at: f) }
   }
 
-  private func post(_ url: String, _ body: Data, _ type: String?) throws -> Int {
+  /// `reply` gets the body of a 2xx answer.
+  private func post(_ url: String, _ body: Data, _ type: String?, reply: (Data) -> Void = { _ in }) throws -> Int {
     guard let u = URL(string: url) else { throw URLError(.badURL) }
     var r = URLRequest(url: u, timeoutInterval: 60)
     r.httpMethod = "POST"
@@ -619,13 +636,14 @@ final class Uploader: Thread {
     let release = { DispatchQueue.main.async { if task != .invalid { UIApplication.shared.endBackgroundTask(task); task = .invalid } } }
     task = UIApplication.shared.beginBackgroundTask(withName: "upload", expirationHandler: release)  // not ended on expiry = killed
     defer { release() }
-    var code = 0, err: Error?
+    var code = 0, err: Error?, got: Data?
     let done = DispatchSemaphore(value: 0)
-    URLSession.shared.uploadTask(with: r, from: body) { _, resp, e in
-      code = (resp as? HTTPURLResponse)?.statusCode ?? 0; err = e; done.signal()
+    URLSession.shared.uploadTask(with: r, from: body) { data, resp, e in
+      code = (resp as? HTTPURLResponse)?.statusCode ?? 0; got = data; err = e; done.signal()
     }.resume()
     done.wait()
     if let err { throw err }
+    if (200..<300).contains(code), let got { reply(got) }
     return code
   }
 

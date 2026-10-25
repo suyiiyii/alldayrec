@@ -24,6 +24,7 @@ type: reference
 ## 不在下表里的
 
 - 请求体是原始字节、不在 OpenAPI 里的：`POST /api/chunks` 的请求体是一个完整的音频文件，`POST /api/firmware` 的请求体是一个固件包。
+- 返回的内容：表里只有请求。上传录音时用到的两个：`POST /api/chunks` 返回 `{"seconds": 这块的秒数, "slice": {…}}`，`GET /api/client-config` 返回 `{"slice": {…}}`。`slice` 是 App 现在每块音频该切的秒数（`foreground`、`background`、`screenOff`）；有页面开着时，`background` 和 `screenOff` 不超过 `SLICE_WATCHED_S`（见[配置](./configuration.md)）。
 - `GET /ws`：WebSocket，服务器向网页推送这个租户的更新。
 - 网页本身的路由（`/`、`/live`、`/conversations` 等）和 `/assets/*`，见[网页与 App](./web-and-app.md)。
 

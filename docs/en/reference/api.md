@@ -25,6 +25,7 @@ added since, such as `/api/todos/{todo_id}/mark` and `/api/lang`.
 ## Not in the tables
 
 - Bodies of raw bytes, which OpenAPI does not describe: the body of `POST /api/chunks` is one whole audio file, the body of `POST /api/firmware` a firmware package.
+- What the endpoints answer: the tables give only the requests. The two used when uploading audio: `POST /api/chunks` answers `{"seconds": the piece's seconds, "slice": {…}}`, `GET /api/client-config` answers `{"slice": {…}}`. `slice` holds the seconds per piece the apps cut now (`foreground`, `background`, `screenOff`); while a page is open, `background` and `screenOff` are at most `SLICE_WATCHED_S` (see [Configuration](./configuration.md)).
 - `GET /ws`: a WebSocket on which the server pushes the tenant's updates to the web pages.
 - The web app's own routes (`/`, `/live`, `/conversations` and so on) and `/assets/*`: see [Web pages and app settings](./web-and-app.md).
 
