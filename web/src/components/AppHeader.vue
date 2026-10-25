@@ -27,7 +27,7 @@ const router = useRouter();
 const under = computed(() => TABS.find((x) => x.under.test(route.path)));
 const sub = computed(() => !!under.value && route.path !== under.value.to);
 const back = () => (history.state?.back ? router.back() : router.push(under.value?.to ?? "/"));
-// the online demo (src/demo.ts): one label on every page, next to the name (a phone: over the tabs), to the docs home
+// the online demo (src/demo.ts): one label on every page, next to the name (a phone: above the page), to the docs home
 const DEMO = import.meta.env.MODE === "demo";
 </script>
 
@@ -173,14 +173,11 @@ nav a.on {
   header.bare {
     display: none;
   }
+  /* in the page's flow, above its content (main's own side padding): nothing to cover, nothing covers it */
   .demo-tag.phone {
     display: block;
-    position: fixed;
-    left: var(--space-3);
-    bottom: calc(var(--tabbar) + var(--space-2));
-    z-index: 3;
-    background: var(--surface);
-    box-shadow: var(--shadow);
+    width: fit-content;
+    margin: var(--space-2) var(--space-3) 0;
   }
   .nav-tabs {
     display: flex;
