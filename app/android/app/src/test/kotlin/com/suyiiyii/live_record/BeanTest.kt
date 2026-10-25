@@ -245,6 +245,51 @@ class BeanTest {
         assertEquals("the cut is not a try", 0, sync.files[c]!!.tries)
     }
 
+    /** 10-25 T2: live, the link drops (the phone's Bluetooth off 30 s), live again from where the bean is, the bean
+     *  stops; the head and the middle in one re-pull (cut), the tail on the next connection; then the app is killed
+     *  before the pieces are up. The recording's end still goes to the server, once, after all of it is up. */
+    @Test fun endAfterDropFillsAndKill() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val state = File(dir, "state.json")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val c = t0 / 1000
+        bean.recording = true; bean.open = c; bean.listed[c] = 0
+        var live = 0
+        bean.onTransfer = { file, from, isLive ->
+            if (isLive && live++ == 0) {
+                bean.header(file, 0xFFFFFFFFL); bean.units(file, (36L..1092L).toList())
+                bean.script += { throw IOException("link gone") }
+            } else if (isLive) {
+                bean.header(file, 0xFFFFFFFFL); bean.units(file, (3120L..5687L).toList())
+                bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
+                bean.recording = false; bean.open = 0; bean.listed[c] = 5699L * 20
+            } else {
+                bean.header(file, 5699L * Bean.UNIT); bean.units(file, (from..5698L).toList(), last = 5698); bean.complete(file)
+                if (from > 0) bean.script += { throw IOException("app killed") }
+            }
+        }
+        val since = t0 - 3_600_000
+        val sync = BeanSync("D3200-0A0B", state, chunks, bean)
+        bean.confirmed = { sync.deletable }
+        assertEquals("link gone", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
+        assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }
+        assertEquals("app killed", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
+        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, true), Triple(c, 0L, false), Triple(c, 5688L, false)), bean.transfers)
+        val anchor = sync.files[c]!!.anchor
+        assertEquals("not yet: its pieces are not up", emptyList<Long>(), bean.ends)
+
+        val again = BeanSync("D3200-0A0B", state, chunks, bean)  // the app back
+        bean.confirmed = { again.deletable }
+        bean.script += { for (f in Uploader.queue(chunks)) f.delete(); bean.now += 1000 }  // all of it goes up
+        repeat(12) { bean.script += {} }
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals("the end, once", listOf(anchor + 5699L * 20), bean.ends)
+        assertEquals(4, bean.transfers.size)
+        assertEquals(listOf(c), bean.deleted)
+    }
+
     /** A double tap is logged once, not again when a re-pull reads its units; a realtime unit far later on the wall
      *  clock than its seq says is logged (a pause would date what follows early). */
     @Test fun marksOnceAndTimeJumps() {

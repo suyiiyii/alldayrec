@@ -64,4 +64,42 @@ class UploaderTest {
             assertEquals(null, got.poll(1, TimeUnit.SECONDS))  // once
         } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
     }
+
+    /** A bean's end (BeanLink: `end:<name>`) goes once its pieces are up, again until the server takes it (10-25: the
+     *  one request of T2's end was lost); none when the bean records again before it went (it carries on). */
+    @Test fun ends() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        File(dir, "1000@D3200-0A0B.ogg").writeBytes(ByteArray(64))  // the recording's last piece, still queued
+        File(dir, "9500@D3200-0C0D.ogg").writeBytes(ByteArray(64))  // recording again since its end at 9000
+        val kv = java.util.concurrent.ConcurrentHashMap<String, Long>(mapOf("end:D3200-0A0B" to 5000L, "end:D3200-0C0D" to 9000L))
+        lateinit var edit: SharedPreferences.Editor
+        edit = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { _, m, a ->
+            when (m.name) { "remove" -> { kv.remove(a[0] as String); edit }; "commit" -> true; else -> null } } as SharedPreferences.Editor
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            when (m.name) { "getLong" -> kv[a[0] as String] ?: a[1]; "getAll" -> kv; "edit" -> edit; else -> null } } as SharedPreferences
+        val got = LinkedBlockingQueue<String>()
+        var failed = false
+        val http = ServerSocket(0)
+        Thread {
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                val code = if (path.startsWith("/api/chunks/end") && !failed) { failed = true; 500 } else 200
+                got += "$code $path"
+                c.getOutputStream().write("HTTP/1.1 $code X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        try {
+            assertEquals("200 /api/chunks?device=D3200-0A0B&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("500 /api/chunks/end?device=D3200-0A0B&t=5000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("200 /api/chunks?device=D3200-0C0D&start=9500", got.poll(10, TimeUnit.SECONDS))  // after a 5 s pause
+            assertEquals("200 /api/chunks/end?device=D3200-0A0B&t=5000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals(null, got.poll(1, TimeUnit.SECONDS))
+            assertEquals(emptyMap<String, Long>(), kv.toMap())
+        } finally { up.running = false; up.join(7000); http.close(); dir.deleteRecursively() }
+    }
 }

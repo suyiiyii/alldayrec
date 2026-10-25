@@ -213,8 +213,7 @@ class RecorderService : Service() {
                 it.start()
             }
             if (ble && Bean.isBean(prefs.getString("bleName", null))) bean = BeanLink(this, prefs, dir, { slicer?.sliceS() ?: 20 },
-                { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) },
-                { name, at -> uploader?.let { u -> Thread { u.end(at, name) }.start() } }).also { it.start() }
+                { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) }).also { it.start() }
             else if (ble) link = BleLink(this, prefs, dir, File(getExternalFilesDir(null), "undated"), { slicer?.sliceS() ?: 20 },
                 { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) }).also { it.start() }
             prefs.edit().remove("endAt").remove("endDevice").apply()  // a new recording carries on the conversation: no end for the old stop
@@ -362,6 +361,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         while (running) {
             val q = files()
             letGo(q)
+            ends(q)
             if (q.isEmpty()) { sleep(200); continue }
             val b = batch(q)
             try {
@@ -421,8 +421,30 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                      "upload_fails" to fails, "upload_ok_s" to okAt.takeIf { it > 0 }?.let { (now - it) / 1000 })
     }
 
-    fun end(atMs: Long, bleName: String? = null) {
-        try { post("$server/api/chunks/end?device=${enc(bleName ?: device)}&t=$atMs", ByteArray(0), null) } catch (e: Exception) { note = say("endFailed", "detail" to e.message) }
+    /** Tells the server the recorder stopped at `atMs`; true: it took it. */
+    fun end(atMs: Long, bleName: String? = null): Boolean {
+        val d = bleName ?: device
+        val code = try { post("$server/api/chunks/end?device=${enc(d)}&t=$atMs", ByteArray(0), null) }
+                   catch (e: Exception) { Log.w("live-record", "end of $d not sent: ${e.message}"); note = say("endFailed", "detail" to e.message); return false }
+        Log.i("live-record", "end of $d at $atMs: HTTP $code")
+        if (code != 200) note = say("endFailed", "detail" to "HTTP $code")
+        return code == 200
+    }
+
+    /** A recorder that ended on its own (BeanLink: `end:<device>`): told once none of its pieces is left, again until the
+     *  server takes it (10-25: a bean's end never reached the server; it had one request, no retry, no log). */
+    private fun ends(q: List<File>) {
+        for (k in prefs.all?.keys.orEmpty().filter { it.startsWith("end:") }) {
+            val d = k.removePrefix("end:")
+            val at = prefs.getLong(k, 0)
+            val left = q.filter { deviceOf(it) == d }.map(::startMs)
+            when {
+                left.any { it >= at } -> prefs.edit().remove(k).apply()  // recording again: it carries on the conversation, no end
+                left.isNotEmpty() -> {}
+                end(at, d) -> if (prefs.getLong(k, 0) == at) prefs.edit().remove(k).apply()
+                else -> sleep(5000)
+            }
+        }
     }
 
     private fun keep(f: File) {

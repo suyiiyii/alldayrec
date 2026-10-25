@@ -44,7 +44,7 @@ fun beanAdv(r: ScanResult): Pair<String, Int>? {
 @SuppressLint("MissingPermission")
 class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, chunks: File,
                private val sliceS: () -> Int, private val onPiece: (Int) -> Unit, private val onName: (String) -> Unit,
-               private val onReport: (String, Map<String, Any?>) -> Unit, private val onEnd: (String, Long) -> Unit) {
+               private val onReport: (String, Map<String, Any?>) -> Unit) {
     private val name = prefs.getString("bleName", null) ?: ""
     private val adapter = ctx.getSystemService(BluetoothManager::class.java).adapter
     @Volatile private var on = true
@@ -82,7 +82,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun hold(at: Long?) = prefs.edit().apply { if (at == null) remove("hold:$name") else putLong("hold:$name", at) }.apply()
         override fun held() = prefs.getLong("hold:$name", -1).takeIf { it >= 0 }
         override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
-        override fun end(at: Long) = onEnd(name, at)
+        override fun end(at: Long) { prefs.edit().putLong("end:$name", at).commit() }  // Uploader.ends() sends it
         override fun piece() = onPiece(1)
         override fun trace(what: String, v: Map<String, Any?>) {
             val w = capture ?: return

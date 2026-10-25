@@ -14,6 +14,9 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECPoint
 import java.security.spec.ECPublicKeySpec
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 import javax.crypto.Cipher
@@ -254,6 +257,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         /** prefs hold:<tag>, sent with every upload while set (Uploader); null: let go. */
         fun hold(at: Long?)
         fun held(): Long?
+        /** The bean's last recording ended at `at` (wall ms) and all of it is up: the server is told (BeanLink: kept in the
+         *  prefs until it takes it). */
         fun end(at: Long)
         fun piece()
         /** Starts of this bean's pieces the server refused (Uploader: HTTP 400): their files stay on the bean. */
@@ -301,7 +306,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var busy = 0         // code 4s in a row
     private var xfer: Xfer? = null
     private var since = 0L
-    private var pendingEnd = 0L
+    private var pendingEnd = 0L  // kept in the state file: a kill before the pieces are up does not lose it (complete()
+                                 // is not run again for a file that is whole)
     private var caught = 0L      // backlog units taken since the backlog began
     private var caughtSince = 0L
     private var marked = false
@@ -315,6 +321,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (stateFile.exists()) try {
             val o = JSONObject(stateFile.readText())
             for (k in o.keys()) {
+                if (k == "end") { pendingEnd = o.getLong(k); continue }
                 val f = o.getJSONObject(k)
                 val h = f.getJSONArray("h")
                 files[k.toLong()] = F(f.getLong("a"), MutableList(h.length()) { longArrayOf(h.getJSONArray(it).getLong(0), h.getJSONArray(it).getLong(1)) },
@@ -327,6 +334,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val o = JSONObject()
         for ((id, f) in files) o.put("$id", JSONObject().put("a", f.anchor).put("t", f.total).put("r", f.tries)
             .put("h", JSONArray(f.have.map { JSONArray(listOf(it[0], it[1])) })))
+        if (pendingEnd > 0) o.put("end", pendingEnd)
         stateFile.parentFile?.mkdirs()
         val tmp = File(stateFile.path + ".tmp")
         tmp.writeText(o.toString())
@@ -463,7 +471,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (older()) return
         val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs)
         io.held()?.let { h -> if (q.none { it < h + HOLD_MARGIN_MS }) { io.hold(null); io.log("hold", "补传完了，不再压住定稿") } }
-        if (!recording && xfer == null && pendingEnd > 0 && q.isEmpty()) { io.end(pendingEnd); pendingEnd = 0 }
+        if (!recording && xfer == null && pendingEnd > 0 && q.isEmpty()) {
+            io.log("end", "录音到 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(pendingEnd))} 结束，都上传了：告诉服务端", fields = mapOf("at" to pendingEnd))
+            io.end(pendingEnd); pendingEnd = 0; save()
+        }
     }
 
     /** Files the server has whole: begun since the bean was added here, closed on the bean, every unit on the phone and
