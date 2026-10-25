@@ -59,7 +59,8 @@ async def unstar(sid: str):
 async def sentence_speaker(sid: str, body: dict):
     """This sentence was said by `to`. The only one of its label: the label renamed (apply_rename: its voice, pins and
     name hints go with it). Else the row alone, and the participants gain `to` when new: only then is the summary
-    redone. A named person's voice is learnt from it after the answer (enroll); 我 and S<n> teach nothing here."""
+    redone. A named person's voice is learnt from it after the answer (enroll); 我 and S<n> teach nothing here. A row
+    heard as music (S?: always the row alone) given to someone is a voice: its music flag goes, the undo puts it back."""
     c, r = sentence(sid, body.get("conv"))
     frm, to = r.get("speaker") or "", (body.get("to") or "").strip()
     if not to or to == "S?" or len(to) > 20 or to == frm:
@@ -72,10 +73,10 @@ async def sentence_speaker(sid: str, body: dict):
         keys = (f"{c['id']}|{frm}", f"{c['id']}|{to}")
         with db.tx() as t:  # undo_rename's shape: the voices and pins as they are (unchanged), put back as they were
             before = {"conv": c["id"], "from": frm, "to": to, "participants": c["participants"], "after": after, "hints": None,
-                      "rows": [r["rowid"]],
+                      "rows": [r["rowid"]], "music": [r["rowid"]] if r.get("music") else [],
                       "voices": [tuple(v) for v in t.execute("SELECT * FROM voices WHERE conv = ? AND label IN (?, ?)", (c["id"], frm, to))],
                       "apart": [tuple(v) for v in t.execute("SELECT voice, grp FROM apart WHERE voice IN (?, ?)", keys)]}
-            t.execute("UPDATE sentences SET speaker = ? WHERE rowid = ?", (to, r["rowid"]))
+            t.execute("UPDATE sentences SET speaker = ?, music = NULL WHERE rowid = ?", (to, r["rowid"]))
             t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(after, ensure_ascii=False), c["id"]))
             if frm != "我" and not speakers.ANON.fullmatch(frm):  # what it taught the people bank as frm (bank.py)
                 before["enrolled"] = bank.forget(t, frm, [r["rowid"]])
@@ -84,7 +85,7 @@ async def sentence_speaker(sid: str, body: dict):
             T().speakers["at"] = 0.0
             queue_summary(c, keep=True)
         learn = to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed")
-        rows = [{**r, "conv": c["id"]}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
+        rows = [{**r, "conv": c["id"], "music": None}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
         ws.note(f"对话 {c['start'][11:19]}：{r['start'][11:19]} 这一句 {frm} 改为 {to}", "state")
     await enroll_soon(to, rows)
     return {"speaker": to, "participants": after, "voiceprints": len(rows), "undo": keep_undo([before])}

@@ -56,7 +56,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
-    if not to or to == "S?" or len(to) > 20 or to == frm:
+    if not to or to == "S?" or len(to) > 20 or to == frm or frm == "S?":  # S?: music and odd rows, one at a time only
         raise HTTPException(400, "bad name")
     hit = [r for r in conversation_rows(c) if r.get("speaker") == frm]
     if not hit:
@@ -190,6 +190,9 @@ async def speaker_undo(body: dict):
                 raise HTTPException(409, "[undo_gone] 这次改名已经不能撤销了")
             t.execute(f"UPDATE sentences SET speaker = ? WHERE speaker = ? AND rowid IN ({','.join('?' * len(b['rows']))})",
                       (b["from"], b["to"], *b["rows"]))
+            if b.get("music"):  # a ♪ row given to someone (routes_sentences): heard as music again
+                t.execute(f"UPDATE sentences SET music = 1 WHERE speaker = ? AND rowid IN ({','.join('?' * len(b['music']))})",
+                          (b["from"], *b["music"]))
             t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(b["participants"], ensure_ascii=False), b["conv"]))
             t.execute("DELETE FROM voices WHERE conv = ? AND label IN (?, ?)", (b["conv"], b["from"], b["to"]))
             for v in b["voices"]:

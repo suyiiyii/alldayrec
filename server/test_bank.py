@@ -200,3 +200,19 @@ def test_relearn(store, tmp_path):
     run("--apply")
     assert dump() == now
 
+
+def test_music_row_given_to_someone(store):
+    """A ♪ row (S?, music 1) given to someone is a voice: no music flag, learnt like any fixed sentence; the undo puts
+    S? and the flag back, and takes the learning out."""
+    from alldayrec.routes_sentences import sentence_speaker
+    c = conv(1, "S1", [A, A, A, A])
+    db.conn().execute("UPDATE sentences SET speaker = 'S?', music = 1 WHERE id = '1-2'")
+    anyio.run(rename, c, {"from": "S1", "to": "张三"})
+    was = ledger()
+    with pytest.raises(HTTPException):
+        apply_rename(c, "S?", "张三")  # every S? row of it at once: no
+    r = anyio.run(sentence_speaker, "1-2", {"conv": c, "to": "张三"})
+    row = lambda: tuple(db.conn().execute("SELECT speaker, music FROM sentences WHERE id = '1-2'").fetchone())
+    assert row() == ("张三", None) and r["voiceprints"] == 1 and len(ledger()) == len(was) + 1
+    anyio.run(speaker_undo, {"undo": r["undo"]})
+    assert row() == ("S?", 1) and ledger() == was

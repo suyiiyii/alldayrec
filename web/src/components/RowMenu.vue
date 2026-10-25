@@ -116,7 +116,8 @@ async function fix(to: string) {
   if (!to) return;
   const r = row.value!,
     c = conv.value!,
-    from = r.speaker ?? "";
+    from = r.speaker ?? "",
+    music = r.music;
   close();
   try {
     const res = await post<{ voiceprints: number; undo: string }>(
@@ -124,19 +125,21 @@ async function fix(to: string) {
       { conv: c.id, to },
     );
     r.speaker = to; // the live page's row; the conversation page loads again
+    r.music = undefined; // given to someone, a ♪ row is a voice (the server clears it too)
     emit("changed");
     toast(t(res.voiceprints ? "rowMenu.fixedLearn" : "rowMenu.fixed", { to: speakerLabel(to) }), {
-      undo: () => void undo(r, res.undo, from),
+      undo: () => void undo(r, res.undo, from, music),
       ms: 10_000,
     });
   } catch (e) {
     toast((e as Error).message);
   }
 }
-async function undo(r: Row, id: string, from: string) {
+async function undo(r: Row, id: string, from: string, music?: number) {
   try {
     await post("/api/speakers/undo", { undo: id });
     r.speaker = from;
+    r.music = music;
     emit("changed");
     toast(t("rowMenu.fixedBack", { to: speakerLabel(from) }));
   } catch (e) {
