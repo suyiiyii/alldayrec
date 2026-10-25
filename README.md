@@ -40,6 +40,15 @@
 
 </div>
 
+## 架构
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-zh-dark-20261026.png">
+  <img alt="架构图：开源录音设备、飞书录音豆和手机麦克风经手机 App 上传，浏览器的 /record 页直接上传；自部署服务器先存下音频，再做语音检测、语音识别、认人，大模型写摘要；网页、MCP 和命令行读取结果" src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-zh-light-20261026.png">
+</picture>
+
+录音设备和手机把音频传到你自己的服务器，语音检测和声纹在服务器本机跑，语音识别用云端或本机引擎，摘要交给你配置的大模型，详见[架构与数据流](https://suyiiyii.github.io/alldayrec/explanation/architecture.html)。
+
 ## 快速开始
 
 需要一把[阿里云百炼（DashScope）](https://bailian.console.aliyun.com/)北京区的 API key，语音识别和大模型可以共用这一把；用别的引擎见[如何更换语音识别引擎](https://suyiiyii.github.io/alldayrec/how-to/change-asr-engine.html)。三种跑法任选一种。

@@ -6,13 +6,12 @@ type: explanation
 
 alldayrec 是一个 Python 服务器加几个客户端。音频从录音设备或手机进来，服务器在本机做语音检测和声纹，把语音识别和摘要交给你选的云服务，结果存进 SQLite，原始录音一直留在磁盘上。
 
-```text
-BLE recorder ──BLE──▶ phone app ──HTTP(S)──▶ server (FastAPI) ──▶ web UI, MCP, CLI
-                      (or the phone's mic)    │ local: VAD, voiceprints (onnxruntime)
-                                              │ cloud: ASR engine, OpenAI-compatible LLM
-                                              ▼
-                                       SQLite + original audio
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-zh-dark-20261026.png">
+  <img alt="架构图：开源录音设备、飞书录音豆和手机麦克风经手机 App 上传，浏览器的 /record 页直接上传；自部署服务器先存下音频，再做语音检测、语音识别、认人，大模型写摘要；网页、MCP 和命令行读取结果" src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-zh-light-20261026.png">
+</picture>
+
+图的源文件是 [`docs/diagrams/architecture.drawio`](https://github.com/suyiiyii/alldayrec/blob/main/docs/diagrams/architecture.drawio)，用 draw.io 打开编辑。
 
 ## 组成部分
 

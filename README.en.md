@@ -42,6 +42,15 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 
 </div>
 
+## Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-en-dark-20261026.png">
+  <img alt="Architecture: the open recorder, the Feishu bean and the phone mic upload through the phone app, the browser's /record page uploads directly; the self-hosted server stores the audio, then runs VAD, ASR and speakers, and an LLM writes summaries; the web UI, MCP and CLI read the results" src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/architecture-en-light-20261026.png">
+</picture>
+
+Recorders and phones send audio to your own server, which runs speech detection and voiceprints locally, transcribes with a cloud or local ASR engine and summarizes with the LLM you configure; see [Architecture and data flow](https://suyiiyii.github.io/alldayrec/en/explanation/architecture.html).
+
 ## Quickstart
 
 You need an [Alibaba Cloud Bailian (DashScope)](https://bailian.console.aliyun.com/) API key, Beijing region; one key can run both the ASR and the LLM. Other engines: [How to change the ASR engine](https://suyiiyii.github.io/alldayrec/en/how-to/change-asr-engine.html). Pick one of three ways to run it.

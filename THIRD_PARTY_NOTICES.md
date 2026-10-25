@@ -14,6 +14,7 @@ alldayrec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 | `app/android/app/src/main/kotlin/com/suyiiyii/live_record/Bean.kt` (the Feishu recorder bean's protocol: framing, keys, file and audio decryption, parsers) | Ported from [ws/soundcore](https://github.com/ws/soundcore) (`crates/soundcore-d3200-protocol`), Copyright (C) 2026 Will Smidlein, and [Eliqi797/open-feishu-recording-bean](https://github.com/Eliqi797/open-feishu-recording-bean) (`android/.../D3200Protocol.kt`, `DeviceCrypto.kt`), Copyright (c) 2026 Eliqi797. Not affiliated with Anker or Feishu | 0BSD and MIT (below) |
 | `fixtures/bean-crypto.json` | ws/soundcore's `crates/soundcore-d3200-protocol/tests/crypto.json` (byte vectors), unchanged, Copyright (C) 2026 Will Smidlein | 0BSD (below) |
 | `web/src/components/Icon.vue` | The SVG paths of 29 [Lucide](https://lucide.dev) icons, lucide-static 0.460.0, unchanged | ISC (below) |
+| `docs/diagrams/architecture.drawio` and the images exported from it | 14 [Lucide](https://lucide.dev) icons, lucide-static 0.460.0, with the stroke colour set | ISC (below) |
 
 ## Model files (not in the repository; the server downloads them, `server/alldayrec/infer.py`)
 
