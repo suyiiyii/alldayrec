@@ -207,26 +207,24 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
     private var part: File? = null
     private var fileStartUs = 0L
     private var fileSlice = 0
-    private var lastState = 0
 
     fun sliceS() = if (screenOff) offS else if (foreground) fgS else bgS
 
     fun start() {
         android.util.Log.i("live-record", "slicer start fg=$fgS bg=$bgS off=$offS ble=$ble")
         running = true
-        lastState = sliceS()
         if (!ble) thread = Thread { try { micLoop() } catch (e: Exception) { error = e.toString() } }.also { it.start() }
     }
 
     fun stop() { android.util.Log.i("live-record", "slicer stop"); running = false; thread?.join(5000) }
 
     /** One Opus packet at `ptsUs` after `wallMs`: rotates at a frame boundary when the slice length is up, or the
-     *  state changed to a shorter slice that is already over. */
+     *  length now is shorter and the piece is already that long (the app came to the front, a page started watching),
+     *  as on iOS. */
     private fun write(buf: ByteBuffer, offset: Int, size: Int, flags: Int, wallMs: Long, ptsUs: Long) {
         val state = sliceS()
         if (muxer != null && (ptsUs - fileStartUs >= fileSlice * 1_000_000L ||
-                (state != lastState && state < fileSlice && ptsUs - fileStartUs >= state * 1_000_000L))) closeFile()
-        lastState = state
+                (state < fileSlice && ptsUs - fileStartUs >= state * 1_000_000L))) closeFile()
         if (muxer == null) {
             part = File(dir, "${wallMs + ptsUs / 1000}${tag?.let { "@$it" } ?: ""}.part")
             muxer = MediaMuxer(part!!.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG).also {
