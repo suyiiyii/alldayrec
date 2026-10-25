@@ -10,7 +10,7 @@ const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
-const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261026.png";
+const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261026b.png";
 // the English README tagline; en/index.md repeats it in its title and hero
 const EN_TAGLINE = "An open-source Plaud for your whole day: a private second brain";
 

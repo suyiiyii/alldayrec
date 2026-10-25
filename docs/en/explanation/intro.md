@@ -9,11 +9,11 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 
 ## What it looks like
 
-![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif)
 
 The Live page: captions come up as people speak, and the AI live summary keeps up. Below, the web UI on a phone, filled with made-up data.
 
-| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
+| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png) |
 |:--:|:--:|
 | Timeline: the conversation going on, due to-dos, each day's conversations | One conversation: the summary, to-dos and decisions, each with its audio one tap away |
 

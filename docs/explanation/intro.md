@@ -9,11 +9,11 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ## 界面一览
 
-![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif)
 
 实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例。
 
-| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
+| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png) |
 |:--:|:--:|
 | 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
 

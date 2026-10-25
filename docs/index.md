@@ -8,7 +8,7 @@ hero:
   text: *tagline
   tagline: 全平台可用，不用买硬件，手机就能录。
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: 实时页：边说边出字幕，AI 实时摘要跟着更新（示例数据）
   actions:
     - theme: brand

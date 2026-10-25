@@ -8,7 +8,7 @@ Works on every platform, no hardware to buy: your phone is the recorder.
 
 [中文](README.md) | **English**
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
 
 Live captions · Timeline · One conversation
 

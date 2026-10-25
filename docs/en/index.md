@@ -8,7 +8,7 @@ hero:
   text: *tagline
   tagline: "Works on every platform, no hardware to buy: your phone is the recorder."
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
     - theme: brand
