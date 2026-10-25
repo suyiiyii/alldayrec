@@ -217,10 +217,10 @@ class BeanTest {
         assertEquals(1, bean.logs.count { "code 4" in it.second })
     }
 
-    /** Live began 36 units into the file (the bean starts realtime where it is, 10-25). The rest of the file is on the
-     *  phone, so the re-pull from 0 is cut once unit 35 is in: the link goes (the bean cannot be stopped otherwise),
-     *  not 1800 more units. */
-    @Test fun headOnly() {
+    /** Live began 36 units into the file (the bean starts realtime where it is, 10-25) and missed its last 7 (10-25: a
+     *  pause). The re-pull from 0 is cut once unit 35 is in (the link goes: the bean cannot be stopped otherwise), not
+     *  7287 more units; the next connection asks from the tail's offset. */
+    @Test fun headAndTail() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
@@ -229,17 +229,45 @@ class BeanTest {
         bean.onTransfer = { file, from, live ->
             if (live) {
                 bean.header(file, 0xFFFFFFFFL)
-                bean.units(file, (36L..1835L).toList(), last = 1835)
+                bean.units(file, (36L..7322L).toList())
                 bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
-                bean.recording = false; bean.open = 0; bean.listed[c] = 1836L * 20
-            } else { bean.header(file, 1836L * Bean.UNIT); bean.units(file, (from..1835L).toList(), last = 1835); bean.complete(file) }
+                bean.recording = false; bean.open = 0; bean.listed[c] = 7330L * 20
+            } else { bean.header(file, 7330L * Bean.UNIT); bean.units(file, (from..7329L).toList(), last = 7329); bean.complete(file) }
         }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false)), bean.transfers)
-        assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
-        assertTrue("the rest not taken", bean.queued > 500)
+        assertTrue("the rest not taken", bean.queued > 2000)
+        assertEquals(7323L, sync.gap(sync.files[c]!!))
         assertTrue(bean.logs.any { "断开连接" in it.second })
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }  // connected again
+        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false), Triple(c, 7323L, false)), bean.transfers)
+        assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
+        assertEquals("the cut is not a try", 0, sync.files[c]!!.tries)
+    }
+
+    /** A double tap is logged once, not again when a re-pull reads its units; a realtime unit far later on the wall
+     *  clock than its seq says is logged (a pause would date what follows early). */
+    @Test fun marksOnceAndTimeJumps() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val d = t0 / 1000
+        bean.recording = true; bean.open = d
+        bean.onTransfer = { file, from, live ->
+            if (live) {
+                bean.header(file, 0xFFFFFFFFL)
+                bean.units(file, (10L..60L).toList(), marks = setOf(40, 41, 42))
+                bean.units(file, (61L..99L).toList(), last = 99, wait = 10_000)
+                bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
+                bean.recording = false; bean.open = 0; bean.listed[d] = 100L * 20
+            } else { bean.header(file, 100L * Bean.UNIT); bean.units(file, (from..99L).toList(), last = 99, marks = setOf(40, 41, 42)); bean.complete(file) }
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(Triple(d, 0L, true), Triple(d, 0L, false)), bean.transfers)
+        assertNull(sync.gap(sync.files[d]!!))
+        assertEquals(1, bean.logs.count { it.first == "mark" })
+        assertEquals(1, bean.logs.count { it.first == "bean_gap_time" })
     }
 
     /** Off the bean go only files the server has whole: not one with a hole, one with a piece the server refused or
@@ -327,7 +355,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
         sent += frame; sentAt += now
         val p = frame.copyOfRange(9, frame.size - 1)
         when ((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255)) {
-            0x2E01 -> {
+            0x2E01 -> {  // a new connection: nothing of the one before is on its way
+                out.clear()
                 val s = Bean.shared(keys, Bean.point(p, keys.public as ECPublicKey))
                 session = Bean.hkdf(s)
                 push(0x2E01, Bean.pub(keys.public as ECPublicKey) + s)
@@ -386,11 +415,12 @@ class FakeBean(var now: Long) : BeanSync.Io {
     }
 
     /** Units three to a frame, 20 ms each; the audio says its file and seq. */
-    fun units(file: Long, seqs: List<Long>, last: Long = -1) {
+    fun units(file: Long, seqs: List<Long>, last: Long = -1, marks: Set<Long> = emptySet(), wait: Long = 0) {
         val (k, n) = fileKeys[file]!!
-        for (c in seqs.chunked(3)) push(0x1A08, c.fold(ByteArray(0)) { acc, s ->
-            acc + Bean.le32(s) + byteArrayOf(if (s == last) 4 else if (s == 0L) 2 else 0) + Bean.ctr(k, Bean.iv(n, s), audio(file, s)) + byteArrayOf(0)
-        }, 20L * c.size)
+        for ((i, c) in seqs.chunked(3).withIndex()) push(0x1A08, c.fold(ByteArray(0)) { acc, s ->
+            val flags = (if (s == last) 4 else if (s == 0L) 2 else 0) or (if (s in marks) 1 else 0)
+            acc + Bean.le32(s) + byteArrayOf(flags.toByte()) + Bean.ctr(k, Bean.iv(n, s), audio(file, s)) + byteArrayOf(0)
+        }, 20L * c.size + if (i == 0) wait else 0)
     }
 
     fun complete(file: Long) = push(0x1A0A, byteArrayOf(0) + Bean.le32(0) + Bean.le32(file))

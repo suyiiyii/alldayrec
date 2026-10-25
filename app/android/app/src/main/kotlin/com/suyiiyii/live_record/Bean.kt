@@ -235,8 +235,9 @@ object Bean {
  * the bean's clock as it began, set at each connect; the phone's own clock when the file is first met live and the two
  * agree within seconds) and which units are in pieces already. A unit's time is its anchor + seq × 20 ms; a transfer
  * after a drop starts at the first unit missing (its byte offset), units had already are dropped, a hole is asked
- * for again (three times); one that the bean would only fill by sending the rest of the file again ends the session
- * once it is in (rest()). Pieces of what is said now go up ahead of a backlog (the hold, as BleLink's); the end of
+ * for again (three times); when a long stretch the phone has follows it, the session ends once the hole is in and the
+ * next hole is asked for from its own offset (rest()), not by taking that stretch again. A pause inside a file would
+ * date what follows it early (the app never pauses the bean): logged as bean_gap_time. Pieces of what is said now go up ahead of a backlog (the hold, as BleLink's); the end of
  * the last recording goes to the server once its pieces are up. A file the server has whole is then deleted on the
  * bean (prune()); nothing else is.
  */
@@ -445,7 +446,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     private fun begin(x: Xfer) {
-        xfer = x; x.at = io.now(); x.seen = x.at
+        xfer = x; x.at = io.now(); x.seen = x.at; marked = false
         state = say(if (x.live) "joining" else "beanIdle")
         if (x.live) { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
         send(Bean.transfer(x.file, x.from * Bean.UNIT, x.live))
@@ -561,13 +562,19 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             io.log("bean_gap", "文件 ${x.file} 缺单元 ${x.last + 1}..${s.seq - 1}（${(s.seq - x.last - 1) * Bean.FRAME_MS} ms）", "warn",
                 mapOf("file" to x.file, "from" to x.last + 1, "to" to s.seq))
         }
-        x.units++; x.last = s.seq; x.seen = io.now()
+        val now = io.now()
+        val late = now - x.seen - (s.seq - x.last) * Bean.FRAME_MS
+        if (x.live && x.last >= 0 && late > 5000)  // the bean paused mid-file (the app never asks it to) or the link stalled
+            io.log("bean_gap_time", "文件 ${x.file} 实时单元 ${x.last}→${s.seq} 之间过了 ${(now - x.seen) / 1000} s：豆子若暂停过，" +
+                "之后的单元按序号排会早 ${late / 1000} s", "warn", mapOf("file" to x.file, "seq" to s.seq, "late_ms" to late))
+        x.units++; x.last = s.seq; x.seen = now
         if (s.flags and 4 != 0) f.total = s.seq + 1
+        val dupe = has(f, s.seq) || runFile == x.file && s.seq in runFrom until runFrom + run.size
         val mark = s.flags and 1 != 0
-        if (mark && !marked) io.log("mark", "双击标记", fields = mapOf("file" to x.file, "seq" to s.seq), at = f.anchor + s.seq * Bean.FRAME_MS)
-        marked = mark
+        if (mark && !marked && !dupe) io.log("mark", "双击标记", fields = mapOf("file" to x.file, "seq" to s.seq), at = f.anchor + s.seq * Bean.FRAME_MS)
+        marked = mark  // also on units had already: a mark that goes on past them is not a new one
         if (x.until in 1..s.seq + 1) x.cut = true
-        if (has(f, s.seq) || runFile == x.file && s.seq in runFrom until runFrom + run.size) { x.dupes++; return }
+        if (dupe) { x.dupes++; return }
         if (run.isNotEmpty() && (runFile != x.file || s.seq != runFrom + run.size)) flush()
         if (run.isEmpty()) { runFile = x.file; runFrom = s.seq }
         run += audio
@@ -604,7 +611,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val f = files[x.file]
         io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} ${if (x.cut) "缺的取到了" else "传完（结果 $result）"}：${x.units} 个单元，seq ${x.first}..${x.last}，" +
             "重复 ${x.dupes}，缺 ${x.lost}，用时 ${(io.now() - x.at) / 1000} s" +
-            (if (x.cut) "；后面 ${(f?.total ?: 0) - x.until} 个单元手机都有，断开连接让豆子停下" else ""), if (result == 0 && x.lost == 0L) null else "warn",
+            (if (x.cut) "；单元 ${x.until} 起的一段手机已有，断开连接让豆子停下，缺的再从各自的位置要" else ""), if (result == 0 && x.lost == 0L) null else "warn",
             mapOf("file" to x.file, "units" to x.units, "first" to x.first, "last" to x.last, "dupes" to x.dupes, "lost" to x.lost, "result" to result, "cut" to x.cut))
         if (x.live) {
             listing = Bean.Listing(listing.files, 0); needList = true; askedAt = 0  // recording on? the info says
@@ -615,7 +622,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.anchor + (x.last + 1) * Bean.FRAME_MS)
         } else if (gap(f) == null) {
             pendingEnd = maxOf(pendingEnd, f.anchor + f.total * Bean.FRAME_MS)
-        } else if (++f.tries > TRIES) {
+        } else if (!(x.cut && gap(f)!! > x.from) && ++f.tries > TRIES) {  // cut with the hole filled: not a try
             io.log("bean_xfer", "文件 ${x.file} 从单元 ${gap(f)} 起取了 $TRIES 次仍不全，不再取", "error", mapOf("file" to x.file, "gap" to gap(f)))
         }
         save()
@@ -655,11 +662,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     private fun done(f: F) = gap(f) == null || f.tries > TRIES
 
-    /** Where the one range the phone has after `from` begins, when it runs to the file's end and that rest is long
-     *  enough that a new connection costs less than taking it again (the bean sends from the offset to the end and
-     *  cannot be stopped mid-file, 10-25: 1831 units in 6 s to fill 36). -1: take it all. */
-    private fun rest(f: F, from: Long): Long =
-        f.have.filter { it[0] > from }.singleOrNull()?.takeIf { it[1] == f.total && f.total - it[0] >= REST_UNITS }?.get(0) ?: -1
+    /** Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
+     *  than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file, 10-25: 1831
+     *  units in 6 s to fill 36). The next hole is then asked for from its own offset. -1: take it all. */
+    private fun rest(f: F, from: Long): Long = f.have.firstOrNull { it[0] > from && it[1] - it[0] >= REST_UNITS }?.get(0) ?: -1
 
     /** The session ends on purpose: the link goes, which is how a transfer stops early; BeanLink connects again. */
     class Again(why: String) : Exception(why)
