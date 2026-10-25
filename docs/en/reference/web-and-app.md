@@ -12,7 +12,7 @@ The server serves the web pages (`web/` builds into `server/alldayrec/static/dis
 
 | Address | Page | Content |
 |---|---|---|
-| `/` (also `/conversations`) | 时间线 (Timeline) | Every conversation by day, newest first. On today with no filter, the conversation going on (tap **全屏** (Full screen) to go to `/live`) and the due to-dos sit at the top; each day opens with its recap, and short conversations without a summary fold into one line. At the top: a day picker, **日历** (Calendar), the search box, **问 AI** (Ask AI; a round button at the bottom right on a phone) and tags |
+| `/` (also `/conversations`) | 时间线 (Timeline) | Every conversation by day, newest first. On today with no filter, the conversation going on (tap **全屏** (Full screen) to go to `/live`) and the due to-dos sit at the top; each past day opens with its recap, and short conversations without a summary fold into one line. At the top: a day picker, **日历** (Calendar), the search box, **问 AI** (Ask AI; a round button at the bottom right on a phone) and tags |
 | `/live` | 实时 (Live) | The live captions and analysis of the conversation going on; you can also pick a day to read its transcript |
 | `/todos` | 待办 (To-dos) | To-dos due today or earlier that aren't marked yet, in three groups: 「今天」 (Today), 「本周」 (This week), 「更早」 (Earlier). Tap the round check to mark one done (or swipe left on a phone); the **⋯** menu can mark it **不对，不是待办** (Wrong: not a to-do); tap the text to open the original quote. The 「更早」 group has **全部标为已处理** (Mark all as handled); if you marked one by mistake, tap **撤销** (Undo) in the notice |
 | `/c/<id>` | 对话 (Conversation) | One conversation's summary and transcript; tap a line to play from there |
