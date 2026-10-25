@@ -39,11 +39,11 @@ The animation is the Live page: captions come up as people speak, and the AI liv
 
 ## What it does
 
-- **Every platform, no hardware to buy**: the Android app, the iPhone app and a browser all record directly; while offline, audio queues on the device and goes up later.
+- **Every platform, no hardware to buy**: the Android app, the iPhone app and a browser all record directly.
 - **Transcribes in two layers**: the final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
-- **Knows who spoke**: speech detection and voiceprints run locally on the CPU; it learns your own voice and remembers the names you give others.
-- **Remembers**: conversation summaries, to-dos with due dates, a daily recap, full-text search, and "ask AI" answers with links to the conversations they came from.
-- **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI; the data is SQLite plus the original audio.
+- **Knows who spoke**: it learns your own voice and remembers the names you give others.
+- **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
+- **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
 - **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
 
 ## Quickstart
