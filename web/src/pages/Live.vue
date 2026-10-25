@@ -365,15 +365,25 @@ function jump(start: string) {
   color: var(--surface);
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
 }
-/* a phone: the summary card sticks under the header, the captions scroll under it; up with the header by --lift */
+/* a phone: the summary sticks under the header, edge to edge (main's padding out), the captions starting under it and
+   scrolling under it; up with the header by --lift */
 .side {
   position: sticky;
   top: var(--head);
   z-index: 1;
-  background: var(--bg);
-  padding: var(--space-2) 0;
+  margin: 0 calc(-1 * var(--space-4)) var(--space-2);
   transform: translateY(calc(-1 * var(--lift, 0px)));
   will-change: transform;
+}
+@media (max-width: 600px) {
+  .side {
+    margin-inline: calc(-1 * var(--space-3));
+  }
+}
+@media (max-width: 899px) {
+  main.cols {
+    padding-top: 0; /* the summary joins the header */
+  }
 }
 /* nothing going on: a line of what to do, the recorders, the last conversation, how to start */
 .idle {
@@ -448,7 +458,9 @@ function jump(start: string) {
   }
   .side {
     grid-area: side;
+    margin: 0;
     padding: var(--space-3) 0;
+    background: var(--bg);
   }
   .side > * {
     max-height: calc(100dvh - var(--head) + var(--lift, 0px) - var(--space-5));

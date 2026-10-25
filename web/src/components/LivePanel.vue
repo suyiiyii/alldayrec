@@ -129,15 +129,19 @@ const paneOpen = ref(
     }
   })(),
 );
-function toggle() {
-  paneOpen.value = !paneOpen.value;
+const keepOpen = () => {
   try {
     localStorage.setItem("livePaneOpen", paneOpen.value ? "1" : "0");
   } catch {}
+};
+function toggle() {
+  paneOpen.value = !paneOpen.value;
+  keepOpen();
 }
 const paneBox = ref<HTMLElement | null>(null);
 // the topics' height, dragged by the grip under them (a phone; a wide screen gives the column the screen's height), kept
-// per orientation; none: the default (28vh). A double tap on the grip goes back to it
+// per orientation; none: the default (28vh). A double tap on the grip goes back to it, open. Dragged up past half the
+// least height the topics fold away (the head stays, as a tap on it does); dragged down from there they open again
 const MIN_H = 56; // about two lines
 // under it the grip and the page's newest caption stay in sight: grip 20 + gap 8 + a one-line row 81 + main's padding 60
 const BELOW = 170;
@@ -154,24 +158,31 @@ const paneH = ref(readH());
 const turned = () => (paneH.value = readH());
 portrait.addEventListener("change", turned);
 onUnmounted(() => portrait.removeEventListener("change", turned));
-let drag: { y: number; h: number; max: number; moved: boolean } | null = null,
+let drag: { y: number; h: number; max: number; moved: boolean; was: number } | null = null,
   tapAt = 0;
 function dragStart(e: PointerEvent) {
-  const b = paneBox.value!,
+  const g = e.currentTarget as HTMLElement,
+    h = paneOpen.value ? paneBox.value!.offsetHeight : 0, // folded: the topics come back under the grip
     tabs = parseFloat(getComputedStyle(document.body).paddingBottom); // the bottom tab bar
   drag = {
     y: e.clientY,
-    h: b.offsetHeight,
-    max: innerHeight - tabs - b.getBoundingClientRect().top - BELOW,
+    h,
+    max: innerHeight - tabs - g.getBoundingClientRect().top + h - BELOW, // the grip is right under the topics
     moved: false,
+    was: paneH.value,
   };
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  g.setPointerCapture(e.pointerId);
 }
 function dragMove(e: PointerEvent) {
   if (!drag) return;
   const dy = e.clientY - drag.y;
   drag.moved ||= Math.abs(dy) > 4;
-  if (drag.moved) paneH.value = Math.round(Math.min(Math.max(drag.h + dy, MIN_H), drag.max));
+  if (!drag.moved) return;
+  paneOpen.value = drag.h + dy >= MIN_H / 2;
+  // folded, it keeps the height it had: a tap on the head opens it to that
+  paneH.value = paneOpen.value
+    ? Math.round(Math.min(Math.max(drag.h + dy, MIN_H), drag.max))
+    : drag.was;
 }
 function dragEnd() {
   if (!drag) return;
@@ -179,9 +190,13 @@ function dragEnd() {
   drag = null;
   if (!moved) {
     // a tap (no dblclick: iOS does not fire it for a finger)
-    if (performance.now() - tapAt < 300) paneH.value = 0;
+    if (performance.now() - tapAt < 300) {
+      paneH.value = 0;
+      paneOpen.value = true;
+    }
     tapAt = performance.now();
   }
+  keepOpen();
   try {
     if (paneH.value) localStorage.setItem(hKey(), String(paneH.value));
     else localStorage.removeItem(hKey());
@@ -264,7 +279,7 @@ watch(
       <Timeline :topics="current.topics" open @jump="$emit('jump', $event)" />
     </div>
     <div
-      v-if="current && paneOpen"
+      v-if="current"
       class="grip"
       role="separator"
       aria-orientation="horizontal"
@@ -405,9 +420,23 @@ watch(
 .grip:active {
   color: var(--accent);
 }
+/* a phone: a sheet hanging from the header over the captions, edge to edge, frosted (the captions under it blur), its
+   bottom corners round */
 @media (max-width: 899px) {
+  .sum {
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: color-mix(in srgb, var(--surface) 60%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(180%);
+    backdrop-filter: blur(10px) saturate(180%);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.12);
+  }
   .shut .body {
     display: none;
+  }
+}
+@media (max-width: 899px) and (prefers-color-scheme: dark) {
+  .sum {
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.5);
   }
 }
 /* a wide screen: the card is a column of its own, always open, as tall as the screen allows */
