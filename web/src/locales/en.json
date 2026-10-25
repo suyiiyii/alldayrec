@@ -1,5 +1,6 @@
 {
   "common": {
+    "demo": "Online demo · sample data",
     "today": "Today",
     "yesterday": "Yesterday",
     "todayAt": "Today {t}",

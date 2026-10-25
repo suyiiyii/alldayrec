@@ -131,8 +131,11 @@ function ask(text: string) {
   void nextTick(() => askCard.value?.scrollIntoView({ block: "start" }));
 }
 // the sheet starts as hold-to-talk (豆包's way) on a touch screen, as the text box with a mouse; the one last picked
-// stays. No microphone (a page over plain http, an old WebView): the text box alone
-const canTalk = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+// stays. No microphone (a page over plain http, an old WebView), or the online demo (src/demo.ts): the text box alone
+const canTalk =
+  import.meta.env.MODE !== "demo" &&
+  typeof MediaRecorder !== "undefined" &&
+  !!navigator.mediaDevices?.getUserMedia;
 const mode = localStorage.askMode ?? (matchMedia("(pointer: coarse)").matches ? "voice" : "text");
 const talk = ref(canTalk && mode === "voice"),
   hint = ref("");

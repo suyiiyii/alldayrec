@@ -12,6 +12,8 @@ Works on every platform, no hardware to buy: your phone is the recorder.
 
 Live captions · Timeline · One conversation
 
+[Try the demo](https://suyiiyii.github.io/alldayrec/demo/)
+
 The web UI switches to English on the 「我的」 (Me) page.
 
 </div>

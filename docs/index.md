@@ -14,6 +14,11 @@ hero:
     - theme: brand
       text: 快速开始
       link: /tutorial/first-run
+    # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
+    - theme: alt
+      text: 在线体验
+      link: /demo/
+      target: _self
     - theme: alt
       text: GitHub
       link: https://github.com/suyiiyii/alldayrec

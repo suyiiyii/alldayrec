@@ -38,22 +38,28 @@ const recorders = computed(() => {
 const allStars = ref(false);
 onMounted(() => void loadStars().catch(() => {}));
 
-const LINKS = computed<{ to: string; icon: IconName; title: string; sub: string }[]>(() => [
-  {
-    to: "/todos",
-    icon: "check",
-    title: t("me.todos"),
-    sub: !due.value
-      ? t("me.todosSub")
-      : open(due.value).length
-        ? t("me.todosDue", open(due.value).length)
-        : t("me.todosNone"),
-  },
-  { to: "/connect", icon: "smartphone", title: t("me.connect"), sub: t("me.connectSub") },
-  { to: "/progress", icon: "activity", title: t("me.progress"), sub: t("me.progressSub") },
-  { to: "/connect#ai", icon: "sparkles", title: t("me.ai"), sub: t("me.aiSub") },
-  { to: "/record", icon: "mic", title: t("me.record"), sub: t("me.recordSub") },
-]);
+const LINKS = computed(() => {
+  const all: { to: string; icon: IconName; title: string; sub: string }[] = [
+    {
+      to: "/todos",
+      icon: "check",
+      title: t("me.todos"),
+      sub: !due.value
+        ? t("me.todosSub")
+        : open(due.value).length
+          ? t("me.todosDue", open(due.value).length)
+          : t("me.todosNone"),
+    },
+    { to: "/connect", icon: "smartphone", title: t("me.connect"), sub: t("me.connectSub") },
+    { to: "/progress", icon: "activity", title: t("me.progress"), sub: t("me.progressSub") },
+    { to: "/connect#ai", icon: "sparkles", title: t("me.ai"), sub: t("me.aiSub") },
+    { to: "/record", icon: "mic", title: t("me.record"), sub: t("me.recordSub") },
+  ];
+  // the online demo (src/demo.ts) has no phone, AI service or recorder to connect: 待办 and 处理进度 only
+  return import.meta.env.MODE === "demo"
+    ? all.filter((l) => l.to === "/todos" || l.to === "/progress")
+    : all;
+});
 
 // the page's language, kept in this browser; the server's too: the models write summaries, recaps and answers in it
 const LANGS: [Lang, string][] = [

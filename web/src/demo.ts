@@ -1,10 +1,13 @@
 // The online demo (`vp build --mode demo`, served from the docs site under /demo/): the real pages with no server.
 // - GETs read a recorded snapshot, snap/<the request>.json next to the page (fictional sample data);
-//   search runs over the snapshot's conversations and their sentences as the server's does;
+//   search runs over the snapshot's conversations and their sentences as the server's does; what it keeps no file for
+//   (a device's log, the calls) answers empty, with no request;
 // - every write, AI button and setting answers 403 [demo]: the page says 这是在线体验，部署自己的实例后可用;
 // - the clock stands at the snapshot's evening (snap/replay.json's now, the viewer's wall clock) and runs on from there,
 //   never past that day: at 23:59 the page starts over (a day the snapshot lacks would leave the timeline empty);
 // - /ws is a scripted socket: the snapshot's last conversation said again now, sentence by sentence, on a loop.
+// Elsewhere under the same switch: no 网页录音, 连接手机 or 接入 AI (router.ts, Me.vue), no listening in or voice question,
+// and a label on every page (AppHeader.vue).
 import type { LiveState, Row, Status } from "./lib/api";
 import { isoLocal } from "./lib/track";
 
@@ -34,6 +37,13 @@ window.Date = new Proxy(RealDate, {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const demo = () => json({ detail: "[demo] demo" }, 403); // api.ts says err.code.demo
+// GETs the snapshot keeps no answer for: what a server with no such history says
+const EMPTY = new Map<string, unknown>([
+  ["device-log", { events: [], status: [], audio: [] }],
+  ["upgrades", []],
+  ["events", []],
+  ["calls", { calls: [], balance: null }],
+]);
 
 // GET /api/search as db.search does it, over every closed conversation (limit 0): q in its summary (any case) or in
 // one of its sentences (as written), every day's sentences fetched at the first q
@@ -83,14 +93,17 @@ window.fetch = async (input, init) => {
   const u = new URL(input instanceof Request ? input.url : String(input), location.href);
   if (u.origin !== location.origin || !u.pathname.startsWith("/api/"))
     return realFetch(input, init);
+  const path = u.pathname.slice(5);
+  // the language: this browser's own (我的 keeps a pick in localStorage), no hint for a pick
+  if (path === "lang") return json({ lang: navigator.language.startsWith("zh") ? "zh" : "en" });
   if ((init?.method ?? "GET") !== "GET") return demo();
+  if (EMPTY.has(path)) return json(EMPTY.get(path));
+  if (path === "app/latest" || path.endsWith("/halves")) return demo(); // no app build; 拆分's first step
   if (u.pathname === "/api/status") return json(status());
   if (u.pathname === "/api/search") return json(await search(u.searchParams));
   const q = [...u.searchParams].sort(([a], [b]) => (a < b ? -1 : 1));
   const key =
-    decodeURIComponent(u.pathname.slice(5)) +
-    (q.length ? "?" : "") +
-    q.map(([k, v]) => `${k}=${v}`).join("&");
+    decodeURIComponent(path) + (q.length ? "?" : "") + q.map(([k, v]) => `${k}=${v}`).join("&");
   const r = await realFetch(snap(key));
   return r.ok ? r : demo();
 };
@@ -163,7 +176,15 @@ function status(): Status {
 const live = () => ({
   type: "live",
   device: DEV,
-  live: { device: DEV, ...talk(), at: isoLocal(Date.now()), upto: lastEnd(), topics },
+  // a second behind what was said: 立即更新 stays pressable (and answers with the hint)
+  live: {
+    device: DEV,
+    ...talk(),
+    speech_s: Math.max(0, talk().speech_s - 1),
+    at: isoLocal(Date.now()),
+    upto: lastEnd(),
+    topics,
+  },
 });
 
 type Listener = (m: unknown) => void;

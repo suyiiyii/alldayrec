@@ -1,6 +1,7 @@
 import { watch } from "vue";
 import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import { i18n, t } from "./i18n";
+import { toast } from "./lib/toast";
 
 export const router = createRouter({
   // the online demo (src/demo.ts) is static files with no fallback to index.html: its paths go after a #
@@ -72,4 +73,12 @@ const title = () => {
   document.title = k ? t(k) : "alldayrec";
 };
 router.afterEach(title);
+// the online demo has no recorder, microphone, phone or AI service to reach (src/demo.ts): those pages say so; opened
+// directly, the timeline instead
+if (import.meta.env.MODE === "demo")
+  router.beforeEach((to, from) => {
+    if (to.path !== "/record" && to.path !== "/connect") return;
+    toast(t("err.code.demo"));
+    return from.matched.length ? false : "/";
+  });
 watch(i18n.global.locale, title);

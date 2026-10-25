@@ -10,6 +10,7 @@ let stopOther = () => {}; // the card listening now
 // stops (iOS suspends it anyway). One per device card on the progress page; one listening on the page at a time.
 import { onUnmounted, ref } from "vue";
 import { intl, t } from "../i18n";
+import { toast } from "../lib/toast";
 
 const { device } = defineProps<{ device: string }>();
 const LEAD_S = 1; // played this far behind the newest piece's arrival: pieces come late by their upload's jitter
@@ -27,6 +28,7 @@ let ctx: AudioContext | null = null,
   raf = 0;
 
 function start() {
+  if (import.meta.env.MODE === "demo") return toast(t("err.code.demo")); // no recorder to hear (src/demo.ts)
   stopOther();
   stopOther = stop;
   on.value = true;

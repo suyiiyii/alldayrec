@@ -1,5 +1,6 @@
 {
   "common": {
+    "demo": "在线体验 · 示例数据",
     "today": "今天",
     "yesterday": "昨天",
     "todayAt": "今天 {t}",

@@ -73,6 +73,12 @@ async function setAlias(alias: string, name: string) {
 }
 const link = (id: string, at: string | null) =>
   `/c/${id}` + (at ? `#${encodeURIComponent(at)}` : "");
+// the online demo's hash history (src/demo.ts) takes a plain #mine for a route: there the count scrolls by itself
+function anchor(e: MouseEvent, id: string) {
+  if (import.meta.env.MODE !== "demo") return;
+  e.preventDefault();
+  document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
+}
 </script>
 
 <template>
@@ -101,11 +107,17 @@ const link = (id: string, at: string | null) =>
           </div>
         </div>
         <div class="stats">
-          <a class="stat" :href="p.mine.length ? '#mine' : undefined"
+          <a
+            class="stat"
+            :href="p.mine.length ? '#mine' : undefined"
+            @click="anchor($event, 'mine')"
             ><b>{{ p.mine.length }}</b
             >{{ t("person.mine") }}</a
           >
-          <a class="stat" :href="p.theirs.length ? '#theirs' : undefined"
+          <a
+            class="stat"
+            :href="p.theirs.length ? '#theirs' : undefined"
+            @click="anchor($event, 'theirs')"
             ><b>{{ p.theirs.length }}</b
             >{{ t("person.theirs") }}</a
           >
