@@ -15,6 +15,7 @@ import { t } from "../i18n";
 import {
   errorTitle,
   get,
+  isFragment,
   post,
   type Conversation,
   type Due,
@@ -28,7 +29,9 @@ import { useSocket, useWatch } from "../lib/socket";
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
 // one tag filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
 // Pinned on top while it shows today unfiltered: the conversation going on (the live card) and what is due. Each past
-// day opens with its recap, yesterday's unfolded. A brand-new instance gets the three steps to start instead.
+// day opens with its recap, yesterday's unfolded. Without words or a tag, a day's fragments (too little speech for a
+// summary) fold into one line under its recap, a tap shows them in their places. A brand-new instance gets the three
+// steps to start instead.
 const PAGE = 30;
 const route = useRoute(),
   router = useRouter();
@@ -190,14 +193,20 @@ async function page() {
 
 // the list by day, newest first
 const days = computed(() => {
-  const out: { day: string; convs: Conversation[] }[] = [];
+  const out: { day: string; convs: Conversation[]; frags: number }[] = [];
   for (const c of items.value) {
     const d = c.start.slice(0, 10);
-    if (out.at(-1)?.day !== d) out.push({ day: d, convs: [] });
+    if (out.at(-1)?.day !== d) out.push({ day: d, convs: [], frags: 0 });
     out.at(-1)!.convs.push(c);
+    out.at(-1)!.frags += +isFragment(c);
   }
   return out;
 });
+// the days whose fragments are out; words or a tag: every result as found
+const unfolded = ref<Record<string, boolean>>({});
+const fold = computed(() => !q.value && !tag.value);
+const shown = (g: (typeof days.value)[number]) =>
+  fold.value && !unfolded.value[g.day] ? g.convs.filter((c) => !isFragment(c)) : g.convs;
 // each past day's recap, asked once as the day comes into the list (null: none, or still on its way)
 watch(days, (ds) => {
   if (q.value || tag.value) return;
@@ -390,7 +399,18 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           :recap="recaps[g.day]!"
           :open="g.day === yesterday"
         />
-        <ConversationItem v-for="c in g.convs" :key="c.id" :c="c" />
+        <button
+          v-if="fold && g.frags"
+          class="frags"
+          :aria-expanded="!!unfolded[g.day]"
+          @click="unfolded[g.day] = !unfolded[g.day]"
+        >
+          <Icon :name="unfolded[g.day] ? 'chevron-down' : 'chevron-right'" :size="16" />
+          {{
+            t(unfolded[g.day] ? "timeline.fragsHide" : "timeline.frags", { n: g.frags }, g.frags)
+          }}
+        </button>
+        <ConversationItem v-for="c in shown(g)" :key="c.id" :c="c" />
       </section>
       <template v-if="done && !items.length && !reply && !asking">
         <div v-if="q || tag || day" class="empty">
@@ -538,6 +558,18 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   margin-left: var(--space-1);
   font-size: var(--fs-sm);
   font-weight: 400;
+  color: var(--muted);
+}
+/* 另有 3 段零碎对话: a quiet line, not a card */
+.frags {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  margin-top: calc(-1 * var(--space-3));
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--muted);
 }
 .ask .x {

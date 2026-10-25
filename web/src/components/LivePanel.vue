@@ -8,6 +8,7 @@ import {
   errorTitle,
   hhmm,
   hhmmss,
+  MIN_SPEECH_S,
   post,
   type DeviceStatus,
   type LiveState,
@@ -33,7 +34,6 @@ const doneTo = (device: string) =>
 // The device: the one given, if it is in a conversation; else of the recording ones, the one whose conversation going on
 // spoke last (not the one analyzed last: a conversation under a minute has no analysis yet); with none talking, the one
 // whose audio came in last
-const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation is analyzed by itself from this much speech on
 const barDev = computed(() => {
   const ds = props.status?.devices ?? [];
   const going = ds.filter((d) => d.recording && d.conversation);

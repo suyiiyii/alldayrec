@@ -834,7 +834,9 @@
     "typeInstead": "Type",
     "talkInstead": "Talk",
     "askByVoice": "Ask by voice",
-    "clickToSend": "Click again to send, Esc to cancel"
+    "clickToSend": "Click again to send, Esc to cancel",
+    "frags": "{n} more short conversation | {n} more short conversations",
+    "fragsHide": "Hide {n} short conversation | Hide {n} short conversations"
   },
   "todoItem": {
     "quote": "“{q}”",

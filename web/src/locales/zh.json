@@ -834,7 +834,9 @@
     "typeInstead": "打字",
     "talkInstead": "说话",
     "askByVoice": "说出问题",
-    "clickToSend": "再点一下发送，Esc 取消"
+    "clickToSend": "再点一下发送，Esc 取消",
+    "frags": "另有 {n} 段零碎对话",
+    "fragsHide": "收起 {n} 段零碎对话"
   },
   "todoItem": {
     "quote": "「{q}」",

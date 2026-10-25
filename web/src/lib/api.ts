@@ -1,4 +1,4 @@
-import { i18n, t } from "../i18n";
+import { i18n, t } from "../i18n.ts";
 
 export interface Row {
   id: string;
@@ -21,6 +21,10 @@ export interface Span {
 export const inSpans = (r: Row, spans?: Span[]) =>
   !!spans?.some((x) => x.from <= r.start && r.start <= x.to);
 export const MOSTLY_MEDIA = 0.8; // a conversation this much media is greyed as a whole
+export const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation is analyzed by itself from this much speech on
+// a fragment: too little speech for a summary (its title is its first sentence); the time line folds a day's away
+export const isFragment = (c: Conversation) =>
+  (c.speech_s ?? Infinity) < MIN_SPEECH_S && (c.summary?.media_share ?? 0) < MOSTLY_MEDIA;
 
 // Rows in order, a run of FOLD or more media rows folded into one line; a shorter run stays, greyed
 export type Seg = { k: "row"; r: Row; media: boolean } | { k: "fold"; key: string; rows: Row[] };

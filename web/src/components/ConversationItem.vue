@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { hhmm, minutes, MOSTLY_MEDIA, type Conversation } from "../lib/api";
+import { hhmm, MOSTLY_MEDIA, type Conversation } from "../lib/api";
 import { t } from "../i18n";
 import { speakerList } from "../lib/speakers";
 
-// one conversation in a list: a card on a time line down the left (a grey dot: person colours are for avatars)
+// one conversation in a list: a card on a time line down the left (a grey dot: person colours are for avatars). Slim:
+// its start and its people, the title, the gist; the end, minutes, todos and tags are on the conversation page
 const { c } = defineProps<{ c: Conversation }>();
 const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
 </script>
@@ -14,12 +15,8 @@ const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
     <span class="dot" />
     <RouterLink class="card" :class="{ media }" :to="'/c/' + c.id">
       <div class="meta">
-        <span>{{ media ? t("convItem.media") : "" }}{{ hhmm(c.start) }}–{{ hhmm(c.end) }}</span> ·
-        <span>{{ t("common.min", { n: minutes(c) }) }}</span> ·
+        <span>{{ media ? t("convItem.media") : "" }}{{ hhmm(c.start) }}</span> ·
         <span>{{ speakerList(c.participants || []) || "—" }}</span>
-        <template v-if="c.summary?.todos?.length">
-          · <span>{{ t("convItem.todos", c.summary.todos.length) }}</span></template
-        >
       </div>
       <div
         class="title"
@@ -36,12 +33,7 @@ const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
               : t("api.summaryPending")
         }}
       </div>
-      <template v-if="!media">
-        <div v-if="c.summary?.summary" class="gist">{{ c.summary.summary }}</div>
-        <div v-if="c.summary?.tags?.length" class="tagline">
-          <span v-for="tg in c.summary.tags" :key="tg" class="tag">{{ tg }}</span>
-        </div>
-      </template>
+      <div v-if="!media && c.summary?.summary" class="gist">{{ c.summary.summary }}</div>
     </RouterLink>
   </div>
 </template>
@@ -84,7 +76,7 @@ const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-/* a line breaks between the parts, never inside one (「1 / 条待办」) */
+/* a line breaks between the parts, never inside one (「等 3 / 人」) */
 .meta span {
   white-space: nowrap;
 }
@@ -100,17 +92,5 @@ const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.tagline {
-  margin-top: 6px;
-}
-/* the topics are words here, not buttons: grey, no accent */
-.tagline .tag {
-  cursor: inherit;
-  margin-right: 4px;
-  min-height: 22px;
-  padding: 0 8px;
-  color: var(--muted);
-  background: var(--bg);
 }
 </style>
