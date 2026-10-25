@@ -12,7 +12,7 @@ import { toast } from "../lib/toast";
 import Icon from "./Icon.vue";
 
 const props = defineProps<{ id: string; mark?: Mark | null }>();
-const { busy, error, detail, run } = useMutation();
+const { busy, error, run } = useMutation();
 const now = computed(() => markOf(props));
 const menu = ref<HTMLDetailsElement>(),
   opened = ref(false),
@@ -30,6 +30,7 @@ async function mark(m: Mark | null) {
         )
       : setMarks([props.id], null).then(() => toast(t("common.undone"))),
   );
+  if (error.value) toast(error.value); // as its 完成 says it: inline, it squeezed the todo's text in its row
 }
 defineExpose({ mark }); // TodoItem's swipe
 </script>
@@ -63,7 +64,6 @@ defineExpose({ mark }); // TodoItem's swipe
         </button>
       </div>
     </details>
-    <span v-if="error" class="bad" role="alert" :title="detail">{{ error }}</span>
   </span>
 </template>
 
@@ -133,10 +133,5 @@ defineExpose({ mark }); // TodoItem's swipe
 }
 .menu button.wrong {
   color: var(--err);
-}
-/* an error wraps inside the page instead of running off a phone's edge */
-.marks .bad {
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 </style>
