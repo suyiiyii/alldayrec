@@ -201,6 +201,7 @@ String nativeText(BuildContext context, Object? v) {
     'forgetOthers' => l.linkForgetOthers,
     'joining' => l.linkJoining,
     'connected' => l.linkConnected,
+    'beanIdle' => l.linkBeanIdle,
     'linkError' => l.linkError(detail),
     'synced' => l.lastSynced(time('at'), v['kb']),
     'usbSwitchingOn' => l.usbSwitchingOn,

@@ -910,6 +910,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get linkConnected => '已连接 · 实时上传';
 
   @override
+  String get linkBeanIdle => '录音豆已连上 · 没在录音';
+
+  @override
+  String get beanFeishuBound => '已绑定飞书';
+
+  @override
+  String get beanFeishuNotBound => '未绑定飞书';
+
+  @override
   String linkError(Object detail) {
     return '录音设备出错：$detail';
   }

@@ -98,4 +98,12 @@ void main() {
     rows = scan(rows, [rec(a, -70), rec(c, -80)]);
     expect(nearest(rows), a);
   });
+
+  test('a bean keeps its row as its address changes (its name is from its MAC)', () {
+    const bean = 'D3200-0A0B';
+    var rows = scan([], [rec(bean, -50, address: 'r1'), rec(a, -60)]);
+    rows = scan(rows, [rec(bean, -52, address: 'r2'), rec(a, -60)]);
+    expect(names(rows), [bean, a]);
+    expect(rows.first['address'], 'r2');
+  });
 }

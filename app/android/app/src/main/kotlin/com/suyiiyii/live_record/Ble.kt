@@ -114,14 +114,16 @@ object Ble {
     } catch (e: Exception) { Log.w("live-record", "ble removeBond: $e"); false }
 }
 
-/** The add-recorder page's list: the recorders around and the state each advertises. */
+/** The add-recorder page's list: the recorders around and the state each advertises; Feishu recorder beans too
+ *  (BeanLink.kt), with the flags byte they advertise (a bean has no binding of ours to say: state 0). */
 @SuppressLint("MissingPermission")
 class Nearby(ctx: Context) {
-    private class Seen(val address: String, val rssi: Int, val state: Int, val mv: Int, val card: Int, val busy: Boolean, val at: Long)
+    private class Seen(val address: String, val rssi: Int, val state: Int, val mv: Int, val card: Int, val busy: Boolean, val at: Long, val flags: Int = -1)
     private val seen = java.util.concurrent.ConcurrentHashMap<String, Seen>()
     private val scanner = ctx.getSystemService(BluetoothManager::class.java).adapter.bluetoothLeScanner
     private val cb = object : ScanCallback() {
         override fun onScanResult(type: Int, r: ScanResult) {
+            beanAdv(r)?.let { (n, flags) -> seen[n] = Seen(r.device.address, r.rssi, 0, -1, -1, !r.isConnectable, System.currentTimeMillis(), flags); return }
             val name = Ble.fullName(r) ?: return
             // the state byte is in the scan response: a result without one keeps the last known; a non-connectable
             // advertisement is a recorder connected to another phone, scan response or not
@@ -132,14 +134,15 @@ class Nearby(ctx: Context) {
         }
     }
 
-    fun start() = scanner?.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Ble.STORE)).build()),
+    fun start() = scanner?.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Ble.STORE)).build(),
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(Bean.SERVICE)).build()),
         ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb)
 
     fun stop() = scanner?.stopScan(cb)
 
     /** Seen in the last 5 s, nearest first. */
     fun list() = seen.entries.filter { System.currentTimeMillis() - it.value.at < 5000 }.sortedByDescending { it.value.rssi }
-        .map { (n, s) -> mapOf("name" to n, "address" to s.address, "rssi" to s.rssi, "state" to s.state, "mv" to s.mv, "card" to s.card, "busy" to s.busy) }
+        .map { (n, s) -> mapOf("name" to n, "address" to s.address, "rssi" to s.rssi, "state" to s.state, "mv" to s.mv, "card" to s.card, "busy" to s.busy, "flags" to s.flags) }
 }
 
 /** Finds the recorder by scanning for its service (always: the board's address is random static, and a device made

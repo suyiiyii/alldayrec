@@ -106,6 +106,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final lent = store == -16;
     final dfuState = st['dfu'] ?? r['dfu'], dfu = dfuState == null ? null : nativeText(context, dfuState);
     final listen = st['listen'] as List?;  // listening on this phone: its lines
+    final bean = name?.startsWith('D3200-') == true;  // a Feishu recorder bean: no pause, listening, USB disk or firmware of ours
 
     // connection chip: what the link is doing, in one colour
     final (String chip, Color chipColor, IconData chipIcon) = !recording
@@ -161,12 +162,12 @@ class _RecorderPageState extends State<RecorderPage> {
           child: Text(l.recorderHelp, style: small),
         ),
         // pause
-        section(l.pauseRecording, Row(children: [
+        if (!bean) section(l.pauseRecording, Row(children: [
           Expanded(child: Text(!linked ? l.pauseNeedsLink : pausedMin > 0 ? l.pausedResumesIn(pausedMin) : l.recordingNow)),
           if (linked) PauseButton(paused: pausedMin > 0, onDone: _pauseDone, labels: true),
         ])),
         // listening on this phone (Listen.swift, Listen.kt)
-        section(l.liveListening, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (!bean) section(l.liveListening, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             secondary: Icon(Icons.headphones_rounded, color: listen != null ? cs.primary : cs.onSurfaceVariant),
@@ -214,7 +215,7 @@ class _RecorderPageState extends State<RecorderPage> {
             ]),
         ])),
         // USB disk
-        section(l.usbDiskMode, Column(children: [
+        if (!bean) section(l.usbDiskMode, Column(children: [
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             secondary: Icon(Icons.usb_rounded, color: lent ? cs.primary : cs.onSurfaceVariant),
@@ -232,8 +233,10 @@ class _RecorderPageState extends State<RecorderPage> {
         ])),
         // firmware and binding
         section(l.deviceManagement, Column(children: [
-          FirmwareTile(name: name, model: model, fw: fw, dfu: dfu, dfuBusy: st['dfuBusy'] == true),
-          const Divider(height: 20),
+          if (!bean) ...[
+            FirmwareTile(name: name, model: model, fw: fw, dfu: dfu, dfuBusy: st['dfuBusy'] == true),
+            const Divider(height: 20),
+          ],
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.link_off_rounded, color: syncing ? cs.outline : cs.error),

@@ -110,7 +110,8 @@ class MainActivity : FlutterActivity() {
                 "bind" -> {  // the recorder the person chose: the link pairs with it next (force: it then forgets its other phones)
                     val addr = call.argument<String>("address")!!
                     val d = getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(addr)
-                    if (d.bondState == BluetoothDevice.BOND_BONDED) Ble.removeBond(d)  // an old bond the recorder may have forgotten
+                    // an old bond the recorder may have forgotten; a bean is never paired (one Feishu paired stays as it is)
+                    if (d.bondState == BluetoothDevice.BOND_BONDED && !Bean.isBean(call.argument<String>("name"))) Ble.removeBond(d)
                     val p = getSharedPreferences("recorder", MODE_PRIVATE)
                     val e = p.edit().putString("bleName", call.argument<String>("name"))
                         .putString("bleAddress", addr).putBoolean("bindPending", true).putBoolean("bindForce", call.argument<Boolean>("force")!!)
@@ -134,8 +135,9 @@ class MainActivity : FlutterActivity() {
                     name?.let { e.remove("hold:${Ble.tag(it)}") }  // its backlog no longer comes from here
                     e.commit()
                     val forgot = RecorderService.link?.forgetAll() ?: false
-                    name?.let { DeviceLog.app(Ble.tag(it), "unbind", if (forgot) "解除绑定：录音设备忘掉了所有手机" else "解除绑定：录音设备没连上，只有这台手机忘掉了它") }
-                    if (addr != null && BluetoothAdapter.checkBluetoothAddress(addr))
+                    name?.let { DeviceLog.app(Ble.tag(it), "unbind", if (forgot) "解除绑定：录音设备忘掉了所有手机"
+                        else if (Bean.isBean(it)) "解除绑定：这台手机不再连这颗录音豆（豆子那边什么也不改）" else "解除绑定：录音设备没连上，只有这台手机忘掉了它") }
+                    if (addr != null && BluetoothAdapter.checkBluetoothAddress(addr) && !Bean.isBean(name))
                         Ble.removeBond(getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(addr))
                     runOnUiThread { result.success(forgot) }
                 }.start()

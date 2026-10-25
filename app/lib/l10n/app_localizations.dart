@@ -1652,6 +1652,24 @@ abstract class AppLocalizations {
   /// **'已连接 · 实时上传'**
   String get linkConnected;
 
+  /// No description provided for @linkBeanIdle.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音豆已连上 · 没在录音'**
+  String get linkBeanIdle;
+
+  /// No description provided for @beanFeishuBound.
+  ///
+  /// In zh, this message translates to:
+  /// **'已绑定飞书'**
+  String get beanFeishuBound;
+
+  /// No description provided for @beanFeishuNotBound.
+  ///
+  /// In zh, this message translates to:
+  /// **'未绑定飞书'**
+  String get beanFeishuNotBound;
+
   /// No description provided for @linkError.
   ///
   /// In zh, this message translates to:

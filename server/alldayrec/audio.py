@@ -78,8 +78,8 @@ def _crc_table() -> list[int]:
 _CRC = _crc_table()  # Ogg's CRC-32: polynomial 0x04C11DB7, not reflected, no initial value or final xor
 
 
-def ogg(audio_packets: list[bytes], frame_ms: int = 10, pre_skip: int = 0) -> bytes:
-    """Opus packets (each one frame of frame_ms) as one 16 kHz mono Ogg Opus stream (RFC 7845), a packet a page;
+def ogg(audio_packets: list[bytes], frame_ms: int = 10, pre_skip: int = 0, channels: int = 1) -> bytes:
+    """Opus packets (each one frame of frame_ms) as one 16 kHz Ogg Opus stream (RFC 7845), a packet a page;
     pre_skip in 48 kHz samples, decoded and dropped by the reader."""
     pages = []
 
@@ -91,7 +91,7 @@ def ogg(audio_packets: list[bytes], frame_ms: int = 10, pre_skip: int = 0) -> by
             crc = (crc << 8 & 0xFFFFFFFF) ^ _CRC[crc >> 24 ^ b]
         struct.pack_into("<I", p, 22, crc)
         pages.append(bytes(p))
-    page(b"OpusHead" + struct.pack("<BBHIhB", 1, 1, pre_skip, SR, 0, 0), 2, 0)
+    page(b"OpusHead" + struct.pack("<BBHIhB", 1, channels, pre_skip, SR, 0, 0), 2, 0)
     page(b"OpusTags" + bytes(8), 0, 0)
     for k, p in enumerate(audio_packets):
         page(p, 4 if k == len(audio_packets) - 1 else 0, (k + 1) * frame_ms * 48)
@@ -104,9 +104,10 @@ QUIET = 32768 * 10 ** (-60 / 20)  # a 10 ms frame under this RMS (-60 dBFS) has 
 DEHUM_MIN = 50  # quiet frames (0.5 s) a piece needs for its hum to be taken out
 
 
-def celt10(packet: bytes) -> bool:
-    """An Opus packet's TOC says CELT, one 10 ms frame: a recorder's encoder (firmware codec.c)."""
-    return len(packet) > 0 and packet[0] >> 3 >= 16 and (packet[0] >> 3) & 3 == 2 and packet[0] & 3 == 0
+def celt(packet: bytes) -> int:
+    """The ms of an Opus packet whose TOC says CELT, one frame of 10 ms (a recorder's encoder, firmware codec.c) or
+    20 ms (the Feishu bean's, stereo); 0 for anything else."""
+    return {2: 10, 3: 20}.get(packet[0] >> 3 & 3, 0) if len(packet) > 0 and packet[0] >> 3 >= 16 and packet[0] & 3 == 0 else 0
 
 
 def dehum(x: np.ndarray) -> np.ndarray:
@@ -127,15 +128,16 @@ def dehum(x: np.ndarray) -> np.ndarray:
 def primed(prev: bytes, body: bytes) -> bytes:
     """body, an Ogg Opus piece of a recorder, with the last PREROLL packets of the piece it goes on from (`prev`) put
     ahead of its own and skipped (pre-skip): the decoder then has the state the board's encoder had. A recorder's pieces
-    are slices of one running encoder (CELT, 10 ms frames, pre-skip 0: the app's Store.oggOpus, lr_sync); a fresh
-    decoder starting inside it put out the piece's first 10-40 ms up to 26 dB too loud, a click at every join, each
-    second while the app is in front (10-08). Anything else (an iPhone's own microphone: SILK, 20 ms; a phone that
-    starts each piece anew) is body unchanged."""
+    are slices of one running encoder (CELT, 10 ms frames, pre-skip 0: the app's Store.oggOpus, lr_sync; a Feishu
+    bean's: 20 ms, stereo); a fresh decoder starting inside it put out the piece's first 10-40 ms up to 26 dB too loud,
+    a click at every join, each second while the app is in front (10-08). Anything else (an iPhone's own microphone:
+    SILK, 20 ms; a phone that starts each piece anew) is body unchanged."""
     ps, prev = packets(body), packets(prev)[2:][-PREROLL:]
-    if (len(ps) < 3 or not ps[0].startswith(b"OpusHead") or struct.unpack_from("<H", ps[0], 10)[0] != 0
-            or len(prev) < PREROLL or not all(map(celt10, prev + ps[2:3]))):
+    ms = celt(ps[2]) if len(ps) > 2 else 0
+    if (not ms or not ps[0].startswith(b"OpusHead") or struct.unpack_from("<H", ps[0], 10)[0] != 0
+            or len(prev) < PREROLL or any(celt(p) != ms for p in prev)):
         return body
-    return ogg(prev + ps[2:], 10, PREROLL * 10 * 48)
+    return ogg(prev + ps[2:], ms, PREROLL * ms * 48, ps[0][9])
 
 
 def before(device: str, start_ms: int) -> bytes | None:
@@ -243,7 +245,7 @@ def samples(p) -> np.ndarray | None:
     stored at upload (save) stay those of the piece as it came."""
     body, ogg = read(p), p["path"].endswith(".ogg")
     x = decode(body, aac=p["path"].endswith(".aac"), n=p["n"], prev=before(p["device"], p["start_ms"]) if ogg else None)
-    if x is not None and DEHUM and ogg and celt10((packets(body)[2:] or [b""])[0]):
+    if x is not None and DEHUM and ogg and celt((packets(body)[2:] or [b""])[0]) == 10:
         return dehum(x)
     return x
 

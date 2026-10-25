@@ -73,12 +73,13 @@ object Store {
         return a
     }
 
-    /** 16 kHz mono Opus packets of FRAME_MS each into one Ogg Opus file (RFC 7845), as web/src/lib/ogg.ts does:
-     *  pre-skip 0 (the board's encoder runs on across pieces), granule counting every frame from the piece's start. */
-    fun oggOpus(frames: List<ByteArray>): ByteArray {
+    /** 16 kHz Opus packets of [frameMs] each into one Ogg Opus file (RFC 7845), as web/src/lib/ogg.ts does: pre-skip 0
+     *  (the encoder runs on across pieces), granule counting every frame from the piece's start. The bean's (Bean.kt):
+     *  20 ms frames, stereo. */
+    fun oggOpus(frames: List<ByteArray>, frameMs: Long = FRAME_MS, channels: Int = 1): ByteArray {
         val serial = Random.nextInt()
         val head = ByteBuffer.allocate(19).order(ByteOrder.LITTLE_ENDIAN)
-            .put("OpusHead".toByteArray()).put(1).put(1).putShort(0).putInt(16000).putShort(0).put(0).array()
+            .put("OpusHead".toByteArray()).put(1).put(channels.toByte()).putShort(0).putInt(16000).putShort(0).put(0).array()
         val tags = "OpusTags".toByteArray() + ByteArray(8)
         val out = ByteArrayOutputStream()
         out.write(page(listOf(head), 2, 0, serial, 0))
@@ -86,7 +87,7 @@ object Store {
         var seq = 2
         for (i in frames.indices step 50) {
             val end = minOf(i + 50, frames.size)
-            out.write(page(frames.subList(i, end), if (end == frames.size) 4 else 0, end * FRAME_MS * 48, serial, seq++))
+            out.write(page(frames.subList(i, end), if (end == frames.size) 4 else 0, end * frameMs * 48, serial, seq++))
         }
         return out.toByteArray()
     }

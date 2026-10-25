@@ -558,6 +558,9 @@
   "linkForgetOthers": "让录音设备忘掉其他手机",
   "linkJoining": "正在接上实时",
   "linkConnected": "已连接 · 实时上传",
+  "linkBeanIdle": "录音豆已连上 · 没在录音",
+  "beanFeishuBound": "已绑定飞书",
+  "beanFeishuNotBound": "未绑定飞书",
   "linkError": "录音设备出错：{detail}",
   "@linkError": {
     "placeholders": {

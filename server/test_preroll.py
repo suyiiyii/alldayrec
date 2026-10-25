@@ -48,3 +48,19 @@ def test_join(tmp_path, monkeypatch):
     assert audio.save("iPhone", T, c, "audio/ogg") == audio.save("iPhone", T + 1000, d, "audio/ogg") == 1.0
     assert np.array_equal(audio.samples(db.conn().execute("SELECT * FROM pieces WHERE device = 'iPhone' AND start_ms = ?", (T + 1000,)).fetchone()),
                           audio.decode(d))
+
+
+def test_bean_join(tmp_path):
+    """A Feishu bean's audio as the Android app uploads it (Bean.kt, Store.oggOpus): its units' 160-byte packets, 20 ms
+    CELT, stereo, 16 kHz, one running encoder cut into pieces. ffmpeg takes them as they are (mono out); a piece that
+    goes on from the one before starts as the one stream does."""
+    db.open_db(tmp_path / "t.db")
+    bean = encode("-ac", "2", "-application", "audio", "-frame_duration", "20", "-b:a", "64k", "-vbr", "off")
+    assert {len(p) for p in bean} == {160} and {p[0] >> 3 for p in bean} == {23} and bean[0][0] & 4, "CELT WB 20 ms, stereo, CBR"
+    a, b = audio.ogg(bean[:100], 20, channels=2), audio.ogg(bean[100:200], 20, channels=2)
+    assert audio.save("D3200-0A1B", T, a, "audio/ogg") == audio.save("D3200-0A1B", T + 2000, b, "audio/ogg") == 2.0
+    x = audio.samples(db.conn().execute("SELECT * FROM pieces WHERE start_ms = ?", (T + 2000,)).fetchone())
+    one = audio.decode(audio.ogg(bean[:200], 20, channels=2))[100 * 320:]
+    assert len(x) == len(one) == 100 * 320, (len(x), len(one))
+    assert abs(lvl(x[:640]) - lvl(one[:640])) < 1, f"the join: first 40 ms {lvl(x[:640]) - lvl(one[:640]):+.1f} dB against one stream"
+    assert lvl(audio.decode(b)[:640]) - lvl(one[:640]) > 6, "on its own the same piece starts loud"

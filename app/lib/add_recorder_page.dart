@@ -19,7 +19,8 @@ List<Map> mergeNearby(List<Map> rows, List scan) {
   final out = [for (final r in rows) {...r, 'missed': (r['missed'] as int) + 1}];
   for (final Map d in scan) {
     var i = out.indexWhere((r) => r['address'] == d['address']);
-    if (i < 0 && RegExp(r'^LR-[A-Z0-9]+-[0-9A-F]{4}$').hasMatch(d['name'])) i = out.indexWhere((r) => r['name'] == d['name']);
+    // a name is the recorder's own (a bean's from its MAC): its address may change between scans
+    if (i < 0 && RegExp(r'^(LR-[A-Z0-9]+|D3200)-[0-9A-F]{4}$').hasMatch(d['name'])) i = out.indexWhere((r) => r['name'] == d['name']);
     if (i < 0) {
       out.add({...d, 'missed': 0});
     } else if (out[i]['missed'] != 0) {  // else this scan has it twice (one name, two addresses): the first, stronger, stays
@@ -151,7 +152,8 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
             ? (l.busyOtherPhone, null)
             : bound
                 ? (l.boundOtherPhone, TextButton(onPressed: () => _bind(d, true), child: Text(l.forceBind)))
-                : (state < 0 ? l.oldFirmware : l.notBound, FilledButton(onPressed: () => _bind(d, false), child: Text(l.bind)));
+                : (beanText(l, d).isNotEmpty ? '' : state < 0 ? l.oldFirmware : l.notBound,  // a bean: what Feishu has of it
+                    FilledButton(onPressed: () => _bind(d, false), child: Text(l.bind)));
     return Card.outlined(
       child: ListTile(
         enabled: !d['gone'],
@@ -160,9 +162,17 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
           Flexible(child: Text(d['name'])),
           if (d['nearest']) Padding(padding: const EdgeInsets.only(left: 8), child: Badge(label: Text(l.nearest), backgroundColor: cs.primary)),
         ]),
-        subtitle: Text(d['gone'] ? what : [what, near, advText(l, d)].where((s) => s.isNotEmpty).join(' · ')),
+        subtitle: Text(d['gone'] ? what : [what, near, advText(l, d), beanText(l, d)].where((s) => s.isNotEmpty).join(' · ')),
         trailing: action,
       ),
     );
   }
+}
+
+/// A Feishu recorder bean's advertised flags: whether a Feishu account has it (bit 7), and the byte itself, which the
+/// first tests with one want to see before and after this phone connects to it; '' for a recorder of ours.
+String beanText(AppLocalizations l, Map d) {
+  final flags = d['flags'] as int? ?? -1;
+  if (flags < 0) return '';
+  return '${flags & 0x80 != 0 ? l.beanFeishuBound : l.beanFeishuNotBound} (0x${flags.toRadixString(16).padLeft(2, '0').toUpperCase()})';
 }

@@ -22,6 +22,8 @@
     <string name="link_forget_others">让录音设备忘掉其他手机</string>
     <string name="link_joining">正在接上实时</string>
     <string name="link_connected">已连接 · 实时上传</string>
+    <string name="link_encrypting">正在建立加密连接</string>
+    <string name="link_bean_idle">录音豆已连上 · 没在录音</string>
     <string name="link_error">录音设备出错：%1$s</string>
     <string name="note_rejected">服务端无法解码一块，已丢弃</string>
     <string name="note_upload_failed">上传失败 %1$s</string>

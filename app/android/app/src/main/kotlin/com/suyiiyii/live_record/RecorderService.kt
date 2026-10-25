@@ -37,18 +37,20 @@ class RecorderService : Service() {
         @Volatile var slicer: Slicer? = null
         @Volatile var uploader: Uploader? = null
         @Volatile var link: BleLink? = null  // the BLE recorder, when it is the source instead of the microphone
+        @Volatile var bean: BeanLink? = null  // or a Feishu recorder bean (Bean.kt)
         @Volatile var interruptedAt: Long = 0
         @Volatile var foregroundApp = true
         fun status(dir: File): Map<String, Any?> {
             val q = Uploader.queue(dir)
+            val l = link; val b = bean
             return mapOf(
                 "running" to (slicer != null), "uploading" to (uploader != null), "files" to slicer?.files, "slice" to slicer?.sliceS(),
                 "error" to slicer?.error, "sent" to uploader?.sent, "note" to uploader?.note,
                 "pending" to q.size, "pendingBytes" to q.sumOf { it.length() }, "oldest" to q.firstOrNull()?.let(Uploader::startMs),
-                "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to link?.state,
-                "connected" to (link?.state?.get("code") == "connected"), "tag" to slicer?.tag, "hw" to link?.hw,
-                "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (link != null) "ble" else "mic"), "usbNote" to link?.usbNote, "lastSync" to link?.syncNote,
-                "syncDone" to link?.syncDoneKb, "syncTotal" to link?.syncTotalKb, "syncLive" to link?.syncLiveKb, "pausedUntil" to link?.pausedUntil,
+                "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to (l?.state ?: b?.state),
+                "connected" to ((l?.state ?: b?.state)?.get("code") == "connected"), "tag" to slicer?.tag, "hw" to (l?.hw ?: b?.hw),
+                "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (l != null || b != null) "ble" else "mic"), "usbNote" to l?.usbNote, "lastSync" to l?.syncNote,
+                "syncDone" to (l?.syncDoneKb ?: b?.syncDoneKb), "syncTotal" to (l?.syncTotalKb ?: b?.syncTotalKb), "syncLive" to l?.syncLiveKb, "pausedUntil" to l?.pausedUntil,
                 "listen" to link?.listening?.lines)
         }
 
@@ -102,6 +104,8 @@ class RecorderService : Service() {
                 "forgetOthers" -> s(R.string.link_forget_others)
                 "joining" -> s(R.string.link_joining)
                 "connected" -> s(R.string.link_connected)
+                "encrypting" -> s(R.string.link_encrypting)
+                "beanIdle" -> s(R.string.link_bean_idle)
                 "linkError" -> s(R.string.link_error, v["detail"])
                 "rejected" -> s(R.string.note_rejected)
                 "uploadFailed" -> s(R.string.note_upload_failed, v["detail"])
@@ -206,7 +210,10 @@ class RecorderService : Service() {
                 it.screenOff = !(getSystemService(POWER_SERVICE) as PowerManager).isInteractive
                 it.start()
             }
-            if (ble) link = BleLink(this, prefs, dir, File(getExternalFilesDir(null), "undated"), { slicer?.sliceS() ?: 20 },
+            if (ble && Bean.isBean(prefs.getString("bleName", null))) bean = BeanLink(this, prefs, dir, { slicer?.sliceS() ?: 20 },
+                { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) },
+                { name, at -> uploader?.let { u -> Thread { u.end(at, name) }.start() } }).also { it.start() }
+            else if (ble) link = BleLink(this, prefs, dir, File(getExternalFilesDir(null), "undated"), { slicer?.sliceS() ?: 20 },
                 { n -> slicer?.let { it.files += n } }, { slicer?.tag = it }, { name, hw -> uploader?.report(name, hw) }).also { it.start() }
             prefs.edit().remove("endAt").remove("endDevice").apply()  // a new recording carries on the conversation: no end for the old stop
             ensureUploader(prefs, dir)
@@ -227,6 +234,7 @@ class RecorderService : Service() {
         val at = System.currentTimeMillis()
         prefs.edit().putBoolean("active", false).putLong("endAt", at).putString("endDevice", slicer?.tag).apply()  // kept: a kill before the queue empties still ends it
         link?.stop(); link = null
+        bean?.stop(); bean = null
         slicer?.stop(); slicer = null
         uploadOnly(prefs, dir, at)
     }
@@ -282,6 +290,7 @@ class RecorderService : Service() {
         background()
         unregisterReceiver(screen)
         link?.stop(); link = null
+        bean?.stop(); bean = null
         slicer?.stop(); slicer = null
         uploader?.running = false; uploader = null
         super.onDestroy()

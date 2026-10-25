@@ -24,6 +24,8 @@
     <string name="link_forget_others">Making the recorder forget other phones</string>
     <string name="link_joining">Going live</string>
     <string name="link_connected">Connected · live upload</string>
+    <string name="link_encrypting">Setting up an encrypted connection</string>
+    <string name="link_bean_idle">Bean connected · not recording</string>
     <string name="link_error">Recorder error: %1$s</string>
     <string name="note_rejected">The server could not decode a piece: dropped</string>
     <string name="note_upload_failed">Upload failed: %1$s</string>

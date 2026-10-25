@@ -937,6 +937,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get linkConnected => 'Connected · live upload';
 
   @override
+  String get linkBeanIdle => 'Bean connected · not recording';
+
+  @override
+  String get beanFeishuBound => 'Bound to Feishu';
+
+  @override
+  String get beanFeishuNotBound => 'Not bound to Feishu';
+
+  @override
   String linkError(Object detail) {
     return 'Recorder error: $detail';
   }

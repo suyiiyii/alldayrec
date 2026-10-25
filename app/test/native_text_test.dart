@@ -14,7 +14,7 @@ final codes = <Map<String, Object?>>[
   {'code': 'away', 'lastSeen': 1800000000000}, {'code': 'connecting'}, {'code': 'stalePairing', 'name': 'LR-P3-2420'},
   {'code': 'stalePairing', 'name': null}, {'code': 'mtu'}, {'code': 'pairing'}, {'code': 'pairingDialog'}, {'code': 'encrypting'},
   {'code': 'pairingFailed'}, {'code': 'services'}, {'code': 'clock'}, {'code': 'status'}, {'code': 'forgetOthers'}, {'code': 'joining'},
-  {'code': 'connected'}, {'code': 'linkError', 'detail': 'GATT 133'}, {'code': 'synced', 'at': 1800000000000, 'kb': 1234},
+  {'code': 'connected'}, {'code': 'beanIdle'}, {'code': 'linkError', 'detail': 'GATT 133'}, {'code': 'synced', 'at': 1800000000000, 'kb': 1234},
   {'code': 'notConnected'}, {'code': 'usbSwitchingOn'}, {'code': 'usbSwitchingOff'}, {'code': 'usbNoComputer'},
   {'code': 'usbFailed', 'err': -19}, {'code': 'usbNotYetOn'}, {'code': 'usbStillOn'}, {'code': 'usbOn'}, {'code': 'rejected'},
   {'code': 'uploadFailed', 'detail': 'HTTP 502'}, {'code': 'endFailed', 'detail': 'HTTP 502'}, {'code': 'archiveFailed', 'detail': 'EIO'},

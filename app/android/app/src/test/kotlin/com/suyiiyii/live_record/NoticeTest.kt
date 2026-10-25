@@ -54,7 +54,7 @@ class NoticeTest {
     @Test fun everyCode() {  // each code the link and the uploader say has its words in both languages
         val codes = listOf("scanning", "bluetoothOff", "unbound", "kicked", "elsewhere", "bluetoothNotOn", "scanFailed", "connectFailed",
             "away", "connecting", "mtu", "pairing", "pairingFailed", "services", "clock", "status", "forgetOthers", "joining", "connected",
-            "linkError", "rejected", "uploadFailed", "endFailed", "archiveFailed")
+            "encrypting", "beanIdle", "linkError", "rejected", "uploadFailed", "endFailed", "archiveFailed")
         for (str in listOf(zh, en)) for (c in codes) assertNotEquals(c, RecorderService.said(say(c, "lastSeen" to now), str))
         assertEquals("录音设备不在附近，它在离线录音，回来后自动补传", RecorderService.said(say("away", "lastSeen" to null), zh))
     }

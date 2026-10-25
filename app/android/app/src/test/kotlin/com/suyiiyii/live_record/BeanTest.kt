@@ -1,0 +1,291 @@
+package com.suyiiyii.live_record
+
+import org.json.JSONObject
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.math.BigInteger
+import java.nio.ByteBuffer
+import java.nio.file.Files
+import java.security.KeyFactory
+import java.security.KeyPair
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECPrivateKeySpec
+
+/** The bean's protocol against ws/soundcore's byte vectors (fixtures/bean-crypto.json, 0BSD), and BeanSync against a
+ *  fake bean (FakeBean below: synthetic keys, files and audio, a made-up serial and MAC; nothing of a real bean). */
+class BeanTest {
+    private val v = JSONObject(javaClass.getResource("/bean-crypto.json")!!.readText())
+    private fun hex(s: String) = s.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+    private fun field(o: String, k: String) = hex(v.getJSONObject(o).getString(k))
+
+    @Test fun commands() {  // ws/soundcore's command vectors
+        assertEquals("08ee0000000101" + "0a0002", Bean.hex(Bean.info()))
+        assertEquals("08ee0000001a0e0c0000002a", Bean.hex(Bean.list(0)))
+        assertEquals("04030201fb", Bean.hex(Bean.clock(0x01020304, -5).let { it.copyOfRange(9, it.size - 1) }))
+        assertEquals("a60000000403020101", Bean.hex(Bean.transfer(0x01020304, 166, true).let { it.copyOfRange(9, it.size - 1) }))
+        for (f in listOf(Bean.info(), Bean.list(3), Bean.clock(1, 8), Bean.transfer(1, 0, false), Bean.hello(ByteArray(65)))) assertTrue(Bean.allowed(f))
+    }
+
+    @Test fun onlyFiveCommandsGoOut() {
+        assertEquals(setOf(0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07), Bean.SENDS)
+        // bind, auth, unbind, the record button, delete, Wi-Fi, completion ack, SPP reads, factory reset and OTA, a log read
+        for (cmd in listOf(0x0B87, 0x0B8B, 0x0B01, 0x01B8, 0x1882, 0x1A10, 0x1A05, 0x1A02, 0x1A0A, 0x1A0F, 0x1A11, 0xFF20, 0xFF01, 0x1B0E))
+            assertThrows(IllegalArgumentException::class.java) { Bean.frame(cmd shr 8, cmd and 255) }
+        // a frame made some other way: well formed, and still not sent
+        val bind = byteArrayOf(0x08, 0xEE.toByte(), 0, 0, 0, 0x0B, 0x87.toByte(), 10, 0)
+        assertFalse(Bean.allowed(bind + bind.sum().toByte()))
+        val info = Bean.info()
+        assertFalse(Bean.allowed(info.copyOf().also { it[9] = 0 }))  // a wrong sum
+    }
+
+    @Test fun reader() {  // ws/soundcore's framing vectors: one frame, and one split over notifications after junk
+        val r = Bean.Reader()
+        val f = r.push(hex("09ff00000110a20a00c5")).single()
+        assertEquals(listOf(0x10, 0xA2, 1, 0), listOf(f.type, f.id, f.status, f.payload.size))
+        assertTrue(r.push(hex("de09")).isEmpty())
+        assertTrue(r.push(hex("ff00000110a2")).isEmpty())
+        assertEquals(0x10A2, r.push(hex("0a00c5")).single().cmd)
+        // a frame whose sum is off is skipped, the next one is read
+        assertEquals(0x10A2, r.push(hex("09ff00000110a20a00c4") + hex("09ff00000110a20a00c5")).single().cmd)
+        assertFalse(Bean.Frame(0x01, 0x01, 0x11, ByteArray(0)).ok)  // device commands: status 1 only
+        assertTrue(Bean.Frame(0x1A, 0x07, 0x11, ByteArray(0)).ok)
+    }
+
+    @Test fun crypto() {
+        assertArrayEquals(field("aes_256_ctr", "ciphertext_hex"),
+            Bean.ctr(field("aes_256_ctr", "key_hex"), field("aes_256_ctr", "iv_hex"), field("aes_256_ctr", "plaintext_hex")))
+        assertArrayEquals(field("hkdf_sha256", "derived_key_hex"), Bean.hkdf(field("hkdf_sha256", "shared_secret_hex")))
+        // ECDH: the app's private value 3, the device's public key (its private value 4)
+        val like = Bean.keys().public as ECPublicKey
+        val app = Bean.point(field("ecdh_p256", "app_public_key_hex"), like)
+        assertArrayEquals(field("ecdh_p256", "app_public_key_hex"), Bean.pub(app))
+        val mine = KeyPair(app, KeyFactory.getInstance("EC").generatePrivate(ECPrivateKeySpec(BigInteger.valueOf(3), like.params)))
+        val device = field("ecdh_p256", "device_public_key_hex")
+        val shared = field("ecdh_p256", "shared_secret_hex")
+        assertArrayEquals(shared, Bean.shared(mine, Bean.point(device, like)))
+        assertArrayEquals(Bean.hkdf(shared), Bean.session(mine, device + shared))
+        assertThrows(IllegalArgumentException::class.java) { Bean.session(mine, device + ByteArray(32)) }  // not the secret we got
+        assertArrayEquals(field("file_key", "file_key_hex"),
+            Bean.fileKey(field("file_key", "session_key_hex"), field("file_key", "session_nonce_hex"), field("file_key", "encrypted_file_key_hex")))
+        val nonce = field("audio_counter", "nonce_hex")
+        assertArrayEquals(field("audio_counter", "counter_hex"), Bean.iv(nonce, 3))
+        assertArrayEquals(field("audio_counter", "max_counter_hex"), Bean.iv(nonce, Bean.MAX_SEQ))
+        assertThrows(IllegalArgumentException::class.java) { Bean.iv(nonce, Bean.MAX_SEQ + 1) }
+        assertArrayEquals(field("audio_slice", "plaintext_hex"),
+            Bean.opus(field("file_key", "file_key_hex"), nonce, Bean.Slice(3, 0, field("audio_slice", "ciphertext_hex"))))
+    }
+
+    @Test fun parsing() {
+        val unit = Bean.le32(7) + byteArrayOf(5) + ByteArray(160) { it.toByte() } + byteArrayOf(0)
+        val s = Bean.slices(unit + unit).first()
+        assertEquals(7L, s.seq); assertEquals(5, s.flags)
+        assertArrayEquals(ByteArray(160) { it.toByte() }, s.data)
+        assertThrows(IllegalArgumentException::class.java) { Bean.slices(unit.copyOf(165)) }
+        val hw = Bean.info(FakeBean(0).info())
+        assertEquals(listOf(80, "battery", "01.00", 20_000_000L, 60, false), listOf(hw["battery"], hw["charge"], hw["fw"], hw["free_kb"], hw["case_battery"], hw["recording"]))
+        assertEquals("fake000000000001", Bean.serial(FakeBean(0).info()))
+        assertEquals(listOf(10, 100, 100), listOf(Bean.pct(0), Bean.pct(9), Bean.pct(100)))
+        val l = Bean.listing(Bean.u16le(2) + Bean.le32(11) + Bean.le32(2000) + Bean.le32(12) + Bean.le32(4000) + Bean.le32(13) + ByteArray(4))
+        assertEquals(listOf(11L to 2000L, 12L to 4000L), l.files)
+        assertEquals(13L, l.open)
+        // the name is from the MAC in the manufacturer data (company id first), whatever address it comes from
+        val adv = byteArrayOf(0, 0, 0x0A, 0x0B, 0x91.toByte(), 0, 0)
+        assertEquals("D3200-0A0B", Bean.name(0x0002, adv))
+        assertEquals(0x91, Bean.flags(0x0002, adv))
+        assertNull(Bean.name(0x0002, byteArrayOf(1, 2, 3)))
+        assertTrue(Bean.isBean("D3200-0A0B")); assertFalse(Bean.isBean("LR-P3-0A0B"))
+    }
+
+    /** What a fake bean records goes up as pieces, each unit once and dated by its seq: live from where the bean is
+     *  (begun 30 s before), on in the next file it rotates to, a drop mid-file resumed by its byte offset, a hole
+     *  asked for again once the recording stops, the start of the first file pulled as backlog; the hold until all of
+     *  it is up, then the end. A file from before the bean was added is never asked for. */
+    @Test fun sync() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks"); val state = File(dir, "state.json")
+        val t0 = 1_793_000_000_000L
+        val since = t0 - 3_600_000
+        val bean = FakeBean(t0)
+        val a = (t0 - 30_000) / 1000; val old = since / 1000 - 100
+        var b = 0L
+        bean.recording = true; bean.open = a; bean.listed[old] = 60_000
+        bean.onTransfer = { file, from, live ->
+            when {
+                live && file == a -> {  // live from where the bean is, whatever was asked: 1500 units (30 s) in
+                    bean.header(file, 0xFFFFFFFFL)
+                    bean.units(file, (1500L..1749L).toList(), last = 1749)
+                    bean.complete(file)
+                    b = (bean.now + 5000) / 1000 + 1
+                    bean.rotation(b); bean.open = b; bean.listed[a] = 35_000
+                }
+                live && file == b && from == 0L -> {
+                    bean.header(file, 0xFFFFFFFFL)
+                    bean.units(file, (0L..199L).toList())
+                    bean.script += { throw IOException("link dropped") }
+                }
+                live && file == b -> {  // again after the drop, from its offset; ten units lost on the way
+                    bean.header(file, 0xFFFFFFFFL)
+                    bean.units(file, (200L..249L) + (260L..299L), last = 299)
+                    bean.complete(file)
+                    bean.push(0x1882, byteArrayOf(0))
+                    bean.recording = false; bean.open = 0; bean.listed[b] = 6000
+                }
+                !live && file == a -> { bean.header(file, 1750L * Bean.UNIT); bean.units(file, (from..1749L).toList(), last = 1749); bean.complete(file) }
+                !live && file == b -> { bean.header(file, 300L * Bean.UNIT); bean.units(file, (from..299L).toList(), last = 299); bean.complete(file) }
+                else -> fail("asked for $file from $from live $live")
+            }
+        }
+        val one = BeanSync("D3200-0A0B", state, chunks, bean)
+        assertEquals("link dropped", assertThrows(IOException::class.java) { one.session(since, "") }.message)
+        val anchorA = one.files[a]!!.anchor
+        assertTrue("the phone's clock, near the bean's", anchorA - a * 1000 in 0L..3000L)
+        assertEquals("live began past the file's start: the hold", anchorA + 1500 * 20 - 60_000, bean.held)
+        assertTrue(Bean.u32(bean.sentOf(0x01A6), 0) in t0 / 1000 - 1..t0 / 1000 + 1)
+
+        // a new session (what the phone knows of the files read back): on in B from its offset, then the backlog
+        val pieces = mutableListOf<Pair<Long, List<ByteArray>>>()
+        bean.script += {  // the uploader takes every piece, then time goes on
+            for (f in Uploader.queue(chunks)) { pieces += Uploader.startMs(f) to packets(f); f.delete() }
+            bean.now += 1000
+        }
+        bean.script += { bean.now += 6000 }
+        val two = BeanSync("D3200-0A0B", state, chunks, bean)
+        assertThrows(IOException::class.java) { two.session(since, "") }
+        assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(b, 200L, true), Triple(a, 0L, false), Triple(b, 250L, false)), bean.transfers)
+        assertTrue(bean.logs.any { it.first == "bean_gap" && "250..259" in it.second })
+
+        val seen = mutableMapOf<Long, MutableList<Long>>()
+        for ((start, ps) in pieces) {
+            assertEquals("stereo", 2, ps[0][9].toInt())
+            for ((i, p) in ps.drop(2).withIndex()) {
+                val seq = ByteBuffer.wrap(p, 1, 4).int.toLong()
+                val file = if (p[5] == (a % 251).toByte()) a else b
+                assertEquals(0xBC.toByte(), p[0])  // decrypted
+                assertEquals("dated by its seq", two.files[file]!!.anchor + seq * 20, start + i * 20)
+                seen.getOrPut(file) { mutableListOf() } += seq
+            }
+        }
+        assertEquals("each unit once", (0L..1749L).toList(), seen[a]!!.sorted())
+        assertEquals((0L..299L).toList(), seen[b]!!.sorted())
+        assertNull("all up: no hold", bean.held)
+        assertEquals(listOf(two.files[b]!!.anchor + 300 * 20), bean.ends)
+        assertFalse(bean.transfers.any { it.first == old })
+    }
+
+    /** An Ogg file's packets (OpusHead, OpusTags, then the audio). */
+    private fun packets(f: File): List<ByteArray> {
+        val b = f.readBytes(); val out = mutableListOf<ByteArray>(); var cur = ByteArrayOutputStream(); var p = 0
+        while (p < b.size) {
+            assertEquals("OggS", String(b, p, 4))
+            val n = b[p + 26].toInt() and 255
+            var body = p + 27 + n
+            for (i in 0 until n) {
+                val l = b[p + 27 + i].toInt() and 255
+                cur.write(b, body, l); body += l
+                if (l < 255) { out += cur.toByteArray(); cur = ByteArrayOutputStream() }
+            }
+            p = body
+        }
+        return out
+    }
+}
+
+/** A bean as the protocol has it, scripted, for BeanSync: it answers the five commands, wraps file keys in the
+ *  session key of each connection and encrypts each unit as a bean does; `onTransfer` says what a 1A/07 starts and
+ *  `script` what happens when the phone waits and nothing is on its way (out of script: the link goes). */
+class FakeBean(var now: Long) : BeanSync.Io {
+    private val keys = Bean.keys()
+    private var session = ByteArray(0)
+    private val rnd = java.util.Random(1)
+    private val out = ArrayDeque<Pair<ByteArray, Long>>()  // notifications, and the ms before each
+    private val fileKeys = mutableMapOf<Long, Pair<ByteArray, ByteArray>>()
+    var recording = false
+    var open = 0L
+    val listed = linkedMapOf<Long, Long>()
+    val sent = mutableListOf<ByteArray>()
+    val transfers = mutableListOf<Triple<Long, Long, Boolean>>()
+    var onTransfer: (Long, Long, Boolean) -> Unit = { _, _, _ -> }
+    val script = ArrayDeque<() -> Unit>()
+    val logs = mutableListOf<Pair<String, String>>()
+    var held: Long? = null
+    val ends = mutableListOf<Long>()
+
+    fun sentOf(cmd: Int) = sent.last { (it[5].toInt() and 255) shl 8 or (it[6].toInt() and 255) == cmd }.let { it.copyOfRange(9, it.size - 1) }
+
+    override fun send(frame: ByteArray) {
+        assertTrue("only the five commands reach the bean", Bean.allowed(frame))
+        sent += frame
+        val p = frame.copyOfRange(9, frame.size - 1)
+        when ((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255)) {
+            0x2E01 -> {
+                val s = Bean.shared(keys, Bean.point(p, keys.public as ECPublicKey))
+                session = Bean.hkdf(s)
+                push(0x2E01, Bean.pub(keys.public as ECPublicKey) + s)
+            }
+            0x0101 -> push(0x0101, info())
+            0x01A6 -> push(0x01A6, ByteArray(0))
+            0x1A0E -> push(0x1A0E, if (Bean.u16(p, 0) > 0) Bean.u16le(0) + Bean.le32(open) + ByteArray(4)
+                else listed.entries.fold(Bean.u16le(listed.size)) { acc, (id, ms) -> acc + Bean.le32(id) + Bean.le32(ms) } + Bean.le32(open) + ByteArray(4))
+            0x1A07 -> Triple(Bean.u32(p, 4), Bean.u32(p, 0) / Bean.UNIT, p[8] == 1.toByte()).let { transfers += it; onTransfer(it.first, it.second, it.third) }
+        }
+    }
+
+    override fun receive(ms: Long): ByteArray? {
+        if (out.isEmpty()) (script.removeFirstOrNull() ?: throw IOException("out of script"))()
+        val (b, wait) = out.removeFirstOrNull() ?: run { now += ms; return null }
+        now += wait
+        return b
+    }
+
+    override fun now() = now
+    override fun liveUnits() = 50
+    override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text }
+    override fun report(hw: Map<String, Any?>) {}
+    override fun hold(at: Long?) { held = at }
+    override fun held() = held
+    override fun end(at: Long) { ends += at }
+    override fun piece() {}
+
+    fun info() = ByteArray(57).also { b ->
+        b[0] = 1; b[1] = 7; b[38] = 5
+        "01.00".toByteArray().copyInto(b, 3); "fake000000000001".toByteArray().copyInto(b, 8)
+        Bean.le32(30_000_000).copyInto(b, 24); Bean.le32(20_000_000).copyInto(b, 28)
+        byteArrayOf(2, 0, 0, 0, 0x0A, 0x0B).copyInto(b, 39)
+        b[50] = if (recording) 1 else 0
+    }
+
+    /** A frame from the bean (status 1), in notifications of up to 200 B. */
+    fun push(cmd: Int, payload: ByteArray, wait: Long = 0) {
+        val n = payload.size + 10
+        val f = byteArrayOf(0x09, 0xFF.toByte(), 0, 0, 1, (cmd shr 8).toByte(), cmd.toByte(), n.toByte(), (n shr 8).toByte()) + payload
+        val whole = f + f.sum().toByte()
+        for ((i, c) in whole.toList().chunked(200).withIndex()) out += c.toByteArray() to if (i == 0) wait else 0L
+    }
+
+    fun header(file: Long, size: Long) {
+        val (k, n) = fileKeys.getOrPut(file) { ByteArray(32).also(rnd::nextBytes) to ByteArray(16).also(rnd::nextBytes) }
+        val sn = ByteArray(16).also(rnd::nextBytes)
+        push(0x1A07, Bean.le32(file) + Bean.le32(size) + n + Bean.ctr(session, sn, "soundcored3200".toByteArray() + k) + sn + byteArrayOf(0))
+    }
+
+    /** Units three to a frame, 20 ms each; the audio says its file and seq. */
+    fun units(file: Long, seqs: List<Long>, last: Long = -1) {
+        val (k, n) = fileKeys[file]!!
+        for (c in seqs.chunked(3)) push(0x1A08, c.fold(ByteArray(0)) { acc, s ->
+            acc + Bean.le32(s) + byteArrayOf(if (s == last) 4 else if (s == 0L) 2 else 0) + Bean.ctr(k, Bean.iv(n, s), audio(file, s)) + byteArrayOf(0)
+        }, 20L * c.size)
+    }
+
+    fun complete(file: Long) = push(0x1A0A, byteArrayOf(0) + Bean.le32(0) + Bean.le32(file))
+    fun rotation(file: Long) = push(0x1A06, Bean.le32(file) + byteArrayOf(0))
+    private fun audio(file: Long, seq: Long) = ByteArray(160).also { ByteBuffer.wrap(it).put(0xBC.toByte()).putInt(seq.toInt()).put((file % 251).toByte()) }
+}
