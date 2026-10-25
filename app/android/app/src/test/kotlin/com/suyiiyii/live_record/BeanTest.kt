@@ -181,6 +181,56 @@ class BeanTest {
         assertFalse(bean.transfers.any { it.first == old })
     }
 
+    /** A transfer asked for right after the one before ended got code 4 (10-25): the next waits 200 ms as the SDK does,
+     *  and a code 4 is asked again after a moment without counting as a try. */
+    @Test fun paced() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val p = t0 / 1000 - 600; val q = p + 100
+        bean.listed[p] = 200; bean.listed[q] = 200
+        var busy = true
+        bean.onTransfer = { file, _, _ ->
+            if (file == q && busy) { busy = false; bean.header(file, 10L * Bean.UNIT, code = 4) }
+            else { bean.header(file, 10L * Bean.UNIT); bean.units(file, (0L..9L).toList(), last = 9); bean.complete(file) }
+        }
+        repeat(20) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(p, q, q), bean.transfers.map { it.first })
+        val asked = bean.sent.indices.filter { bean.sent[it][5] == 0x1A.toByte() && bean.sent[it][6] == 0x07.toByte() }.map { bean.sentAt[it] }
+        assertTrue("200 ms after p's end", asked[1] - asked[0] >= 200 + 10 * 20)
+        assertTrue("and after the code 4", asked[2] - asked[1] >= 200)
+        assertEquals("not a try", 0, sync.files[q]!!.tries)
+        assertNull(sync.gap(sync.files[q]!!))
+        assertEquals(1, bean.logs.count { "code 4" in it.second })
+    }
+
+    /** Live began 36 units into the file (the bean starts realtime where it is, 10-25). The rest of the file is on the
+     *  phone, so the re-pull from 0 is cut once unit 35 is in: the link goes (the bean cannot be stopped otherwise),
+     *  not 1800 more units. */
+    @Test fun headOnly() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val c = t0 / 1000
+        bean.recording = true; bean.open = c
+        bean.onTransfer = { file, from, live ->
+            if (live) {
+                bean.header(file, 0xFFFFFFFFL)
+                bean.units(file, (36L..1835L).toList(), last = 1835)
+                bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
+                bean.recording = false; bean.open = 0; bean.listed[c] = 1836L * 20
+            } else { bean.header(file, 1836L * Bean.UNIT); bean.units(file, (from..1835L).toList(), last = 1835); bean.complete(file) }
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false)), bean.transfers)
+        assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
+        assertTrue("the rest not taken", bean.queued > 500)
+        assertTrue(bean.logs.any { "断开连接" in it.second })
+    }
+
     /** An Ogg file's packets (OpusHead, OpusTags, then the audio). */
     private fun packets(f: File): List<ByteArray> {
         val b = f.readBytes(); val out = mutableListOf<ByteArray>(); var cur = ByteArrayOutputStream(); var p = 0
@@ -201,7 +251,8 @@ class BeanTest {
 
 /** A bean as the protocol has it, scripted, for BeanSync: it answers the five commands, wraps file keys in the
  *  session key of each connection and encrypts each unit as a bean does; `onTransfer` says what a 1A/07 starts and
- *  `script` what happens when the phone waits and nothing is on its way (out of script: the link goes). */
+ *  `script` what happens when the phone waits a second or more and nothing is on its way (out of script: the link
+ *  goes). */
 class FakeBean(var now: Long) : BeanSync.Io {
     private val keys = Bean.keys()
     private var session = ByteArray(0)
@@ -212,6 +263,9 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var open = 0L
     val listed = linkedMapOf<Long, Long>()
     val sent = mutableListOf<ByteArray>()
+    val sentAt = mutableListOf<Long>()
+    var completedAt = -1L  // when the last 1A/0A came
+    val queued get() = out.size  // notifications not taken yet
     val transfers = mutableListOf<Triple<Long, Long, Boolean>>()
     var onTransfer: (Long, Long, Boolean) -> Unit = { _, _, _ -> }
     val script = ArrayDeque<() -> Unit>()
@@ -223,7 +277,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
 
     override fun send(frame: ByteArray) {
         assertTrue("only the five commands reach the bean", Bean.allowed(frame))
-        sent += frame
+        sent += frame; sentAt += now
         val p = frame.copyOfRange(9, frame.size - 1)
         when ((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255)) {
             0x2E01 -> {
@@ -240,9 +294,11 @@ class FakeBean(var now: Long) : BeanSync.Io {
     }
 
     override fun receive(ms: Long): ByteArray? {
+        if (out.isEmpty() && ms < 1000) { now += ms; return null }  // the pause between transfers: not a script step
         if (out.isEmpty()) (script.removeFirstOrNull() ?: throw IOException("out of script"))()
         val (b, wait) = out.removeFirstOrNull() ?: run { now += ms; return null }
         now += wait
+        if (b[0] == 0x09.toByte() && b[5] == 0x1A.toByte() && b[6] == 0x0A.toByte()) completedAt = now
         return b
     }
 
@@ -271,10 +327,10 @@ class FakeBean(var now: Long) : BeanSync.Io {
         for ((i, c) in whole.toList().chunked(200).withIndex()) out += c.toByteArray() to if (i == 0) wait else 0L
     }
 
-    fun header(file: Long, size: Long) {
+    fun header(file: Long, size: Long, code: Int = 0) {
         val (k, n) = fileKeys.getOrPut(file) { ByteArray(32).also(rnd::nextBytes) to ByteArray(16).also(rnd::nextBytes) }
         val sn = ByteArray(16).also(rnd::nextBytes)
-        push(0x1A07, Bean.le32(file) + Bean.le32(size) + n + Bean.ctr(session, sn, "soundcored3200".toByteArray() + k) + sn + byteArrayOf(0))
+        push(0x1A07, Bean.le32(file) + Bean.le32(size) + n + Bean.ctr(session, sn, "soundcored3200".toByteArray() + k) + sn + byteArrayOf(code.toByte()))
     }
 
     /** Units three to a frame, 20 ms each; the audio says its file and seq. */

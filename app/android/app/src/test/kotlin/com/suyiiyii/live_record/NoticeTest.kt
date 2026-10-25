@@ -38,6 +38,10 @@ class NoticeTest {
         assertEquals("扫描失败 2，5 秒后重试" to "", ble("link" to say("scanFailed", "err" to 2, "s" to 5L)))
         assertEquals("录音设备出错：GATT 133" to "", ble("link" to say("linkError", "detail" to "GATT 133")))
         assertEquals("正在启动" to "", ble())
+        // a bean's backlog: it is not recording, nothing goes up live
+        assertEquals("补传录音豆里的录音 1.5 / 44.5 MB" to "电量 68%",
+            ble("link" to say("beanIdle"), "connected" to true, "hw" to hw, "syncDone" to 1536L, "syncTotal" to 45568L))
+        assertEquals("录音豆已连上 · 没在录音" to "电量 68%", ble("link" to say("beanIdle"), "connected" to true, "hw" to hw))
     }
 
     @Test fun english() {

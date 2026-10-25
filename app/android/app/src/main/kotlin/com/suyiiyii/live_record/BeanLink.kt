@@ -88,7 +88,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
             val line = JSONObject(v + mapOf("t" to System.currentTimeMillis(), "what" to what)).toString()
             captured += line.length
             if (captured > 200L shl 20) { w.close(); capture = null; return }  // 200 MB: a capture is for a short test
-            w.write(line); w.write("\n")
+            w.write(line); w.write("\n"); w.flush()  // each line: an app killed mid-session keeps what it had
         }
     }
 
@@ -96,6 +96,8 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     private val thread = Thread { loop() }
 
     val state get() = if (inSession) sync.state else linkState
+    /** The session is up (its key exchange and first reads done): recording or not. */
+    val connected get() = inSession && sync.state["code"] in setOf("beanIdle", "joining", "connected")
     val hw get() = sync.hw + mapOf("name" to name)
     val syncDoneKb get() = sync.syncDoneKb
     val syncTotalKb get() = sync.syncTotalKb
@@ -122,6 +124,8 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
                 wait = 2000
             } catch (e: InterruptedException) {
                 return
+            } catch (e: BeanSync.Again) {  // a transfer stopped by letting the link go (logged): straight back
+                wait = 1000
             } catch (e: Exception) {
                 Log.w("live-record", "bean: $e")
                 if (on) linkState = say("linkError", "detail" to (e.message ?: "$e"))

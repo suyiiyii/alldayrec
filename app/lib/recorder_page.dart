@@ -61,11 +61,11 @@ class _RecorderPageState extends State<RecorderPage> {
     _load();
   }
 
-  Future<void> _unbind(String name, bool linked) async {
+  Future<void> _unbind(String name, bool linked, bool bean) async {
     final l = AppLocalizations.of(context);
     final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: Text(l.unbindTitle(name)),
-      content: Text((linked ? l.unbindLinkedBody : l.unbindAwayBody) + (Platform.isIOS ? '\n\n${l.unbindIosForget(name)}' : '')),
+      content: Text(bean ? l.beanUnbindBody : (linked ? l.unbindLinkedBody : l.unbindAwayBody) + (Platform.isIOS ? '\n\n${l.unbindIosForget(name)}' : '')),
       actions: [
         TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.cancel)),
         TextButton(onPressed: () => Navigator.pop(c, true), child: Text(l.unbind)),
@@ -159,7 +159,7 @@ class _RecorderPageState extends State<RecorderPage> {
         ],
         Padding(
           padding: const EdgeInsets.only(top: 8),
-          child: Text(l.recorderHelp, style: small),
+          child: Text(bean ? l.beanRecorderHelp : l.recorderHelp, style: small),
         ),
         // pause
         if (!bean) section(l.pauseRecording, Row(children: [
@@ -198,13 +198,13 @@ class _RecorderPageState extends State<RecorderPage> {
             Row(children: [
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
-              Expanded(child: Text(l.fetchingCard, style: t.textTheme.bodyLarge)),
+              Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
               Text('${sizeText(syncDone)} / ${sizeText(syncTotal)}', style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
             ]),
             const SizedBox(height: 10),
             LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
-            Text(live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
+            Text(bean ? l.beanSyncHelp : live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
                 style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           ] else
             Row(children: [
@@ -241,8 +241,8 @@ class _RecorderPageState extends State<RecorderPage> {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.link_off_rounded, color: syncing ? cs.outline : cs.error),
             title: Text(l.unbind, style: TextStyle(color: syncing ? cs.outline : cs.error)),
-            subtitle: Text(syncing ? l.unbindAfterSync : l.unbindSub),
-            onTap: syncing ? null : () => _unbind(name, linked),
+            subtitle: Text(bean ? (syncing ? l.beanUnbindAfterSync : l.beanUnbindSub) : syncing ? l.unbindAfterSync : l.unbindSub),
+            onTap: syncing ? null : () => _unbind(name, linked, bean),
           ),
         ])),
       ]),

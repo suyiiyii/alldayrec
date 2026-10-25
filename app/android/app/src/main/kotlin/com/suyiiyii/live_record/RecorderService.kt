@@ -48,7 +48,7 @@ class RecorderService : Service() {
                 "error" to slicer?.error, "sent" to uploader?.sent, "note" to uploader?.note,
                 "pending" to q.size, "pendingBytes" to q.sumOf { it.length() }, "oldest" to q.firstOrNull()?.let(Uploader::startMs),
                 "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to (l?.state ?: b?.state),
-                "connected" to ((l?.state ?: b?.state)?.get("code") == "connected"), "tag" to slicer?.tag, "hw" to (l?.hw ?: b?.hw),
+                "connected" to (l?.state?.get("code") == "connected" || b?.connected == true), "tag" to slicer?.tag, "hw" to (l?.hw ?: b?.hw),
                 "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (l != null || b != null) "ble" else "mic"), "usbNote" to l?.usbNote, "lastSync" to l?.syncNote,
                 "syncDone" to (l?.syncDoneKb ?: b?.syncDoneKb), "syncTotal" to (l?.syncTotalKb ?: b?.syncTotalKb), "syncLive" to l?.syncLiveKb, "pausedUntil" to l?.pausedUntil,
                 "listen" to link?.listening?.lines)
@@ -125,7 +125,9 @@ class RecorderService : Service() {
             val title = when {
                 s["source"] != "ble" -> t(R.string.notice_recording)
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
-                total > 0 -> if (s["connected"] == true)
+                total > 0 -> if ((s["link"] as Map<*, *>?)?.get("code") == "beanIdle")  // a bean's backlog: it is not recording
+                    t(R.string.notice_bean_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
+                else if (s["connected"] == true)
                     t(R.string.notice_live_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
                 else t(R.string.notice_fetching_current, (s["syncLive"] as Long? ?: 0L) / 1024.0)
                 else -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
@@ -342,18 +344,34 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     /** Where the server's finalization waits for a recorder's backlog (BleLink.holdAhead), null: it does not. */
     private fun hold(device: String) = prefs.getLong("hold:$device", -1).takeIf { device.isNotEmpty() && it >= 0 }
 
+    /** Recorders whose last upload went with a hold: the server waits until an upload comes without it. At start, those
+     *  with one in the prefs (the app may have gone between the upload and the let go). */
+    private val holding = prefs.all?.keys.orEmpty().filter { it.startsWith("hold:") }.map { it.removePrefix("hold:") }.toMutableSet()
+
+    /** A hold let go with none of that recorder's pieces left to say so (a recorder that stopped, its backlog all up):
+     *  told on its own (10-25: the bean's hold stayed on the server until unbind), after the upload that carried it. */
+    private fun letGo(q: List<File>) {
+        for (d in holding.filter { d -> hold(d) == null && q.none { deviceOf(it) == d } }) try {
+            val code = post("$server/api/hold/release?device=${enc(d)}", ByteArray(0), null)
+            Log.i("live-record", "hold of $d let go: HTTP $code")
+            if (code == 200) holding -= d
+        } catch (e: Exception) { Log.w("live-record", "hold of $d not let go: ${e.message}"); sleep(5000) }
+    }
 
     override fun run() {
         while (running) {
             val q = files()
+            letGo(q)
             if (q.isEmpty()) { sleep(200); continue }
             val b = batch(q)
             try {
                 // the hold with every upload while there is one: the server lets go when an upload comes without it
+                val held = hold(deviceOf(b[0]))
                 val code = post("$server/api/chunks?device=${enc(deviceOf(b[0]).ifEmpty { device })}&start=${startMs(b[0])}" +
-                                (hold(deviceOf(b[0]))?.let { "&hold=$it" } ?: ""),
+                                (held?.let { "&hold=$it" } ?: ""),
                                 b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg")
                 Log.i("live-record", "upload ${b.size} pieces of ${deviceOf(b[0]).ifEmpty { device }} from ${startMs(b[0])}: HTTP $code")
+                if (code == 200 || code == 400) { if (held != null) holding += deviceOf(b[0]) else holding -= deviceOf(b[0]) }  // the server took the hold either way
                 when {
                     code == 200 -> {
                         b.forEach(::keep); sent += b.size; note = null

@@ -561,6 +561,12 @@
   "linkBeanIdle": "录音豆已连上 · 没在录音",
   "beanFeishuBound": "已绑定飞书",
   "beanFeishuNotBound": "未绑定飞书",
+  "beanRecorderHelp": "录音豆按下按键才录音，手机不能替它开始或停止。手机在附近时边录边传；不在时录音留在豆子里，回来后自动补传。",
+  "beanFetching": "正在取回录音豆里的录音",
+  "beanSyncHelp": "录音豆没在录音时，取回它录下而这台手机还没有的部分",
+  "beanUnbindSub": "这台手机不再连它，改用手机麦克风；录音豆本身什么也不改",
+  "beanUnbindAfterSync": "正在取回录音豆里的录音，取完再解除",
+  "beanUnbindBody": "只是这台手机忘掉这颗录音豆、改用手机麦克风。录音豆本身什么也不改：按键照样录音，飞书照常能连。还没取回的录音留在豆子里。",
   "linkError": "录音设备出错：{detail}",
   "@linkError": {
     "placeholders": {

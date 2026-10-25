@@ -1670,6 +1670,42 @@ abstract class AppLocalizations {
   /// **'未绑定飞书'**
   String get beanFeishuNotBound;
 
+  /// No description provided for @beanRecorderHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音豆按下按键才录音，手机不能替它开始或停止。手机在附近时边录边传；不在时录音留在豆子里，回来后自动补传。'**
+  String get beanRecorderHelp;
+
+  /// No description provided for @beanFetching.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在取回录音豆里的录音'**
+  String get beanFetching;
+
+  /// No description provided for @beanSyncHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音豆没在录音时，取回它录下而这台手机还没有的部分'**
+  String get beanSyncHelp;
+
+  /// No description provided for @beanUnbindSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台手机不再连它，改用手机麦克风；录音豆本身什么也不改'**
+  String get beanUnbindSub;
+
+  /// No description provided for @beanUnbindAfterSync.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在取回录音豆里的录音，取完再解除'**
+  String get beanUnbindAfterSync;
+
+  /// No description provided for @beanUnbindBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'只是这台手机忘掉这颗录音豆、改用手机麦克风。录音豆本身什么也不改：按键照样录音，飞书照常能连。还没取回的录音留在豆子里。'**
+  String get beanUnbindBody;
+
   /// No description provided for @linkError.
   ///
   /// In zh, this message translates to:

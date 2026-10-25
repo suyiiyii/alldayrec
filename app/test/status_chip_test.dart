@@ -56,6 +56,13 @@ void main() {
     expect(find.descendant(of: chip, matching: find.byType(Text)), findsNothing);
   });
 
+  testWidgets('a bean connected and not recording: not 「Recording」', (tester) async {
+    await pump(tester, {...cannedStatus('recording'), 'link': {'code': 'beanIdle'}});
+    expect(find.byIcon(Icons.mic_rounded), findsNothing);
+    expect(colorOf(tester, Icons.bluetooth_connected_rounded), ThemeData().colorScheme.outline);
+    expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, startsWith('Bean connected · not recording'));
+  });
+
   testWidgets('the microphone: red running, crossed out grey stopped, no number', (tester) async {
     await pump(tester, cannedStatus('mic'), ble: false);
     expect(colorOf(tester, Icons.mic_rounded), recordingRed);

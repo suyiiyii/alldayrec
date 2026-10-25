@@ -247,6 +247,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     class F(var anchor: Long, val have: MutableList<LongArray> = mutableListOf(), var total: Long = -1, var tries: Int = 0)
 
     private class Xfer(val file: Long, val live: Boolean, val from: Long) {
+        var until = -1L  // the phone has the rest of the file from here: the link goes once this unit is in (rest())
+        var cut = false
         var key: ByteArray? = null
         var nonce = ByteArray(16)
         var first = -1L
@@ -273,6 +275,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var listedAt = 0L
     private var askedAt = 0L
     private var liveAgain = 0L   // when a refused realtime transfer is tried again
+    private var quietUntil = 0L  // no 1A/07 before: the bean has just ended a transfer (code 4 when asked at once)
+    private var busy = 0         // code 4s in a row
     private var xfer: Xfer? = null
     private var since = 0L
     private var pendingEnd = 0L
@@ -341,7 +345,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var reported = io.now()
         var settled = 0L
         while (true) {
-            if (xfer == null) {
+            if (xfer == null && io.now() >= quietUntil) {
                 if (needList || recording && listing.open == 0L && io.now() - listedAt > 10_000) listing = list()
                 val open = listing.open
                 val x = when {
@@ -351,7 +355,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 }
                 if (x != null) begin(x) else state = say("beanIdle")
             }
-            next(1000)?.let(::take)
+            val quiet = quietUntil - io.now()
+            next(if (xfer == null && quiet > 0) quiet else 1000)?.let(::take)
+            xfer?.takeIf { it.cut }?.let { complete(it, 0); throw Again("file ${it.file}: the rest is here already") }
             val now = io.now()
             xfer?.let { x ->  // the bean did not answer, or an offline transfer stopped: on with the next
                 if (x.key == null && now - x.at > 15_000) failed(x, "no answer")
@@ -420,6 +426,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun begin(x: Xfer) {
         xfer = x; x.at = io.now(); x.seen = x.at
         state = say(if (x.live) "joining" else "beanIdle")
+        if (x.live) { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
         send(Bean.transfer(x.file, x.from * Bean.UNIT, x.live))
     }
 
@@ -466,15 +473,20 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (h.file != x.file) return failed(x, "it answered with file ${h.file}")
         when (h.code) {
             0 -> {
-                x.key = h.key; x.nonce = h.nonce
+                x.key = h.key; x.nonce = h.nonce; busy = 0
                 if (!x.live || h.size != 0xFFFFFFFFL) {
                     if (h.size % Bean.UNIT != 0L) return failed(x, "file of ${h.size} B")
-                    file(x.file, x.file * 1000).total = h.size / Bean.UNIT
+                    file(x.file, x.file * 1000).let { f -> f.total = h.size / Bean.UNIT; if (!x.live) x.until = rest(f, x.from) }
                 }
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = x.from }; xfer = null; save() }  // nothing after `from`: all of it is here
             1 -> { file(x.file, x.file * 1000).tries = TRIES + 1; failed(x, "no such file") }
+            4 -> {  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
+                if (busy++ == 0) io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 豆子还忙（code 4），稍后再要", fields = mapOf("file" to x.file))
+                quietUntil = io.now() + minOf(5000L, PACE_MS * busy)
+                xfer = null
+            }
             else -> failed(x, "code ${h.code}")
         }
     }
@@ -503,6 +515,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val mark = s.flags and 1 != 0
         if (mark && !marked) io.log("mark", "双击标记", fields = mapOf("file" to x.file, "seq" to s.seq), at = f.anchor + s.seq * Bean.FRAME_MS)
         marked = mark
+        if (x.until in 1..s.seq + 1) x.cut = true
         if (has(f, s.seq) || runFile == x.file && s.seq in runFrom until runFrom + run.size) { x.dupes++; return }
         if (run.isNotEmpty() && (runFile != x.file || s.seq != runFrom + run.size)) flush()
         if (run.isEmpty()) { runFile = x.file; runFrom = s.seq }
@@ -536,10 +549,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun complete(x: Xfer, result: Int) {
         flush()
         xfer = null
+        quietUntil = io.now() + PACE_MS
         val f = files[x.file]
-        io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 传完（结果 $result）：${x.units} 个单元，seq ${x.first}..${x.last}，" +
-            "重复 ${x.dupes}，缺 ${x.lost}，用时 ${(io.now() - x.at) / 1000} s", if (result == 0 && x.lost == 0L) null else "warn",
-            mapOf("file" to x.file, "units" to x.units, "first" to x.first, "last" to x.last, "dupes" to x.dupes, "lost" to x.lost, "result" to result))
+        io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} ${if (x.cut) "缺的取到了" else "传完（结果 $result）"}：${x.units} 个单元，seq ${x.first}..${x.last}，" +
+            "重复 ${x.dupes}，缺 ${x.lost}，用时 ${(io.now() - x.at) / 1000} s" +
+            (if (x.cut) "；后面 ${(f?.total ?: 0) - x.until} 个单元手机都有，断开连接让豆子停下" else ""), if (result == 0 && x.lost == 0L) null else "warn",
+            mapOf("file" to x.file, "units" to x.units, "first" to x.first, "last" to x.last, "dupes" to x.dupes, "lost" to x.lost, "result" to result, "cut" to x.cut))
         if (x.live) {
             listing = Bean.Listing(listing.files, 0); needList = true; askedAt = 0  // recording on? the info says
             if (x.units == 0) liveAgain = io.now() + 30_000
@@ -589,6 +604,15 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     private fun done(f: F) = gap(f) == null || f.tries > TRIES
 
+    /** Where the one range the phone has after `from` begins, when it runs to the file's end and that rest is long
+     *  enough that a new connection costs less than taking it again (the bean sends from the offset to the end and
+     *  cannot be stopped mid-file, 10-25: 1831 units in 6 s to fill 36). -1: take it all. */
+    private fun rest(f: F, from: Long): Long =
+        f.have.filter { it[0] > from }.singleOrNull()?.takeIf { it[1] == f.total && f.total - it[0] >= REST_UNITS }?.get(0) ?: -1
+
+    /** The session ends on purpose: the link goes, which is how a transfer stops early; BeanLink connects again. */
+    class Again(why: String) : Exception(why)
+
     private fun send(frame: ByteArray) {
         check(Bean.allowed(frame)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
         io.trace("tx", mapOf("hex" to Bean.hex(frame)))
@@ -621,6 +645,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     companion object {
         const val TRIES = 3
+        const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
+        const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
     }
 }

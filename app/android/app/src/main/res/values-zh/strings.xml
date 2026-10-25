@@ -32,6 +32,7 @@
     <string name="notice_uploading">alldayrec 正在上传 · 剩 %1$s 块</string>
     <string name="notice_recording">alldayrec 正在录音</string>
     <string name="notice_live_catching_up">实时上传 · 后台补传 %1$.1f / %2$.1f MB</string>
+    <string name="notice_bean_catching_up">补传录音豆里的录音 %1$.1f / %2$.1f MB</string>
     <string name="notice_fetching_current">接上实时前先取正在录的这段 · 还差 %1$.1f MB</string>
     <string name="notice_starting">正在启动</string>
     <string name="notice_recording_error">录音错误 %1$s</string>

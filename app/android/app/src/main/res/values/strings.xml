@@ -34,6 +34,7 @@
     <string name="notice_uploading">alldayrec is uploading · %1$s pieces left</string>
     <string name="notice_recording">alldayrec is recording</string>
     <string name="notice_live_catching_up">Live upload · catching up %1$.1f / %2$.1f MB</string>
+    <string name="notice_bean_catching_up">Fetching from the bean %1$.1f / %2$.1f MB</string>
     <string name="notice_fetching_current">Fetching the file being recorded before going live · %1$.1f MB left</string>
     <string name="notice_starting">Starting</string>
     <string name="notice_recording_error">Recording error: %1$s</string>

@@ -62,13 +62,14 @@ async def chunk_end(device: str, t: int):
 
 @router.post("/api/hold/release")
 async def hold_release(device: str):
-    """The phone no longer has the recorder (unbound, or another bound in its place): the older audio on its card will
-    not come from it, so finalization stops waiting for it now, not HOLD_MAX_S after the phone last said the hold
-    (10-07: LR-P3-116C's 261 pieces waited from 17:47 to 05:47)."""
+    """No older audio of the recorder is coming from the phone: it no longer has the recorder (unbound, or another bound
+    in its place), or its backlog is all up and no upload follows to let go (a recorder that stopped). Finalization
+    stops waiting for it now, not HOLD_MAX_S after the phone last said the hold (10-07: LR-P3-116C's 261 pieces waited
+    from 17:47 to 05:47)."""
     if audio.held(device) is not None:
         audio.hold(device, None)
-        log.info("%s hold let go: its phone no longer has it", device)
-        ws.note(f"{device} 已从手机上解除，不再等它卡里的旧录音，继续定稿")
+        log.info("%s hold let go: no older audio is coming from its phone", device)
+        ws.note(f"{device} 的旧录音不用再等了，继续定稿")
     return {"ok": True}
 
 

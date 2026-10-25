@@ -946,6 +946,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get beanFeishuNotBound => 'Not bound to Feishu';
 
   @override
+  String get beanRecorderHelp =>
+      'The bean records when its button is pressed; the phone cannot start or stop it. With the phone nearby it uploads as it records; when the phone is away the audio stays on the bean and is fetched when the phone is back.';
+
+  @override
+  String get beanFetching => 'Fetching the recordings on the bean';
+
+  @override
+  String get beanSyncHelp =>
+      'While the bean is not recording, the phone fetches what it recorded that this phone does not have yet';
+
+  @override
+  String get beanUnbindSub =>
+      'This phone stops connecting to it and uses its own microphone; nothing changes on the bean';
+
+  @override
+  String get beanUnbindAfterSync =>
+      'Fetching the recordings on the bean; unbind once that is done';
+
+  @override
+  String get beanUnbindBody =>
+      'Only this phone forgets the bean and switches to its own microphone. Nothing changes on the bean: its button still records and Feishu can still connect. Recordings not fetched yet stay on the bean.';
+
+  @override
   String linkError(Object detail) {
     return 'Recorder error: $detail';
   }

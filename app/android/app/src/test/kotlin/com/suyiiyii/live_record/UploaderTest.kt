@@ -5,6 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
 import java.lang.reflect.Proxy
+import java.net.ServerSocket
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /** One request is one stretch from its first piece's start: the backlog queued after what is said now is older
  *  and must not ride along in its batch (the emulator run lost 2 min of backlog that way). */
@@ -30,5 +33,35 @@ class UploaderTest {
         assertEquals(mapOf<String, Any?>("queue_n" to 2, "queue_kb" to 3L, "queue_age_s" to 60L, "upload_fails" to 0, "upload_ok_s" to null),
                      Uploader(prefs, dir, "", "", "phone", null).queued("LR-EMU-BEEF", now = 61_000))
         dir.deleteRecursively()
+    }
+
+    /** A recorder that stopped with its backlog all up sends nothing more to say the hold is gone: the uploader tells the
+     *  server on its own, once, after the upload that carried it (10-25: the bean's hold stayed until unbind). */
+    @Test fun letGo() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        File(dir, "1000@D3200-0A0B.ogg").writeBytes(ByteArray(64))
+        val kv = java.util.concurrent.ConcurrentHashMap<String, Long>(mapOf("hold:D3200-0A0B" to 500L))
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            if (m.name == "getLong") kv[a[0] as String] ?: a[1] else null } as SharedPreferences
+        val got = LinkedBlockingQueue<String>()
+        val http = ServerSocket(0)
+        Thread {  // one request per connection: the line, the headers, the body
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                if (path.startsWith("/api/chunks")) kv.remove("hold:D3200-0A0B")  // the backlog's last piece: let go
+                got += path
+                c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        try {
+            assertEquals("/api/chunks?device=D3200-0A0B&start=1000&hold=500", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("/api/hold/release?device=D3200-0A0B", got.poll(5, TimeUnit.SECONDS))
+            assertEquals(null, got.poll(1, TimeUnit.SECONDS))  // once
+        } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
     }
 }
