@@ -8,7 +8,7 @@ description: "教程：用 Docker 在自己的电脑上跑起 alldayrec，在浏
 在这个教程里，我们用 Docker 在你自己的电脑上跑起 alldayrec，用浏览器录一段话，然后在网页上看到它的转写。全程大约 15 分钟。
 
 ::: info 适用版本
-`docker-compose.yml` 拉取的是镜像 `ghcr.io/suyiiyii/alldayrec:latest`，它对应最新的版本标签（写这一页时是 v0.1.0）。下面用到的页面地址（`/record`、`/conversations`）在 v0.1.0 和 main 上都有，两者的界面样式不同。
+`docker-compose.yml` 拉取的是镜像 `ghcr.io/suyiiyii/alldayrec:latest`，它对应最新的版本标签（写这一页时是 v0.2.0）。下面用到的页面地址（`/record`、`/conversations`）在各个版本和 main 上都有，界面样式可能不同。
 :::
 
 ## 准备
@@ -60,10 +60,11 @@ docker compose logs -f
 第一次启动时，服务器会下载 4 个模型文件（约 70 MB）并校验，然后开始监听。日志的最后几行类似这样：
 
 ```text
-alldayrec-1  | ... infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
-alldayrec-1  | ... infer INFO models: downloading fireredvad-cmvn.ark from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
-alldayrec-1  | ... infer INFO models: downloading redimnet2-b6.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx
-alldayrec-1  | ... live INFO models ok: 3 files in /data/models
+alldayrec-1  | ... alldayrec.infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
+alldayrec-1  | ... alldayrec.infer INFO models: downloading fireredvad-cmvn.ark from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
+alldayrec-1  | ... alldayrec.infer INFO models: downloading redimnet2-b6.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx
+alldayrec-1  | ... alldayrec.infer INFO models: downloading yamnet.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/yamnet.onnx
+alldayrec-1  | ... live INFO models ok: 4 files in /data/models
 alldayrec-1  | ... live INFO tenants: main
 alldayrec-1  | ... live INFO ready on 0.0.0.0:8770
 ```

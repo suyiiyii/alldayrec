@@ -27,7 +27,7 @@ Since `apk-v1.5.1` the app connects to `http://` addresses: inside Tailscale or 
 
 2. In a browser on your computer, open the web UI at the address the phone will use, e.g. `http://100.x.y.z:8770/?token=<your token>` (a Tailscale address) or `http://192.168.1.10:8770/?token=<your token>` (a LAN address).
 
-3. Open **连接手机** (Connect phone, `/connect`) and scan the QR code with the app. The QR code carries the address picked under 「手机用哪个地址」 (Address for the phone): with the page opened at `127.0.0.1`, the first Tailscale or LAN address the server finds is picked by default. In Docker the server can't see the computer's interfaces, so the list has only this page's own address: open the page at the computer's LAN or Tailscale address, or pick 「自己填」 (Enter it yourself).
+3. Open **连接手机** (Connect a phone, `/connect`) and scan the QR code with the app. The QR code carries the address picked under 「手机用哪个地址」 (Address for the phone): with the page opened at `127.0.0.1`, the first Tailscale or LAN address the server finds is picked by default. In Docker the server can't see the computer's interfaces, so the list has only this page's own address: open the page at the computer's LAN or Tailscale address, or pick 「自己填」 (Enter it yourself).
 
 ## The phone connects over the public internet
 

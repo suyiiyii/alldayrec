@@ -8,7 +8,7 @@ description: "Run alldayrec long-term with Docker Compose on Linux or macOS: fil
 This page runs alldayrec long-term with Docker Compose on a Linux or macOS machine. If you are new to it, go through [Your first transcript](../tutorial/first-run.md) first.
 
 ::: info Version
-`docker-compose.yml` uses the image `ghcr.io/suyiiyii/alldayrec:latest` by default, the newest version tag (v0.1.0 when this page was written); the `main` tag follows the main branch. To choose a version, see [Pin an image version](#pin-an-image-version) below.
+`docker-compose.yml` uses the image `ghcr.io/suyiiyii/alldayrec:latest` by default, the newest version tag (v0.2.0 when this page was written); the `main` tag follows the main branch. To choose a version, see [Pin an image version](#pin-an-image-version) below.
 :::
 
 ## Prerequisites

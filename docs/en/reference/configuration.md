@@ -7,7 +7,7 @@ type: reference
 The server's settings live in two places: `tenants.json` lists the people it serves, and environment variables (usually in `.env`) set everything else. When a required setting is missing, the server refuses to start and writes the missing ones to its log.
 
 ::: info Version
-This page follows the main branch. v0.1.0 has no `UI_LANG` and no `lang` field in `tenants.json`; up to v0.2.0, `LOOP_STALL_MS` is off by default. Everything else is the same.
+This page follows the main branch. v0.2.0 has no `MUSIC_DETECT` or `SLICE_WATCHED_S`, and its `LOOP_STALL_MS` is off by default; everything else is the same. v0.1.0 also has no `DATA_DIR`, no `UI_LANG` and no `lang` field in `tenants.json`, and keeps `tenants.json` and the model files in other default places.
 :::
 
 ## tenants.json
@@ -94,10 +94,10 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 
 | Variable | Used in | Description |
 |---|---|---|
-| `LIVE_DATA`, `RECORDINGS_DIR` | `owner.py`, `replay_case.py` | A tenant's data directory and recordings directory |
+| `LIVE_DATA`, `RECORDINGS_DIR` | `owner.py`, `replay_case.py`, `migrate.py` (`RECORDINGS_DIR`: `migrate.py` only) | A tenant's data directory and recordings directory |
 | `OWNER_LABELS` | `owner.py` | Windows known to be your own voice (jsonl) |
 | `CASES_DIR` | `eval_all.sh` | The directory of labeled evaluation cases |
-| `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` | See those two scripts |
+| `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` (`EMB_MODEL` also `owner.py`) | See those scripts |
 
 ## Other environment variables
 
@@ -106,7 +106,7 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | Variable | When unset | Description | Source |
 |---|---|---|---|
 | `SLICE_FOREGROUND_S`, `SLICE_BACKGROUND_S`, `SLICE_SCREEN_OFF_S` | `1`, `20`, `60` | Seconds of audio per piece while the app is in the foreground, in the background, or with the screen off (Android); the app reads them from `/api/client-config` and from the answer to each upload | `routes_upload.py` |
-| `SLICE_WATCHED_S` | `2` | While the live captions page `/live` is open, pieces in the background and with the screen off are at most this many seconds, so captions appear within seconds even with the phone in a pocket; the small live captions window on 「今天」 (Today) does not count. Back to normal within a minute after the page closes | `routes_upload.py` |
+| `SLICE_WATCHED_S` | `2` | While the 实时 (Live) page `/live` is open, pieces in the background and with the screen off are at most this many seconds, so captions appear within seconds even with the phone in a pocket; the card of the conversation going on, on the 时间线 (Timeline) page, does not count. Back to normal within a minute after the page closes | `routes_upload.py` |
 | `REFINE_WINDOW_S` | `240` | The most seconds of audio the draft layer handles at once | `device_pipeline.py` |
 | `LIVE_EVERY_S` | `120` | The live analysis is redone each time an ongoing conversation gains this many seconds of speech | `device_pipeline.py` |
 | `SQUEEZE_KEEP_S` | `3` | Before audio goes to the engine, silences longer than this many seconds are cut to this length; 0 sends the audio whole | `asr.py` |
@@ -121,5 +121,5 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | `DEHUM` | `1` | Removes the recorder's 10 ms periodic hum when its audio is read; 0 turns it off | `audio.py` |
 | `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `routes_speakers.py` |
 | `DIAR_TH`, `DIAR_JOIN`, `DIAR_GUARD`, `PEOPLE_MIN` | `0.5`, `0.35`, `0.6`, `0.7` | Thresholds for telling speakers apart within a conversation | `diarist.py` |
-| `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你的声音」 (Which one is your voice) card pops up by itself | `selfvoice.py` |
+| `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你？」 (Which one is you?) card pops up by itself | `selfvoice.py` |
 | `LOOP_STALL_MS` | `100` | When the event loop is held up longer than this many milliseconds, the log gets one line with how long and in which function (at most a line a second, the ones in between counted), and the `perf_stalls` table a row; it also measures the loop's lag and the thread pools' use each minute. About 0.6% of a core; `0` turns it off | `monitor.py` |

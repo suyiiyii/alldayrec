@@ -16,7 +16,8 @@ description: "Change the ASR engine for final transcripts with ENGINE in .env (d
    | `qwen` | `DASHSCOPE_API_KEY` |
    | `volc` | `VOLC_ASR_KEY` |
    | `stepfun-sse` | `STEPFUN_API_KEY` |
-   | `stepfun`, `stepfun-file` | `STEPFUN_API_KEY`, plus your own upload bridge and file-mode ASR service: `ASR_UPLOAD_BRIDGE_URL`, `ASR_UPLOAD_BRIDGE_TOKEN`, `ASR_SERVICE_URL`, `ASR_SERVICE_BASIC_AUTH` |
+   | `stepfun` | `STEPFUN_API_KEY`, plus your own upload bridge and file-mode ASR service: `ASR_UPLOAD_BRIDGE_URL`, `ASR_UPLOAD_BRIDGE_TOKEN`, `ASR_SERVICE_URL`, `ASR_SERVICE_BASIC_AUTH` |
+   | `stepfun-file` | Your own upload bridge and file-mode ASR service: `ASR_UPLOAD_BRIDGE_URL`, `ASR_UPLOAD_BRIDGE_TOKEN`, `ASR_SERVICE_URL`, `ASR_SERVICE_BASIC_AUTH` |
    | `local` | No key |
 
 2. Restart the server. With Docker, run `docker compose up -d`: Compose recreates the container with the new `.env`.
@@ -28,6 +29,8 @@ Whichever engine you use, you need the three LLM settings (`LLM_BASE_URL`, `LLM_
 ## No ASR key at all: `ENGINE=local`
 
 `local` runs the X-ASR zh-en model with sherpa-onnx in the server process. It outputs text only, and speakers come from the server's own voiceprints. On far-field audio, it does worse than `qwen`.
+
+It needs the `local` extra: the Docker image has it already; with uvx or pip, install `alldayrec[local]` (see [How to run with uvx or pip](./run-uvx.md)); from source, run `uv sync --extra local`.
 
 When the first audio arrives, the server downloads a model tarball of about 136 MB, so the first transcript takes about a minute. If the download is slow, set `LOCAL_ASR_URL` to the same tarball's address on a mirror; the server checks the file against its sha256.
 

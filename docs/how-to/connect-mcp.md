@@ -13,7 +13,7 @@ description: "把 Claude Code、Codex、Cursor、Cherry Studio 接入 alldayrec 
 - 在用这个连接的会话里，不要给联网和 Shell 工具开自动批准：录音里的话可能被当成指令，借这些工具把内容发出去。
 - token 能读写这台服务器上你的全部数据，只放在自己的电脑上。
 
-网页 **连接手机** 页（`/connect`）里的 **接入 AI** 一节会列出下面这些配置，地址和 token 已经填好，点 **复制** 就行。
+网页 **连接手机** 页（`/connect`）里折叠着的 **高级：接入 AI** 一节会列出下面这些配置，地址和 token 已经填好，点 **复制** 就行。
 
 ## Claude Code
 

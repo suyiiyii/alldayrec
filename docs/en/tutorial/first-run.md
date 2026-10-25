@@ -8,7 +8,7 @@ description: "Tutorial: run alldayrec with Docker on your computer, record a few
 In this tutorial, you run alldayrec with Docker on your own computer, record a few sentences in the browser, and then see their transcript in the web UI. It takes about 15 minutes.
 
 ::: info Version
-`docker-compose.yml` pulls the image `ghcr.io/suyiiyii/alldayrec:latest`, which matches the newest version tag (v0.1.0 when this page was written). The page addresses used below (`/record`, `/conversations`) exist both in v0.1.0 and on main; the two look different.
+`docker-compose.yml` pulls the image `ghcr.io/suyiiyii/alldayrec:latest`, which matches the newest version tag (v0.2.0 when this page was written). The page addresses used below (`/record`, `/conversations`) exist in every version and on main; they may look different.
 :::
 
 ## What you need
@@ -60,10 +60,11 @@ docker compose logs -f
 At the first start, the server downloads 4 model files (about 70 MB), checks them, and then starts listening. The last lines of the log look like this:
 
 ```text
-alldayrec-1  | ... infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
-alldayrec-1  | ... infer INFO models: downloading fireredvad-cmvn.ark from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
-alldayrec-1  | ... infer INFO models: downloading redimnet2-b6.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx
-alldayrec-1  | ... live INFO models ok: 3 files in /data/models
+alldayrec-1  | ... alldayrec.infer INFO models: downloading fireredvad-stream-vad.onnx from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
+alldayrec-1  | ... alldayrec.infer INFO models: downloading fireredvad-cmvn.ark from https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/...
+alldayrec-1  | ... alldayrec.infer INFO models: downloading redimnet2-b6.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/redimnet2-b6.onnx
+alldayrec-1  | ... alldayrec.infer INFO models: downloading yamnet.onnx from https://github.com/suyiiyii/alldayrec/releases/download/models-v1/yamnet.onnx
+alldayrec-1  | ... live INFO models ok: 4 files in /data/models
 alldayrec-1  | ... live INFO tenants: main
 alldayrec-1  | ... live INFO ready on 0.0.0.0:8770
 ```
@@ -84,7 +85,7 @@ Once the page opens, the token disappears from the address bar: the server now r
 
 1. Open `http://127.0.0.1:8770/record`. This is the web recording page.
 2. Leave the source at **本机麦克风** (This device's microphone) and click **开始录音** (Start recording). When the browser asks whether to allow the microphone, allow it.
-3. Talk normally for a minute or two, for example about what you plan to do today. The top of the page shows 「录音中 · 已传 N 块 · 待传 0」 (Recording · N pieces uploaded · 0 waiting), with one more piece every 20 seconds.
+3. Talk normally for a minute or two, for example about what you plan to do today. The top of the page shows 「录音中 · 已传 N 块 · 待传 0」 (Recording · N pieces sent · 0 waiting), with one more piece every 20 seconds.
 4. Click **停止** (Stop).
 
 ## 7. See the transcript

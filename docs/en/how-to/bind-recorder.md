@@ -9,7 +9,7 @@ A BLE recorder (such as [LR-P3](../reference/hardware.md)) has to be bound to a 
 
 ## Bind
 
-1. In the app, open **我的 › 录音设备** (Me › Recorders) and tap **添加录音设备** (Add recorder).
+1. In the app, open **我的 › 录音设备** (Me › Recorder) and tap **添加录音设备** (Add recorder).
 2. The page lists the permissions you haven't granted yet (Bluetooth or "附近的设备" (Nearby devices), notifications, running in the background). Allow each one.
 3. Turn the recorder on (plugging in the charging cable is enough). Nearby recorders show up in the list. The name is printed on the recorder; when several are nearby, the one with the strongest signal is marked "最近" (Nearest).
 4. Tap **绑定** (Bind) next to it.
@@ -40,7 +40,7 @@ The binding is kept on this phone only. From then on:
 - With the phone away, the audio stays on the bean. Once the phone is back, it fetches the audio while the bean is not recording. Only files recorded after the binding are fetched.
 - Files the server has in full are deleted from the bean, one at a time, only while the bean is not recording.
 
-The **录音设备** (Recorders) page has no pause, live listening, USB drive mode or firmware update for a bean.
+The **录音设备** (Recorder) page has no pause, live listening, USB disk mode or firmware update for a bean.
 
 Unbinding only makes this phone forget the bean and switch to its own mic. Nothing changes on the bean: its button still records, Feishu can still connect, and recordings not fetched yet stay on the bean.
 

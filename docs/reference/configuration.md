@@ -7,7 +7,7 @@ type: reference
 服务器的设置分两处：`tenants.json` 列出它为哪些人服务，环境变量（通常写在 `.env` 里）设置其余一切。服务器缺必填项时拒绝启动，并在日志里写出缺了哪些。
 
 ::: info 适用版本
-这一页按 main 分支写。v0.1.0 没有 `UI_LANG` 和 `tenants.json` 的 `lang` 字段；v0.2.0 及以前 `LOOP_STALL_MS` 默认不检测。其余各项相同。
+这一页按 main 分支写。v0.2.0 没有 `MUSIC_DETECT` 和 `SLICE_WATCHED_S`，`LOOP_STALL_MS` 默认不检测，其余各项相同。v0.1.0 还没有 `DATA_DIR`、`UI_LANG` 和 `tenants.json` 的 `lang` 字段，`tenants.json` 和模型文件的默认位置也不同。
 :::
 
 ## tenants.json
@@ -94,10 +94,10 @@ type: reference
 
 | 变量 | 用在 | 说明 |
 |---|---|---|
-| `LIVE_DATA`、`RECORDINGS_DIR` | `owner.py`、`replay_case.py` | 一个租户的数据目录和录音目录 |
+| `LIVE_DATA`、`RECORDINGS_DIR` | `owner.py`、`replay_case.py`、`migrate.py`（`RECORDINGS_DIR` 只有 `migrate.py` 用） | 一个租户的数据目录和录音目录 |
 | `OWNER_LABELS` | `owner.py` | 已知是本人声音的窗口（jsonl） |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
-| `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这两个脚本 |
+| `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py`（`EMB_MODEL` 还有 `owner.py`） | 见这几个脚本 |
 
 ## 其他环境变量
 
@@ -106,7 +106,7 @@ type: reference
 | 变量 | 不设时 | 说明 | 源码 |
 |---|---|---|---|
 | `SLICE_FOREGROUND_S`、`SLICE_BACKGROUND_S`、`SLICE_SCREEN_OFF_S` | `1`、`20`、`60` | App 在前台、后台、熄屏（安卓）时每块音频的秒数，App 通过 `/api/client-config` 和每次上传的回答读取 | `routes_upload.py` |
-| `SLICE_WATCHED_S` | `2` | 实时字幕页 `/live` 开着时，后台和熄屏的每块音频最多这么多秒，手机在口袋里字幕也几秒内出来；「今天」页的实时字幕小窗不算。页面关掉后一分钟内恢复 | `routes_upload.py` |
+| `SLICE_WATCHED_S` | `2` | 实时页 `/live` 开着时，后台和熄屏的每块音频最多这么多秒，手机在口袋里字幕也几秒内出来；「时间线」页上进行中对话的小窗不算。页面关掉后一分钟内恢复 | `routes_upload.py` |
 | `REFINE_WINDOW_S` | `240` | 初稿层一次最多处理的音频秒数 | `device_pipeline.py` |
 | `LIVE_EVERY_S` | `120` | 进行中的对话新增这么多秒语音后，重做实时分析 | `device_pipeline.py` |
 | `SQUEEZE_KEEP_S` | `3` | 送给引擎前，长于这个秒数的静音剪到这么长；0 表示整段送 | `asr.py` |
@@ -121,5 +121,5 @@ type: reference
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `DIAR_TH`、`DIAR_JOIN`、`DIAR_GUARD`、`PEOPLE_MIN` | `0.5`、`0.35`、`0.6`、`0.7` | 一段对话内区分说话人的阈值 | `diarist.py` |
-| `SELFVOICE_POP_P` | `0.95` | 「哪个是你的声音」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |
+| `SELFVOICE_POP_P` | `0.95` | 「哪个是你？」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |
 | `LOOP_STALL_MS` | `100` | 事件循环被卡住超过这么多毫秒时，日志里记一行卡了多久、卡在哪个函数（每秒最多一行，其间的次数一并记上），同时存进 `perf_stalls` 表；每分钟的循环延迟和线程池占用也靠它测。约占 0.6% 个核；`0` 关闭 | `monitor.py` |

@@ -19,14 +19,14 @@ Start with the log: with Docker, run `docker compose logs -f`. The web page **�
 
 This browser isn't signed in yet. Open `http(s)://<your-server>/?token=<your token>` once; after that a cookie keeps you signed in.
 
-## Summaries fail, or "ask AI" reports "模型调用失败" (model call failed)
+## Summaries fail, or "ask AI" reports 「服务器出错了，稍后再试」 (Something went wrong on the server. Try again later)
 
 - When a Bailian key is restricted to specific models in the console, calls to the chat models return 403. Use a key without a model restriction.
 - Another LLM service must support tool calls and JSON output (`response_format` of `json_object`).
 
 ## Some conversations have no summary
 
-A conversation with under 60 seconds of speech doesn't go to the LLM: its title is its first sentence, and it has no summary or to-dos (`MIN_SPEECH_S` in `server/alldayrec/summary.py`).
+A conversation with under 60 seconds of speech doesn't go to the LLM (unless 「立即总结」 (Summarize now) was tapped while it was going on): its title is its first sentence, and it has no summary or to-dos (`MIN_SPEECH_S` in `server/alldayrec/summary.py`).
 
 ## The first transcript is slow with `ENGINE=local`
 
@@ -55,6 +55,6 @@ Yes. The server decodes the audio for playback and live listening on the web pag
 
 ## The card's OMI drive never appears on macOS
 
-The app's **录音设备 › U 盘模式 › 存储卡当 U 盘** (Recorder › USB drive mode › Card as USB drive) gives the recorder's card to the computer as a USB drive. Normally the OMI drive appears after about 20 seconds.
+The app's **录音设备 › U 盘模式 › 存储卡当 U 盘** (Recorder › USB disk mode › Card as a USB disk) gives the recorder's card to the computer as a USB drive. Normally the OMI drive appears after about 20 seconds.
 
 What the maintainer measured on macOS 26: the system allows about 20 seconds to mount a FAT32 volume, so a large FAT32 card that reads slowly (such as 32 GB) may never mount; the same card formatted as exFAT mounts in about 2 seconds. The firmware reads both FAT32 and exFAT. Also, macOS mounts no disks while the Mac is locked.

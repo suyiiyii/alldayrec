@@ -57,7 +57,8 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `profiles` | People cards of people with recognized names, each row with its source |
 | `pieces` | The index of uploaded pieces, which is also the processing queue |
 | `feedback` | Users' corrections to summaries |
-| `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (new on main, not in v0.1.0) |
+| `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
+| `stars` | Starred sentences: the sentence id, its conversation, when it was starred (new on main) |
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |

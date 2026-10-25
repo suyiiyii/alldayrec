@@ -74,7 +74,7 @@ server refuses to start with an empty one). Choose with the user:
 Never expose a server whose token is empty.
 
 Then the user opens the web page **at the address the phone will use** (not `127.0.0.1`), goes to 连接手机 (Connect
-phone, `/connect`), and in the app taps 我的 › 设置 › 扫码登录 (Me › Settings › Scan to log in) to scan the QR code:
+a phone, `/connect`), and in the app taps 我的 › 设置 › 扫码登录 (Me › Settings › Scan to sign in) to scan the QR code:
 the QR code carries the address picked under 手机用哪个地址 (Address for the phone). In Docker the server can't list the
 computer's addresses, so open the page at the computer's LAN or Tailscale IP, or type it under 自己填 (Enter it
 yourself). App install (APK from the GitHub Releases, iOS built with Xcode):

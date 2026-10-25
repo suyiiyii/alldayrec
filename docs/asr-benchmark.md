@@ -209,7 +209,7 @@ published AISHELL-4 WER 21–27); 7–9B audio LLMs (GPU only). sherpa-onnx mode
 
 ## Run it on your own recordings
 
-The scorer and replay tools are in `server/` (run `uv sync` there first). Lay out your cases like this:
+The scorer and replay tools are in `server/alldayrec/`; run them from `server/` (run `uv sync` there first). Lay out your cases like this:
 
 ```
 $CASES_DIR/
@@ -223,10 +223,10 @@ $CASES_DIR/
 In `gt.jsonl` the wearer is `我`; give every other person their own label. Hypothesis speakers may be `我` / `他人` or
 anonymous labels (`S1`, `SPEAKER_00`, …).
 
-- `uv run python score_case.py --gt <case>/gt.jsonl --hyp <case>/hyp/<name>.jsonl [--gt-until <ISO>]` scores one hypothesis: 我-vs-others
+- `uv run python -m alldayrec.score_case --gt <case>/gt.jsonl --hyp <case>/hyp/<name>.jsonl [--gt-until <ISO>]` scores one hypothesis: 我-vs-others
   accuracy, who-is-who accuracy after a one-to-one label mapping, coverage, mixed rows, count ratio, CER per 60 s window
   (a different, higher scale than the tables above) and latency when present.
-- `uv run python replay_case.py <case> engine-pieces` replays a case's audio through the server's final layer as it runs now
+- `uv run python -m alldayrec.replay_case <case> engine-pieces` replays a case's audio through the server's final layer as it runs now
   (squeeze, lift, `PROVIDERS[ENGINE]`, diarist) and writes `<case>/hyp/engine-pieces.jsonl`; `HYP_NAME` renames it.
   Load the server's `.env` first (`set -a; . .env; set +a`); it needs your voiceprint bank (`OWNER_BANK`, an
   `owner-redimnet2.npz`). Run it with `ENGINE=local` to get the end-to-end speaker numbers this benchmark did not
