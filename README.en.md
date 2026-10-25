@@ -27,7 +27,7 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 - **Knows who spoke**: it learns your own voice and remembers the names you give others.
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
 - **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
-- **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
+- **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) from the web page.
 
 <div align="center">
 

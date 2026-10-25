@@ -54,8 +54,9 @@ const LINKS = computed(() => {
     { to: "/progress", icon: "activity", title: t("me.progress"), sub: t("me.progressSub") },
     { to: "/connect#ai", icon: "sparkles", title: t("me.ai"), sub: t("me.aiSub") },
     { to: "/record", icon: "mic", title: t("me.record"), sub: t("me.recordSub") },
+    { to: "/import", icon: "upload", title: t("me.import"), sub: t("me.importSub") },
   ];
-  // the online demo (src/demo.ts) has no phone, AI service or recorder to connect: 待办 and 处理进度 only
+  // the online demo (src/demo.ts) has no phone, AI service or recorder to connect and takes no uploads: 待办 and 处理进度 only
   return import.meta.env.MODE === "demo"
     ? all.filter((l) => l.to === "/todos" || l.to === "/progress")
     : all;

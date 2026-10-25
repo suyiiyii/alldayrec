@@ -19,11 +19,12 @@ The server serves the web pages (`web/` builds into `server/alldayrec/static/dis
 | `/calendar` | 日历 (Calendar) | How many conversations each day has |
 | `/speakers` | 人物 (People) | Recognized speakers |
 | `/p/<name>` | 人物 (Person) | One person's conversations, points and to-dos |
-| `/me` | 我的 (Me) | Every device that has recorded, with its battery, free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices)), links to the to-dos and the pages below, and the page language |
+| `/me` | 我的 (Me) | Every device that has recorded, with its battery, free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices); import batches are not listed here), links to the to-dos and the pages below, and the page language |
 | `/progress` | 处理进度 (Progress) | How far along transcription and summaries are, AI calls and the system log |
 | `/device/<name>` | 设备日志 (Device log) | One device's events and status history |
 | `/connect` | 连接手机 (Connect a phone) | The Android app download, the QR code to sign in by scanning, and the settings for connecting AI (MCP) |
 | `/record` | 网页录音 (Web recording) | Records with the browser's microphone or a Bluetooth recorder when you have no app |
+| `/import` | 导入录音 (Import recordings) | Uploads audio files you pick, each at its start time on the timeline; Past imports below. See [How to import recordings you already have](../how-to/import-recordings.md) |
 
 ### Web recording (`/record`)
 

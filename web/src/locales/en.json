@@ -31,6 +31,7 @@
     "person": "Person",
     "device": "Device log",
     "record": "alldayrec recorder",
+    "import": "Import recordings",
     "connect": "Connect a phone"
   },
   "err": {
@@ -371,6 +372,8 @@
     "aiSub": "Let Claude Code, Codex or Cursor search the conversations and to-dos here",
     "record": "Web recording",
     "recordSub": "No app? Record with the browser's microphone or a Bluetooth recorder",
+    "import": "Import recordings",
+    "importSub": "Transcribe audio files from a phone or recorder into the timeline",
     "lang": "Language · 语言",
     "langSub": "The pages, and the summaries, recaps and answers the AI writes",
     "about": "About",
@@ -381,6 +384,31 @@
     "starsAll": "All {n}",
     "starsLess": "Show less",
     "older": "Earlier devices ({n})"
+  },
+  "import": {
+    "pick": "Choose audio files",
+    "lead": "You can pick several. Each file goes into the timeline at its start time; change any guess that is wrong.",
+    "from": {
+      "meta": "Start time from the file's metadata",
+      "name": "Start time from the file name",
+      "modified": "Start time worked out from when the file was saved"
+    },
+    "overlap": "Overlaps {name} by {d}; the overlap is transcribed once",
+    "future": "Ends in the future",
+    "remove": "Remove",
+    "batch": "Batch name",
+    "nameUsed": "This batch name is taken: audio earlier than where its transcription has got to is only stored.",
+    "go": "Import {n} file | Import {n} files",
+    "sending": "Uploading {p}%",
+    "decoding": "The server is decoding",
+    "sent": "Uploaded, {d}",
+    "failed": "Failed: {error}",
+    "retry": "Retry",
+    "undecodable": "The server cannot decode this file",
+    "done": "Imported {n} file. Once transcribed, its conversations appear on: | Imported {n} files. Once transcribed, their conversations appear on:",
+    "again": "Import another batch",
+    "history": "Past imports",
+    "transcribing": "Transcribing, about {n} min left"
   },
   "mediaFold": {
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"

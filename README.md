@@ -25,7 +25,7 @@
 - **认人**：认得出你自己，记得你给别人起的名字。
 - **记忆**：对话摘要、待办和截止日期、每日回顾、全文搜索。
 - **开放**：网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
-- **导入已有录音**：录音文件可以通过 HTTP 接口[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
+- **导入已有录音**：在网页上选录音文件[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
 
 <div align="center">
 

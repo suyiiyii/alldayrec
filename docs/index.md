@@ -37,7 +37,7 @@ features:
     details: 网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
     link: /how-to/connect-mcp
   - title: 导入已有录音
-    details: 录音文件可以通过 HTTP 接口导入。
+    details: 在网页上选录音文件导入。
     link: /how-to/import-recordings
 ---
 

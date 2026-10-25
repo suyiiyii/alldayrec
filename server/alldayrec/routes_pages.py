@@ -23,6 +23,7 @@ DIST = Path(__file__).resolve().parent / "static/dist"  # the web app (web/: pnp
 @router.get("/conversations")
 @router.get("/c/{conv_id}")
 @router.get("/record")
+@router.get("/import")
 @router.get("/speakers")
 @router.get("/calendar")
 @router.get("/progress")

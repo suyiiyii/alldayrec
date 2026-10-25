@@ -37,7 +37,7 @@ features:
     details: A web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
     link: /en/how-to/connect-mcp
   - title: Imports recordings
-    details: Audio files you already have can be imported over the HTTP API.
+    details: Audio files you already have can be imported from the web page.
     link: /en/how-to/import-recordings
 ---
 

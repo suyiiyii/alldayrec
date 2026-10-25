@@ -31,6 +31,7 @@
     "person": "人物",
     "device": "设备日志",
     "record": "alldayrec 录音",
+    "import": "导入录音",
     "connect": "连接手机"
   },
   "err": {
@@ -371,6 +372,8 @@
     "aiSub": "让 Claude Code、Codex、Cursor 查这里的对话和待办",
     "record": "网页录音",
     "recordSub": "没有 App 时，用浏览器的麦克风或蓝牙录音设备录",
+    "import": "导入录音",
+    "importSub": "把手机或录音笔里的录音文件转写进时间线",
     "lang": "语言 · Language",
     "langSub": "界面，和 AI 写的摘要、回顾、回答",
     "about": "关于",
@@ -381,6 +384,31 @@
     "starsAll": "全部 {n} 条",
     "starsLess": "收起",
     "older": "更早的设备（{n} 台）"
+  },
+  "import": {
+    "pick": "选择录音文件",
+    "lead": "可以多选。每个文件按开始时间进时间线，猜得不对就改。",
+    "from": {
+      "meta": "开始时间来自文件信息",
+      "name": "开始时间来自文件名",
+      "modified": "开始时间按修改时间推算"
+    },
+    "overlap": "和 {name} 重叠 {d}，重叠部分只转写一次",
+    "future": "结束时间在未来",
+    "remove": "移除",
+    "batch": "批次名",
+    "nameUsed": "这个批次名用过了：早于它已转写位置的录音只保存、不转写。",
+    "go": "导入 {n} 个文件",
+    "sending": "上传中 {p}%",
+    "decoding": "服务器解码中",
+    "sent": "已上传，{d}",
+    "failed": "失败：{error}",
+    "retry": "重试",
+    "undecodable": "服务器解码不了这个文件",
+    "done": "已导入 {n} 个文件。转写完成后，对话出现在：",
+    "again": "再导入一批",
+    "history": "导入记录",
+    "transcribing": "转写中，还剩约 {n} 分钟"
   },
   "mediaFold": {
     "line": "媒体 {from}–{to} · {n} 句"

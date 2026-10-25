@@ -32,7 +32,7 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 - **Knows who spoke.** It learns your own voice and remembers the names you give others.
 - **Remembers.** Conversation summaries, to-dos with due dates, a daily recap, and full-text search.
 - **Opens up.** A web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
-- **Imports recordings.** Audio files you already have can be [imported](../how-to/import-recordings.md) over the HTTP API.
+- **Imports recordings.** Audio files you already have can be [imported](../how-to/import-recordings.md) from the Me page.
 
 ## How it compares
 

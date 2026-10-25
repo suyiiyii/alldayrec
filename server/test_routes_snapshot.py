@@ -20,6 +20,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET", "/progress", "page"),
     ("GET", "/calendar", "page"),
     ("GET", "/speakers", "page"),
+    ("GET", "/import", "page"),
     ("GET", "/record", "page"),
     ("GET", "/c/{conv_id}", "page"),
     ("GET", "/conversations", "page"),

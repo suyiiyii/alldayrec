@@ -56,6 +56,11 @@ export const router = createRouter({
       meta: { title: "title.device" },
     },
     {
+      path: "/import",
+      component: () => import("./pages/Import.vue"),
+      meta: { title: "title.import" },
+    },
+    {
       path: "/record",
       component: () => import("./pages/Record.vue"),
       meta: { title: "title.record" },

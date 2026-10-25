@@ -145,8 +145,9 @@ export interface DeviceStatus {
   sound?: { s: number; zero_s: number; full: number } | null; // its last 10 min of audio: s of it, s in zero runs, full-scale samples
 }
 
-// a device with audio (Status.recorders): where its stored audio ends, its recorder as its phone last read it
-export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw">;
+// a device with audio (Status.recorders, Status.imports): where its stored audio starts and ends, its recorder as its
+// phone last read it
+export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw"> & { audio_start?: string };
 
 export type Charge = "battery" | "charging" | "full";
 export const chargeText = (c: Charge) => t(`api.charge.${c}`);
@@ -283,6 +284,7 @@ export interface Status {
   commit?: string;
   devices?: DeviceStatus[]; // the devices whose pipeline runs
   recorders?: Recorder[]; // every device with audio, its newest recording first (我的)
+  imports?: Recorder[]; // the batches 导入录音 sent (import-*), apart from the recorders
   summaries_pending?: number;
   lang?: "zh" | "en"; // what the models write in (GET/PUT /api/lang)
 }

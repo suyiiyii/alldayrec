@@ -180,7 +180,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         });
     c.setBackgroundColor(Colors.transparent);  // the scaffold shows through until the page paints (no white flash in dark mode)
     final p = c.platform;
-    if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
+    if (p is AndroidWebViewController) {
+      p.setMediaPlaybackRequiresUserGesture(false);
+      // a page's <input type=file> (导入录音): Android's WebView opens no picker by itself (iOS's does)
+      p.setOnShowFileSelector((s) => Recorder.pickFiles(s.mode == FileSelectorMode.openMultiple, s.acceptTypes));
+    }
     if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
     if (p is WebKitWebViewController) p.setAllowsBackForwardNavigationGestures(true);  // iOS: swipe from the left edge = back
     return c
