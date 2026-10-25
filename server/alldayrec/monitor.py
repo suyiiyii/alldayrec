@@ -2,6 +2,7 @@
 the Prometheus numbers pushed every minute, and the StepFun balance; the process each minute and the event loop's
 stalls, kept (perf.py)."""
 import base64
+import ctypes
 import datetime as dt
 import hashlib
 import logging
@@ -167,11 +168,20 @@ def queued() -> int:
     return sum(audio.queued(d) for d in T().devices)
 
 
+# glibc keeps what the process frees and gives back only the top of a heap: a voiceprint's activations (~0.6 GB for
+# 15 s, onnxruntime without its arena) and the segmenters' 900 s buffers, copied on every piece, left RSS mostly 25-60 MB
+# higher after a final with speech (10-25, MALLOC_ARENA_MAX=2: 294 MB at start, 647 MB 8 h later with no page open).
+# Given back once a minute, a replay of such a night stayed at 285 MB instead of 494 MB. Linux only (glibc).
+TRIM = getattr(ctypes.CDLL(None), "malloc_trim", None) if sys.platform == "linux" else None
+
+
 async def metrics_loop():
-    """Every minute: the process's sample and every tenant's requests kept (perf.sample), and with VM_INGEST_URL every
-    tenant's metrics() and the sample to VictoriaMetrics (basic auth VM_INGEST_USER / VM_INGEST_PASSWORD); a failure is
-    a warning, the next minute tries again."""
+    """Every minute: the heaps' free pages given back (TRIM), the process's sample and every tenant's requests kept
+    (perf.sample), and with VM_INGEST_URL every tenant's metrics() and the sample to VictoriaMetrics (basic auth
+    VM_INGEST_USER / VM_INGEST_PASSWORD); a failure is a warning, the next minute tries again."""
     while True:
+        if TRIM:
+            await anyio.to_thread.run_sync(TRIM, 0)
         try:
             s = perf.sample(sum(tenant.call(t, queued) for t in core.TENANTS), sum(len(t.clients) for t in core.TENANTS))
         except Exception as e:
