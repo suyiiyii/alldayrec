@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch 
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
-import DeviceCard from "../components/DeviceCard.vue";
 import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
@@ -288,7 +287,6 @@ function jump(start: string) {
             </div>
           </div>
         </div>
-        <DeviceCard v-for="d in status?.devices ?? []" :key="d.device" :d="d" />
         <RouterLink v-if="last" class="card last" :to="'/c/' + last.id">
           <span class="muted">{{ t("live.last", { at: hhmm(last.end) }) }}</span>
           <b>{{ convLink(last) }}</b>
