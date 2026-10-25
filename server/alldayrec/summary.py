@@ -152,8 +152,9 @@ async def summarize(conv: dict, rows: list[dict], known_tags: list[str] = ()) ->
 
 def typed(res: dict) -> tuple[dict, list[str]]:
     """The reply with each field of the type the format gives it (title and summary text, tags texts, the other lists
-    objects), and the fields that held something else: that part is dropped. A tag that is not a text broke tag_counts,
-    and with it every later summary and the tags list."""
+    objects; a todo, decision or AI request with a text, its due, owner, to and quote text or null), and the fields that
+    held something else: that part is dropped. A tag that is not a text broke tag_counts, and with it every later summary
+    and the tags list; a todo's list as its text broke the due todos."""
     out, bad = dict(res), []
     for k in ("title", "summary"):
         if not isinstance(out.get(k) or "", str):
@@ -161,6 +162,9 @@ def typed(res: dict) -> tuple[dict, list[str]]:
     for k in LISTS:
         v = out.get(k) or []
         out[k] = [x for x in v if isinstance(x, str if k == "tags" else dict)] if isinstance(v, list) else []
+        if k in ("todos", "decisions", "ai_requests"):  # each one a text, its other words text or null (todo_ids, due_todos)
+            out[k] = [{**x, **{f: None for f in ("due", "owner", "to", "quote") if x.get(f) is not None and not isinstance(x[f], str)}}
+                      for x in out[k] if isinstance(x.get("text"), str)]
         if out[k] != v:
             bad.append(k)
     return out, bad
@@ -241,6 +245,8 @@ if __name__ == "__main__":
     # an odd reply: what is not in the format is dropped; one that is not an object raises (the worker tries again)
     s = result({"id": "c1"}, rows, {"title": ["t"], "tags": [{"name": "工作"}, "工作"], "todos": ["买菜", {"text": "a"}], "topics": "t"}, {})
     assert s["title"] == "" and s["tags"] == ["工作"] and [x["text"] for x in s["todos"]] == ["a"] and s["topics"] == [], s
+    s = result({"id": "c1"}, rows, {"todos": [{"text": ["买菜"]}, {"text": "b", "due": 1, "owner": "我", "to": None}], "decisions": [{"quote": "q"}]}, {})
+    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "due_date": None}] and s["decisions"] == [], s
     try:
         result({"id": "c1"}, rows, ["not an object"], {})
         raise AssertionError("a reply that is not an object was taken")

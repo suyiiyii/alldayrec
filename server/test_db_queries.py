@@ -96,9 +96,13 @@ def test_relabel_finds_rows_by_index(tmp_path):
     db.open_db(tmp_path / "old.db")
     q = "UPDATE sentences SET speaker = ? WHERE source = ? AND id = ?"  # device_pipeline.commit's
     plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q, ("我", "mic", "r1")))
-    assert "sentences_source_id" in plan, plan
+    assert "sentences_id_source" in plan, plan
     db.conn().execute(q, ("我", "mic", "r1"))
     assert [r["speaker"] for r in db.sentences("2026-10-01", "2026-10-02")] == ["我"]
+    # a pass's rows replaced (every final piece, on the event loop) stay on the start range, not the device's history
+    q = "DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ?"  # db.replace_sentences'
+    plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q, ("a", "b", "mic")))
+    assert "sentences_start" in plan, plan
 
 
 @pytest.mark.parametrize("limit", [0, -1, 1, 2, 30])
