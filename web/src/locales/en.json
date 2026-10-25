@@ -37,6 +37,7 @@
     "server": "Something went wrong on the server. Try again later",
     "http": "The request didn't go through ({status})",
     "code": {
+      "demo": "This is the online demo. Run your own instance to use it",
       "speakers_changed": "The speaker groups have changed. Refresh the page and try again",
       "undo_gone": "This rename can no longer be undone",
       "no_pending_voice": "No voice is waiting to be confirmed. Refresh the page and try again",

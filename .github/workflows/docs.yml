@@ -2,7 +2,7 @@ name: docs
 on:
   push:  # main: build and publish the site on GitHub Pages
     branches: [main]
-    paths: &paths ['docs/**', 'server/alldayrec/*.py', 'server/pyproject.toml', 'server/uv.lock', '.github/workflows/docs.yml']
+    paths: &paths ['docs/**', 'server/alldayrec/*.py', 'server/pyproject.toml', 'server/uv.lock', 'web/**', '.github/workflows/docs.yml']
   pull_request:  # PRs: build only (dead links fail it)
     paths: *paths
   workflow_dispatch:
@@ -40,6 +40,14 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
           ORIGIN: ${{ steps.pages.outputs.origin }}
+      # the online demo at /demo/: the pages in demo mode (web/src/demo.ts), after the docs (VitePress empties its dist)
+      - run: pnpm install --frozen-lockfile && pnpm exec vp build --mode demo --base ./ --outDir ../docs/.vitepress/dist/demo --emptyOutDir
+        working-directory: web
+      # and the API answers they read: a snapshot of fictional sample data on the assets branch (add-only), pinned by its hash
+      - run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/snap.tgz" https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/demo/snapshot-20261026.tgz
+          echo "800b9a59f82aecc21084549cef4f8d95b11a7e1524923b24568ecbd0fdbc26b9  $RUNNER_TEMP/snap.tgz" | sha256sum -c
+          tar xzf "$RUNNER_TEMP/snap.tgz" -C docs/.vitepress/dist/demo
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:

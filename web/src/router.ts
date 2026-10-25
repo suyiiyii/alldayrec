@@ -1,9 +1,10 @@
 import { watch } from "vue";
-import { createRouter, createWebHistory } from "vue-router";
+import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
 import { i18n, t } from "./i18n";
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // the online demo (src/demo.ts) is static files with no fallback to index.html: its paths go after a #
+  history: import.meta.env.MODE === "demo" ? createWebHashHistory() : createWebHistory(),
   routes: [
     // the old /conversations shows it too (an alias, not a redirect: the 1.5.0 app's 对话 tab loads that path, and a
     // redirect would move its WebView to 时间线's path, which that app answers by reloading both tabs, again and again)
