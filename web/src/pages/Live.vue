@@ -144,13 +144,27 @@ watch(day, () => {
   window.scrollTo(0, 0);
 });
 
-const atBottom = () => window.innerHeight + window.scrollY >= document.body.scrollHeight - 40;
-const onScroll = () => (follow.value = atBottom());
-const toBottom = () => window.scrollTo(0, document.body.scrollHeight);
+// Following the captions stops as soon as the reader goes up, by any amount, and starts again only at the very bottom
+// or from the button. By direction: a phone's toolbars coming and going (innerHeight) and new captions (a longer
+// page) move no one up; iOS bouncing past the end, or the page getting shorter under a reader there (a caption redone
+// shorter pulls scrollY back), settles at the bottom, so it follows again.
+let lastY = 0;
+const bottom = () => document.documentElement.scrollHeight - window.innerHeight;
+const scrolled = () => Math.max(0, Math.min(window.scrollY, bottom())); // iOS bounces past both ends: no scroll
+const atBottom = () => window.scrollY >= bottom() - 2;
+function onScroll() {
+  const y = scrolled();
+  follow.value = atBottom() || (follow.value && y >= lastY);
+  lastY = y;
+}
+function toBottom() {
+  follow.value = true;
+  window.scrollTo(0, document.documentElement.scrollHeight);
+}
 watch(timeline, async () => {
   if (!follow.value || !live.value) return;
   await nextTick();
-  toBottom();
+  if (follow.value) toBottom(); // a finger may have gone up meanwhile
 });
 
 // the header's height: the summary card sticks right under it
@@ -184,6 +198,7 @@ onMounted(() => {
   window.addEventListener("scroll", onScroll);
   loadCalendar();
   follow.value = live.value;
+  lastY = scrolled();
   const h = (header = document.querySelector("header"));
   if (h) (sizer = new ResizeObserver(() => (headH.value = h.offsetHeight))).observe(h);
 });
