@@ -388,10 +388,12 @@ export interface LogEvent {
 export class ApiError extends Error {
   detail: string;
   code: string;
-  constructor(message: string, detail: string, code = "") {
+  status: number; // 0: no answer (the network)
+  constructor(message: string, detail: string, code = "", status = 0) {
     super(message);
     this.detail = detail;
     this.code = code;
+    this.status = status;
   }
 }
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
@@ -420,6 +422,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
             : t("err.http", { status: r.status }),
     `${path}: HTTP ${r.status}${raw && " " + raw}`,
     code,
+    r.status,
   );
 }
 

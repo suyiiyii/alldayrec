@@ -12,6 +12,7 @@
     "minSec": "{m} 分 {s} 秒",
     "hourMin": "{h} 小时 {m} 分",
     "back": "返回",
+    "retry": "重试",
     "undo": "撤销",
     "undone": "已撤销",
     "loading": "加载中",

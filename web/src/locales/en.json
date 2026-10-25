@@ -12,6 +12,7 @@
     "minSec": "{m} min {s} s",
     "hourMin": "{h} h {m} min",
     "back": "Back",
+    "retry": "Retry",
     "undo": "Undo",
     "undone": "Undone",
     "loading": "Loading",

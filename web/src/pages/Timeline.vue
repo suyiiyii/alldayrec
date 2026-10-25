@@ -50,7 +50,8 @@ const tags = ref<[string, number][]>([]),
   recaps = ref<Record<string, Recap | null>>({});
 const ready = ref(false),
   loading = ref(false),
-  done = ref(false);
+  done = ref(false),
+  failed = ref<{ msg: string; title: string } | null>(null); // the list did not load: said, with 重试
 const more = useTemplateRef<HTMLElement>("more"),
   selfCard = useTemplateRef<InstanceType<typeof SelfVoice>>("selfCard");
 let seq = 0;
@@ -59,7 +60,12 @@ let seq = 0;
 const top = computed(() => !q.value && !tag.value && !day.value);
 const going = computed(() => !!status.value?.devices?.some((d) => d.recording && d.conversation));
 const empty = computed(
-  () => ready.value && !Object.keys(calendar.value).length && !status.value?.recorders?.length,
+  () =>
+    ready.value &&
+    !failed.value &&
+    !items.value.length &&
+    !Object.keys(calendar.value).length &&
+    !status.value?.recorders?.length,
 );
 const yesterday = shiftDay(today(), -1);
 
@@ -84,24 +90,28 @@ const reply = ref<Reply | null>(kept()),
   asking = ref(false),
   askErr = ref(""),
   askErrTitle = ref("");
+let asked = 0; // the newest question: an older one's answer (10-30 s) that lands after it is dropped
 watch(reply, (r) => {
   try {
     sessionStorage.setItem("ask", JSON.stringify(r));
   } catch {}
 });
 async function askAI(text: string) {
+  const my = ++asked;
   asking.value = true;
   askErr.value = "";
   question.value = text;
   const t0 = Date.now();
   try {
     const r = await post<Reply>("/api/ask", { q: text });
-    reply.value = { ...r, q: text, secs: Math.round((Date.now() - t0) / 1000) };
+    if (my === asked) reply.value = { ...r, q: text, secs: Math.round((Date.now() - t0) / 1000) };
   } catch (e) {
-    askErr.value = String((e as Error).message ?? e);
-    askErrTitle.value = errorTitle(e);
+    if (my === asked) {
+      askErr.value = String((e as Error).message ?? e);
+      askErrTitle.value = errorTitle(e);
+    }
   }
-  asking.value = false;
+  if (my === asked) asking.value = false;
 }
 const answer = computed(() => {
   const by = new Map((reply.value?.sources ?? []).map((s) => [s.id, s]));
@@ -176,22 +186,41 @@ async function restart() {
   const my = ++seq;
   loading.value = true;
   if (top.value) selfCard.value?.load(); // after a reconnect too: it may have popped meanwhile
-  const cs = await search("");
+  let cs: Conversation[];
+  try {
+    cs = await search("");
+  } catch (e) {
+    if (my === seq) fail(e);
+    return;
+  }
   if (my !== seq) return; // a newer search started meanwhile
   items.value = cs;
   done.value = cs.length < PAGE;
   loading.value = false;
+  failed.value = null;
   spy();
 }
 async function page() {
   if (loading.value || done.value) return;
   const my = seq;
   loading.value = true;
-  const cs = await search(items.value.at(-1)?.start ?? "");
+  let cs: Conversation[];
+  try {
+    cs = await search(items.value.at(-1)?.start ?? "");
+  } catch (e) {
+    if (my === seq) fail(e);
+    return;
+  }
   if (my !== seq) return;
   items.value.push(...cs);
   done.value = cs.length < PAGE;
   loading.value = false;
+  failed.value = null;
+}
+// what is on screen stays; 重试 (or the socket's resync) loads it again
+function fail(e: unknown) {
+  loading.value = false;
+  failed.value = { msg: (e as Error).message, title: errorTitle(e) };
 }
 
 // the list by day, newest first
@@ -274,15 +303,25 @@ watch(more, (el, old) => {
   if (old) io.unobserve(old);
   if (el) io.observe(el);
 });
-onMounted(async () => {
-  window.addEventListener("scroll", spy, { passive: true });
-  get<Due[]>("/api/todos/due").then((d) => (due.value = d));
+// the page's loads (重试 again); only the list's failure is said: the socket pushes the status every 2 s, and the
+// calendar only marks the picker's days
+async function init() {
+  get<Due[]>("/api/todos/due").then((d) => (due.value = d), () => {});
   get<Record<string, number>>("/api/tags").then(
     (ts) => (tags.value = Object.entries(ts).slice(0, 40)),
+    () => {},
   );
-  const [st] = await Promise.all([get<Status>("/api/status"), loadCalendar(true), restart()]);
-  status.value = st;
+  const [st] = await Promise.all([
+    get<Status>("/api/status").catch(() => null),
+    loadCalendar(true).catch(() => {}),
+    restart(),
+  ]);
+  if (st) status.value = st;
   ready.value = true;
+}
+onMounted(() => {
+  window.addEventListener("scroll", spy, { passive: true });
+  void init();
 });
 onUnmounted(() => {
   io.disconnect();
@@ -393,6 +432,10 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         </div>
       </div>
       <SelfVoice v-if="top" ref="selfCard" />
+      <div v-if="failed" class="empty" :title="failed.title">
+        <Icon name="alert-circle" :size="48" />{{ failed.msg }}
+        <button class="btn" @click="init">{{ t("common.retry") }}</button>
+      </div>
       <section v-for="g in days" :key="g.day">
         <h2 class="day" :data-day="g.day">
           {{ dayLabel(g.day) }} <span class="n">{{ t("calendar.convs", g.convs.length) }}</span>
@@ -424,7 +467,14 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <div>{{ t("timeline.none") }}</div>
         </div>
       </template>
-      <button v-show="!done" ref="more" class="more" :disabled="loading" @click="page">
+      <!-- after a page that failed it is there again to try; with nothing loaded, 重试 above is -->
+      <button
+        v-show="!done && !(failed && !items.length)"
+        ref="more"
+        class="more"
+        :disabled="loading"
+        @click="page"
+      >
         {{ loading ? t("timeline.loading") : t("timeline.earlier") }}
       </button>
       <!-- 问 AI on a phone: a sheet from the bottom; a tap on the dim backdrop (the dialog itself) or Escape closes it -->

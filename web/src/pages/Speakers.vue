@@ -126,7 +126,9 @@ async function expand(g: Speaker) {
   if (open.value === g.id) return (open.value = "");
   open.value = g.id;
   members.value = [];
-  members.value = (await get<{ members: Voice[] }>(`/api/speakers/${encodeURIComponent(g.id)}`)).members;
+  const ms = (await get<{ members: Voice[] }>(`/api/speakers/${encodeURIComponent(g.id)}`)).members;
+  // another card opened meanwhile: these voices are not its (不是 on one would detach it from the wrong card)
+  if (open.value === g.id) members.value = ms;
 }
 // 这张卡像是两个人: a card's two halves (the server's two-half test), from naming it (to: the name asked
 // for) or from its ⋯ 拆开; a half's voices (conv|label) are what 只命名这一半 names and 拆开 moves out

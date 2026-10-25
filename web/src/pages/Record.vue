@@ -288,9 +288,9 @@ async function stop() {
     stream!.getTracks().forEach((t) => t.stop());
   }
   if (ble) {
+    follower.cut(); // the last piece, while target() still names the board
     ble.gatt?.disconnect();
     ble = null;
-    follower.cut();
   }
   note(t("record.stopping"));
   await sleep(500);
@@ -307,7 +307,11 @@ const onVisible = () =>
   recording.value &&
   note(t(document.hidden ? "record.hidden" : "record.visible", { n: sent.value }, sent.value));
 onMounted(() => document.addEventListener("visibilitychange", onVisible));
-onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
+// leaving the page stops it: no button would be left to (its pieces still go up, then the end)
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onVisible);
+  if (recording.value) void stop();
+});
 </script>
 
 <template>
