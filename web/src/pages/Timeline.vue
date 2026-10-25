@@ -59,7 +59,7 @@ let seq = 0;
 const top = computed(() => !q.value && !tag.value && !day.value);
 const going = computed(() => !!status.value?.devices?.some((d) => d.recording && d.conversation));
 const empty = computed(
-  () => ready.value && !Object.keys(calendar.value).length && !status.value?.devices?.length,
+  () => ready.value && !Object.keys(calendar.value).length && !status.value?.recorders?.length,
 );
 const yesterday = shiftDay(today(), -1);
 

@@ -283,7 +283,7 @@ function jump(start: string) {
           <div>
             <b>{{ t("live.idle") }}</b>
             <div class="muted">
-              {{ t(status?.devices?.length ? "live.idleWear" : "live.idleConnect") }}
+              {{ t(status?.recorders?.length ? "live.idleWear" : "live.idleConnect") }}
             </div>
           </div>
         </div>
@@ -297,7 +297,7 @@ function jump(start: string) {
           ><Icon name="mic" :size="18" />{{ t("live.recordHere") }}</RouterLink
         >
         <p class="in-app-hint muted">{{ t("live.inAppHint") }}</p>
-        <RouterLink v-if="!status?.devices?.length" class="card last" to="/connect">
+        <RouterLink v-if="!status?.recorders?.length" class="card last" to="/connect">
           <Icon name="smartphone" :size="20" />
           <b>{{ t("live.connectRecorder") }}</b>
           <Icon name="chevron-right" :size="18" />

@@ -24,7 +24,7 @@ onMounted(async () => {
     get<string[]>("/api/days").catch(() => []),
   ]);
   apk.value = !!a;
-  phone.value = !!s?.devices?.length;
+  phone.value = !!s?.recorders?.length; // a phone has sent audio here (devices: only the pipelines running now)
   heard.value = d.length > 0;
 });
 
