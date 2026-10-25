@@ -65,11 +65,13 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     c["participants"] = list(dict.fromkeys(to if p == frm else p for p in c["participants"]))
     with db.tx() as t:
         keys = (f"{conv_id}|{frm}", f"{conv_id}|{to}")
+        # its device's rows only (conversation_rows): another device recording the same minutes has labels of its own
         before |= {"to": to, "after": c["participants"], "hints": db.name_hints(conv_id).get(conv_id),
-                   "rows": [r[0] for r in t.execute("SELECT rowid FROM sentences WHERE start >= ? AND start <= ? AND speaker = ?", (c["start"], c["end"], frm))],
+                   "rows": [r[0] for r in t.execute("SELECT rowid FROM sentences WHERE start >= ? AND start <= ? AND speaker = ? AND (? IS NULL OR source = ?)",
+                                                    (c["start"], c["end"], frm, c.get("device"), c.get("device")))],
                    "voices": [tuple(r) for r in t.execute("SELECT * FROM voices WHERE conv = ? AND label IN (?, ?)", (conv_id, frm, to))],
                    "apart": [tuple(r) for r in t.execute("SELECT voice, grp FROM apart WHERE voice IN (?, ?)", keys)]}
-        t.execute("UPDATE sentences SET speaker = ? WHERE start >= ? AND start <= ? AND speaker = ?", (to, c["start"], c["end"], frm))
+        t.execute(f"UPDATE sentences SET speaker = ? WHERE rowid IN ({','.join('?' * len(before['rows']))})", (to, *before["rows"]))
         t.execute("UPDATE conversations SET participants = ? WHERE id = ?", (json.dumps(c["participants"], ensure_ascii=False), conv_id))
         if t.execute("SELECT 1 FROM voices WHERE conv = ? AND label = ?", (conv_id, to)).fetchone():
             t.execute("DELETE FROM voices WHERE conv = ? AND label = ?", (conv_id, frm))  # a merge: the label's own voice stays
