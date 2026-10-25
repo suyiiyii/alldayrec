@@ -69,3 +69,5 @@ type: reference
 | `perf_pieces` | 每个定稿块和初稿轮次各步骤的耗时：解码、VAD、识别、声纹、写库（main 上新增） |
 
 `perf_` 开头的表只记耗时和资源用量，不记内容，保留 90 天。`GET /api/perf?day=YYYY-MM-DD` 读一天的；从数据库副本导出用 `python -m alldayrec.perf export <live.db> <YYYY-MM-DD>`。
+
+`enrolled` 出现之前学到的声纹，每人只有一行汇总，不对应具体的句子。那时学进了别人声音的，可以用 `python -m alldayrec.bank relearn <live.db>` 从这个人现在名下的声音（实时录音里的）重新算出这一行：只打印每人前后的句数、用上和丢掉的声音数、新旧声纹的余弦，不写库；加 `--apply` 才写，写完重启服务端（声纹在启动时载入）。之后逐句学到的不受影响。

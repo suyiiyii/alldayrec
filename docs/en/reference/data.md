@@ -69,3 +69,5 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `perf_pieces` | How long each step of each final piece and draft pass took: decode, VAD, ASR, voiceprints, store (new on main) |
 
 The `perf_` tables hold durations and resource use only, never content, and keep 90 days. `GET /api/perf?day=YYYY-MM-DD` reads one day; `python -m alldayrec.perf export <live.db> <YYYY-MM-DD>` exports one from a copy of the store.
+
+A voiceprint learnt before `enrolled` existed is one summary row per person, not tied to sentences. If it took in someone else's voice back then, `python -m alldayrec.bank relearn <live.db>` recomputes that row from the voices now under the person's name (from live recordings). It only prints, per person, the sentences before and after, the voices used and dropped, and the cosine between the old and the new voiceprint; `--apply` writes it, and then the server needs a restart (it loads the voiceprints at start). What was learnt sentence by sentence since stays.

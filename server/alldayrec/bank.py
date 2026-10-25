@@ -4,8 +4,16 @@ the two-half test of a voice card (#295).
 The ledger, table enrolled: one row per sentence learnt (row: its rowid in sentences, n 1, e its voiceprint), and per
 name at most one row NULL, n its sentences: the bank as it stood before the ledger (10-25). A name's voiceprint is
 the n-weighted mean of its rows. A rename away from the name (apply_rename: 不是, 拆开, the conversation page) and an
-undo drop the rows of the sentences they move, and the voiceprint is that mean again.
+undo drop the rows of the sentences they move, and the voiceprint is that mean again. A NULL row that drifted (taught
+by renames before the filter, #295) is learnt again from the name's voices; without --apply it only says what it would:
+
+    python -m alldayrec.bank relearn <live.db>            per name: n before and after, voices used, cosine old/new
+    python -m alldayrec.bank relearn <live.db> --apply    then restart the server: the diarists load the bank at start
 """
+import sqlite3
+import sys
+from pathlib import Path
+
 import numpy as np
 
 from alldayrec import db
@@ -76,6 +84,44 @@ def restore(t, gone: list[tuple]) -> None:
         recompute(t, name)
 
 
+RELEARN_MIN = 5  # voices a name needs for relearn; fewer and its NULL row stays as it is
+
+
+def relearnt(voices: list[tuple[int, np.ndarray]]) -> tuple[int, np.ndarray, int] | None:
+    """A name's NULL row (n, e) again from its voices (k sentences each, their unit mean): those BANK_MIN close to the
+    voices' median, each weighing its k sentences as a ledger row weighs one, e a unit vector like a sentence's; and how
+    many voices it used. None: fewer than RELEARN_MIN to learn from."""
+    if len(voices) < RELEARN_MIN:
+        return None
+    k, E = np.array([x[0] for x in voices]), np.array([x[1] for x in voices], np.float64)
+    keep = E @ unit(np.median(E, 0)) >= BANK_MIN  # the median: a few voices of someone else do not move it
+    if keep.sum() < RELEARN_MIN:
+        return None
+    return int(k[keep].sum()), unit(k[keep] @ E[keep]), int(keep.sum())
+
+
+def relearn(t) -> list[dict]:
+    """Every NULL row (我 has none: its voiceprint is the npz) learnt again from the name's live voices (the voices
+    table: one per conversation x label, renames carry them along), those of conversations with ledger rows of the name
+    left out (learnt since, sentence by sentence: they stay); and the name's voiceprint recomputed. Live only: the
+    recorders' sound, the one enroll learns from and the diarists name (history voices are other microphones). From
+    the voices, not the old row: running it again changes nothing. Per name what it did."""
+    out = []
+    for name, n in t.execute("SELECT name, n FROM enrolled WHERE row IS NULL AND name != '我'").fetchall():
+        vs = [(k or 1, db.vec(e)) for k, e in t.execute(
+            "SELECT k, e FROM voices WHERE label = ? AND device = 'live' AND e IS NOT NULL AND conv NOT IN "
+            "(SELECT conv FROM enrolled WHERE name = ? AND row IS NOT NULL AND conv IS NOT NULL)", (name, name))]
+        r = {"name": name, "old_n": n, "voices": len(vs)}
+        if new := relearnt(vs):
+            was = db.vec(t.execute("SELECT e FROM people WHERE name = ?", (name,)).fetchone()[0])
+            t.execute("UPDATE enrolled SET n = ?, e = ? WHERE name = ? AND row IS NULL", (new[0], db.blob(new[1]), name))
+            recompute(t, name)
+            now = db.vec(t.execute("SELECT e FROM people WHERE name = ?", (name,)).fetchone()[0])
+            r |= {"new_n": new[0], "used": new[2], "cos": round(float(unit(was) @ unit(now)), 3)}
+        out.append(r)
+    return out
+
+
 def sync(*names: str) -> None:
     """The names' voiceprints as the store has them now, into every diarist of the tenant (after the transaction)."""
     people = db.people()
@@ -124,3 +170,22 @@ def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] 
         if key(m) in vec:
             out[int(vec[key(m)] @ worst[1][1] > vec[key(m)] @ worst[1][0])].append(m)
     return sorted(out, key=lambda h: -sum(m.get("speech_s") or 0 for m in h))
+
+
+if __name__ == "__main__":
+    match sys.argv[1:]:
+        case ["relearn", store, *apply] if apply in ([], ["--apply"]):
+            if apply:
+                db.open_db(Path(store))
+                with db.tx() as t:
+                    done = relearn(t)
+            else:  # the same work on a copy in memory: the file is opened read-only
+                t = sqlite3.connect(":memory:")
+                db.read_only(store).backup(t)
+                done = relearn(t)
+            for r in done:
+                print(f"{r['name']}: n {r['old_n']} -> {r['new_n']}, voices {r['used']} used / {r['voices'] - r['used']} dropped, "
+                      f"cosine old/new {r['cos']}" if "new_n" in r else f"{r['name']}: kept (n {r['old_n']}, {r['voices']} voices)")
+            print("written" if apply else "dry run: nothing written (--apply writes)")
+        case _:
+            raise SystemExit(__doc__)

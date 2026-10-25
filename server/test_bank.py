@@ -1,6 +1,9 @@
 """The people bank as a ledger (bank.py, #295): what a rename teaches is filtered, recorded per sentence and taken back
 by the undo either way round; a card that sounds like two people is not named whole without asking, and 拆开 moves a
-half out in one transaction with an undo."""
+half out in one transaction with an undo; a NULL row that drifted is learnt again (relearn)."""
+import subprocess
+import sys
+
 import anyio
 import numpy as np
 import pytest
@@ -167,3 +170,33 @@ def test_one_sentence_fix_forgets_and_learns(store):
     assert db.people()["张三"][0] == 2 and db.people()["李四"][0] == 1 and ledger() != was
     anyio.run(speaker_undo, {"undo": r["undo"]})
     assert ledger() == was and "李四" not in db.people()
+
+
+def test_relearn(store, tmp_path):
+    """A NULL row that drifted is learnt again from the name's live voices: the odd one, a history one and those of a
+    conversation learnt since (its ledger rows stay) left out; too few voices: kept. The dry run writes nothing; --apply
+    writes, and again changes nothing."""
+    with db.tx() as t:
+        t.execute("INSERT INTO enrolled VALUES ('张三', NULL, NULL, 50, ?)", (db.blob(bank.unit(A + B)),))  # drifted to B
+        t.execute("INSERT INTO enrolled VALUES ('张三', 'c-new', 7, 1, ?)", (db.blob(A),))  # learnt since
+        t.execute("INSERT INTO enrolled VALUES ('李四', NULL, NULL, 9, ?)", (db.blob(C),))
+        v = lambda conv, name, e, device="live": {"conv": conv, "label": name, "device": device, "k": 4, "e": e}
+        db.insert_voices(t, [v(f"c{i}", "张三", A) for i in range(5)] + [v("c-odd", "张三", C), v("c-old", "张三", B, "mic"),
+                             v("c-new", "张三", B)] + [v(f"d{i}", "李四", C) for i in range(4)])
+        for name in ("张三", "李四"):
+            bank.recompute(t, name)
+    dump = lambda: [list(map(tuple, db.conn().execute(f"SELECT * FROM {n} ORDER BY {o}"))) for n, o in (("enrolled", "rowid"), ("people", "n DESC"))]
+    was = dump()
+    run = lambda *a: subprocess.run([sys.executable, "-m", "alldayrec.bank", "relearn", str(tmp_path / "t.db"), *a],
+                                    capture_output=True, text=True, check=True).stdout
+    out = run()
+    assert "张三: n 50 -> 20, voices 5 used / 1 dropped, cosine old/new 0.717" in out and "李四: kept (n 9, 4 voices)" in out
+    assert dump() == was, "a dry run"
+    run("--apply")
+    now = dump()
+    assert [r[:4] for r in now[0]] == [("张三", None, None, 20), ("张三", "c-new", 7, 1), ("李四", None, None, 9)]
+    assert db.people()["张三"][0] == 21 and np.allclose(bank.unit(db.people()["张三"][1]), A)
+    assert now[0][2] == was[0][2] and now[1][1] == was[1][1], "李四 as it was"
+    run("--apply")
+    assert dump() == now
+
