@@ -33,7 +33,7 @@ const route = useRoute(),
 const today = todayOf();
 const day = computed(() => (route.query.day as string | undefined) || today);
 const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } =
-  useLive(day);
+  useLive(day, true);
 const said = computed(() => new Set(Object.values(partials.value))); // the sentences being said now
 // the summary card while a conversation goes on; with none, the idle card under the captions says what the
 // recorders are doing, the last conversation today and how to start one

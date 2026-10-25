@@ -447,9 +447,9 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     }
     private val endDue = mutableMapOf<String, Long>()  // an end that failed: not tried again before (this thread only)
 
-    /** The piece lengths in the server's answer to an upload (`slice`, shorter while a page watches): the running slicer
-     *  cuts with them and a restart reads them, as the app's "slices" call does. From here because the Dart side that
-     *  asks /api/client-config does not run in the background or with the screen off. */
+    /** The piece lengths in the server's answer to an upload (`slice`, shorter while the live page is open): the running
+     *  slicer cuts with them and a restart reads them, as the app's "slices" call does. From here because the Dart side
+     *  that asks /api/client-config does not run in the background or with the screen off. */
     private fun slices(reply: ByteArray) {
         val s = try { org.json.JSONObject(String(reply)).optJSONObject("slice") } catch (_: Exception) { null } ?: return
         val fg = s.optInt("foreground"); val bg = s.optInt("background"); val off = s.optInt("screenOff")

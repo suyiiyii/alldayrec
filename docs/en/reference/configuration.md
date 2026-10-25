@@ -106,7 +106,7 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | Variable | When unset | Description | Source |
 |---|---|---|---|
 | `SLICE_FOREGROUND_S`, `SLICE_BACKGROUND_S`, `SLICE_SCREEN_OFF_S` | `1`, `20`, `60` | Seconds of audio per piece while the app is in the foreground, in the background, or with the screen off (Android); the app reads them from `/api/client-config` and from the answer to each upload | `routes_upload.py` |
-| `SLICE_WATCHED_S` | `2` | While a page is open, pieces in the background and with the screen off are at most this many seconds, so drafts appear within seconds even with the phone in a pocket; back to normal within a minute after the last page closes | `routes_upload.py` |
+| `SLICE_WATCHED_S` | `2` | While the live captions page `/live` is open, pieces in the background and with the screen off are at most this many seconds, so captions appear within seconds even with the phone in a pocket; the small live captions window on 「今天」 (Today) does not count. Back to normal within a minute after the page closes | `routes_upload.py` |
 | `REFINE_WINDOW_S` | `240` | The most seconds of audio the draft layer handles at once | `device_pipeline.py` |
 | `LIVE_EVERY_S` | `120` | The live analysis is redone each time an ongoing conversation gains this many seconds of speech | `device_pipeline.py` |
 | `SQUEEZE_KEEP_S` | `3` | Before audio goes to the engine, silences longer than this many seconds are cut to this length; 0 sends the audio whole | `asr.py` |

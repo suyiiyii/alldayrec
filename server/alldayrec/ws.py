@@ -40,6 +40,8 @@ async def ws_endpoint(ws: WebSocket):
                 continue
             if isinstance(m, dict) and m.get("type") == "watch":  # a page in front: every 20 s; wake: it just came to the front
                 T().watch_until = time.time() + 60
+                if m.get("live"):  # the live page, not 今天's live card: short pieces from the phones (routes_upload.slices)
+                    T().live_until = T().watch_until
                 if m.get("wake"):
                     T().wake_at = time.time()
     except WebSocketDisconnect:

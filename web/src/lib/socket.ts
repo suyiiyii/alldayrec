@@ -73,15 +73,17 @@ export function useSocket(onMessage: (m: any) => void, onResync: () => void) {
 
 // The live analysis and drafts run only while a page shows today in front (server watch_until): a heartbeat every
 // 20 s while on() holds, and a wake when the page comes back to the front so a stale analysis is redone at once.
+// live: the live page itself; while it is open the phones upload short pieces (server live_until).
 export function useWatch(
   send: (m: unknown) => boolean,
   connected: Ref<boolean>,
   on: () => boolean = () => true,
+  live = false,
 ) {
   let wake = true,
     timer = 0;
   const beat = () => {
-    if (on() && !document.hidden && send({ type: "watch", wake })) wake = false;
+    if (on() && !document.hidden && send({ type: "watch", wake, live })) wake = false;
   };
   const onVisible = () => {
     if (document.hidden) return;

@@ -54,6 +54,7 @@ class Tenant:
     dias: list = field(default_factory=list)        # its pipelines' diarists: a rename teaches them a name
     watch_until: float = 0.0                        # a page of its watches until then: drafts, the live analysis
     wake_at: float = 0.0                            # ... and came to the front then
+    live_until: float = 0.0                         # its live page (/live) watches until then: short upload pieces
     chunks: dict | None = None                      # its newest upload
     owner: dict | None = None                       # 我's voiceprint picked on its card (selfvoice), for the next conversations
     read_to: dict = field(default_factory=dict)     # audio.stream: per device, the last piece its reader has finished with

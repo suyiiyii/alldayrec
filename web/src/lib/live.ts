@@ -5,8 +5,8 @@ import { useSocket, useWatch } from "./socket";
 
 // One day's sentences as the server pushes them (final rows replacing drafts, the sentence being said as a partial),
 // its closed conversations, the live analyses and the status. The live page and 时间线's live card both use it; a
-// day other than today is loaded once and gets no pushes.
-export function useLive(day: Ref<string>) {
+// day other than today is loaded once and gets no pushes. page: the live page (its watch asks for short pieces).
+export function useLive(day: Ref<string>, page = false) {
   const now = today(); // as the page opened: one left open past midnight keeps following the stream
   const live = computed(() => day.value === now);
   const rows = ref<Row[]>([]),
@@ -88,7 +88,7 @@ export function useLive(day: Ref<string>) {
       lives.value = lives.value.filter((l) => l.device !== m.device).concat(m.live ? [m.live] : []);
     } else if (m.type === "status") status.value = m;
   }, load);
-  useWatch(send, connected, () => live.value);
+  useWatch(send, connected, () => live.value, page);
 
   return { live, rows, partials, convs, status, lives, ready, going, connected, doneTo };
 }

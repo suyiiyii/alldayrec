@@ -26,14 +26,14 @@ router = APIRouter()
 SLICE_FOREGROUND_S = int(os.environ.get("SLICE_FOREGROUND_S", "1"))   # the apps' piece seconds with the app in front: 1 s
 SLICE_BACKGROUND_S = int(os.environ.get("SLICE_BACKGROUND_S", "20"))  # ... in the background             (drafts ~8 s vs ~13 s at 5 s)
 SLICE_SCREEN_OFF_S = int(os.environ.get("SLICE_SCREEN_OFF_S", "60"))  # ... screen off (Android)
-SLICE_WATCHED_S = int(os.environ.get("SLICE_WATCHED_S", "2"))  # at most this in the background and screen off while a page watches
+SLICE_WATCHED_S = int(os.environ.get("SLICE_WATCHED_S", "2"))  # ... at most this in both while /live is open
 
 
 def slices() -> dict:
-    """The piece lengths the apps cut now, per app state. While a page of the tenant watches (ws: a page showing today
-    in front), the background and screen-off ones are at most SLICE_WATCHED_S, so its drafts come within seconds also
-    from a phone in a pocket; they are back to theirs within a minute of the last page leaving."""
-    cap = (lambda s: min(s, SLICE_WATCHED_S)) if time.time() < T().watch_until else (lambda s: s)
+    """The piece lengths the apps cut now, per app state. While the tenant's live page is open (ws: its watch says
+    live; 今天's live card does not), the background and screen-off ones are at most SLICE_WATCHED_S, so its captions
+    come within seconds also from a phone in a pocket; they are back to theirs within a minute of the page leaving."""
+    cap = (lambda s: min(s, SLICE_WATCHED_S)) if time.time() < T().live_until else (lambda s: s)
     return {"foreground": SLICE_FOREGROUND_S, "background": cap(SLICE_BACKGROUND_S), "screenOff": cap(SLICE_SCREEN_OFF_S)}
 
 
@@ -143,7 +143,8 @@ async def upgrades(device: str, since: str):
 async def client_config():
     """What the apps ask on start and while recording: piece lengths per app state (the server changes them without
     a new build; short pieces in front make drafts quick, long ones in the background save requests). The lengths now
-    (slices()), shortened while a page watches, the same as /api/chunks answers: the app's poll never undoes them."""
+    (slices()), shortened while the live page is open, the same as /api/chunks answers: the app's poll never undoes
+    them."""
     return {"slice": slices()}
 
 

@@ -1,5 +1,6 @@
 """The piece lengths the apps get, from /api/client-config and with every upload's answer: the configured ones, and
-while a page watches the background and screen-off ones at most SLICE_WATCHED_S (the foreground's stays)."""
+while the live page is open the background and screen-off ones at most SLICE_WATCHED_S (the foreground's stays).
+今天's live card watches too (drafts, the live analysis) but leaves the lengths as they are."""
 import time
 
 from starlette.testclient import TestClient
@@ -19,14 +20,23 @@ def test_slices(tmp_path, monkeypatch):
     monkeypatch.setattr(audio, "save", lambda *a: 2.0)  # a piece of 2 s, not decoded
     c = TestClient(server.app)  # no `with`: the lifespan does not start
     up = lambda: c.post("/api/chunks", params={"device": "phone", "start": 1_000}, content=b"x", headers={"content-type": "audio/ogg"}).json()
+    cfg = lambda: c.get("/api/client-config").json()["slice"]
 
-    assert c.get("/api/client-config").json() == {"slice": NORMAL}
-    assert up() == {"seconds": 2.0, "slice": NORMAL}
+    def until(cond):  # the WebSocket's messages are handled on its own loop
+        end = time.time() + 5
+        while not cond() and time.time() < end:
+            time.sleep(0.01)
+        assert cond()
 
-    t.watch_until = time.time() + 60  # a page in front (ws.py)
-    assert c.get("/api/client-config").json() == {"slice": WATCHED}
-    assert up() == {"seconds": 2.0, "slice": WATCHED}
+    assert cfg() == NORMAL and up() == {"seconds": 2.0, "slice": NORMAL}
+    with c.websocket_connect("/ws") as w:
+        w.send_json({"type": "watch", "wake": True, "live": False})  # 今天's live card
+        until(lambda: t.watch_until > time.time())
+        assert cfg() == NORMAL and up()["slice"] == NORMAL, "drafts run, the pieces stay as they are"
 
-    t.watch_until = time.time() - 1  # its last watch was over a minute ago
-    assert c.get("/api/client-config").json() == {"slice": NORMAL}
-    assert up()["slice"] == NORMAL
+        w.send_json({"type": "watch", "wake": False, "live": True})  # the live page
+        until(lambda: t.live_until > time.time())
+        assert cfg() == WATCHED and up() == {"seconds": 2.0, "slice": WATCHED}
+
+    t.live_until = time.time() - 1  # its last watch was over a minute ago
+    assert cfg() == NORMAL and up()["slice"] == NORMAL

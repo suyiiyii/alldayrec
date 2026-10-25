@@ -115,8 +115,8 @@ class UploaderTest {
         } finally { up.running = false; up.join(7000); http.close(); dir.deleteRecursively() }
     }
 
-    /** The piece lengths in an upload's answer (shorter while a page watches) go to the running slicer and to the prefs
-     *  a restart reads; an answer without them changes nothing. */
+    /** The piece lengths in an upload's answer (shorter while the live page is open) go to the running slicer and to the
+     *  prefs a restart reads; an answer without them changes nothing. */
     @Test fun slices() {
         val dir = kotlin.io.path.createTempDirectory().toFile()
         val kv = java.util.concurrent.ConcurrentHashMap<String, Int>(mapOf("foreground" to 1, "background" to 20, "screenOff" to 60))
@@ -127,7 +127,7 @@ class UploaderTest {
         val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
             when (m.name) { "getInt" -> kv[a[0] as String] ?: a[1]; "getLong" -> a[1]; "edit" -> edit; else -> null } } as SharedPreferences
         val http = ServerSocket(0)
-        Thread {  // one request per connection; the piece at 5000 is answered while a page watches
+        Thread {  // one request per connection; the piece at 5000 is answered while the live page is open
             while (!http.isClosed) try { http.accept().use { c ->
                 val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
                 val path = r.readLine().split(" ")[1]

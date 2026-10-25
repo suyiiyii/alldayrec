@@ -106,7 +106,7 @@ type: reference
 | 变量 | 不设时 | 说明 | 源码 |
 |---|---|---|---|
 | `SLICE_FOREGROUND_S`、`SLICE_BACKGROUND_S`、`SLICE_SCREEN_OFF_S` | `1`、`20`、`60` | App 在前台、后台、熄屏（安卓）时每块音频的秒数，App 通过 `/api/client-config` 和每次上传的回答读取 | `routes_upload.py` |
-| `SLICE_WATCHED_S` | `2` | 有页面开着时，后台和熄屏的每块音频最多这么多秒，手机在口袋里初稿也几秒内出字；最后一个页面关掉后一分钟内恢复 | `routes_upload.py` |
+| `SLICE_WATCHED_S` | `2` | 实时字幕页 `/live` 开着时，后台和熄屏的每块音频最多这么多秒，手机在口袋里字幕也几秒内出来；「今天」页的实时字幕小窗不算。页面关掉后一分钟内恢复 | `routes_upload.py` |
 | `REFINE_WINDOW_S` | `240` | 初稿层一次最多处理的音频秒数 | `device_pipeline.py` |
 | `LIVE_EVERY_S` | `120` | 进行中的对话新增这么多秒语音后，重做实时分析 | `device_pipeline.py` |
 | `SQUEEZE_KEEP_S` | `3` | 送给引擎前，长于这个秒数的静音剪到这么长；0 表示整段送 | `asr.py` |

@@ -577,8 +577,9 @@ final class Uploader: Thread {
     }
   }
 
-  /// The piece lengths in the server's answer to an upload (`slice`, shorter while a page watches; iOS cuts only by
-  /// foreground and background): from here because Dart, which asks /api/client-config, does not run in the background.
+  /// The piece lengths in the server's answer to an upload (`slice`, shorter while the live page is open; iOS cuts only
+  /// by foreground and background): from here because Dart, which asks /api/client-config, does not run in the
+  /// background.
   private static func slices(_ reply: Data) {
     let d = Recorder.defaults
     guard let s = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["slice"] as? [String: Any],
