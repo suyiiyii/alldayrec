@@ -32,8 +32,10 @@ const route = useRoute(),
   router = useRouter();
 const today = todayOf();
 const day = computed(() => (route.query.day as string | undefined) || today);
-const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } =
-  useLive(day, true);
+const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } = useLive(
+  day,
+  true,
+);
 const said = computed(() => new Set(Object.values(partials.value))); // the sentences being said now
 // the summary card while a conversation goes on; with none, the idle card under the captions says what the
 // recorders are doing, the last conversation today and how to start one
@@ -53,11 +55,13 @@ type Item =
   | { k: "catchup"; key: string; text: string };
 // Per device, the time between its final rows and its drafts (or, with none, its newest audio): the drafts follow
 // what is said now while a backlog (a phone back after hours offline) is finalized in order, so this time is not lost.
-// Held: the phone still reads older audio off the recorder's card in the background; finals wait for it
+// Held: the phone still reads older audio off the recorder's card in the background; finals wait for it.
+// An import batch (status.imports) is no backlog of now: 导入录音 shows its progress
+const imported = computed(() => new Set((status.value?.imports ?? []).map((r) => r.device)));
 const catchups = computed(() =>
   (live.value ? (status.value?.devices ?? []) : []).flatMap((d) => {
     const from = doneTo(d.device);
-    if (!from) return [];
+    if (!from || imported.value.has(d.device)) return [];
     const to =
       rows.value
         .filter((r) => r.state === "draft" && r.source === d.device && r.start >= from)

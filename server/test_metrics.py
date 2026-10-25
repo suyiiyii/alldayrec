@@ -92,15 +92,18 @@ def test_recorders(tmp_path):
         put("LR-P3-OLD", a)
     put("phone", -3600_000)
     put("LR-BEAN", -600_000)
-    put("import-20261020-093000", -7200_000)  # a batch from 导入录音: listed apart
+    put("import-20261020-093000", -7200_000)  # a batch from 导入录音: listed apart, not recording though its audio just came
+    db.conn().execute("UPDATE pieces SET received_ms = ? WHERE device = 'import-20261020-093000'", (now,))
     db.add_device_status("LR-BEAN", iso(-700_000), {"battery": 80})
     db.add_device_status("LR-BEAN", iso(-590_000), {"battery": 79})
     t.devices["phone"] = pipeline_state.PipelineState()
+    t.devices["import-20261020-093000"] = pipeline_state.PipelineState()
     seen = []
     db.conn().set_trace_callback(seen.append)
     s = monitor.status()
     db.conn().set_trace_callback(None)
-    assert [d["device"] for d in s["devices"]] == ["phone"]
+    assert [(d["device"], d["recording"]) for d in s["devices"]] == [("phone", False), ("import-20261020-093000", False)]
+    assert s["recording"] is False
     assert s["recorders"] == [{"device": "LR-BEAN", "audio_start": iso(-600_000), "audio_end": iso(-590_000), "hw": {"battery": 79, "at": iso(-590_000)}},
                               {"device": "phone", "audio_start": iso(-3600_000), "audio_end": iso(-3590_000), "hw": None},
                               {"device": "LR-P3-OLD", "audio_start": iso(-9 * 86400_000), "audio_end": iso(-9 * 86400_000 + 20_000), "hw": None}], s["recorders"]

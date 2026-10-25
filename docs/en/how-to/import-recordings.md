@@ -1,6 +1,6 @@
 ---
 type: how-to
-description: "Import recordings you already have (MP3, WAV, m4a, Plaud exports) on the web page Import recordings: check the start times and upload. Scripts can use POST /api/chunks."
+description: "Import recordings you already have (MP3, WAV, m4a, Plaud exports) into alldayrec on the web page Import recordings."
 ---
 
 # How to import recordings you already have
@@ -36,7 +36,7 @@ The sources for the third-party products are in [What alldayrec is](../explanati
 4. Tap Import N files. The files go up oldest first, each with its upload progress. If one fails, tap Retry, or tap × to take it out of the batch.
 5. When the upload is done, the page lists the days the conversations fall on; tap a day to open its timeline. Transcription takes a while; Past imports at the bottom of the page shows how long is left.
 
-Each batch has a device name of its own, by default `import-` and the moment of the import (e.g. `import-20261026-093000`); you can change it under Batch name. Batches are listed under Past imports, not as recorders on the Me page.
+Each batch has a device name of its own, by default `import-` and the moment of the import (e.g. `import-20261026-093000`); you can change it under Batch name. Batches are listed under Past imports.
 
 A conversation with less than 10 seconds of speech is not kept as a conversation; its sentences stay in the transcript (see [Architecture and data flow](../explanation/architecture.md#conversations-summaries-and-the-recap)).
 

@@ -155,16 +155,19 @@ def decode(body: bytes, aac: bool = False, n: int | None = None, prev: bytes | N
     prev: the piece this one goes on from (before()), for a recorder's decoder to start where it left off (primed)."""
     if prev is not None:
         body = primed(prev, body)
-    run = lambda src, data: subprocess.run(["ffmpeg", "-v", "error", "-i", src, "-f", "s16le", "-ac", "1", "-ar", str(SR), "pipe:1"],
-                                           input=data, capture_output=True)
-    out = run("pipe:0", body)
-    if out.returncode or len(out.stdout) < 2:  # an Opus piece can be one 20 ms packet (the last one of a run)
-        # from a file: an .m4a keeps its index (moov) after the audio, and ffmpeg cannot seek back to it in a pipe
-        # (10-26: an imported 60 s one decoded to nothing)
-        with tempfile.NamedTemporaryFile() as f:
+    run = lambda args, data: subprocess.run(["ffmpeg", "-nostdin", "-v", "error", *args, "-f", "s16le", "-ac", "1", "-ar", str(SR),
+                                             "pipe:1"], input=data, capture_output=True)
+
+    def from_file(*args):  # an .m4a keeps its index (moov) after the audio: ffmpeg cannot seek back to it in a pipe
+        with tempfile.NamedTemporaryFile() as f:  # (10-26: an imported 60 s one decoded to nothing)
             f.write(body)
             f.flush()
-            out = run(f.name, None)
+            return run([*args, "-i", f.name], None)
+
+    # MP4/M4A/3GP straight from a file, with the mov demuxer only (no probing of other local-file readers)
+    out = from_file("-f", "mov") if body[4:8] == b"ftyp" else run(["-i", "pipe:0"], body)
+    if out.returncode or len(out.stdout) < 2:  # an Opus piece can be one 20 ms packet (the last one of a run)
+        out = from_file()  # an old .mov, a leading free atom
     if out.returncode or len(out.stdout) < 2:
         return None
     x = np.frombuffer(out.stdout[:len(out.stdout) // 2 * 2], np.int16)

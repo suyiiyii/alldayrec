@@ -393,11 +393,11 @@
       "name": "Start time from the file name",
       "modified": "Start time worked out from when the file was saved"
     },
-    "overlap": "Overlaps {name} by {d}; the overlap is transcribed once",
+    "overlap": "Overlaps {name} by {d}",
     "future": "Ends in the future",
     "remove": "Remove",
     "batch": "Batch name",
-    "nameUsed": "This batch name is taken: audio earlier than where its transcription has got to is only stored.",
+    "nameUsed": "This batch name is taken; pick another",
     "go": "Import {n} file | Import {n} files",
     "sending": "Uploading {p}%",
     "decoding": "The server is decoding",

@@ -237,7 +237,7 @@ const left = (dev: string) => {
         <button
           v-if="!items.some((i) => i.state === 'failed') && !endError"
           class="btn-primary go"
-          :disabled="busy"
+          :disabled="busy || used"
           @click="go"
         >
           {{ t("import.go", { n: items.length }, items.length) }}

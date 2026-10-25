@@ -53,8 +53,8 @@ def device_status(device: str, st: PipelineState) -> dict:
             "hold_seen": dt.datetime.fromtimestamp(seen).isoformat(timespec="seconds") if hold and seen else None,
             "hold_until": dt.datetime.fromtimestamp(seen + audio.HOLD_MAX_S).isoformat(timespec="seconds") if hold and seen else None,
             # its newest audio came in device_pipeline.LIVE_AUDIO_S ago at most: behind_s and the latencies are about now (otherwise
-            # behind_s is how long ago it last recorded)
-            "recording": bool(arrived) and time.time() * 1000 - arrived["at"] < device_pipeline.LIVE_AUDIO_S * 1000,
+            # behind_s is how long ago it last recorded); an import batch never records, its audio only just came in
+            "recording": not imported(device) and bool(arrived) and time.time() * 1000 - arrived["at"] < device_pipeline.LIVE_AUDIO_S * 1000,
             "rate": round(rate, 1) if rate else None, "eta_s": round(left / rate) if rate and rate > 0.1 and left > 30 else None,
             "last_speech": st.last_speech.isoformat(timespec="seconds") if st.last_speech else None,
             "refine": st.refine, "conversation": st.conversation, "drafting": st.drafting, "draft": st.draft,

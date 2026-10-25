@@ -182,11 +182,16 @@ class MainActivity : FlutterActivity() {
                 }
                 "pickFiles" -> {  // a web page's <input type=file> (导入录音): the system's picker, by the accept's MIME types (audio/*; not its .m4a)
                     picked?.success(emptyList<String>())
-                    picked = result
+                    picked = null
                     val types = call.argument<List<String>>("types").orEmpty().filter { "/" in it }.ifEmpty { listOf("*/*") }
-                    startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
-                        .putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
-                        .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, call.argument<Boolean>("multiple") == true), PICK_FILES)
+                    try {
+                        startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                            .putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, call.argument<Boolean>("multiple") == true), PICK_FILES)
+                        picked = result
+                    } catch (e: Exception) {  // no picker (ActivityNotFoundException): no files, the page's input stays usable
+                        result.success(emptyList<String>())
+                    }
                 }
                 else -> result.notImplemented()
             }
