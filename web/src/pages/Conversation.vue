@@ -1,12 +1,21 @@
 <script setup lang="ts">
 // One conversation: its title, time and people, then two tabs. 摘要 (the default): how much recording it rests on, the
-// summary, todos, decisions, each person's points, topics; ▶ on them plays about 10 s of the sentence they cite, its
-// time opens 原文 there (QuoteAt). 原文: who spoke how
-// much, the sentences, a player at the bottom that keeps the sentence playing lit and in view. The tab is in the
-// query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from another page opens 原文 there.
-// Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu; a long press on a sentence
-// copies it, stars it or fixes its speaker (RowMenu)
-import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+// summary, todos, decisions, each person's points, topics (让 AI 做的事 and each topic's points folded under their
+// heading, a tap opens them); ▶ on them plays about 10 s of the sentence they cite, its time opens 原文 there
+// (QuoteAt). 原文: who spoke how much, the sentences, a player at the bottom that keeps the sentence playing lit and in
+// view. The tab is in the query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from
+// another page opens 原文 there. Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu;
+// a long press on a sentence copies it, stars it or fixes its speaker (RowMenu)
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  useTemplateRef,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import Avatar from "../components/Avatar.vue";
@@ -63,6 +72,17 @@ async function load() {
   } catch {
     missing.value = true;
   }
+}
+
+// 让 AI 做的事 folds to its heading and each topic to its time and title, the summary's ("s<i>") and the live ones
+// ("l<i>"); what is open stays open across the tabs, until another conversation
+const aiOpen = ref(false);
+const opened = reactive(new Set<string>());
+const flip = (k: string) => void (opened.has(k) ? opened.delete(k) : opened.add(k));
+const allOpen = (p: string, n: number) => [...Array(n).keys()].every((i) => opened.has(p + i));
+function flipAll(p: string, n: number) {
+  const close = allOpen(p, n);
+  for (let i = 0; i < n; i++) void (close ? opened.delete(p + i) : opened.add(p + i));
 }
 
 // the tabs
@@ -162,6 +182,8 @@ watch(
   async () => {
     c.value = null;
     jumped.value = false;
+    aiOpen.value = false;
+    opened.clear();
     sug.value = null;
     allMerges.value = false;
     panel.value = "";
@@ -513,10 +535,16 @@ async function alias(name: string, of: string) {
             </ul>
           </section>
           <section v-if="s.ai_requests?.length" class="card">
-            <h3>{{ t("conv.aiRequests") }}</h3>
-            <ul class="items ai">
-              <li v-for="(t, i) in s.ai_requests" :key="i">
-                {{ t.text }}<QuoteAt :at="t.at" :c="c" @jump="jump" />
+            <h3>
+              <button class="fold" :aria-expanded="aiOpen" @click="aiOpen = !aiOpen">
+                <Icon :name="aiOpen ? 'chevron-down' : 'chevron-right'" :size="16" />{{
+                  t("conv.aiRequests", { n: s.ai_requests.length })
+                }}
+              </button>
+            </h3>
+            <ul v-if="aiOpen" class="items ai">
+              <li v-for="(r, i) in s.ai_requests" :key="i">
+                {{ r.text }}<QuoteAt :at="r.at" :c="c" @jump="jump" />
               </li>
             </ul>
           </section>
@@ -545,11 +573,25 @@ async function alias(name: string, of: string) {
             </div>
           </section>
           <section v-if="s.topics?.length" class="card">
-            <h3>{{ t("conv.topics") }}</h3>
-            <div v-for="(t, i) in s.topics" :key="i" class="topic">
-              <b>{{ t.title }}</b><QuoteAt :at="t.at" :c="c" @jump="jump" />
-              <ul class="points">
-                <li v-for="p in t.points" :key="p">{{ p }}</li>
+            <div class="hrow">
+              <h3>{{ t("conv.topics") }}</h3>
+              <button
+                v-if="s.topics.length > 1"
+                class="btn-ghost all"
+                @click="flipAll('s', s.topics.length)"
+              >
+                {{ allOpen("s", s.topics.length) ? t("conv.foldAll") : t("conv.openAll") }}
+              </button>
+            </div>
+            <div v-for="(tp, i) in s.topics" :key="i" class="topic">
+              <button class="fold" :aria-expanded="opened.has('s' + i)" @click="flip('s' + i)">
+                <Icon
+                  :name="opened.has('s' + i) ? 'chevron-down' : 'chevron-right'"
+                  :size="16"
+                /><b>{{ tp.title }}</b></button
+              ><QuoteAt :at="tp.at" :c="c" @jump="jump" />
+              <ul v-if="opened.has('s' + i)" class="points">
+                <li v-for="p in tp.points" :key="p">{{ p }}</li>
               </ul>
             </div>
           </section>
@@ -560,8 +602,22 @@ async function alias(name: string, of: string) {
         </div>
         <div v-else class="card muted">{{ t("api.summaryPending") }}</div>
         <section v-if="c.timeline?.topics.length" class="card">
-          <h3>{{ t("conv.liveTopics") }}</h3>
-          <Timeline :topics="c.timeline.topics" @jump="listen" />
+          <div class="hrow">
+            <h3>{{ t("conv.liveTopics") }}</h3>
+            <button
+              v-if="c.timeline.topics.length > 1"
+              class="btn-ghost all"
+              @click="flipAll('l', c.timeline.topics.length)"
+            >
+              {{ allOpen("l", c.timeline.topics.length) ? t("conv.foldAll") : t("conv.openAll") }}
+            </button>
+          </div>
+          <Timeline
+            :topics="c.timeline.topics"
+            :shown="(i: number) => opened.has('l' + i)"
+            @flip="(i: number) => flip('l' + i)"
+            @jump="listen"
+          />
         </section>
       </template>
 
@@ -860,7 +916,59 @@ ul.items > li:last-child {
   font-size: var(--fs-sm);
 }
 .topic + .topic {
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+/* 让 AI 做的事's heading and a topic's title: a tap on the line opens what is folded under it, or folds it again */
+.fold {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.fold svg {
+  flex: none;
+  color: var(--muted);
+}
+h3 .fold {
+  width: 100%;
+}
+.card h3:last-child {
+  margin-bottom: 0;
+}
+/* a topic: its title (the rest of the line) and its time on one line, its points under them */
+.topic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.topic > .fold {
+  flex: 1;
+  min-width: 0;
+}
+.topic > .points {
+  flex-basis: 100%;
+}
+/* 议题's heading, with the one control that opens or folds every topic */
+.hrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+.hrow h3 {
+  margin: 0;
+}
+.hrow .all {
+  min-height: 32px;
+  padding: 0 var(--space-2);
+  margin-right: calc(-1 * var(--space-2));
 }
 .items.ai li {
   color: var(--muted);

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { hhmmss, type LiveTopic } from "../lib/api";
 import { speakerLabel } from "../lib/speakers";
+import Icon from "./Icon.vue";
 
-// open: the last topic is still being discussed
-defineProps<{ topics: LiveTopic[]; open?: boolean }>();
-defineEmits<{ jump: [start: string] }>();
+// open: the last topic is still being discussed. shown: whether a topic's points, decisions, todos and questions are
+// open; with it each title is a button that asks to flip them (flip), without it they all show
+defineProps<{ topics: LiveTopic[]; open?: boolean; shown?: (i: number) => boolean }>();
+defineEmits<{ jump: [start: string]; flip: [i: number] }>();
 </script>
 
 <template>
@@ -18,12 +20,15 @@ defineEmits<{ jump: [start: string] }>();
       <a class="at" :href="'#' + t.start" @click.prevent="$emit('jump', t.start)">{{
         hhmmss(t.start)
       }}</a>
-      <b>{{ t.title }}</b>
+      <button v-if="shown" class="fold" :aria-expanded="shown(i)" @click="$emit('flip', i)">
+        <Icon :name="shown(i) ? 'chevron-down' : 'chevron-right'" :size="16" /><b>{{ t.title }}</b>
+      </button>
+      <b v-else>{{ t.title }}</b>
       <span v-if="open && i === topics.length - 1" class="badge">{{
         $t("topicTimeline.now")
       }}</span>
     </div>
-    <ul>
+    <ul v-if="!shown || shown(i)">
       <li v-for="p in t.points" :key="p">{{ p }}</li>
       <li v-for="d in t.decisions" :key="'d' + d" class="dec">
         {{ $t("topicTimeline.decided", { d }) }}
@@ -56,6 +61,29 @@ defineEmits<{ jump: [start: string] }>();
 .at {
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
+}
+/* a title that folds: the chevron, the title and the time centred on one line */
+.head:has(.fold) {
+  align-items: center;
+}
+.fold {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.fold svg {
+  flex: none;
+  color: var(--muted);
 }
 .badge {
   font-size: var(--fs-xs);
