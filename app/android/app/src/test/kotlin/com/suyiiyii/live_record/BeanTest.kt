@@ -377,6 +377,21 @@ class BeanTest {
         assertEquals(listOf(Triple(p, 0L, false)), bean.transfers)
     }
 
+    /** Recording at connect, its button pressed to stop it during the handshake (after the info, before the start is
+     *  settled): that stop holds, no start. */
+    @Test fun stopInHandshake() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = t0 / 1000
+        bean.onSend = { if (it == 0x01A6) { bean.push(0x1882, byteArrayOf(0)); bean.recording = false; bean.open = 0 } }
+        repeat(3) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertTrue(bean.logs.any { it.first == "bean_stop" })
+        assertEquals("the stop holds", 0, bean.starts)
+    }
+
     /** A transfer stalled 30 s ends the session (the link is let go), as a cut does: no new connection either, so a
      *  stop by hand still holds. */
     @Test fun stopHoldsAfterAStall() {
@@ -483,6 +498,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var confirmed: () -> Set<Long> = { emptySet() }  // what the phone may delete (BeanSync.deletable)
     var startable = false
     var starts = 0  // each 18/82 asked
+    var onSend: (Int) -> Unit = {}  // after the bean's answer to each command
 
     fun sentOf(cmd: Int) = sent.last { (it[5].toInt() and 255) shl 8 or (it[6].toInt() and 255) == cmd }.let { it.copyOfRange(9, it.size - 1) }
 
@@ -512,6 +528,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
             }
             0x1A07 -> Triple(Bean.u32(p, 4), Bean.u32(p, 0) / Bean.UNIT, p[8] == 1.toByte()).let { transfers += it; onTransfer(it.first, it.second, it.third) }
         }
+        onSend((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255))
     }
 
     override fun receive(ms: Long): ByteArray? {
