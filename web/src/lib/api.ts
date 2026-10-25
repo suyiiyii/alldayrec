@@ -145,6 +145,9 @@ export interface DeviceStatus {
   sound?: { s: number; zero_s: number; full: number } | null; // its last 10 min of audio: s of it, s in zero runs, full-scale samples
 }
 
+// a device with audio (Status.recorders): where its stored audio ends, its recorder as its phone last read it
+export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw">;
+
 export type Charge = "battery" | "charging" | "full";
 export const chargeText = (c: Charge) => t(`api.charge.${c}`);
 
@@ -278,7 +281,8 @@ export interface Status {
   draft_engine?: string;
   fallback_engine?: string | null;
   commit?: string;
-  devices?: DeviceStatus[];
+  devices?: DeviceStatus[]; // the devices whose pipeline runs
+  recorders?: Recorder[]; // every device with audio, its newest recording first (我的)
   summaries_pending?: number;
   lang?: "zh" | "en"; // what the models write in (GET/PUT /api/lang)
 }
@@ -351,8 +355,8 @@ export interface Due extends TodoView {
   stale: boolean;
 }
 
-// a device's finals are within 30 s of its newest audio
-export const caughtUp = (d: DeviceStatus) => d.left_s < 30;
+// a device's finals are within 30 s of its newest audio; one with no pipeline (a Recorder) has all its audio final
+export const caughtUp = (d: { left_s?: number }) => (d.left_s ?? 0) < 30;
 // its recorder's card: store is an errno; with nothing mounted this boot (total_kb 0) no card or one not seated (-19,
 // -116: a mount that timed out), as the app's cardState says it
 export const card = (h: RecorderStatus) =>

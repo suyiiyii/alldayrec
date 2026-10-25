@@ -376,7 +376,8 @@
     "stars": "Starred",
     "starsEmpty": "Press and hold a sentence to copy it, star it or fix who said it",
     "starsAll": "All {n}",
-    "starsLess": "Show less"
+    "starsLess": "Show less",
+    "older": "Earlier devices ({n})"
   },
   "mediaFold": {
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"

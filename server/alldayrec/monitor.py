@@ -74,16 +74,29 @@ def sound(device: str, end: dt.datetime | None) -> dict | None:
     return {"s": round(sum(r["s"] for r in m), 1), "zero_s": round(sum(r["zero_s"] for r in m), 2), "full": sum(r["full"] for r in m)} if m else None
 
 
+def recorders(ds: list[dict]) -> list[dict]:
+    """Every device with audio, its newest recording first (我的 lists them): where its stored audio ends and its
+    recorder's newest status. devices (ds) has only those whose pipeline runs: after a restart, one whose audio is all
+    final has none until it records again. Two index lookups a device, none started for it."""
+    hw = {d["device"]: d["hw"] for d in ds}
+    out = []
+    for d in audio.devices():
+        end = db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (d,)).fetchone()[0]
+        out.append({"device": d, "audio_end": dt.datetime.fromtimestamp(end / 1000).isoformat(timespec="seconds"),
+                    "hw": hw[d] if d in hw else db.device_status(d)})
+    return sorted(out, key=lambda r: r["audio_end"], reverse=True)
+
+
 def status() -> dict:
-    """What the page's status line shows (the device whose audio came in last), every device's pipeline, and the
-    pieces still queued over all devices. Its callers run it in a thread (threads.DB): its reads of the pieces held the
-    event loop up to 0.8 s under load (10-24)."""
+    """What the page's status line shows (the device whose audio came in last), every device's pipeline, every device
+    with audio (recorders), and the pieces still queued over all devices. Its callers run it in a thread (threads.DB):
+    its reads of the pieces held the event loop up to 0.8 s under load (10-24)."""
     ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in list(T().devices.items())]  # a pipeline may start meanwhile
     top = max(ds, key=lambda d: d["audio_end"] or "", default={"device": None, "audio_end": None, "behind_s": None, "done_to": None,
                                                                  "last_speech": None, "refine": None, "conversation": None, "latency_s": None,
                                                                  "latency_med_s": None, "final_latency_s": None})
     summaries = db.conn().execute("SELECT count(*) FROM summaries WHERE status = 'pending'").fetchone()[0]
-    return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
+    return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "recorders": recorders(ds), "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
             "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,

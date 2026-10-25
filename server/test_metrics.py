@@ -79,6 +79,33 @@ def test_status_off_the_loop(monkeypatch):
     assert where and loop not in where, "not on the event loop"
 
 
+def test_recorders(tmp_path):
+    """recorders (我的) has every device with audio, its newest recording first, with where its audio ends and its
+    recorder's newest status: also one with no pipeline, its audio all final (none starts after a restart: the bean
+    was missing, 10-25). devices stays the running pipelines; the ends are looked up by pieces_end."""
+    t = db.open_db(tmp_path / "t.db")
+    now = int(time.time()) * 1000
+    put = lambda dev, a: db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES (?, ?, 10, 'x')", (dev, now + a))
+    iso = lambda a: dt.datetime.fromtimestamp((now + a) / 1000).isoformat(timespec="seconds")
+    for a in (-9 * 86400_000, -9 * 86400_000 + 10_000):
+        put("LR-P3-OLD", a)
+    put("phone", -3600_000)
+    put("LR-BEAN", -600_000)
+    db.add_device_status("LR-BEAN", iso(-700_000), {"battery": 80})
+    db.add_device_status("LR-BEAN", iso(-590_000), {"battery": 79})
+    t.devices["phone"] = pipeline_state.PipelineState()
+    seen = []
+    db.conn().set_trace_callback(seen.append)
+    s = monitor.status()
+    db.conn().set_trace_callback(None)
+    assert [d["device"] for d in s["devices"]] == ["phone"]
+    assert s["recorders"] == [{"device": "LR-BEAN", "audio_end": iso(-590_000), "hw": {"battery": 79, "at": iso(-590_000)}},
+                              {"device": "phone", "audio_end": iso(-3590_000), "hw": None},
+                              {"device": "LR-P3-OLD", "audio_end": iso(-9 * 86400_000 + 20_000), "hw": None}], s["recorders"]
+    ends = [q for q in seen if re.fullmatch(r"SELECT max\(start_ms \+ seconds \* 1000\) FROM pieces WHERE device = '[^']*'", q)]
+    assert len(ends) >= 3 and all("pieces_end" in " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q)) for q in ends), ends
+
+
 def test_metrics(monkeypatch):
     t = db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     t.id = "main"

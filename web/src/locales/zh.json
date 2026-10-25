@@ -376,7 +376,8 @@
     "stars": "收藏",
     "starsEmpty": "长按一句话，就能复制、收藏，或者改正是谁说的",
     "starsAll": "全部 {n} 条",
-    "starsLess": "收起"
+    "starsLess": "收起",
+    "older": "更早的设备（{n} 台）"
   },
   "mediaFold": {
     "line": "媒体 {from}–{to} · {n} 句"

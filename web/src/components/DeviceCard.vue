@@ -1,21 +1,22 @@
 <script setup lang="ts">
 import { t } from "../i18n";
-import { card, caughtUp, chargeText, hhmm, type DeviceStatus } from "../lib/api";
+import { card, caughtUp, chargeText, hhmm, type DeviceStatus, type Recorder } from "../lib/api";
 import { today } from "../lib/calendar";
 
-// A device as a status card (我的, and 实时 with nothing going on); a tap opens its own page. The third tile: how far
-// behind the words come up while it records, else when its audio last came
-const { d } = defineProps<{ d: DeviceStatus }>();
+// A device as a status card (我的); a tap opens its own page. The third tile: how far behind the words come up while
+// it records, else when its audio last came. One with no pipeline (a Recorder) shows its hw and last audio
+type Card = Recorder & Partial<DeviceStatus>;
+const { d } = defineProps<{ d: Card }>();
 
 // behind: its finals are short of its audio; offline: no audio in the last 2 min
-const badge = (d: DeviceStatus) =>
+const badge = (d: Card) =>
   !caughtUp(d)
-    ? { text: t("deviceCard.behind", { n: Math.max(1, Math.round(d.left_s / 60)) }), cls: "warn" }
+    ? { text: t("deviceCard.behind", { n: Math.max(1, Math.round((d.left_s ?? 0) / 60)) }), cls: "warn" }
     : d.recording
       ? { text: t("deviceCard.caughtUp"), cls: "ok" }
       : { text: t("deviceCard.offline"), cls: "off" };
 // the card's free space when it records to it, else what is wrong with it
-const cardTile = (d: DeviceStatus) =>
+const cardTile = (d: Card) =>
   !d.hw
     ? "—"
     : !d.hw.store && d.hw.total_kb
@@ -56,7 +57,7 @@ const seen = (iso: string | null) => {
         <span class="k">{{ t("deviceCard.lag") }}</span>
       </div>
       <div v-else>
-        <span class="v">{{ seen(d.audio_end) }}</span>
+        <span class="v" :class="{ long: seen(d.audio_end).length > 8 }">{{ seen(d.audio_end) }}</span>
         <span class="k">{{ t("deviceCard.lastAudio") }}</span>
       </div>
     </div>

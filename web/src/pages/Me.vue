@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.vue";
 import DeviceCard from "../components/DeviceCard.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
 import { lang, setLang, t, type Lang } from "../i18n";
-import { engines, get, hhmm, post, type Due, type Status } from "../lib/api";
+import { engines, get, hhmm, post, type Due, type Recorder, type Status } from "../lib/api";
 import { dayLabel } from "../lib/calendar";
 import { useSocket } from "../lib/socket";
 import { speakerLabel } from "../lib/speakers";
@@ -13,8 +13,8 @@ import { loadStars, stars } from "../lib/stars";
 import { open } from "../lib/todos";
 import { toast } from "../lib/toast";
 
-// 我的: each device as a status card (the details on its own page), the starred sentences (a long press on one
-// stars it; each opens its conversation's 原文 there), then the pages that are not a daily read
+// 我的: each device with audio as a status card (the details on its own page), the starred sentences (a long press on
+// one stars it; each opens its conversation's 原文 there), then the pages that are not a daily read
 const status = ref<Status | null>(null);
 const due = ref<Due[] | null>(null);
 const load = async () => (status.value = await get<Status>("/api/status"));
@@ -22,6 +22,19 @@ onMounted(load);
 onMounted(async () => (due.value = await get<Due[]>("/api/todos/due").catch(() => null)));
 useSocket((m) => m.type === "status" && (status.value = m), load);
 const STARS = 3; // the newest; the rest folded
+// the devices, their newest recording first: one whose pipeline runs as its full status; one that last recorded more
+// than OLD_DAYS ago folded at the bottom
+const OLD_DAYS = 7;
+const recorders = computed(() => {
+  const recent: Recorder[] = [],
+    older: Recorder[] = [];
+  for (const r of status.value?.recorders ?? []) {
+    const d = status.value?.devices?.find((x) => x.device === r.device);
+    const old = !d?.recording && Date.now() - +new Date(r.audio_end ?? 0) > OLD_DAYS * 86400000;
+    (old ? older : recent).push(d ?? r);
+  }
+  return { recent, older };
+});
 const allStars = ref(false);
 onMounted(() => void loadStars().catch(() => {}));
 
@@ -58,7 +71,15 @@ function pick(l: Lang) {
   <AppHeader />
   <main>
     <h1>{{ t("title.me") }}</h1>
-    <DeviceCard v-for="d in status?.devices ?? []" :key="d.device" :d="d" />
+    <DeviceCard v-for="d in recorders.recent" :key="d.device" :d="d" />
+    <details v-if="recorders.older.length" class="older">
+      <summary>
+        <Icon class="chev" name="chevron-right" :size="16" />{{
+          t("me.older", { n: recorders.older.length })
+        }}
+      </summary>
+      <DeviceCard v-for="d in recorders.older" :key="d.device" :d="d" />
+    </details>
     <section class="card stars">
       <h2><Icon name="star" :size="18" />{{ t("me.stars") }}</h2>
       <p v-if="!stars.length" class="muted">{{ t("me.starsEmpty") }}</p>
@@ -125,6 +146,28 @@ function pick(l: Lang) {
 <style scoped>
 h1 {
   margin: var(--space-3) 0 var(--space-4);
+}
+/* the devices idle 7+ days: a grey line that opens to their cards, its chevron turning */
+.older > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0 var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+.older > summary::-webkit-details-marker {
+  display: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chev {
+    transition: transform 0.15s;
+  }
+}
+.older[open] .chev {
+  transform: rotate(90deg);
 }
 /* one card, a row each, a line between */
 .list {
