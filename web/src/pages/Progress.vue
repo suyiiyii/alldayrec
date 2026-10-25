@@ -264,7 +264,7 @@ const eta = (d: DeviceStatus) => {
             t("progress.log")
           }}</RouterLink></span
         >
-        <span :class="caughtUp(d) ? 'ok' : 'busy'">{{
+        <span class="badge" :class="caughtUp(d) ? 'ok' : 'busy'">{{
           t(
             caughtUp(d)
               ? "progress.caughtUp"
