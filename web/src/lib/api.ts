@@ -132,6 +132,7 @@ export interface DeviceStatus {
   hold?: string | null; // finals wait here for older audio the phone is still sending
   hold_seen?: string | null; // when its phone last said the hold
   hold_until?: string | null; // when the queue stops waiting without the phone (12 h after hold_seen)
+  hold_expired?: { reason: "stale"; seconds: number } | null;
   recording?: boolean; // its newest audio came in the last 2 min: behind_s and latency_s are about now
   queued: number;
   latency_s: number | null; // its newest draft row's end to its showing (the final rows' while no page watches)
@@ -448,12 +449,14 @@ export function post<T>(path: string, body?: unknown, method = "POST"): Promise<
 }
 
 export const hhmm = (iso: string) => iso.slice(11, 16);
-// A hold its phone has not said for 5 min: the phone went away with older audio still on the recorder's card
+// A persisted no-progress expiry, or a hold its phone has not said for 5 min: the phone went away with older audio still on the recorder's card
 // (10-07: LR-P3-116C, unbound at 17:58); the queue waits for it until hold_until, then finalizes what it has
 export const holdLeft = (d: DeviceStatus) =>
-  d.hold && d.hold_seen && Date.now() - +new Date(d.hold_seen) > 5 * 60_000
-    ? t("api.holdLeft", { seen: hhmm(d.hold_seen), until: hhmm(d.hold_until ?? "") })
-    : "";
+  d.hold_expired?.reason === "stale"
+    ? t("api.holdStale", { minutes: d.hold_expired.seconds / 60 })
+    : d.hold && d.hold_seen && Date.now() - +new Date(d.hold_seen) > 5 * 60_000
+      ? t("api.holdLeft", { seen: hhmm(d.hold_seen), until: hhmm(d.hold_until ?? "") })
+      : "";
 export const hhmmss = (iso: string) => iso.slice(11, 19);
 // a closed conversation's link text: its summary's title, or how the summary is going
 export const convLink = (c: Conversation) =>

@@ -285,9 +285,9 @@ const eta = (d: DeviceStatus) => {
             n: d.queued,
           })
         }}</span>
-        <template v-if="d.hold"
+        <template v-if="d.hold || d.hold_expired"
           ><span>{{ t("progress.catchUp") }}</span
-          ><span>{{ held(d) }}</span></template
+          ><span>{{ d.hold_expired ? holdLeft(d) : held(d) }}</span></template
         >
         <span>{{ t("progress.speed") }}</span
         ><span>{{ d.rate ? t("progress.speedVal", { rate: d.rate }) : "—" }}</span>

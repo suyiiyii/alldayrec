@@ -29,6 +29,7 @@ import numpy as np
 from alldayrec import db
 from alldayrec import perf
 from alldayrec import threads
+from alldayrec import ws
 from alldayrec.tenant import T
 
 log = logging.getLogger("live")
@@ -36,6 +37,8 @@ SR = 16000
 # the current tenant's recordings dir: T().recordings; per device, the start of the last piece its reader has finished
 # with (later ones are queued): T().read_to
 HOLD_MAX_S = 12 * 3600  # a hold not said again for this long is let go: a phone that never comes back must not stop finals for good
+HOLD_STALE_S = int(os.environ.get("HOLD_STALE_S", "1200"))  # no older audio arriving, even if the phone keeps saying hold
+_holds = threading.RLock()  # a hold refresh, older-piece arrival and expiry must preserve each other's persisted state
 _append = threading.Lock()  # uploads are saved in threads (threads.MEDIA): one append (and its index row) at a time
 
 
@@ -242,6 +245,11 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
         db.conn().execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                           (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, int(time.time() * 1000), *h))
+        with _holds:
+            held = db.kv(f"hold:{device}")
+            if held and start_ms < held["at"] and not held.get("released"):
+                held["progress"] = time.time()
+                db.put_kv(f"hold:{device}", held)
     return len(x) / SR
 
 
@@ -361,13 +369,55 @@ def hold(device: str, at_ms: int | None):
     sends what is said now): the device's queue (stream without edge_s) hands out nothing from at_ms on until
     that audio is in, so none of it arrives behind the reader. None: nothing older is coming. Every upload says it
     again; kept across a restart."""
-    db.put_kv(f"hold:{device}", None if at_ms is None else {"at": at_ms, "seen": time.time()})
+    with _holds:
+        h = db.kv(f"hold:{device}")
+        now = time.time()
+        if at_ms is None:
+            h = None
+        elif h and h["at"] == at_ms:
+            h.setdefault("progress", now)  # a pre-timeout store gets one full grace period after upgrade
+            h["seen"] = now  # repeating a hold does not mean older audio made progress, or rearm an expired hold
+        else:
+            h = {"at": at_ms, "seen": now, "progress": now}
+        db.put_kv(f"hold:{device}", h)
 
 
 def held(device: str) -> int | None:
-    """Where the device's queue waits (unix ms); None when it does not (no hold, or one not said for HOLD_MAX_S)."""
+    """Where finals wait (unix ms). Only new audio starting before it renews the no-progress grace period.
+    Expiry is persisted: repeated uploads and restarts cannot rearm the same hold or repeat its warning."""
+    with _holds:
+        h = db.kv(f"hold:{device}")
+        if not h or h.get("released") or time.time() - h["seen"] >= HOLD_MAX_S:
+            return None
+        done = db.kv(f"finalized_to:{device}")
+        if done and int(dt.datetime.fromisoformat(done).timestamp() * 1000) >= h["at"]:
+            return None  # already passed: late pieces cannot be put back in front of the reader
+        if "progress" not in h:
+            h["progress"] = time.time()
+            db.put_kv(f"hold:{device}", h)
+        if time.time() - h["progress"] < HOLD_STALE_S:
+            return h["at"]
+        h.update(released="stale", stale_s=HOLD_STALE_S)
+        db.put_kv(f"hold:{device}", h)
+    text = f"{device}：补传等了 {HOLD_STALE_S / 60:g} 分钟没有进展，先定稿；之后到的更早录音只保存不转写"
+    log.warning("%s", text)
+    # monitor.status runs in an AnyIO worker; ws.note schedules its broadcast on the tenant's event loop.
+    if T().tg:
+        try:
+            anyio.get_current_task()
+        except RuntimeError:
+            anyio.from_thread.run_sync(ws.note, text, "warn")
+        else:
+            ws.note(text, "warn")
+    else:
+        ws.note(text, "warn")
+    return None
+
+
+def hold_expired(device: str) -> dict | None:
+    """Why the queue stopped waiting, retained until the phone releases or replaces that hold."""
     h = db.kv(f"hold:{device}")
-    return h["at"] if h and time.time() - h["seen"] < HOLD_MAX_S else None
+    return {"reason": "stale", "seconds": h["stale_s"]} if h and h.get("released") == "stale" else None
 
 
 def hold_seen(device: str) -> float | None:
@@ -554,6 +604,7 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
 
     async def held_back():  # 10:05 came first, the phone still has older audio: 10:03 is to go before it
         send, got = anyio.create_memory_object_stream()
+        db.put_kv("finalized_to:phone", None)  # the earlier pending() check's completed recording is not this reader
         hold("phone", M(5))
         with send, got:
             async with anyio.create_task_group() as tg:

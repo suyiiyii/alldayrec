@@ -488,10 +488,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         send(Bean.transfer(x.file, x.from * Bean.UNIT, x.live))
     }
 
-    /** Older audio still to come from the bean: the backlog, or a hole in the file being recorded (live began after
-     *  its start, or went on after a drop past where it was). */
-    private fun older() = pending().isNotEmpty() || files[listing.open]?.let { f ->
-        listing.open * 1000 >= since && f.have.isNotEmpty() && (gap(f) ?: Long.MAX_VALUE) < f.have.last()[1] } == true
+    /** Only closed-file backlog can justify waiting. Holes in the open file cannot be fetched while it records;
+     *  waiting for them would stop finals until the bean closes the file (up to six hours). */
+    private fun older() = pending().isNotEmpty()
 
     /** No older audio to come and none of it waiting to go up: the hold goes; once nothing records and all is up, the
      *  end of the last recording. */
@@ -641,8 +640,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             fields = mapOf("file" to x.file, "seq" to s.seq, "from" to x.from, "toc" to ((audio.getOrNull(0)?.toInt() ?: 0) and 255)))
         if (x.live) {
             state = say("connected")
-            val before = x.file * 1000 >= since && (gap(f) ?: 0) < s.seq  // live begins past a hole in its own file
-            if ((before || older()) && io.held() == null) io.hold(f.anchor + s.seq * Bean.FRAME_MS - HOLD_MARGIN_MS)
+            if (older() && io.held() == null) {
+                val at = f.anchor + s.seq * Bean.FRAME_MS - HOLD_MARGIN_MS
+                io.hold(at)
+                io.log("hold", "压住定稿到 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(at))}，因为还有已关闭文件等补传",
+                    fields = mapOf("at" to at, "reason" to "closed_backlog"))
+            }
         }
     }
 

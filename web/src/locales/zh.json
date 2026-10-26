@@ -93,6 +93,7 @@
       "free": "剩 {free} / {total} GB"
     },
     "holdLeft": "手机 {seen} 后没再联系，最晚 {until} 不再等",
+    "holdStale": "补传等了 {minutes} 分钟没有进展，先定稿；之后到的更早录音只保存不转写",
     "view": "查看",
     "summaryFailed": "摘要生成失败",
     "summaryPending": "摘要生成中…"

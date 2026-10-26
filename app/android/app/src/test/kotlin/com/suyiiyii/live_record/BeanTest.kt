@@ -165,7 +165,8 @@ class BeanTest {
         val anchorA = one.files[a]!!.anchor
         val anchors = one.files.mapValues { it.value.anchor }  // the files go once deleted on the bean
         assertTrue("the phone's clock, near the bean's", anchorA - a * 1000 in 0L..3000L)
-        assertEquals("live began past the file's start: the hold", anchorA + 1500 * 20 - 60_000, bean.held)
+        assertEquals("closed A is pending while B records: the hold", one.files[b]!!.anchor - 60_000, bean.held)
+        assertTrue(bean.logs.any { it.first == "hold" && "因为还有已关闭文件" in it.second })
         assertTrue(Bean.u32(bean.sentOf(0x01A6), 0) in t0 / 1000 - 1..t0 / 1000 + 1)
 
         // a new session (what the phone knows of the files read back): on in B from its offset, then the backlog
@@ -198,6 +199,51 @@ class BeanTest {
         assertEquals(listOf(anchors[b]!! + 300 * 20), bean.ends)
         assertFalse(bean.transfers.any { it.first == old })
         assertEquals("whole on the server: off the bean, once", listOf(a, b), bean.deleted)
+    }
+
+    /** Live starts half a second into a file, then resumes past holes on reconnect. These holes can only be read
+     *  after the file closes, so none of them should block finals while it records. */
+    @Test fun openFileHolesDoNotHold() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val id = t0 / 1000
+        bean.recording = true; bean.open = id; bean.listed[id] = 0
+        var seq = 24L
+        bean.onTransfer = { file, _, live ->
+            assertTrue(live)
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (seq..seq + 99).toList())
+            bean.script += { throw IOException("link dropped") }
+        }
+        for (first in listOf(24L, 1600L, 4500L)) {
+            seq = first
+            val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+            assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+            assertNull("open-file hole at $first does not hold", bean.held)
+        }
+        assertFalse(bean.logs.any { it.first == "hold" })
+    }
+
+    /** An old app's persisted hold must go after upgrading, once its already-cut older pieces are uploaded,
+     *  even though the open file still has a hole. */
+    @Test fun oldOpenFileHoldIsReleased() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = t0 / 1000; bean.listed[bean.open] = 0
+        bean.held = t0 - 60_000
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (24L..123L).toList())
+        }
+        repeat(2) { bean.script += { bean.now += 6000 } }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertNull(bean.held)
+        assertTrue(bean.logs.any { it.first == "hold" && "不再压住定稿" in it.second })
+        assertEquals("the hole remains until close", 0L, sync.gap(sync.files[bean.open]!!))
     }
 
     /** A transfer asked for right after the one before ended got code 4 (10-25): the next waits 200 ms as the SDK does,

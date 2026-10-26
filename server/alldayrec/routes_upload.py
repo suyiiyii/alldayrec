@@ -77,9 +77,9 @@ async def hold_release(device: str):
     stops waiting for it now, not HOLD_MAX_S after the phone last said the hold (10-07: LR-P3-116C's 261 pieces waited
     from 17:47 to 05:47)."""
     if audio.held(device) is not None:
-        audio.hold(device, None)
         log.info("%s hold let go: no older audio is coming from its phone", device)
         ws.note(f"{device} 的旧录音不用再等了，继续定稿")
+    audio.hold(device, None)  # clear an expired hold's reason too
     return {"ok": True}
 
 

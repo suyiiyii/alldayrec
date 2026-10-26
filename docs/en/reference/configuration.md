@@ -59,6 +59,7 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `MODELS_DIR` | empty | `DATA_DIR/models` | The model files directory, an absolute, writable path; missing files are downloaded here at startup. Fixed at `/data/models` in Docker |
 | `PORT` | `8770` | `8770` | The port to listen on. Docker Compose fixes it at `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | The address to listen on; set `0.0.0.0` when the reverse proxy runs on another machine. Docker Compose fixes it at `0.0.0.0` |
+| `HOLD_STALE_S` | `1200` | `1200` | Resume finals after this many seconds without new audio arriving before a recorder's backfill hold. Repeating the hold does not renew it. Older audio arriving later is saved for playback without transcription |
 | `DRAFT_ENGINE` | empty | same as `ENGINE` | The engine of the draft layer (while a page is open); it can also be `qwen-stream`: while a page is open, the audio streams to Qwen (Bailian qwen-audio-3.1-asr-flash-streaming, with `DASHSCOPE_API_KEY`), so words show as they are said |
 | `ENGINE_FALLBACK` | empty | none | The engine used when `ENGINE` or `DRAFT_ENGINE` fails on a window (402, 451, 5xx, timeout); empty means a retry later |
 | `VOLC_ASR_KEY` | empty | — | The API key of a Volcengine Ark Agent Plan, used by `volc` |
