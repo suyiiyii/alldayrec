@@ -260,33 +260,35 @@ WHOLE_S = 300  # keep ordinary device pieces and <=5-minute imports on their exi
 COPY_BYTES = 1024 * 1024
 
 
-
 def decode_process(args):
     """Drain ffmpeg diagnostics without retaining an unbounded error log.
     Output I/O failures are retryable, not invalid audio (a device drops a 400).
     """
-    tail, storage_failed = bytearray(), False
-    storage_errors = (b"no space left on device", b"disk quota exceeded", b"input/output error", b"read-only file system",
-                      b"error opening output", b"error writing", b"error closing file")
-    with subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
-        def drain():
-            nonlocal storage_failed
-            while data := process.stderr.read(4096):
-                tail[:] = (tail + data)[-8192:]
-                storage_failed |= any(error in tail.lower() for error in storage_errors)
-        reader = threading.Thread(target=drain)
-        reader.start()
+    async def run():
+        tail, storage_failed = bytearray(), False
+        storage_errors = (b"no space left on device", b"disk quota exceeded", b"input/output error", b"read-only file system",
+                          b"error opening output", b"error writing", b"error closing file")
         try:
-            code = process.wait(timeout=300)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-            raise
-        finally:
-            reader.join()
-    if code < 0 or (code and storage_failed):
-        raise OSError("decoder could not write temporary audio; check free disk space and retry")
-    return code
+            with anyio.fail_after(300):
+                async with await anyio.open_process(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+                    async def drain():
+                        nonlocal storage_failed
+                        async for data in process.stderr:
+                            chunk = tail + data
+                            storage_failed |= any(error in chunk.lower() for error in storage_errors)
+                            tail[:] = chunk[-8192:]
+                    async with anyio.create_task_group() as group:
+                        group.start_soon(drain)
+                        code = await process.wait()
+        except TimeoutError:
+            raise subprocess.TimeoutExpired(args, 300) from None
+        if code < 0 or (code and storage_failed):
+            raise OSError("decoder could not write temporary audio; check free disk space and retry")
+        return code
+    # This API is synchronous (also used by offline readers); in the HTTP path
+    # its caller already runs in the bounded media pool, away from the event loop.
+    return anyio.run(run)
+
 
 @contextlib.contextmanager
 def decoded_file(source, aac=False, n=None, prev=None):
