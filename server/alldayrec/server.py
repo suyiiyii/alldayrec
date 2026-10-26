@@ -54,6 +54,7 @@ from alldayrec.device_pipeline import pipeline
 from alldayrec.monitor import balance_loop, loop_stalls, metrics_loop, status_loop
 from alldayrec.routes_speakers import voices_loop
 from alldayrec.summaries import RECAP_AT, recap_loop, summary_worker
+from alldayrec.late import processor as late_processor
 from alldayrec.tenant import T
 
 HERE = Path(__file__).resolve().parent
@@ -89,7 +90,7 @@ async def run_tenant(t: tenant.Tenant):
     t.recordings.mkdir(parents=True, exist_ok=True)
     with anyio.CancelScope() as t.scope:
         async with anyio.create_task_group() as t.tg:
-            for name, fn in (("pipeline", pipelines), ("status", status_loop), ("summary", summary_worker), ("voices", voices_loop),
+            for name, fn in (("pipeline", pipelines), ("status", status_loop), ("summary", summary_worker), ("voices", voices_loop), ("late", late_processor),
                              *((("recap", recap_loop),) if RECAP_AT else ())):
                 t.tg.start_soon(supervised, name, fn, name=f"{name}:{t.id}")
 

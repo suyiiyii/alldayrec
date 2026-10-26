@@ -321,6 +321,7 @@ async def conversation(conv_id: str):
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
+    conv_id = c["id"]
     s, closed = db.summary(conv_id), db.closed_todos()
     if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark)
         s["todos"] = [{**t, "id": i, "mark": closed.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]

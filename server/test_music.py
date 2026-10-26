@@ -53,7 +53,7 @@ def test_music_column(tmp_path):
         c.execute("INSERT INTO sentences (id, start, end, speaker, text) VALUES ('f1', '2026-10-24T10:00:00', '2026-10-24T10:00:02', '我', '旧的')")
     db.open_db(tmp_path / "old.db")
     db.init()
-    assert [r[1] for r in db.conn().execute("PRAGMA table_info(sentences)")] == list(db.S_COLS)
+    assert [r[1] for r in db.conn().execute("PRAGMA table_info(sentences)")] == [*db.S_COLS, "late", "late_job"]
     row = lambda i, s, **k: dict(id=i, start=f"2026-10-24T10:00:0{s}", end=f"2026-10-24T10:00:0{s + 1}", speaker="S?", text="啦", source="d", **k)
     with db.tx() as c:
         db.insert_sentences(c, [row("f2", 3, music=1), row("f3", 5)])

@@ -68,6 +68,8 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `LOCAL_ASR_URL` | empty | the k2-fsa/sherpa-onnx GitHub Release | Where `local` downloads its model tarball (about 136 MB) from; the same tarball on a mirror works too (sha256-checked) |
 | `UI_LANG` | `zh` | `zh` | The language of what the LLM writes (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. A `lang` in `tenants.json` wins. The web pages use it too in a browser that hasn't picked a language; the app's UI doesn't change |
 | `RECAP_AT` | `10:00` | `10:00` | The time of day the server writes yesterday's recap; set it empty for no recap |
+| `LATE_SETTLE_S` | `180` | `180` | Seconds after the last extension before late audio is processed; end/hold release settles it immediately. Spans near an open conversation wait for it to close |
+| `LATE_PROCESS_TIMEOUT_S` | `1800` | `1800` | Maximum seconds for one late-audio job; each job contains at most 30 minutes of audio, so processing must be faster than real time (including diarization, RTF < 1); timeouts back off and stop after three attempts, retaining the failure reason |
 | `TZ` | `Asia/Shanghai` | the system time zone | The time zone for conversation dates and `RECAP_AT`. A Docker container's system time zone is UTC; an empty `TZ=` means UTC too |
 | `REFINE_EVERY_S` | `20` | `30` | Draft layer: run once after this many seconds without a pause |
 | `TURN_GAP_S` | `0` | `1.0` | Above 0, joins adjacent sentences of the same speaker less than this many seconds apart into one line; 0 keeps the engine's own sentence split |

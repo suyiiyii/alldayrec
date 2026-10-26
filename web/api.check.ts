@@ -25,8 +25,8 @@ assert.equal(caseText({ at: "", battery: 50, case_battery: 80 }), "充电仓 80%
 assert.equal(caseText({ at: "", battery: 50 }), "");
 assert.equal(caseText(null), "");
 const expired = { hold: null, hold_expired: { reason: "stale", seconds: 1200 } } as DeviceStatus;
-assert.equal(holdLeft(expired), "补传等了 20 分钟没有进展，先定稿；之后到的更早录音只保存不转写");
+assert.equal(holdLeft(expired), "补传等了 20 分钟没有进展，先定稿；之后到的更早录音会补转写");
 i18n.global.locale.value = "en";
-assert.equal(holdLeft(expired), "No backfill progress for 20 min, so finals went on; older audio arriving later is saved, not transcribed.");
+assert.equal(holdLeft(expired), "No backfill progress for 20 min, so finals went on; older audio arriving later will be transcribed afterwards.");
 assert.equal(holdLeft({ hold: null } as DeviceStatus), "");
 console.log("api check ok");

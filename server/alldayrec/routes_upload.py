@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from alldayrec import audio
 from alldayrec import db
+from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import threads
 from alldayrec import ws
@@ -24,6 +25,15 @@ from alldayrec.tenant import T
 
 log = logging.getLogger("live")
 router = APIRouter()
+
+
+@router.post("/api/late-backfill")
+async def late_backfill(days: int = 30, dry_run: bool = True):
+    """Inspect historical missed speech, or enqueue it. Authenticated by the same tenant token as uploads."""
+    if not 1 <= days <= 366:
+        raise HTTPException(400, "days must be between 1 and 366")
+    from alldayrec.late_backfill import scan
+    return await scan(days, dry_run)
 
 
 SLICE_FOREGROUND_S = int(os.environ.get("SLICE_FOREGROUND_S", "1"))   # the apps' piece seconds with the app in front: 1 s
@@ -50,7 +60,9 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     reads a backlog off the recorder's card): finalization waits there for it, drafts go on (audio.hold); an upload
     without it lets go. The answer has the piece's seconds and the piece lengths now (`slice`, slices()): the apps'
     native uploaders take them from here, as Dart does not run in the background to ask /api/client-config."""
+    released = hold is None and db.kv(f"hold:{device}") is not None
     audio.hold(device, hold)  # before the piece is in: the queue must not hand it out ahead of the older audio
+    saved = {}
     kind = request.headers.get("content-type", "")
     try:
         async with anyio.wrap_file(tempfile.NamedTemporaryFile()) as body:
@@ -58,7 +70,7 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
                 await body.write(block)
             await body.flush()
             size = await anyio.to_thread.run_sync(lambda: os.fstat(body.wrapped.fileno()).st_size)
-            seconds = await anyio.to_thread.run_sync(audio.save_file, device, start, body.wrapped, kind, n, limiter=threads.MEDIA)
+            seconds = await anyio.to_thread.run_sync(audio.save_file, device, start, body.wrapped, kind, n, saved, limiter=threads.MEDIA)
     except subprocess.TimeoutExpired:
         log.exception("%s: import decoder stopped making progress", device)
         raise HTTPException(504, "Audio decoding timed out without progress; check the file and retry")
@@ -72,8 +84,11 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
         log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, size)
         ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端收到 400 会丢弃它；原始字节留在 recordings/rejected/", "error")
         raise HTTPException(400, "could not decode")
+    if released:
+        late_store.release(device)
     T().chunks = {"device": device, "at": time.time()}
-    late = "（早于这台设备已处理的位置，只存不转写）" if start <= T().read_to.get(device, -1) else ""
+    late = ((" (late audio; queued for transcription)" if T().lang == "en" else "（迟到音频，稍后补转写）")
+            if saved.get("late") else "")
     ws.note(f"收到 {device} 的块 {seconds:.1f} s，起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}{late}", "warn" if late else "info")
     return {"seconds": round(seconds, 2), "slice": slices()}
 
@@ -83,6 +98,7 @@ async def chunk_end(device: str, t: int):
     """The recorder stopped at device time t (unix ms): the open conversation closes once its audio is processed."""
     end = dt.datetime.fromtimestamp(t / 1000)
     db.put_kv(f"end_at:{device}", iso(end))  # kept across a restart: the queue may still hold the audio before it
+    late_store.release(device)
     log.info("%s stopped recording at %s", device, end.time())
     ws.note(f"{device} 停止录音（{end.strftime('%H:%M:%S')}），处理完剩余音频后关闭对话")
     return {"ok": True}
@@ -94,6 +110,7 @@ async def hold_release(device: str):
     in its place), or its backlog is all up and no upload follows to let go (a recorder that stopped). Finalization
     stops waiting for it now, not HOLD_MAX_S after the phone last said the hold (10-07: LR-P3-116C's 261 pieces waited
     from 17:47 to 05:47)."""
+    late_store.release(device)
     if db.kv(f"hold:{device}"):
         log.info("%s hold let go: no older audio is coming from its phone", device)
         ws.note(f"{device} 的旧录音不用再等了，继续定稿")

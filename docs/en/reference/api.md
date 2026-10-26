@@ -71,6 +71,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | What /app.apk is: the Android app compares versionCode with its own build number and offers the update. | — |
 
+### `/api/late-backfill`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean) |
+
 ### `/api/chunks`
 
 | Method | Description | Parameters |

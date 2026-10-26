@@ -31,6 +31,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET", "/assets/{name}", "asset"),
     ("GET", "/app.apk", "app_apk"),
     ("GET", "/api/app/latest", "apk_latest"),
+    ("POST", "/api/late-backfill", "late_backfill"),
     ("POST", "/api/chunks", "chunk"),
     ("POST", "/api/chunks/end", "chunk_end"),
     ("POST", "/api/hold/release", "hold_release"),

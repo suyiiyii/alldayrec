@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import wave
+from contextlib import nullcontext
 from pathlib import Path
 
 import anyio
@@ -29,6 +30,7 @@ import anyio.to_thread
 import numpy as np
 
 from alldayrec import db
+from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import threads
 from alldayrec import ws
@@ -221,12 +223,14 @@ def append(path: Path, body: bytes) -> int:
     return pos
 
 
-def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | None = None) -> float | None:
+def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | None = None, report: dict | None = None) -> float | None:
     """Keeps one uploaded piece (start_ms: its device time, n: the samples its client wrote, when it says); returns
     its seconds, None when it is not audio. It is on disk and in the index before this returns, so the client may
     delete its copy once told so. Of a piece sent again (same device and start) the longer copy (in bytes) is kept: a
     resend as long or shorter only gets the kept copy's seconds back; a longer one replaces the row, appended to the
     hour file (an Android batch retried with more pieces after the answer to the first try was lost)."""
+    if report is not None:
+        report["late"] = False  # the upload's note uses the save transaction, not a cursor read after the await
     kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
                                      (device, start_ms, len(body))).fetchone()
     if r := kept():
@@ -244,9 +248,14 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
         if r := kept():  # the same piece in two requests at once
             return r[0]
         pos = append(path, body)
-        db.conn().execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
+        received = int(time.time() * 1000)
+        with db.tx() as t:
+            queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
+            if report is not None:
+                report["late"] = queued_late
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, int(time.time() * 1000), *h))
+                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -359,10 +368,12 @@ def file_health(pcm, count):
     return dbfs(energy / max(count, 1)), dbfs(hum / max(count, 1)), zeros * 1000 // SR, full
 
 
-def save_file(device, start_ms, source, content_type, n=None):
+def save_file(device, start_ms, source, content_type, n=None, report=None):
     """HTTP upload already spooled to disk; retain the original bytes and one pieces row.
     A failed decode publishes no row, so retrying never exposes a partial import to the pipeline.
     """
+    if report is not None:
+        report["late"] = False
     size = os.fstat(source.fileno()).st_size
     kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
                                      (device, start_ms, size)).fetchone()
@@ -397,9 +408,14 @@ def save_file(device, start_ms, source, content_type, n=None):
             os.fsync(directory)
         finally:
             os.close(directory)
-        db.conn().execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(count / SR, 3), str(path), pos, size, n, int(time.time() * 1000), *h))
+        received = int(time.time() * 1000)
+        with db.tx() as t:
+            is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (device, start_ms, round(count / SR, 3), str(path), pos, size, n, received, *h))
+        if report is not None:
+            report["late"] = is_late
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -590,6 +606,7 @@ def hold(device: str, at_ms: int | None):
     again; kept across a restart."""
     with _holds:
         h = db.kv(f"hold:{device}")
+        released = at_ms is None and h is not None
         now = time.time()
         if at_ms is None:
             h = None
@@ -602,6 +619,8 @@ def hold(device: str, at_ms: int | None):
         else:
             h = {"at": at_ms, "since": now, "seen": now, "progress": now}
         db.put_kv(f"hold:{device}", h)
+    if released:
+        late_store.release(device)
 
 
 def held(device: str) -> int | None:
@@ -618,6 +637,7 @@ def held(device: str) -> int | None:
         if time.time() - h["since"] >= HOLD_MAX_S:
             h["released"] = "max"
             db.put_kv(f"hold:{device}", h)
+            late_store.release(device)
             return None
         done = db.kv(f"finalized_to:{device}")
         if done and int(dt.datetime.fromisoformat(done).timestamp() * 1000) >= h["at"]:
@@ -629,7 +649,8 @@ def held(device: str) -> int | None:
             return h["at"]
         h.update(released="stale", stale_s=HOLD_STALE_S)
         db.put_kv(f"hold:{device}", h)
-    text = f"{device}：补传等了 {HOLD_STALE_S / 60:g} 分钟没有进展，先定稿；之后到的更早录音只保存不转写"
+    late_store.release(device)
+    text = f"{device}：补传等了 {HOLD_STALE_S / 60:g} 分钟没有进展，先定稿；之后到的更早录音会补转写"
     log.warning("%s", text)
     # monitor.status runs in an AnyIO worker; ws.note schedules its broadcast on the tenant's event loop.
     if T().tg:
@@ -671,11 +692,13 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     device's queue (read_to, queued). spent: the ms its pieces took to decode (decode_ms) and the seconds it handed out
     (fed_s) added to it (perf.piece)."""
     ms = int(after.timestamp() * 1000) if after else 0
+    if edge_s is None:
+        late_store.reset_reader(device, ms)
     p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1",
                           (device, ms)).fetchone() if after else None  # None: from 0 all the same, and pieces_end would sort every piece
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
     # audio after `after` still on its way (a pipeline started mid catch-up took 3 such pieces as late)
-    at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, 0.0
+    at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, float(ms)
     decode_failures = 0
     while True:
         if edge_s is None:
@@ -685,10 +708,22 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
             lo = max(last[0] if last else 0, time.time() * 1000) - edge_s * 1000
         # the edge reader by the end (pieces_end: its last edge_s); by start (pieces_device), an idle device's reader
         # (at 0: nothing handed out yet) walked all its pieces each second
-        p = db.conn().execute(f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
-                              "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, at, lo)).fetchone()
-        if p is not None and edge_s is None and (h := held(device)) is not None and p["start_ms"] >= h:
-            p = None  # older audio is still on its way: it goes first
+        h = held(device) if edge_s is None else None
+        query = (f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
+                 "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1")
+        p = db.conn().execute(query, (device, at, lo)).fetchone()
+        if p is None or h is not None and p["start_ms"] >= h:
+            await anyio.sleep(1)
+            continue  # idle readers never take a write lock
+        # Save's late predicate and selection's cursor advance are serialized by SQLite. An upload
+        # cannot slip between the SELECT and advancing the reader and disappear behind it unregistered.
+        with db.tx() if edge_s is None else nullcontext(db.conn()) as t:
+            p = t.execute(query, (device, at, lo)).fetchone()
+            if p is not None and h is not None and p["start_ms"] >= h:
+                p = None
+            if p is not None and edge_s is None:
+                db.put_kv(f"read_to:{device}", p["start_ms"], t)
+                db.put_kv(f"read_end:{device}", round(p["start_ms"] + p["seconds"] * 1000), t)
         if p is None:
             await anyio.sleep(1)
             continue
@@ -716,8 +751,12 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                     s = p["start_ms"] + skip * 1000 / SR
                     skip += len(x)
                     end = p["start_ms"] + skip * 1000 / SR
-                    perf.add(spent, fed_s=len(x) / SR)
-                    yield dt.datetime.fromtimestamp(s / 1000), x
+                    ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
+                    for a, b in ranges:
+                        y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
+                        if len(y):
+                            perf.add(spent, fed_s=len(y) / SR)
+                            yield dt.datetime.fromtimestamp(a / 1000), y
             at = p["start_ms"]
             continue
         with perf.timed(spent, "decode_ms"):
@@ -726,8 +765,12 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         if got is not None:
             s, x = got
             end = s + len(x) * 1000 / SR
-            perf.add(spent, fed_s=len(x) / SR)
-            yield dt.datetime.fromtimestamp(s / 1000), x
+            ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
+            for a, b in ranges:
+                y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
+                if len(y):
+                    perf.add(spent, fed_s=len(y) / SR)
+                    yield dt.datetime.fromtimestamp(a / 1000), y
 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> bytes | None:

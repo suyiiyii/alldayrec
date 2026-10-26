@@ -99,6 +99,7 @@ def snapshot(t: tenant.Tenant) -> str:
 
 # what a's token is sent to, route by route: (method, path, request kwargs)
 REQUESTS = {
+    ("POST", "/api/late-backfill"): ("POST", "/api/late-backfill", dict(params={"days": 1, "dry_run": False})),
     ("POST", "/api/chunks"): ("POST", "/api/chunks", dict(params={"device": DEV, "start": MS + 60_000}, content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/api/chunks/end"): ("POST", "/api/chunks/end", dict(params={"device": DEV, "t": MS + 62_000})),
     ("POST", "/api/hold/release"): ("POST", "/api/hold/release", dict(params={"device": DEV})),
@@ -315,10 +316,12 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
                     break
                 await anyio.sleep(0.5)
             dias[t.id] = list(t.dias)
+            assert DEV in t.read_to, "a running pipeline has its own reader cursor"
+            positions[t.id] = dict(t.read_to)
             tg.cancel_scope.cancel()
         return finals()
 
-    got, dias = {}, {}
+    got, dias, positions = {}, {}, {}
 
     async def both():
         async def keep(t):
@@ -328,7 +331,8 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
                 tg.start_soon(keep, t)
     anyio.run(both)
     assert got == {"a": ["1", "2"], "b": ["51", "52"]}, got
-    assert DEV in a.read_to and DEV in b.read_to and a.read_to is not b.read_to
+    assert DEV in positions["a"] and DEV in positions["b"] and a.read_to is not b.read_to
+    assert not a.read_to and not b.read_to, "stopped readers cannot leave live read-ahead behind"
     assert a.devices[DEV].seg is not b.devices[DEV].seg
     assert len(dias["a"]) == len(dias["b"]) == 2 and not set(map(id, dias["a"])) & set(map(id, dias["b"])), "each its own diarists"
     assert not a.dias and not b.dias, "gone with their pipelines"

@@ -94,7 +94,7 @@
       "free": "{free} / {total} GB free"
     },
     "holdLeft": "the phone has been silent since {seen}; waiting until {until} at the latest",
-    "holdStale": "No backfill progress for {minutes} min, so finals went on; older audio arriving later is saved, not transcribed.",
+    "holdStale": "No backfill progress for {minutes} min, so finals went on; older audio arriving later will be transcribed afterwards.",
     "view": "View",
     "summaryFailed": "Summary failed",
     "summaryPending": "Writing summary…"
@@ -484,7 +484,8 @@
       "profile": "Profiles",
       "recap": "Daily recap",
       "live": "Live analysis",
-      "ask": "Ask AI"
+      "ask": "Ask AI",
+      "late": "Late audio"
     },
     "calls": "{n} call | {n} calls",
     "failed": "{n} failed ({list})",
@@ -571,7 +572,15 @@
     "summariesVal": "{n} conversation | {n} conversations",
     "noDevices": "No device has anything to process yet",
     "events": "System log",
-    "noEvents": "No log yet"
+    "noEvents": "No log yet",
+    "late": {
+      "title": "Late audio",
+      "waiting": "Waiting: {n} span · {m} min | Waiting: {n} spans · {m} min",
+      "deferred": "After conversation closes: {n} span · {m} min | After conversation closes: {n} spans · {m} min",
+      "processing": "Processing: {n} span · {m} min | Processing: {n} spans · {m} min",
+      "failed": "Failed: {n} span · {m} min | Failed: {n} spans · {m} min",
+      "done": "Done today: {n} span · {m} min | Done today: {n} spans · {m} min"
+    }
   },
   "rec": {
     "ev": {

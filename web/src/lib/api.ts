@@ -122,6 +122,7 @@ export interface LiveState {
 }
 
 export interface DeviceStatus {
+  late?: Partial<Record<"waiting" | "deferred" | "processing" | "failed" | "done", { spans: number; minutes: number; note?: string }>>;
   device: string;
   import_progress?: { done_s: number; total_s: number } | null; // stored audio, overlaps once and gaps excluded
   audio_end: string | null;

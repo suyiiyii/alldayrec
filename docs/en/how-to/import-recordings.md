@@ -47,7 +47,7 @@ A conversation with less than 10 seconds of speech is not kept as a conversation
 Importing goes through the HTTP endpoint `POST /api/chunks`: one file per request, the body a whole audio file, decoded by ffmpeg on the server. A script follows three rules, as the web page does:
 
 - **Use a new device name for each batch**, e.g. `import-2026-10`. The next rule holds per device name. Devices named `import` or starting with `import-` count as import batches and are listed under Past imports on the Import recordings page.
-- **Upload oldest first.** Under one device name, audio earlier than where the server has already processed is kept but not transcribed.
+- **Upload oldest first.** Audio that arrives late is transcribed and merged afterwards. Audio bridging two conversations joins them, and old links keep working. The progress page shows late-audio status.
 - **After the last file, tell the server the batch is over.** Otherwise the last stretch keeps waiting for more audio and never gets a final transcript.
 
 Steps:
@@ -72,3 +72,20 @@ Steps:
    It returns `{"ok":true}`.
 
 [`firmware/devkit/lr_sync.py`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/lr_sync.py) is a Python client that reads a recorder's card and uploads it, for reference. The endpoint's parameters are in [HTTP API](../reference/api.md#api-chunks).
+
+## Backfill historical late audio
+
+Administrators first inspect stored, untranscribed late recordings from the last 30 days:
+
+```bash
+cd server
+uv run python -m alldayrec.late_backfill --days 30 --dry-run
+```
+
+Set `LIVE_RECORD_URL`; provide the token through `LIVE_RECORD_TOKEN` or the first line of stdin. The command reports spans, audio minutes and speech minutes per day. Previewing leaves the late queue unchanged. After approval, omit `--dry-run` to enqueue the audio for the normal processor. Old recordings without `received_ms` are skipped, with their dates reported. Ambiguous legacy final-pass logs overlapping multiple devices are also skipped and counted. Failed spans have up to three attempts; the progress page retains their failure reason.
+
+Dry runs run VAD on all candidate audio in the server process, sharing the audio/VAD workers with live processing. Schedule them at a quiet time. Both live ingestion and historical backfill split a continuous backlog into jobs with at most 30 minutes of audio each. Each part commits independently, so a later timeout retains earlier results. Before transcription, every adjacent job boundary, including short remainders after moving a suffix, uses the same VAD to find the midpoint of the longest silence within up to 60 seconds before its original boundary. A cut must leave at least 0.5 seconds on either side; without a usable silence the original boundary stays, and a recording end simply flushes. Chosen boundaries are persisted and reused on retries without moving again. The same conversation bridging rules apply across parts; a job boundary does not end a conversation. Isolated speech shorter than 10 seconds participates in later grouping. Anonymous labels retain their source job: equal labels from different older jobs stay distinct too, receiving unused labels on collision without borrowing the new part's speaker vector. Historical rows without a job ID are distinguished by their originally disconnected groups. Named speakers and the owner keep their labels.
+
+The preview also estimates affected conversations needing summaries and existing daily recaps needing refreshes, to help estimate LLM calls. These two counts are estimates based on speech intervals. Preview and enqueueing use the same candidate plan: already-processed pauses and sentence edges are excluded. Legacy traces without a completion time or reliable device attribution are skipped and reported as ambiguous; intervals shorter than 0.5 seconds are treated as clock jitter.
+
+Summaries are queued once per affected conversation after the device's ready spans finish. Deferred spans waiting for an open conversation to close do not block summaries for other completed conversations. Existing recaps remain visible; automatic regeneration has three persisted attempts per input change, backing off for one minute and then five minutes. Exhaustion stops further attempts and logs the reason, including after a restart.

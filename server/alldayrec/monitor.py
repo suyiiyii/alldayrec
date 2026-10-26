@@ -20,6 +20,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
+from alldayrec import late_store
 from alldayrec import device_pipeline
 from alldayrec import perf
 from alldayrec import stepfun_asr
@@ -75,7 +76,7 @@ def device_status(device: str, st: PipelineState) -> dict:
             # how far behind what one reads now is: its newest sentence's end to its showing; the median a diagnosis
             "latency_s": lat[-1] if lat else None, "latency_med_s": sorted(lat)[len(lat) // 2] if lat else None,
             "final_latency_s": fin[-1] if fin else None,
-            "arrival": arrived, "sound": sound(device, received_to)}
+            "arrival": arrived, "sound": sound(device, received_to), "late": late_store.status(device)}
 
 
 def sound(device: str, end: dt.datetime | None) -> dict | None:
@@ -110,6 +111,13 @@ def status() -> dict:
     with audio (recorders; the import batches apart), and the pieces still queued over all devices. Its callers run it
     in a thread (threads.DB): its reads of the pieces held the event loop up to 0.8 s under load (10-24)."""
     ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in list(T().devices.items())]  # a pipeline may start meanwhile
+    active = {d["device"] for d in ds}
+    for row in db.conn().execute("SELECT DISTINCT device FROM late_spans WHERE status != 'done' OR done_ms >= ?",
+                                 (round(dt.datetime.combine(dt.date.today(), dt.time()).timestamp() * 1000),)):
+        d = row[0]
+        if d not in active:
+            done = db.kv(f"finalized_to:{d}")
+            ds.append({**device_status(d, PipelineState(done_to=dt.datetime.fromisoformat(done) if done else None)), "hw": db.device_status(d)})
     top = max(ds, key=lambda d: d["audio_end"] or "", default={"device": None, "audio_end": None, "behind_s": None, "done_to": None,
                                                                  "last_speech": None, "refine": None, "conversation": None, "latency_s": None,
                                                                  "latency_med_s": None, "final_latency_s": None})

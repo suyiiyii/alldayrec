@@ -42,6 +42,8 @@ async def rename(conv_id: str, body: dict):
     """One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me).
     The answer's undo takes it back (POST /api/speakers/undo)."""
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
+    _, to = db.resolve_voice(conv_id, to)
+    conv_id, frm = db.resolve_voice(conv_id, frm)
     me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
@@ -53,6 +55,8 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     transaction, and the summary is redone. Also returns up to ENROLL of its sentences to teach the diarist that voice
     for later conversations (enroll_soon: seconds of audio work per sentence, after the answer), and what it changed as
     it was before (undo_rename)."""
+    _, to = db.resolve_voice(conv_id, to)
+    conv_id, frm = db.resolve_voice(conv_id, frm)
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
@@ -365,6 +369,8 @@ def card(g: dict) -> dict:
 
 
 def find_group(gid: str, sid: str | None = None) -> dict:
+    gid = canonical_voice_key(gid)
+    sid = canonical_voice_key(sid) if sid else sid
     g = next((g for g in speaker_groups() if g["id"] == gid), None)
     if g and sid:
         g = next((x for x in g["suggested"] if x["id"] == sid), None)
@@ -387,10 +393,17 @@ def voice_key(m: dict) -> str:
     return f"{m['conv']}|{m['label']}"
 
 
+def canonical_voice_key(key: str) -> str:
+    if "|" not in key:
+        return key
+    conv, label = db.resolve_voice(*key.split("|", 1))
+    return f"{conv}|{label}"
+
+
 def chosen(g: dict, body: dict) -> list[dict]:
     """The voices of a card a request picks (naming a half, 拆开): voices, a list of conv|label. Another way to pick
     (say, the voices heard as music) is another key of the body here."""
-    want = set(body.get("voices") or [])
+    want = {canonical_voice_key(k) for k in body.get("voices") or []}
     return [m for m in g["members"] if voice_key(m) in want]
 
 
@@ -448,6 +461,8 @@ async def speaker_detach(body: dict):
     """A voice that is not this speaker: a named one goes back to a fresh S<n> of its conversation; either way it is
     kept apart from the group from now on. Out of 我, the centroid a 「这是我」 learnt from it alone goes too."""
     conv, label, group = body["conv"], body["label"], body["group"]
+    conv, label = db.resolve_voice(conv, label)
+    group = canonical_voice_key(group)
     key = f"{conv}|{label}"
     if not speakers.ANON.fullmatch(label):
         new = unnamed(conv, label)[0]
@@ -558,6 +573,7 @@ def label_suggestions(c: dict, groups: list[dict], vec: dict, hs: dict | None, a
 
 @router.get("/api/conversation/{conv_id}/speakers")
 async def conversation_speakers(conv_id: str):
+    conv_id = db.resolve_conversation(conv_id)
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
@@ -680,6 +696,7 @@ async def voices_loop():
         seen, convs = await anyio.to_thread.run_sync(lambda: (db.voiced_conversations(), all_conversations()), limiter=threads.DB)
         since = (dt.date.today() - dt.timedelta(days=3)).isoformat()
         for c in convs:
+            revision = db.kv(f"conversation_revision:{c['id']}")
             if c["start"] < since or c["id"] in seen:
                 continue
             rows = conversation_rows(c)
@@ -709,6 +726,8 @@ async def voices_loop():
                                 "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
                                 "clip_text": best.get("text")})
             with db.tx() as t:
+                if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
+                    continue
                 db.insert_voices(t, out or [{"conv": c["id"]}])
             T().speakers["at"] = 0.0
         try:

@@ -54,6 +54,8 @@ async def pipeline(device: str):
     seg, dseg = Segmenter(), Segmenter()  # the final layer's audio, the draft layer's
     resume = db.kv(f"finalized_to:{device}")
     done0 = dt.datetime.fromisoformat(resume) if resume else None
+    from alldayrec import late_store
+    late_store.reset_reader(device, int(done0.timestamp() * 1000) if done0 else 0)
     draft0 = db.kv(f"draft_to:{device}")
     st = T().devices[device] = PipelineState(
         seg=seg, done_to=done0,
@@ -166,7 +168,7 @@ async def pipeline(device: str):
                 r["speaker"], changed = new, changed + 1
         return (rows, changed) if missing <= len(rows) // 10 else None
 
-    async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None):
+    async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None, coverage=None):
         """One transaction: the piece's rows replace [lo, hi), closed conversations (with the live analysis that
         overlaps one), the finalized time, the open conversation."""
         recs = [record(c) for c in closed]
@@ -174,6 +176,7 @@ async def pipeline(device: str):
         with db.tx() as t:
             if rows is not None:
                 db.replace_sentences(t, lo, iso(hi), rows, device)
+                db.record_processed(t, device, coverage or [], "final")
             attached, relabelled = False, []
             for rec in recs:
                 if (rl := relabel_rows(rec)) and rl[1]:  # every label again, with the whole conversation in view
@@ -334,11 +337,15 @@ async def pipeline(device: str):
         x = seg.audio[a0 - seg.audio_base:b0 - seg.audio_base]
         at = lambda s: seg.time_at(a0 + round(s * SR))  # the piece may span a session boundary, where the clock jumps
         hi = at(len(x) / SR)
+        points = [a0] + [i for i, _ in seg.anchors if a0 < i < b0] + [b0]
+        heard = [[round(seg.time_at(a).timestamp() * 1000),
+                  round((seg.time_at(a) + dt.timedelta(seconds=(b - a) / SR)).timestamp() * 1000)]
+                 for a, b in zip(points, points[1:])]
         # no speech: nothing to send, the clock still advances. Nor in less than a VAD frame (25 ms), whatever the VAD is
         # in at the newest audio: a store finalized to the ms before this fix left the last samples of a recording here
         if len(x) < SR // 40 or (not any(rel(u[0]) < cut for u in known) and not seg.speaking()):
             with perf.timed(fcost, "commit_ms"):
-                await commit(grouper.advance(hi), [], iso(base), hi)  # no rows: pages still drop their drafts of this time
+                await commit(grouper.advance(hi), [], iso(base), hi, heard)  # no rows: pages still drop their drafts of this time
             final_row(len(x) / SR, 0)
             return True
         t_run = time.perf_counter()
@@ -366,8 +373,9 @@ async def pipeline(device: str):
                           "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") and not g.get("music") else None}
                          for g, m in zip(segs, marks)]
         with open(T().data / f"{lo.date()}.passes.jsonl", "a") as f:  # every piece's raw engine output, for tracing lost rows
-            f.write(json.dumps({"at": dt.datetime.now().isoformat(timespec="seconds"), "layer": "final", "t0": iso(base), "since": 0.0,
-                                "from": iso(lo), "to": iso(hi), "segs": segs}, ensure_ascii=False) + "\n")
+            ranges = [[iso(dt.datetime.fromtimestamp(x / 1000)) for x in r] for r in heard]
+            f.write(json.dumps({"at": dt.datetime.now().isoformat(timespec="seconds"), "layer": "final", "device": device, "t0": iso(base), "since": 0.0,
+                                "from": iso(lo), "to": iso(hi), "audio_ranges": ranges, "segs": segs}, ensure_ascii=False) + "\n")
         shown = dt.datetime.now()
         for r in rows:
             r["source"], r["engine"], r["shown_at"] = device, engine, iso(shown)
@@ -376,7 +384,7 @@ async def pipeline(device: str):
         closed = [c for r in rows for c in grouper.sentence(r)]
         closed += grouper.advance(hi)
         with perf.timed(fcost, "commit_ms"):
-            await commit(closed, rows, iso(lo), hi)
+            await commit(closed, rows, iso(lo), hi, heard)
         final_row(len(x) / SR, len(rows))
         st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((time.perf_counter() - t_run) * 1000),
                         "engine": engine, "speakers": by_label, "changed": len(rows), "piece_s": round(len(x) / SR),
@@ -630,5 +638,6 @@ async def pipeline(device: str):
                 ptg.start_soon(forever, part, name=f"{name}:{device}")
     finally:
         st.ask = None  # no task group to run in until lasting() starts it again
+        T().read_to.pop(device, None)
         T().dias.remove(dia)
         T().dias.remove(ddia)

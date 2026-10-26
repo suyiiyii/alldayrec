@@ -336,10 +336,18 @@ const { connected, send } = useSocket((m) => {
   // summaries arrive every few seconds while old ones are redone: patch the card, never reload the list
   if (m.type === "status") status.value = m;
   else if (m.type === "self") selfCard.value?.load(); // 「哪个是你？」 popped or was answered
+  else if (m.type === "conversation_removed") {
+    items.value = items.value.filter((c) => c.id !== m.id);
+    void loadCalendar(true);
+  }
   else if (m.type === "summary") {
     const c = items.value.find((x) => x.id === m.conversation);
     if (c) c.summary = { ...m };
-  } else if (m.type === "conversation" && top.value && window.scrollY < 200) restart();
+  } else if (m.type === "conversation") {
+    const i = items.value.findIndex((c) => c.id === m.id);
+    if (i >= 0) items.value[i] = { ...items.value[i], ...m };
+    else if (top.value && window.scrollY < 200) restart();
+  }
 }, restart);
 useWatch(send, connected); // the live card's analysis runs while this page is in front, as on the live page
 </script>

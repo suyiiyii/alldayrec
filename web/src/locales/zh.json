@@ -94,7 +94,7 @@
       "free": "剩 {free} / {total} GB"
     },
     "holdLeft": "手机 {seen} 后没再联系，最晚 {until} 不再等",
-    "holdStale": "补传等了 {minutes} 分钟没有进展，先定稿；之后到的更早录音只保存不转写",
+    "holdStale": "补传等了 {minutes} 分钟没有进展，先定稿；之后到的更早录音会补转写",
     "view": "查看",
     "summaryFailed": "摘要生成失败",
     "summaryPending": "摘要生成中…"
@@ -484,7 +484,8 @@
       "profile": "人物档案",
       "recap": "每日回顾",
       "live": "实时分析",
-      "ask": "问 AI"
+      "ask": "问 AI",
+      "late": "补转写"
     },
     "calls": "{n} 次",
     "failed": "失败 {n}（{list}）",
@@ -571,7 +572,15 @@
     "summariesVal": "{n} 段对话",
     "noDevices": "还没有设备的处理任务",
     "events": "系统日志",
-    "noEvents": "还没有日志"
+    "noEvents": "还没有日志",
+    "late": {
+      "title": "补转写",
+      "waiting": "等待 {n} 段 · {m} 分钟",
+      "deferred": "对话结束后处理 {n} 段 · {m} 分钟",
+      "processing": "处理中 {n} 段 · {m} 分钟",
+      "failed": "失败 {n} 段 · {m} 分钟",
+      "done": "今天完成 {n} 段 · {m} 分钟"
+    }
   },
   "rec": {
     "ev": {
