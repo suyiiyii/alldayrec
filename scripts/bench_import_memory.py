@@ -1,7 +1,7 @@
 """Synthetic HTTP upload -> real decode/store/stream/VAD; no ASR or external API.
 
-Run from server/: OPENBLAS_NUM_THREADS=1 MODELS_DIR=/path/to/models \
-    uv run python bench_import_memory.py --seconds 3600
+Run from the repo root: OPENBLAS_NUM_THREADS=1 MODELS_DIR=/path/to/models \
+    PYTHONPATH=server uv run --project server python scripts/bench_import_memory.py --seconds 3600
 Needs the pinned VAD and CMVN files (infer.SOURCES); no owner audio is used.
 Measures the server with /usr/bin/time (-l on macOS, -v on Linux), and samples
 RSS every 20 ms with a 6 GiB safety ceiling. Each run has an empty DATA_DIR.
@@ -117,17 +117,26 @@ def main():
             port = s.getsockname()[1]
         env = {**os.environ, 'DATA_DIR': str(root), 'ENGINE': 'local', 'ENGINE_FALLBACK': '', 'OPENBLAS_NUM_THREADS': '1'}
         time_report = root / 'time.txt'
-        proc = subprocess.Popen(['/usr/bin/time', '-l' if sys.platform == 'darwin' else '-v', '-o', str(time_report),
-                                 sys.executable, __file__, '--serve', str(root), '--port', str(port)],
+        timer = ['/usr/bin/time', '-l' if sys.platform == 'darwin' else '-v', '-o', str(time_report)] if Path('/usr/bin/time').exists() else []
+        proc = subprocess.Popen([*timer, sys.executable, __file__, '--serve', str(root), '--port', str(port)],
                                 env=env, start_new_session=True)
         stop, sampled, server_pid = threading.Event(), [0], [None]
         def sample():
             while not stop.wait(.02) and proc.poll() is None:
                 if server_pid[0] is None:
                     continue
-                result = subprocess.run(['ps', '-o', 'rss=', '-p', str(server_pid[0])], capture_output=True, text=True)
-                if result.stdout.strip():
-                    sampled[0] = max(sampled[0], int(result.stdout) * 1024)
+                if sys.platform == 'linux':
+                    try:
+                        status = Path(f'/proc/{server_pid[0]}/status').read_text()
+                    except FileNotFoundError:
+                        continue
+                    match = re.search(r'VmRSS:\s+(\d+)', status)
+                    rss = int(match[1]) * 1024 if match else 0
+                else:
+                    result = subprocess.run(['ps', '-o', 'rss=', '-p', str(server_pid[0])], capture_output=True, text=True)
+                    rss = int(result.stdout.strip() or 0) * 1024
+                if rss:
+                    sampled[0] = max(sampled[0], rss)
                     if sampled[0] > 6 * 1024**3:
                         os.killpg(proc.pid, signal.SIGKILL)
         monitor = threading.Thread(target=sample, daemon=True)
@@ -165,11 +174,11 @@ def main():
                 os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait()
             monitor.join()
-        report = time_report.read_text()
+        report = time_report.read_text() if timer else ''
         peak = re.search(r"(\d+)\s+maximum resident set size", report) if sys.platform == 'darwin' else re.search(r"Maximum resident set size \(kbytes\): (\d+)", report)
-        if peak is None:
+        if timer and peak is None:
             raise RuntimeError('no RSS measurement in /usr/bin/time output')
-        time_peak = int(peak[1]) * (1 if sys.platform == 'darwin' else 1024)
+        time_peak = int(peak[1]) * (1 if sys.platform == 'darwin' else 1024) if peak else None
         print(json.dumps({'seconds': args.seconds, 'uploaded': uploaded, 'sampled_peak_bytes': sampled[0],
                           'time_peak_bytes': time_peak, **result}))
 

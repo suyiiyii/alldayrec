@@ -100,8 +100,8 @@ def test_import_failure_can_retry(tmp_path, monkeypatch):
         assert c.post(url, content=f).json()['seconds'] == 2
 
 
-@pytest.mark.parametrize('diagnostic', ['No space left on device', 'Disk quota exceeded', 'Input/output error'])
-def test_decoder_storage_failure_is_retryable(tmp_path, monkeypatch, diagnostic):
+@pytest.mark.parametrize('diagnostic', ['No space left on device', 'Disk quota exceeded', 'Input/output error', 'Error opening output file'])
+def test_decoder_diagnostics_are_not_storage_errors(tmp_path, monkeypatch, diagnostic):
     import sys
     t = db.open_db(tmp_path / 'live.db')
     c = client(t)
@@ -115,9 +115,9 @@ def test_decoder_storage_failure_is_retryable(tmp_path, monkeypatch, diagnostic)
         full.setattr(audio.subprocess, 'Popen', fail_write)
         with path.open('rb') as f:
             r = c.post(url, content=f)
-        assert r.status_code == 503 and 'retry' in r.json()['detail']
+        assert r.status_code == 400, 'stderr is not evidence of an errno from our writes'
         assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
-        assert not (t.recordings / 'rejected').exists(), 'valid audio must not be permanently rejected'
+        assert (t.recordings / 'rejected' / 'import-test' / '1700000000000.bin').exists()
     with path.open('rb') as f:
         assert c.post(url, content=f).json()['seconds'] == 2
 
