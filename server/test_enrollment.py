@@ -197,7 +197,9 @@ def test_music_and_unlabelled_rows_do_not_supply_enrollment_speech(audio_store, 
 @pytest.mark.parametrize("confirm", [False, True])
 def test_later_media_summary_keeps_enrollment(audio_store, monkeypatch, confirm):
     c, rows = sample([12.0] * 4)
+    db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
     voices_round(monkeypatch)
+    assert anyio.run(routes_speakers.self_get)["card"], "the unclassified voice can already be on a pending card"
     if confirm:
         g, = anyio.run(routes_speakers.speaker_list, True)["cards"]
         assert anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我", "all": True})["learned"]
@@ -223,6 +225,7 @@ def test_later_media_summary_keeps_enrollment(audio_store, monkeypatch, confirm)
     assert db.summary(c["id"])["media_spans"], "the media summary actually completed"
     assert [tuple(r) for r in db.conn().execute("SELECT * FROM voices")] == before
     assert (core.owner_npz().read_bytes() if confirm else None) == owner
+    assert (db.kv("selfvoice") or {}).get("card") is None, "a later media classification invalidates stale candidates"
     assert all(v["media"] for v in routes_speakers.classified_voices())
     assert bool(anyio.run(routes_speakers.speaker_list)["cards"]) == confirm
     assert bool(anyio.run(routes_speakers.speaker_list, True)["cards"]) != confirm
