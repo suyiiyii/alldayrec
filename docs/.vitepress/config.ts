@@ -12,7 +12,7 @@ const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
 const OG_IMAGE = {
   zh: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-zh-20261026c.png",
-  en: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-en-20261026c.png",
+  en: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-en-20261026d.png",
 };
 // the English README tagline; en/index.md repeats it in its title and hero
 const EN_TAGLINE = "An open-source Plaud for your whole day, so your agent knows you";
