@@ -11,14 +11,14 @@ hero:
     src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
-    - theme: brand
-      text: Quickstart
-      link: /en/tutorial/first-run
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
-    - theme: alt
+    - theme: brand
       text: Try the demo
       link: /demo/
       target: _self
+    - theme: alt
+      text: Quickstart
+      link: /en/tutorial/first-run
     - theme: alt
       text: GitHub
       link: https://github.com/suyiiyii/alldayrec

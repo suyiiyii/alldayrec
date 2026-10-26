@@ -11,14 +11,14 @@ hero:
     src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: 实时页：边说边出字幕，AI 实时摘要跟着更新（示例数据）
   actions:
-    - theme: brand
-      text: 快速开始
-      link: /tutorial/first-run
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
-    - theme: alt
+    - theme: brand
       text: 在线体验
       link: /demo/
       target: _self
+    - theme: alt
+      text: 快速开始
+      link: /tutorial/first-run
     - theme: alt
       text: GitHub
       link: https://github.com/suyiiyii/alldayrec
