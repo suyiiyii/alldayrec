@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS mcp_links (
 CREATE TABLE IF NOT EXISTS sentences (       -- final rows; a finalization pass replaces the ones starting in [from, to)
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
     source TEXT, engine TEXT, shown_at TEXT, dictation TEXT,  -- dictation: the app dictated into (history rows)
-    music INTEGER, late INTEGER NOT NULL DEFAULT 0);  -- late: insert-only rows protected from a live replay
+    music INTEGER, late INTEGER NOT NULL DEFAULT 0, late_job INTEGER);  -- late: insert-only rows protected from a live replay
 CREATE INDEX IF NOT EXISTS sentences_start ON sentences(start);
 CREATE INDEX IF NOT EXISTS sentences_id_source ON sentences(id, source);  -- a row by its id (relabel); id first: on (source, id) a
                                                                           -- pass's DELETE (start range and source) took it and walked the device's history
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS late_spans (
     id INTEGER PRIMARY KEY, device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
     first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting',
     tries INTEGER NOT NULL DEFAULT 0, note TEXT, next_ms INTEGER NOT NULL DEFAULT 0,
-    ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL);
+    ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL, seam_ms INTEGER);
 CREATE INDEX IF NOT EXISTS late_spans_queue ON late_spans(status, start_ms);
 CREATE INDEX IF NOT EXISTS late_spans_device ON late_spans(device, status);
 CREATE TABLE IF NOT EXISTS processed_audio (
@@ -155,6 +155,10 @@ def init():
         conn().execute("ALTER TABLE sentences ADD COLUMN music INTEGER")
     if "late" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:
         conn().execute("ALTER TABLE sentences ADD COLUMN late INTEGER NOT NULL DEFAULT 0")
+    if "late_job" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:
+        conn().execute("ALTER TABLE sentences ADD COLUMN late_job INTEGER")
+    if "seam_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
+        conn().execute("ALTER TABLE late_spans ADD COLUMN seam_ms INTEGER")
     if "level" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 10-14: how loud each voice is
         conn().execute("ALTER TABLE voices ADD COLUMN level REAL")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own

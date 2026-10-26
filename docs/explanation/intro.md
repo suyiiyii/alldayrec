@@ -1,6 +1,6 @@
 ---
 type: explanation
-description: "全天录是什么：开源心力球，私有第二大脑。全平台可用，不用买硬件，手机就能录。界面一览、能做什么，以及和录音豆、心力球、Plaud 等产品的对比。"
+description: "AllDayRec（全天录）：开源心力球，让 Agent 更懂你。界面一览、能做什么，以及和录音豆、心力球、Plaud 等产品的对比。"
 ---
 
 # 简介与定位
@@ -9,17 +9,17 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ## 界面一览
 
-![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif)
+![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-zh-summary-20261026.gif)
 
 实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例。
 
-| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png) |
+| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-zh-named-20261026c.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-zh-summary-20261026.png) |
 |:--:|:--:|
 | 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
 
 ## 为什么做这个
 
-- **全平台，不用买硬件。** 安卓、iPhone App 和浏览器都能直接录。想全天戴，可以接飞书录音豆（安卓），或者自己焊一个开源录音设备（`LR-P3`）。
+- **用你已有的设备。** [飞书录音豆](../how-to/bind-recorder.md#飞书录音豆)（仅安卓）和[开源录音设备](../reference/hardware.md)直接连 App 实时同步；其他设备的录音文件可以[导入](../how-to/import-recordings.md)；没有设备，安卓、iPhone App 和浏览器都能直接录。
 - **原始录音一直留着。** 每句话都能点开回放核对，以后有了更好的模型，还能把过去重新转写一遍。
 - **数据在你自己的服务器上。** 音频只发给你选的语音识别服务，转写只发给你选的大模型。
 - **软件免费，按用量付费。** 转写和大模型按用量付给你选的服务，默认的千问转写约 ¥0.05/小时音频。
@@ -27,7 +27,7 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ## 能做什么
 
-- **全平台，不用买硬件。** 安卓 App、iPhone App 和浏览器都能直接录。安卓 App 还能直接连接[飞书录音豆](../how-to/bind-recorder.md#飞书录音豆)。
+- **用你已有的设备。** [飞书录音豆](../how-to/bind-recorder.md#飞书录音豆)（仅安卓）和[开源录音设备](../reference/hardware.md)直接连 App 实时同步；其他设备的录音文件可以[导入](../how-to/import-recordings.md)；没有设备，安卓、iPhone App 和浏览器都能直接录。
 - **两层转写。** 定稿交给云端语音识别（默认阿里云百炼千问，约 ¥0.05/小时音频），页面开着时几秒内出初稿；也可以 `ENGINE=local` 在本机转写。
 - **认人。** 认得出你自己，记得你给别人起的名字。
 - **记忆。** 对话摘要、待办和截止日期、每日回顾、全文搜索。

@@ -14,7 +14,7 @@ This page runs AllDayRec long-term with Docker Compose on a Linux or macOS machi
 ## Prerequisites
 
 - Docker (with Compose), amd64 or arm64.
-- An [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/) API key, Beijing region, or a key for another ASR engine (see [Change the ASR engine](./change-asr-engine.md)).
+- For cloud transcription, an [Alibaba Cloud Bailian](https://bailian.console.aliyun.com/) API key, Beijing region, or a key for another ASR engine. For transcription on the server's CPU, choose `ENGINE=local` (see [Change the ASR engine](./change-asr-engine.md)).
 - An OpenAI-compatible LLM endpoint; with Bailian, the same key works.
 
 ## Steps
@@ -26,7 +26,9 @@ This page runs AllDayRec long-term with Docker Compose on a Linux or macOS machi
    cp .env.example .env
    ```
 
-2. Edit `.env` and fill in at least `DASHSCOPE_API_KEY` and `LLM_API_KEY`. With the LLM settings in `.env.example` (Bailian compatible mode, `qwen-plus`), put the same key in both. Every setting is in [Configuration](../reference/configuration.md).
+2. Edit `.env`. For the default cloud transcription, fill in `DASHSCOPE_API_KEY` and `LLM_API_KEY`. With the LLM settings in `.env.example` (Bailian compatible mode, `qwen-plus`), put the same key in both. Every setting is in [Configuration](../reference/configuration.md).
+
+   For transcription on the server's CPU, follow the [local transcription configuration](./change-asr-engine.md#no-asr-key-at-all-engine-local) for `ENGINE`, `DRAFT_ENGINE` and `ENGINE_FALLBACK`, and fill in `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` for summaries and questions.
 
    Put each comment on a line of its own: Compose reads `VAR=   # comment` as the value `# comment`.
 

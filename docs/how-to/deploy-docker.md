@@ -14,7 +14,7 @@ description: "在 Linux 或 macOS 机器上用 Docker Compose 长期运行 AllDa
 ## 前提
 
 - Docker（带 Compose），amd64 或 arm64。
-- 一把[阿里云百炼](https://bailian.console.aliyun.com/)北京区的 API key，或者其他语音识别引擎的 key（见[如何更换语音识别引擎](./change-asr-engine.md)）。
+- 选择云端转写时，需要一把[阿里云百炼](https://bailian.console.aliyun.com/)北京区的 API key，或者其他语音识别引擎的 key；在本机 CPU 上转写可选 `ENGINE=local`（见[如何更换语音识别引擎](./change-asr-engine.md)）。
 - 一个 OpenAI 兼容的大模型接口；用百炼时同一把 key 就行。
 
 ## 步骤
@@ -26,7 +26,9 @@ description: "在 Linux 或 macOS 机器上用 Docker Compose 长期运行 AllDa
    cp .env.example .env
    ```
 
-2. 编辑 `.env`，至少填 `DASHSCOPE_API_KEY` 和 `LLM_API_KEY`。用 `.env.example` 里的大模型设置（百炼兼容模式、`qwen-plus`）时，两者填同一把 key。所有项见[配置项](../reference/configuration.md)。
+2. 编辑 `.env`。使用默认的云端转写时，填 `DASHSCOPE_API_KEY` 和 `LLM_API_KEY`。用 `.env.example` 里的大模型设置（百炼兼容模式、`qwen-plus`）时，两者填同一把 key。所有项见[配置项](../reference/configuration.md)。
+
+   要在本机 CPU 上转写，按[本地转写配置](./change-asr-engine.md#不用任何语音识别-key-engine-local)设置 `ENGINE`、`DRAFT_ENGINE` 和 `ENGINE_FALLBACK`，并填好 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，供总结和问答使用。
 
    注释要单独占一行：Compose 会把 `VAR=   # 注释` 读成值 `# 注释`。
 

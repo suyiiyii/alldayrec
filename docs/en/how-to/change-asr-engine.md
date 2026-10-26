@@ -32,7 +32,17 @@ Whichever engine you use, you need the three LLM settings (`LLM_BASE_URL`, `LLM_
 
 It needs the `local` extra: the Docker image has it already; with uvx or pip, install `alldayrec[local]` (see [How to run with uvx or pip](./run-uvx.md)); from source, run `uv sync --extra local`.
 
-When the first audio arrives, the server downloads a model tarball of about 136 MB, so the first transcript takes about a minute. If the download is slow, set `LOCAL_ASR_URL` to the same tarball's address on a mirror; the server checks the file against its sha256.
+Set these values in `.env`:
+
+```ini
+ENGINE=local
+DRAFT_ENGINE=local
+ENGINE_FALLBACK=
+```
+
+Also fill in `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` for summaries and questions. With `DRAFT_ENGINE=local`, drafts while a page is open also run on your CPU; they update in audio windows.
+
+The first transcription request downloads the X-ASR model tarball (about 136 MB) and loads the model, after the startup log says `ready`. This takes time depending on the network and CPU. Import a short recording and wait for its transcript before starting all-day recording. The model stays in `MODELS_DIR`, which defaults to `data/models` in Docker's mounted data directory, for reuse. If the download is slow, set `LOCAL_ASR_URL` to the same tarball's address on a mirror; the server checks the file against its sha256.
 
 ## Drafts and fallback
 

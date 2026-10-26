@@ -49,6 +49,7 @@ async def summarize(c: dict, tags: list[str]) -> dict:
 async def summarize_loop():
     while True:
         c = await T().summaries[1].receive()
+        generation = c.get("_summary_generation")
         try:
             # A late merge may remove a queued conversation or grow one during a model call.
             if db.resolve_conversation(c["id"]) != c["id"]:
@@ -60,16 +61,23 @@ async def summarize_loop():
             if db.kv(f"late_summary:{c['id']}") and (not c.get("_late") or late_store.ready_work(c.get("device"))):
                 continue
             for delay in (10, 60, 300, None):
+                if generation is not None and generation != T().summary_generations.get(c["id"]):
+                    break
                 try:
                     res = await summarize(c, list(tag_counts())[:60])
                     break
                 except Exception as e:  # HTTP errors, timeouts, a reply that is not JSON
+                    if generation is not None and generation != T().summary_generations.get(c["id"]):
+                        break
                     log.warning("summary %s failed: %r", c["id"], e)
                     if delay == 300:
                         c.pop("via_live", None)  # the last try takes the plain summary
                     res = {"conversation": c["id"], "status": "failed", "error": repr(e)[:300]}
                     if delay:
                         await anyio.sleep(delay)
+            # No await between these guards and the write, including fallback/cleanup side effects.
+            if generation is not None and generation != T().summary_generations.get(c["id"]):
+                continue
             if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
                 continue
             old = db.summary(c["id"])

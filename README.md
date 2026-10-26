@@ -9,13 +9,13 @@
 
 读作 **all day rec**。
 
-### 开源心力球，私有第二大脑。
+### 开源心力球，让 Agent 更懂你。
 
-全平台可用，不用买硬件，手机就能录。
+用你已有的设备记录每一天：戴着录、用手机录，或导入其他设备的录音，都整理成你自己服务器上、Agent 能查询的个人记忆。
 
 **中文** | [English](README.en.md)
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-zh-summary-20261026.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-zh-named-20261026c.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-zh-summary-20261026.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
 
 实时字幕 · 时间线 · 一段对话
 
@@ -27,7 +27,7 @@
 
 ## 能做什么
 
-- **全平台，不用买硬件**：安卓 App、iPhone App 和浏览器都能直接录。
+- **用你已有的设备**：飞书录音豆（仅安卓）和开源录音设备直接连 App 实时同步；其他设备的录音文件可以导入；没有设备，安卓、iPhone App 和浏览器都能直接录。
 - **两层转写**：定稿交给云端语音识别（默认阿里云百炼千问，约 ¥0.05/小时音频），页面开着时几秒内出初稿；也可以 `ENGINE=local` 在本机转写。
 - **认人**：认得出你自己，记得你给别人起的名字。
 - **记忆**：对话摘要、待办和截止日期、每日回顾、全文搜索。

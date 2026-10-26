@@ -1,14 +1,14 @@
 ---
 layout: home
 # the README's tagline, written once here (also EN_TAGLINE in .vitepress/config.ts): the page title reuses it
-title: &tagline "An open-source Plaud for your whole day: a private second brain"
+title: &tagline "An open-source Plaud for your whole day, so your agent knows you"
 titleTemplate: "AllDayRec — :title"
 hero:
   name: AllDayRec（全天录）
   text: *tagline
-  tagline: 'Works on every platform, no hardware to buy: your phone is the recorder.<br>Pronounced "all day rec".'
+  tagline: 'Record every day with the devices you already have: wear a recorder, use your phone, or import recordings from other devices. It all becomes a personal memory on your own server that your agent can query.<br>Pronounced "all day rec".'
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-en-summary-20261026.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
@@ -23,9 +23,9 @@ hero:
       text: GitHub
       link: https://github.com/suyiiyii/alldayrec
 features:
-  - title: Every platform, no hardware to buy
-    details: The Android app, the iPhone app and a browser all record directly.
-    link: /en/how-to/install-app
+  - title: Use the devices you already have
+    details: The Feishu recorder bean (Android only) and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
+    link: /en/how-to/bind-recorder
   - title: Transcribes in two layers
     details: The final transcript comes from a cloud ASR engine (default Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; <code>ENGINE=local</code> transcribes on your machine instead.
     link: /en/how-to/change-asr-engine

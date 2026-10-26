@@ -76,6 +76,25 @@ def test_carried_labels_stay_together_and_only_colliding_anonymous_labels_change
     assert len(changed) == 1 and changed[0]["start"] == iso(0)
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("new_label", ["S1", "S8"])
+def test_orphans_from_two_diarists_bridged_later(store, legacy, new_label):
+    # O1/O2 are separate jobs, more than GAP_S apart, each below MIN_S.
+    if legacy:
+        with db.tx() as t:
+            db.insert_sentences(t, [row(0, 2, "S1"), row(3, 5, "S1"), row(400, 405, "S1")])
+            t.execute("UPDATE sentences SET late=1")
+    else:
+        for a, b, rs in [(0, 5, [row(0, 2), row(3, 5)]), (400, 405, [row(400, 405)])]:
+            changed, _ = late_merge.attach(span(a, b), rs, {"S1": E1}, {})
+            assert changed == []
+    changed, _ = late_merge.attach(span(150, 160), [row(150, 155, new_label)], {new_label: E2}, {})
+    speakers = dict(db.conn().execute("SELECT id,speaker FROM sentences WHERE late=1"))
+    assert speakers["f0"] == speakers["f3"]
+    assert len({speakers["f0"], speakers["f400"], speakers["f150"]}) == 3
+    assert len(changed) == 1 and len(changed[0]["participants"]) == 3
+
+
 def test_stuck_deferred_claim_is_read_only(store):
     span(5000, 5010)
     db.put_kv(f"finalized_to:{D}", iso(6000))
@@ -139,6 +158,8 @@ def test_seam_lookahead_is_bounded_and_preserves_budget(store, monkeypatch, sile
     if silence:
         assert ms(1755) < s["end_ms"] < ms(1770)
         assert anyio.run(late.quiet_seam, s)  # the chosen seam stays fixed on retry
+        persisted = dict(db.conn().execute("SELECT * FROM late_spans WHERE id=?", (s["id"],)).fetchone())
+        assert anyio.run(late.quiet_seam, persisted)  # including a snapshot loaded after a restart
         assert len(reads) == 1
     else:
         assert s == before  # continuous speech: only the hard cap can bound the job
@@ -166,3 +187,49 @@ def test_seam_lookahead_cannot_revive_reader_owned_audio(store, monkeypatch):
     rs = list(db.conn().execute("SELECT ranges,status FROM late_spans"))
     assert len(rs) == 1 and json.loads(rs[0][0]) == [[ms(0), ms(60)]]
     assert rs[0][1] == "waiting"
+
+
+def run_backlog(store, monkeypatch, seconds, tones, search_s):
+    monkeypatch.setattr(late_store, "MAX_LATE_AUDIO_MS", 30_000)
+    monkeypatch.setattr(late, "CUT_SEARCH_S", search_s)
+    monkeypatch.setattr(infer, "StreamVad", EnergyVad)
+    monkeypatch.setitem(core.state, "embed", lambda x: E1)
+    np.savez(store / "owner-redimnet2.npz", owner=E2)
+    x = np.zeros(seconds * audio.SR, np.int16)
+    for idx, (a, b) in enumerate(tones, 1):
+        x[a * audio.SR:b * audio.SR] = tone(idx, b - a)
+    audio.save(D, ms(0), flac(x), "audio/flac")
+    span(0, seconds)
+    jobs, utterances = [], []
+
+    async def engine(x, speech, **kw):
+        gs = heard(x)
+        utterances.extend(g["end_ms"] - g["start_ms"] for g in gs)
+        return [{**g, "engine": "test"} for g in gs]
+
+    async def vectors(s):
+        return {c["id"]: {"S1": E1} for c in db.conversations()}
+
+    monkeypatch.setattr(late.asr, "engine_segs", engine)
+    monkeypatch.setattr(late, "conversation_vectors", vectors)
+
+    async def go():
+        while s := late_store.claim():
+            await late.process(s)
+            jobs.append([[(a - ms(0)) / 1000, (b - ms(0)) / 1000] for a, b in json.loads(s["ranges"])])
+
+    anyio.run(go)
+    rs = [tuple(r) for r in db.conn().execute("SELECT start,end,text FROM sentences WHERE late=1 ORDER BY start")]
+    return rs, jobs, utterances
+
+
+@pytest.mark.parametrize("search_s", [10.0, 60.0])
+@pytest.mark.parametrize("seconds", [90, 120])
+def test_three_part_backlog_every_seam_quiet(store, monkeypatch, search_s, seconds):
+    # Utterances straddle both original caps (30 s and 60 s); silence around each.
+    tones = [(a, a+10) for a in range(25, seconds-10, 30)]
+    rs, jobs, utt = run_backlog(store, monkeypatch, seconds, tones, search_s)
+    assert late_store.union(db.processed(D, ms(0), ms(seconds))) == [[ms(0), ms(seconds)]]
+    assert [r[2] for r in rs] == [str(i+1) for i in range(len(tones))], (jobs, rs)
+    assert utt == [10_000] * len(tones)
+    assert sum(b-a for job in jobs for a,b in job) == seconds

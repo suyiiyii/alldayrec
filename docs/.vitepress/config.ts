@@ -10,9 +10,12 @@ const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
-const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-name-20261026.png";
+const OG_IMAGE = {
+  zh: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-zh-20261026c.png",
+  en: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-en-20261026d.png",
+};
 // the English README tagline; en/index.md repeats it in its title and hero
-const EN_TAGLINE = "An open-source Plaud for your whole day: a private second brain";
+const EN_TAGLINE = "An open-source Plaud for your whole day, so your agent knows you";
 
 type Item = [text: string, link: string];
 const group = (text: string, items: Item[]): DefaultTheme.SidebarItem => ({
@@ -107,7 +110,7 @@ export default defineConfig({
       ["meta", { property: "og:url", content: url }],
       ["meta", { property: "og:title", content: title }],
       ["meta", { property: "og:description", content: description }],
-      ["meta", { property: "og:image", content: OG_IMAGE }],
+      ["meta", { property: "og:image", content: OG_IMAGE[page.startsWith("en/") ? "en" : "zh"] }],
       ["meta", { property: "og:image:width", content: "1280" }],
       ["meta", { property: "og:image:height", content: "640" }],
       ["meta", { property: "og:locale", content: siteData.lang.replace("-", "_") }],
@@ -159,7 +162,7 @@ export default defineConfig({
       title: "AllDayRec 文档",
       titleTemplate: "AllDayRec（全天录）：自己部署的全天录音", // the bare name is ambiguous in search: say what it is
       description:
-        "AllDayRec（全天录）：开源心力球，私有第二大脑。全平台可用，不用买硬件，手机就能录。",
+        "AllDayRec（全天录）：开源心力球，让 Agent 更懂你。用你已有的设备记录每一天，整理成 Agent 能查询的个人记忆。",
       themeConfig: {
         nav: nav(false),
         sidebar: sidebar(false),
@@ -179,7 +182,7 @@ export default defineConfig({
       link: "/en/",
       title: "AllDayRec docs",
       titleTemplate: "AllDayRec — self-hosted all-day recorder",
-      description: `AllDayRec (全天录): ${EN_TAGLINE}. Works on every platform, no hardware to buy: your phone is the recorder.`,
+      description: `AllDayRec (全天录): ${EN_TAGLINE}. Record with your own devices to build a personal memory on your own server that your agent can query.`,
       themeConfig: {
         nav: nav(true),
         sidebar: sidebar(true),

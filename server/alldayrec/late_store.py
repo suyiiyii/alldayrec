@@ -55,7 +55,7 @@ def is_late(device: str, start_ms: int) -> bool:
 
 
 def record(t, device: str, start_ms: int, end_ms: int, now_ms: int):
-    """Called only by audio.save, before replacing its pieces row, inside that write transaction."""
+    """Called by both audio save paths before replacing pieces, inside that write transaction."""
     if not is_late(device, start_ms):
         return False
     # All these pieces predate this save (including a shorter copy being replaced). A timestamp tie is
@@ -249,8 +249,8 @@ def move_seam(span, cut):
                       (span["device"], p[0][0], p[-1][1], meta["first_ms"], meta["last_ms"], json.dumps(p),
                        meta["ready"], meta["tries"], meta["next_ms"], meta["note"]))
         encoded = json.dumps(ranges)
-        t.execute("UPDATE late_spans SET end_ms=?,ranges=? WHERE id=?", (cut, encoded, span["id"]))
-        span.update(end_ms=cut, ranges=encoded)
+        t.execute("UPDATE late_spans SET end_ms=?,ranges=?,seam_ms=? WHERE id=?", (cut, encoded, cut, span["id"]))
+        span.update(end_ms=cut, ranges=encoded, seam_ms=cut)
     return True
 
 
@@ -271,12 +271,13 @@ def ready_work(device: str, now_ms: int | None = None) -> bool:
 
 def queue_summaries():
     """Persistent dirty markers survive a restart; one queued revision after a device's ready batch drains."""
+    from alldayrec.core import enqueue_summary
     ids = {db.resolve_conversation(k.split(":", 1)[1]) for k, in db.conn().execute("SELECT key FROM kv WHERE key LIKE 'late_summary:%' AND value='true'")}
     for cid in ids:
         c = db.conversation(cid)
         if c and cid not in T().late_queued and not ready_work(c.get("device")):
             T().late_queued.add(cid)
-            T().summaries[0].send_nowait({**c, "_late": True, "_revision": db.kv(f"conversation_revision:{cid}")})
+            enqueue_summary({**c, "_late": True, "_revision": db.kv(f"conversation_revision:{cid}")})
 
 
 def summary_done(cid: str, t):

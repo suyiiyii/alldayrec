@@ -115,8 +115,8 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
 async def quiet_seam(span):
     """A bounded VAD-only lookahead; ASR still hears each sample in exactly one job."""
     ranges = json.loads(span["ranges"])
-    # A shorter/retried part already has its seam. At a real recording end, force-flush as usual.
-    if sum(b - a for a, b in ranges) < late_store.MAX_LATE_AUDIO_MS - late_store.MIN_LATE_MS:
+    # Length cannot distinguish a chosen seam from a short remainder of the next job.
+    if span.get("seam_ms") == span["end_ms"]:
         return True
     if not db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND start_ms=? "
                              "AND status IN ('waiting','deferred') LIMIT 1",

@@ -81,19 +81,17 @@ def test_ledger_subtracts_all_prior_coverage_and_preserves_holes(store):
 
 
 def test_upload_note_uses_save_snapshot_when_reader_advances_during_await(store, monkeypatch):
-    monkeypatch.setattr(audio, "decode", lambda *a, **kw: np.zeros(audio.SR, np.int16))
-    monkeypatch.setattr(audio, "health", lambda x: (0, 0, 0, 0))
-    save = audio.save
+    save = audio.save_file
     def advancing(*args):
         result = save(*args)
         db.put_kv(f"read_to:{D}", ms(100))
         T().read_to[D] = ms(100)
         return result
-    monkeypatch.setattr(audio, "save", advancing)
+    monkeypatch.setattr(audio, "save_file", advancing)
     class Upload:
         headers = {"content-type": "audio/wav"}
-        async def body(self):
-            return b"audio"
+        async def stream(self):
+            yield flac(np.zeros(audio.SR, np.int16))
     anyio.run(routes_upload.chunk, Upload(), D, ms(0))
     assert late_store.is_late(D, ms(0)), "the reader advanced before the route resumed"
     assert T().events[-1]["kind"] == "info"

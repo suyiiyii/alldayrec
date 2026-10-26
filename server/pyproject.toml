@@ -1,7 +1,7 @@
 [project]
 name = "alldayrec"
 version = "0.3.0"
-description = "AllDayRec: a self-hosted all-day recorder and private second brain."
+description = "AllDayRec: an open-source Plaud for your whole day, so your agent knows you. Record with your own devices to build a personal memory on your own server that your agent can query."
 dynamic = ["readme"]  # hatch_build.py renders the repository README for PyPI
 requires-python = ">=3.11,<3.15"  # onnxruntime has no 3.15 wheel yet
 license = "MIT"

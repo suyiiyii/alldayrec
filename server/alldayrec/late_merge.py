@@ -254,14 +254,14 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
             if t.execute("SELECT 1 FROM sentences WHERE source = ? AND id = ? LIMIT 1", (device, r["id"])).fetchone():
                 continue
             db.insert_sentences(t, [r])
-            t.execute("UPDATE sentences SET late = 1 WHERE id = ? AND source = ?", (r["id"], device))
+            t.execute("UPDATE sentences SET late = 1, late_job = ? WHERE id = ? AND source = ?", (span["id"], r["id"], device))
             kept.append(r)
         if kept:
             low, high = min(r["start"] for r in kept), max(r["end"] for r in kept)
             # A committed part can contain less than MIN_S of speech and create no conversation.
             # Regroup connected short rows, but never interpret an old S1 with this part's S1 vector.
             new_ids = {r["id"] for r in kept}
-            orphaned = [db._sentence(r) for r in t.execute(
+            orphaned = [db._sentence(r) | {"_late_job": r["late_job"]} for r in t.execute(
                 "SELECT s.* FROM sentences s WHERE s.source=? AND s.late=1 AND s.start>=? AND s.start<=? "
                 "AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.device=s.source AND c.start<=s.start AND c.end>=s.start)",
                 (device, (P(low) - dt.timedelta(seconds=MAX_S)).isoformat(),
@@ -271,16 +271,25 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
             used = {r.get("speaker", "S?") for r in grouping} | set(vectors)
             used.update(label for vs in existing_vectors.values() for label in vs)
             collisions = {r.get("speaker") for r in kept} | set(vectors)
-            carried_labels = {}
+            # Pre-ledger rows have no job ID: disconnected old groups are distinct diarists.
+            legacy_jobs = {r["id"]: ("legacy", i) for i, group in enumerate(split(orphaned, min_s=0))
+                           for r in group["sentences"]}
+            carried_labels, label_jobs = {}, {label: ("current", span["id"]) for label in collisions}
             for r in grouping:
                 label = r.get("speaker", "S?")
-                if r["id"] in new_ids or not ANON.fullmatch(label) or label not in collisions:
+                if r["id"] in new_ids or not ANON.fullmatch(label):
                     continue
-                if label not in carried_labels:
-                    n = max([int(x[1:]) for x in used if ANON.fullmatch(x)] or [0]) + 1
-                    carried_labels[label] = f"S{n}"
-                    used.add(f"S{n}")
-                r["speaker"] = carried_labels[label]
+                job = ("job", r["_late_job"]) if r["_late_job"] is not None else legacy_jobs[r["id"]]
+                key = (job, label)
+                if key not in carried_labels:
+                    if label in label_jobs and label_jobs[label] != job:
+                        n = max([int(x[1:]) for x in used if ANON.fullmatch(x)] or [0]) + 1
+                        carried_labels[key] = f"S{n}"
+                        used.add(f"S{n}")
+                    else:
+                        carried_labels[key] = label
+                        label_jobs[label] = job
+                r["speaker"] = carried_labels[key]
                 t.execute("UPDATE sentences SET speaker=? WHERE id=? AND source=?", (r["speaker"], r["id"], device))
             # Only connected orphan groups participate. Include their neighboring conversations too.
             low, high = min(r["start"] for r in grouping), max(r["end"] for r in grouping)
