@@ -3,10 +3,11 @@ import { computed, onMounted, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
 import { t } from "../i18n";
-import { caughtUp, get, hhmm, post, type Status } from "../lib/api";
+import { get, hhmm, post, type Status } from "../lib/api";
 import { dayLabel } from "../lib/calendar";
 import { duration, guess, type From } from "../lib/importStart";
 import { useSocket } from "../lib/socket";
+import { importLine } from "../lib/progress";
 import { clock, isoLocal } from "../lib/track";
 
 // 导入录音: the files picked here go up as one batch, a device of its own (import-<when>), each file one piece at its
@@ -141,11 +142,9 @@ const days = computed(() =>
 const when = (iso: string) => `${dayLabel(iso.slice(0, 10))} ${hhmm(iso)}`;
 const span = (a: string, b: string) =>
   a.slice(0, 10) === b.slice(0, 10) ? `${when(a)}–${hhmm(b)}` : `${when(a)} – ${when(b)}`;
-const left = (dev: string) => {
+const progress = (dev: string) => {
   const d = status.value?.devices?.find((x) => x.device === dev);
-  return d && !caughtUp(d)
-    ? t("import.transcribing", { n: Math.max(1, Math.round(d.left_s / 60)) })
-    : "";
+  return d ? importLine(d) : "";
 };
 </script>
 
@@ -256,7 +255,7 @@ const left = (dev: string) => {
           ><b>{{ r.device }}</b
           ><span class="muted sub"
             >{{ span(r.audio_start ?? "", r.audio_end ?? "")
-            }}{{ left(r.device) && " · " + left(r.device) }}</span
+            }}{{ progress(r.device) && " · " + progress(r.device) }}</span
           ></span
         >
         <Icon name="chevron-right" :size="18" class="go-icon" />

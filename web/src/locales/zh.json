@@ -427,8 +427,7 @@
     "undecodable": "服务器解码不了这个文件",
     "done": "已导入 {n} 个文件。转写完成后，对话出现在：",
     "again": "再导入一批",
-    "history": "导入记录",
-    "transcribing": "转写中，还剩约 {n} 分钟"
+    "history": "导入记录"
   },
   "mediaFold": {
     "line": "媒体 {from}–{to} · {n} 句"
@@ -539,6 +538,8 @@
     "left": "待处理",
     "leftVal": "{left} · 排队 {n} 块",
     "leftAudio": "{span} 录音",
+    "import": "导入",
+    "importAudio": "已转写 {done} / {total} 分钟音频",
     "catchUp": "补传",
     "speed": "速度",
     "speedVal": "{rate} 倍实时",

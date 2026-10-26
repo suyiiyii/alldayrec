@@ -63,3 +63,24 @@ assert.equal(
 );
 assert.equal(speakerColor("我"), "var(--accent)");
 console.log("speakers ok");
+
+// AI requests keep attribution in the existing text field; the conversation card calls labelText.
+// Old summaries have no speaker prefix and stay readable without being assigned a new speaker.
+for (const lang of ["zh", "en"] as const) {
+  i18n.global.locale.value = lang;
+  const requests =
+    lang === "zh"
+      ? ["S1 让 AI 查测试日志", "Alex 让 AI 翻译错误信息", "我让 AI 列出失败测试", "列出失败测试"]
+      : [
+          "S1 asks AI to check test logs",
+          "Alex asks AI to translate errors",
+          "I ask AI to list failing tests",
+          "List failing tests",
+        ];
+  const rendered = requests.map((text) => labelText(text, ["S1", "Alex", "我"]));
+  assert.equal(
+    rendered[0],
+    lang === "zh" ? "说话人 1 让 AI 查测试日志" : "Speaker 1 asks AI to check test logs",
+  );
+  assert.deepEqual(rendered.slice(1), requests.slice(1));
+}

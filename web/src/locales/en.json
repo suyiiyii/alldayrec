@@ -427,8 +427,7 @@
     "undecodable": "The server cannot decode this file",
     "done": "Imported {n} file. Once transcribed, its conversations appear on: | Imported {n} files. Once transcribed, their conversations appear on:",
     "again": "Import another batch",
-    "history": "Past imports",
-    "transcribing": "Transcribing, about {n} min left"
+    "history": "Past imports"
   },
   "mediaFold": {
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"
@@ -539,6 +538,8 @@
     "left": "Left",
     "leftVal": "{left} · {n} queued",
     "leftAudio": "{span} of audio",
+    "import": "Import",
+    "importAudio": "Transcribed {done} / {total} min of audio",
     "catchUp": "Catch-up",
     "speed": "Speed",
     "speedVal": "{rate}× real time",

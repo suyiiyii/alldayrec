@@ -28,6 +28,7 @@ import {
 } from "../lib/api";
 import { upgradeText } from "../lib/recorderLog";
 import { useSocket } from "../lib/socket";
+import { importLine, showLiveLag } from "../lib/progress";
 
 // What the server is doing per device: how far its audio has arrived, how far it is finalized, what is left and
 // when it should be done; refreshed by the status the socket sends every 2 s.
@@ -278,21 +279,30 @@ const eta = (d: DeviceStatus) => {
       <div class="grid">
         <span>{{ t("progress.received") }}</span
         ><span>{{ at(d.received_to) }}</span> <span>{{ t("progress.finalized") }}</span
-        ><span>{{ at(d.done_to) }}</span> <span>{{ t("progress.left") }}</span
-        ><span>{{
-          t("progress.leftVal", {
-            left: caughtUp(d) ? "—" : t("progress.leftAudio", { span: span(d.left_s) }),
-            n: d.queued,
-          })
-        }}</span>
+        ><span>{{ at(d.done_to) }}</span>
+        <template v-if="d.import_progress">
+          <span>{{ t("progress.import") }}</span
+          ><span>{{ importLine(d) }}</span>
+        </template>
+        <template v-else>
+          <span>{{ t("progress.left") }}</span
+          ><span>{{
+            t("progress.leftVal", {
+              left: caughtUp(d) ? "—" : t("progress.leftAudio", { span: span(d.left_s) }),
+              n: d.queued,
+            })
+          }}</span>
+        </template>
         <template v-if="d.hold || d.hold_expired"
           ><span>{{ t("progress.catchUp") }}</span
           ><span>{{ d.hold_expired ? holdLeft(d) : held(d) }}</span></template
         >
         <span>{{ t("progress.speed") }}</span
         ><span>{{ d.rate ? t("progress.speedVal", { rate: d.rate }) : "—" }}</span>
-        <span>{{ t("progress.etaLabel") }}</span
-        ><span>{{ caughtUp(d) ? "—" : d.hold ? t("progress.afterCatchUp") : eta(d) }}</span>
+        <template v-if="!d.import_progress || (!d.hold && (d.eta_s ?? 0) > 0)">
+          <span>{{ t("progress.etaLabel") }}</span
+          ><span>{{ caughtUp(d) ? "—" : d.hold ? t("progress.afterCatchUp") : eta(d) }}</span>
+        </template>
         <span>{{ t("progress.diarization") }}</span
         ><span :class="{ bad: d.refine?.error }">{{
           d.refine?.error
@@ -311,8 +321,10 @@ const eta = (d: DeviceStatus) => {
               )
             : t("progress.none")
         }}</span>
-        <span>{{ t("progress.liveLag") }}</span
-        ><span :class="{ bad: (d.arrival?.lag_s ?? 0) > 300 }">{{ arrived(d) }}</span>
+        <template v-if="showLiveLag(d)">
+          <span>{{ t("progress.liveLag") }}</span
+          ><span :class="{ bad: (d.arrival?.lag_s ?? 0) > 300 }">{{ arrived(d) }}</span>
+        </template>
         <span>{{ t("progress.quality") }}</span
         ><span :class="{ bad: noisy(d) }">{{ sound(d) }}</span>
         <template v-if="d.hw">
