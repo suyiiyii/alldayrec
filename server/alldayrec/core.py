@@ -41,7 +41,7 @@ def queue_summary(c: dict, keep: bool = False):
     """keep: the current summary stays until the new one is written. Only the newest request may replace it.
     Generations live with the tenant's queue/workers; a restart drops all of them together."""
     old = db.summary(c["id"]) if keep else None
-    if not old or old["status"] != "done":
+    if not old or old["status"] != "done" and not (old.get("title") or old.get("todos")):
         db.put_summary({"conversation": c["id"], "status": "pending", "error": None})
     elif old.get("error"):
         db.put_summary({**old, "error": None})

@@ -105,6 +105,7 @@ def test_late_summary_failure_keeps_previous_content_and_marks(model, monkeypatc
 @pytest.mark.parametrize("fails", [False, True])
 def test_late_summary_rename_discards_generation_and_requeues(model, monkeypatch, fails):
     dirty()
+    marked_todo = next(iter(db.closed_todos()))
     async def no_retry(delay):
         pytest.fail("superseded late failure retried")
     monkeypatch.setattr(summaries.anyio, "sleep", no_retry)
@@ -113,6 +114,8 @@ def test_late_summary_rename_discards_generation_and_requeues(model, monkeypatch
         late_store.queue_summaries()
         await model.started(1)
         await routes_speakers.rename(CID, {"from": "S1", "to": "Ada"})
+        assert db.summary(CID).get("title") == "Before"
+        assert db.todo(marked_todo)["owner"] == "Ada"
         model.calls[0]["error"] = fails
         await model.finish(0)
         assert model.pushes == []
@@ -124,6 +127,8 @@ def test_late_summary_rename_discards_generation_and_requeues(model, monkeypatch
         await model.finish(1)
         assert db.summary(CID)["status"] == "done"
         assert db.summary(CID)["todos"][0]["owner"] == "Ada"
+        assert db.todo(marked_todo)["owner"] == "Ada"
+        assert db.closed_todos()[marked_todo] == "done"
         assert len(model.pushes) == 1
         assert not db.kv(f"late_summary:{CID}") and CID not in tenant.T().late_queued
     run_workers(scenario)
