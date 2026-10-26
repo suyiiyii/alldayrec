@@ -293,6 +293,7 @@ watch(
     <div
       v-if="current"
       class="grip"
+      data-header-follow-ignore
       role="separator"
       aria-orientation="horizontal"
       :aria-label="t('livePanel.resize')"

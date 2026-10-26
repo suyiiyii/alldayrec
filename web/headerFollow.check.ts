@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRenderer, defineComponent } from "vue";
 import { useHeaderFollow } from "./src/lib/headerFollow.ts";
 
-const on: Record<string, () => void> = {};
+const on: Record<string, (e?: Event) => void> = {};
 const frames = new Map<number, (t: number) => void>();
 let id = 0,
   now = 0;
@@ -163,3 +163,55 @@ on.touchend();
 await new Promise((r) => setTimeout(r, 150));
 run();
 assert.equal(hidden, 40, "settled 120 ms after the finger left");
+
+// Resizing a nested sheet changes scroll anchoring without scrolling the transcript.
+// Include queued work, cancellation, and the final layout scroll after release.
+const grip = {
+  target: { closest: (selector: string) => selector === "[data-header-follow-ignore]" },
+} as unknown as Event;
+for (const [down, up] of [
+  ["touchstart", "touchend"],
+  ["pointerdown", "pointerup"],
+  ["mousedown", "mouseup"],
+  ["pointerdown", "pointercancel"],
+  ["touchstart", "touchcancel"],
+]) {
+  to(800);
+  rest();
+  to(1000);
+  to(990);
+  const before = hidden;
+  on.scrollend();
+  win.scrollY = 995;
+  on.scroll();
+  on[down](grip);
+  tick();
+  assert.equal(hidden, before, down + ": cancel pending follow/settle");
+  assert.equal(to(1050), before, down + ": layout scroll down ignored");
+  assert.equal(to(900), before, down + ": layout scroll up ignored");
+  on.scrollend();
+  run();
+  assert.equal(hidden, before, down + ": no settling under the grip");
+  on[up]();
+  assert.equal(to(920), before, up + ": final layout scroll ignored");
+  await new Promise((r) => setTimeout(r, 150));
+  run();
+  assert.equal(hidden, before, up + ": release does not snap the picker");
+  on.touchstart();
+  assert.equal(to(910), before - 10, "transcript resumes from the new scroll baseline");
+  on.touchend();
+  rest();
+}
+
+// A new transcript gesture may begin before the resize's rest timer has run.
+to(800);
+rest();
+to(1000);
+on.pointerdown(grip);
+to(1100);
+on.pointerup();
+win.scrollY = 1120;
+on.touchstart();
+assert.equal(to(1110), 30, "a new transcript gesture immediately follows its own delta");
+on.touchend();
+rest();

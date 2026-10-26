@@ -20,6 +20,7 @@ export function useHeaderFollow(
     y = 0,
     held = false,
     touching = false,
+    resizing = false,
     frame = 0,
     anim = 0,
     timer = 0;
@@ -37,6 +38,7 @@ export function useHeaderFollow(
     // up but still at the bottom: the page got shorter under it (a caption redone shorter), no finger moved
     const dy = now < y && now >= bottom() - 1 ? 0 : now - y;
     y = now;
+    if (resizing) return; // scroll anchoring while a nested sheet changes height is not a page gesture
     if (dy < 0) held = false;
     if (!dy || held) return put(hidden);
     window.cancelAnimationFrame(anim);
@@ -61,7 +63,14 @@ export function useHeaderFollow(
       window.cancelAnimationFrame(frame);
       follow();
     }
-    if (touching || held) return;
+    if (touching) return;
+    if (resizing) {
+      // Include the final layout scroll after release, and resume from its position without snapping the picker.
+      y = scrolled();
+      resizing = false;
+      return;
+    }
+    if (held) return;
     const h = size();
     glide(hidden > h / 2 && y - from() >= h ? h : 0);
   }
@@ -73,7 +82,20 @@ export function useHeaderFollow(
     frame ||= window.requestAnimationFrame(follow);
     rest();
   };
-  const down = () => (touching = true);
+  const down = (e?: Event) => {
+    touching = true;
+    if (!(e?.target as Element | null)?.closest?.("[data-header-follow-ignore]")) {
+      if (resizing) y = scrolled();
+      resizing = false;
+      return;
+    }
+    resizing = true;
+    y = scrolled();
+    window.cancelAnimationFrame(frame);
+    window.cancelAnimationFrame(anim);
+    window.clearTimeout(timer);
+    frame = anim = 0;
+  };
   const up = () => {
     touching = false;
     rest();
@@ -87,6 +109,11 @@ export function useHeaderFollow(
     window.addEventListener("touchstart", down, on);
     window.addEventListener("touchend", up, on);
     window.addEventListener("touchcancel", up, on);
+    window.addEventListener("pointerdown", down, on);
+    window.addEventListener("pointerup", up, on);
+    window.addEventListener("pointercancel", up, on);
+    window.addEventListener("mousedown", down, on);
+    window.addEventListener("mouseup", up, on);
   });
   onUnmounted(() => {
     window.removeEventListener("scroll", onScroll);
@@ -94,6 +121,11 @@ export function useHeaderFollow(
     window.removeEventListener("touchstart", down);
     window.removeEventListener("touchend", up);
     window.removeEventListener("touchcancel", up);
+    window.removeEventListener("pointerdown", down);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
+    window.removeEventListener("mousedown", down);
+    window.removeEventListener("mouseup", up);
     window.cancelAnimationFrame(frame);
     window.cancelAnimationFrame(anim);
     window.clearTimeout(timer);
