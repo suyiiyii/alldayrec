@@ -27,11 +27,17 @@ def read_exact(device: str, a: int, b: int) -> np.ndarray:
     end = a
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",
                                (device, b, a)).fetchall():
-        got = audio.fresh(p, max(a, end))
-        if got is None:
+        if p["start_ms"] + p["seconds"] * 1000 <= end:
             continue
-        start, y = got
+        offset = max(0, round((max(a, end) - p["start_ms"]) * SR / 1000))
+        start = p["start_ms"] + offset * 1000 / SR
         i = round((start - a) * SR / 1000)
+        if i >= len(x):
+            break
+        # Long imports decode only this window; short pieces retain codec priming/dehum.
+        y = audio.piece_window(p, offset, len(x) - i)
+        if y is None:
+            raise ValueError("stored late audio could not be decoded")
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
