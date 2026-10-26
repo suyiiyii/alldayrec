@@ -40,11 +40,17 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
             for line in f:
                 try:
                     p = json.loads(line)
+                    if not isinstance(p, dict):
+                        raise ValueError("invalid pass record")
                     if p.get("layer") != "final":
                         continue
                     a, b = [round(dt.datetime.fromisoformat(p[k]).timestamp() * 1000) for k in ("from", "to")]
                 except (ValueError, KeyError, TypeError):
-                    continue  # an interrupted last trace line cannot prove a final pass
+                    day = dt.date.fromisoformat(path.name[:10])
+                    start = round(dt.datetime.combine(day, dt.time()).timestamp() * 1000)
+                    end = round(dt.datetime.combine(day + dt.timedelta(days=1), dt.time()).timestamp() * 1000)
+                    uncertain.append((None, start, end))
+                    continue  # an interrupted trace cannot prove that its day's remaining speech was missed
                 device = p.get("device")
                 if device is None:
                     ds = [r[0] for r in db.conn().execute(
@@ -60,6 +66,8 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
                 try:
                     if "audio_ranges" in p:
                         ranges = [[round(dt.datetime.fromisoformat(x).timestamp() * 1000) for x in pair] for pair in p["audio_ranges"]]
+                        if any(len(r) != 2 or r[1] <= r[0] for r in ranges):
+                            raise ValueError("invalid coverage")
                     else:
                         # Legacy passes heard whole pieces already received at completion, including pauses
                         # and sentence edges. Their rows alone cannot establish acoustic coverage.

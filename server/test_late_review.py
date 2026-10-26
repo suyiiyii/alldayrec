@@ -303,3 +303,37 @@ def test_previous_process_read_ahead_is_ignored_before_first_selection(store):
     db.put_kv(f"finalized_to:{D}", iso(5))
     assert not late_store.is_late(D, ms(10))
     assert late_store.is_late(D, ms(1))
+
+
+def test_recap_budget_is_charged_before_a_mid_request_restart(store, monkeypatch):
+    day = "2026-10-20"
+    db.put_kv(f"recap:{day}", {"headline": "keep", "stale": True})
+    calls = []
+    async def run(now):
+        entered = anyio.Event()
+        async def hang(day):
+            calls.append(day)
+            entered.set()
+            await anyio.sleep_forever()
+        monkeypatch.setattr(summaries.recap, "make", hang)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(summaries.refresh_stale_recaps, now)
+            await entered.wait()
+            tg.cancel_scope.cancel()
+    base = dt.datetime.now()
+    for n in range(3):
+        anyio.run(run, base + dt.timedelta(hours=n))
+        db.open_db(store / "live.db")
+        assert db.kv(f"recap_retry:{day}")["tries"] == n+1
+    anyio.run(summaries.refresh_stale_recaps, base + dt.timedelta(hours=4))
+    assert len(calls) == 3
+    assert db.kv(f"recap:{day}")["headline"] == "keep"
+
+
+def test_truncated_trace_does_not_turn_unknown_speech_into_backfill(store, monkeypatch):
+    history(store, monkeypatch)
+    day = dt.date.today()
+    (store/f"{day}.passes.jsonl").write_text('{"layer":"final",')
+    result = anyio.run(late_backfill.scan, 30, True)
+    assert result["days"] == []
+    assert result["skipped_ambiguous_spans"] > 0

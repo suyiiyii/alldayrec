@@ -154,19 +154,26 @@ async def refresh_stale_recaps(now: dt.datetime | None = None):
         retry = db.kv(f"recap_retry:{day}") or {}
         if retry.get("revision") != revision:
             retry = {"revision": revision, "tries": 0, "next": 0}
-        if retry["tries"] >= len(RECAP_RETRY_DELAYS) or now_s < retry["next"]:
+        if retry["tries"] >= len(RECAP_RETRY_DELAYS):
+            if not retry.get("logged"):
+                db.put_kv(f"recap_retry:{day}", {**retry, "logged": True})
+                log.warning("stale recap %s: stopped after %d attempts (%s)", day, retry["tries"], retry.get("error") or "interrupted")
+            continue
+        if now_s < retry["next"]:
             continue
         if any((c["summary"] or {}).get("status") != "done" or (c["summary"] or {}).get("error")
                for c in db.conversations(day, recap._next(day))):
             continue
+        # Charge before sending: cancellation/deploy after the provider accepted a request must not reset its budget.
+        tries = retry["tries"] + 1
+        attempt = {"revision": revision, "tries": tries, "next": now_s + RECAP_RETRY_DELAYS[tries - 1]}
+        db.put_kv(f"recap_retry:{day}", attempt)
         try:
             result = await write_recap(day)
             if not result or result.get("stale"):
                 raise RuntimeError("recap input changed")
         except Exception as e:
-            tries = retry["tries"] + 1
-            db.put_kv(f"recap_retry:{day}", {"revision": revision, "tries": tries,
-                      "next": now_s + RECAP_RETRY_DELAYS[tries - 1], "error": type(e).__name__})
+            db.put_kv(f"recap_retry:{day}", {**attempt, "error": type(e).__name__, "logged": tries == len(RECAP_RETRY_DELAYS)})
             if tries == len(RECAP_RETRY_DELAYS):
                 log.warning("stale recap %s: stopped after %d attempts (%s)", day, tries, type(e).__name__)
         else:
