@@ -17,10 +17,11 @@ from alldayrec.tenant import T
 log = logging.getLogger("live")
 
 MIN_SPEECH_S = 60
-PROMPT_VERSION = 11  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
+PROMPT_VERSION = 12  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
                      # 7: a todo's owner is who does it (not who said it), what I tell an AI is never a todo, 8: a todo's due_date (its due on the calendar),
                      # 9: each person's point has its sentence (people[].points_at), 10: shorter: summary 2~4 sentences, points and AI requests ≤ 30 字,
-                     # 11: summary one sentence ≤ 40 字, business before chitchat; one 闲聊 topic; todos/decisions extracted independently
+                     # 11: summary one sentence ≤ 40 字, business before chitchat; one 闲聊 topic; todos/decisions extracted independently,
+                     # 12: preserve the actor (I only for the recorder); people points cite their own speaker
 SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[时间] 说话人: 文本」。说话人标签来自声纹聚类：「我」是录音者本人，S1、S2… 是其他人，同一个人可能被拆成多个标签，S? 是太短没认出来的句子。转写有错别字和同音误识别，按意图理解。
 「我」说的话有两种听众，先分清再整理：
 - 对人：说给在场或线上的人听，有来有回，别人会接话、回应、提问
@@ -31,7 +32,7 @@ SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[�
 {"title": "不超过 20 字的标题",
  "ai_spans": [{"from": "HH:MM:SS", "to": "HH:MM:SS"}],
  "media_spans": [{"from": "HH:MM:SS", "to": "HH:MM:SS"}],
- "summary": "一句话，不超过 40 字：这段里最重要的一件事（发生了什么、定了什么），第一人称写「我」",
+ "summary": "一句话，不超过 40 字：这段里最重要的一件事（发生了什么、定了什么），按原文保留主体：仅录音者本人所说所做写「我」，他人的行动、请求、观察和讲述写其说话人标签或姓名，不因像对 AI 下指令而改写主体",
  "people": [{"who": "说话人标签，原样照抄", "points": [{"text": "这个人在这段里说了什么：观点、提供的信息、提出的问题、表的态，1~3 条，每条不超过 30 字", "at": "依据的那一行的时间 HH:MM:SS"}]}],
  "tags": ["2~5 个标签：这段对话和什么相关（项目、领域、活动、人际场合），优先沿用已有标签"],
  "topics": [{"title": "议题", "points": ["要点，一行、不超过 30 字，每个议题最多 4 条"], "at": "议题开始那一行的时间 HH:MM:SS"}],
@@ -40,11 +41,11 @@ SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[�
  "decisions": [{"text": "定下来的事", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}]}
 ai_spans 是我对 AI 说话的连续时间段（第一句和最后一句的时间）。段内只能是我对 AI 说的话：中间夹着别人说话、或我对人说的短句（嗯、对、这个、你让他们上去吧），就在那里断开分成两段；没有就给空数组。
 media_spans 是外放媒体的连续时间段（第一句和最后一句的时间）：中间夹着在场的人说话（包括我对媒体内容的点评），就在那里断开分成两段；没有就给空数组。
-媒体里的话不是任何在场的人说的：不进 people、todos、decisions、topics，不要写成「我」说的或做的。
+媒体里的声音即使有姓名也不是现场参与人；媒体里的话不是任何在场的人说的：不进 people、todos、decisions、topics，不要写成「我」说的或做的。
 对 AI 说的话只进 ai_requests，不进 todos、decisions、people。todos 只收人要做的事：我答应别人的、别人答应的、别人要我做的、我自己说要做的。
 todos 的 owner 是要去做这件事的人，不是说这句话的人：别人要我做的事（我答应了，或者没有拒绝），owner 是「我」、to 是对方；我让在场的 S1 去做的事，owner 是 S1、to 是「我」。
 due_date 按这段对话的日期换算（最后一行写了这段对话哪天几点开始、星期几）：今天、今晚、待会儿是当天，明天、后天往后数，周五、下周一按星期数；原句的时间比开始时间早，说明过了午夜，那句话是第二天说的。「X 之前」「X 之内」取最后一天，「X 之后」取之后的第一天（国庆之后 = 国庆假期结束后的第一天）。说不出是哪一天（过几天、以后、有空、下周、最近）或者 due 是 null 时写 null，不要猜。
-我对 AI 助手的吩咐（帮我查、改、跑、开分支、合并、部署、派人去调研……）说得再像吩咐人，也只进 ai_requests，不是任何人的待办。这种话前后没有人用人的口吻接话，常常是一个人连着说一长段；我的声音有时会被认成 S1 这样的别的标签，同样按对 AI 处理。
+我对 AI 助手的吩咐（帮我查、改、跑、开分支、合并、部署、派人去调研……）说得再像吩咐人，也只进 ai_requests，不是任何人的待办。这种话前后没有人用人的口吻接话，常常是一个人连着说一长段；其他标签也可能在对 AI 说话，仍按该标签或姓名记录主体，不据语气改写成「我」。
 people 只列在这段里说了实质内容的标签（观点、信息、经历、提问、表态），「我」在最前；S?、只有附和的、只说了一两句零碎话（问一句、喊人、接一句玩笑、递东西）的都不列。人多的闲聊挑主要说话的几个，一般不超过 8 个。按这个人自己的话写，不要写成别人对他的评价。
 summary 只写一句，写这段里最重要的事：正事（工作、安排、决定、要办的事、重要的信息）在前，闲聊、外放的媒体、我对 AI 说的话都不写进去；整段都是闲聊、媒体或对 AI 说话时，才用这一句说聊了什么、在看或听什么、在让 AI 做什么。只写这段里有的事：没有媒体、没有对 AI 说话、没有待办时不要提「没有」。
 闲聊（家常、吃喝、宠物、天气、玩笑……）夹在正事里时，在 topics 里并成一个议题，标题「闲聊」，要点只写一行，列出聊了什么（猫、鞋子、吃的）；整段都是闲聊时照常按话题分议题。
@@ -58,7 +59,8 @@ todos 和 decisions 独立检查整段对话，按上述规则逐条提取人的
 ZH = "用中文写；名字、说话人标签和原句（quote）照原文。"
 EN = ("Write everything in English, though these instructions are in Chinese. Never translate, keep exactly as given: "
       "JSON keys, speaker labels (我, S1, S2, S?, 未知), names, quotes, times (HH:MM:SS) and dates (YYYY-MM-DD). "
-      "我 is the recorder: \"I\" in prose. A title is at most 8 words; the summary (40 字 above) at most 25 words; a point or an AI request (30 字 above) at most 15 words.")
+      "Use \"I\" only for what the recorder said or did; keep other people's actions, requests, observations and stories "
+      "attributed to their speaker label or name, even when they sound like instructions to an AI. Named voices in played media are not participants. A title is at most 8 words; the summary (40 字 above) at most 25 words; a point or an AI request (30 字 above) at most 15 words.")
 
 
 def lang_line() -> str:
@@ -120,10 +122,10 @@ def anchor(res: dict, rows: list[dict]) -> dict:
     """The model cites HH:MM:SS; turn each into the start of the row it names (null when none matches), topics in time order.
     A todo's due_date stays only when it is a date and the todo has a due: without words for a time it was made up.
     A person's points ({text, at} each) are kept as two lists side by side, points (the texts, what every reader takes)
-    and points_at; a plain text point has no time."""
-    starts = [r["start"] for r in rows]
-    def at(hms):
-        return next((s for s in starts if s[11:19] == hms), None) if isinstance(hms, str) else None
+    and points_at; a plain text point has no time. A cited point must match its speaker as well as its time;
+    unsupported citations are cleared without guessing a different line or changing the point text."""
+    def at(hms, who=None):
+        return next((r["start"] for r in rows if r["start"][11:19] == hms and (who is None or r.get("speaker") == who)), None) if isinstance(hms, str) else None
     for k in ("topics", "todos", "decisions", "ai_requests"):
         res[k] = [{**x, "at": at(x.get("at"))} for x in res.get(k) or []]
     res["todos"] = [{**x, "due_date": day(x.get("due_date")) if x.get("due") else None} for x in res["todos"]]
@@ -139,7 +141,7 @@ def anchor(res: dict, rows: list[dict]) -> dict:
                 text, hms = (y.get("text"), y.get("at")) if isinstance(y, dict) else (y, None)
                 if isinstance(text, str) and text:
                     p["points"].append(text)
-                    p["points_at"].append(at(hms))
+                    p["points_at"].append(at(hms, x["who"]))
     res["people"] = list(people.values())
     return res
 
@@ -242,7 +244,7 @@ if __name__ == "__main__":
         {"who": "我", "points": [{"text": "先定一下", "at": "10:00:01"}, {"text": "没对上", "at": "10:00:02"}, {"at": "10:02:00"}]},
         {"who": "S1", "points": [{"text": "同意", "at": "10:02:00"}]}, {"who": "我", "points": ["旧格式", {"text": "再说", "at": None}]}]}
     s = result({"id": "c1"}, rows, reply, {"model": "m"})
-    assert s["prompt_version"] == 11 and s["people"] == [
+    assert s["prompt_version"] == 12 and s["people"] == [
         {"who": "我", "points": ["先定一下", "没对上", "旧格式", "再说"], "points_at": [rows[0]["start"], None, None, None]},
         {"who": "S1", "points": ["同意"], "points_at": [rows[1]["start"]]}], s["people"]
     # an odd reply: what is not in the format is dropped; one that is not an object raises (the worker tries again)

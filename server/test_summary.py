@@ -58,6 +58,12 @@ def assert_summary_contract(prompt, lang):
     lines = prompt.splitlines()
     shape = next(x for x in lines if '"summary":' in x)
     assert "一句话" in shape and "不超过 40 字" in shape
+    assert "仅录音者本人所说所做写「我」" in shape
+    assert "他人的行动、请求、观察和讲述写其说话人标签或姓名" in shape
+    assert "第一人称写「我」" not in shape
+    assert "不因像对 AI 下指令而改写主体" in shape
+    assert "仍按该标签或姓名记录主体，不据语气改写成「我」" in prompt
+    assert "媒体里的声音即使有姓名也不是现场参与人" in prompt
     lead = next(x for x in lines if x.startswith("summary 只写一句"))
     assert "正事（工作、安排、决定、要办的事、重要的信息）在前" in lead
     chitchat = next(x for x in lines if x.startswith("闲聊（"))
@@ -68,6 +74,11 @@ def assert_summary_contract(prompt, lang):
     assert prompt.endswith(summary.EN if lang == "en" else summary.ZH)
     if lang == "en":
         assert "summary (40 字 above) at most 25 words" in prompt
+        assert 'Use "I" only for what the recorder said or did' in prompt
+        assert "other people's actions, requests, observations and stories" in prompt
+        assert "attributed to their speaker label or name" in prompt
+        assert "even when they sound like instructions to an AI" in prompt
+        assert "Named voices in played media are not participants" in prompt
 
 
 @pytest.mark.parametrize("lang", ["zh", "en"])
@@ -94,3 +105,23 @@ def test_live_final_prompt_contract(tmp_path, monkeypatch, lang):
     anyio.run(live.final, live.new(start, "mic", []), [], ["work"], start)
     assert live.FINAL in captured[0]
     assert_summary_contract(captured[0], lang)
+
+
+def test_people_points_at_matches_speaker():
+    rows = [dict(start="2026-10-26T10:00:00.100", end="2026-10-26T10:00:00.500", speaker="我", text="first"),
+            dict(start="2026-10-26T10:00:00.800", end="2026-10-26T10:00:01.000", speaker="S1", text="second"),
+            dict(start="2026-10-26T10:00:02.000", end="2026-10-26T10:00:03.000", speaker="S2", text="third"),
+            dict(start="2026-10-26T10:00:04.000", end="2026-10-26T10:00:05.000", speaker="Alex", text="named")]
+    result = summary.result({"id": "c1"}, rows, {"people": [
+        {"who": "S1", "points": [{"text": "same second", "at": "10:00:00"}, {"text": "wrong speaker", "at": "10:00:02"},
+                                    {"text": "outside conversation", "at": "11:00:00"}, "no citation"]},
+        {"who": "Alex", "points": [{"text": "named speaker", "at": "10:00:04"}, {"text": "wrong line", "at": "10:00:00"}]},
+        {"who": "我", "points": [{"text": "recorder", "at": "10:00:00"}]},
+    ]}, {})
+    assert result["people"][0]["points"] == ["same second", "wrong speaker", "outside conversation", "no citation"]
+    assert result["people"][0]["points_at"] == [rows[1]["start"], None, None, None]
+    assert result["people"][1]["points_at"] == [rows[3]["start"], None]
+    assert result["people"][2]["points_at"] == [rows[0]["start"]]
+    for person in result["people"]:
+        assert len(person["points"]) == len(person["points_at"])
+        assert all(any(r["start"] == at and r["speaker"] == person["who"] for r in rows) for at in person["points_at"] if at)
