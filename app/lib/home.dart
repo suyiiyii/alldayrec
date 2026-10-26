@@ -426,7 +426,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         statTile(context,
             icon: hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(battery),
             color: connected ? batteryColor(cs, battery) : cs.outline, label: l.battery, value: '$battery%',
-            sub: connected ? chargeText(l, hw['charge']) : null),
+            sub: connected ? powerText(l, hw) : null),
       if (connected || syncing)
         statTile(context,
             icon: Icons.cloud_upload_rounded, color: syncing || pending > 0 ? cs.primary : Colors.green.shade600, label: l.backlog,

@@ -293,6 +293,7 @@
     "caughtUp": "已追上",
     "offline": "离线",
     "battery": "电量",
+    "case": "充电仓 {n}%",
     "card": "存储卡",
     "cardFree": "存储卡剩余",
     "lag": "延迟",

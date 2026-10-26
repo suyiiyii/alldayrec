@@ -10,6 +10,12 @@ const recordingRed = Color(0xffc62828);
 String? chargeText(AppLocalizations l, Object? charge) =>
     switch (charge) { 'battery' => l.onBattery, 'charging' => l.charging, 'full' => l.charged, _ => null };
 
+/// What it runs on and, for a bean, its charging case as the bean last read it (out of the case it keeps that level).
+String? powerText(AppLocalizations l, Map hw) {
+  final s = [?chargeText(l, hw['charge']), if (hw['case_battery'] != null) l.caseBattery(hw['case_battery'])].join(' · ');
+  return s.isEmpty ? null : s;
+}
+
 /// A BLE recorder's card when it does not record to it: its status' store is an errno. An error with nothing mounted
 /// this boot (total_kb 0) is no card or one not seated (-19; a mount that timed out, -116: LR-P3-2420 without one,
 /// 10-07); -28 full; -16 lent as a USB disk; any other error a card that failed once mounted. tile: under 存储卡.
