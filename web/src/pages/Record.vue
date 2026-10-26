@@ -347,17 +347,21 @@ onUnmounted(() => {
   <div class="page">
     <div class="top">
       <div class="ctl">
-        <input v-model="device" :placeholder="t('record.device')" />
-        <select v-model="source" :disabled="recording">
-          <option value="mic">{{ t("record.mic") }}</option>
-          <option value="ble">{{ t("record.ble") }}</option>
-        </select>
-        <label
-          ><input v-model="upload" type="checkbox" :disabled="recording" />{{ t("record.upload") }}</label
-        >
-        <button class="btn-primary" :class="{ on: recording }" @click="toggle">
-          {{ recording ? t("record.stop") : t("record.start") }}
-        </button>
+        <div>
+          <input v-model="device" :placeholder="t('record.device')" />
+          <label
+            ><input v-model="upload" type="checkbox" :disabled="recording" />{{ t("record.upload") }}</label
+          >
+        </div>
+        <div>
+          <select v-model="source" :disabled="recording">
+            <option value="mic">{{ t("record.mic") }}</option>
+            <option value="ble">{{ t("record.ble") }}</option>
+          </select>
+          <button class="btn-primary" :class="{ on: recording }" @click="toggle">
+            {{ recording ? t("record.stop") : t("record.start") }}
+          </button>
+        </div>
       </div>
       <p class="stat">{{ stat }}</p>
       <audio v-if="lastPiece" :src="lastPiece" controls></audio>
@@ -396,10 +400,15 @@ onUnmounted(() => {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.ctl {
+.ctl,
+.ctl > div {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+.ctl > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 .ctl button {
   font-size: var(--fs-md);
@@ -425,6 +434,17 @@ audio {
   padding: 8px 10px;
   flex: 1;
   min-width: 0;
+}
+/* a phone: the device name and 上传 on one line, the source and the button under them */
+@media (max-width: 600px) {
+  .ctl {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ctl select {
+    flex: 1;
+    min-width: 0;
+  }
 }
 .stat {
   color: var(--fg-2);

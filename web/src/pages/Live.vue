@@ -41,6 +41,7 @@ const said = computed(() => new Set(Object.values(partials.value))); // the sent
 // recorders are doing, the last conversation today and how to start one
 const side = computed(() => live.value && going.value);
 const idle = computed(() => live.value && ready.value && !going.value && !said.value.size);
+const framed = window.top !== window.self; // the captions inside /record
 const last = computed(() =>
   convs.value.reduce<Conversation | null>((a, c) => (a && a.end > c.end ? a : c), null),
 );
@@ -296,11 +297,13 @@ function jump(start: string) {
           <b>{{ convLink(last) }}</b>
           <Icon name="chevron-right" :size="18" />
         </RouterLink>
-        <!-- the app records from its own top bar: no page recorder inside it -->
-        <RouterLink class="btn btn-primary rec" to="/record"
-          ><Icon name="mic" :size="18" />{{ t("live.recordHere") }}</RouterLink
-        >
-        <p class="in-app-hint muted">{{ t("live.inAppHint") }}</p>
+        <!-- the app records from its own top bar: no page recorder inside it; nor inside /record's captions (a frame) -->
+        <template v-if="!framed">
+          <RouterLink class="btn btn-primary rec" to="/record"
+            ><Icon name="mic" :size="18" />{{ t("live.recordHere") }}</RouterLink
+          >
+          <p class="in-app-hint muted">{{ t("live.inAppHint") }}</p>
+        </template>
         <RouterLink v-if="!status?.recorders?.length" class="card last" to="/connect">
           <Icon name="smartphone" :size="20" />
           <b>{{ t("live.connectRecorder") }}</b>

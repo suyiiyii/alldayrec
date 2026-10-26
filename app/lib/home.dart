@@ -219,11 +219,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: body)));
 
   /// A web page (设备状态与更多: /me) in a WebView of its own, there while open;
-  /// back (the key or the app bar's arrow) goes through its history first, as in the tabs' WebViews.
+  /// back (the key or the app bar's arrow) closes a dialog on the page, then goes through its history, as in the tabs' WebViews.
   void _openWeb(String title, String path) {
     final c = _web()..loadRequest(_url(path));
     _open(title, PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) async {
       if (didPop) return;
+      if (await _closeDialog(c)) return;
       if (await c.canGoBack()) return c.goBack();
       if (mounted) Navigator.pop(context);
     }, child: WebViewWidget(controller: c)));
@@ -261,8 +262,21 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     setState(() => page = to);
   }
 
-  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 时间线, then leave
+  /// Back with a sheet or dialog open on the page (a `<dialog>`: 问 AI, a sentence's menu, /record's 离开吗) closes it, as
+  /// back does in Chrome: its cancel event, then close. True if one was open; a page that cannot answer has none.
+  Future<bool> _closeDialog(WebViewController c) async {
+    try {
+      final r = await c.runJavaScriptReturningResult(
+          "(d=>d?(d.dispatchEvent(new Event('cancel')),d.open&&d.close(),1):0)(document.querySelector('dialog[open]'))");
+      return r == 1 || r == '1' || r == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _back() async {  // back key: a dialog on the page, then history inside its WebView, then 时间线, then leave
     final w = page < webs.length ? webs[page] : null;
+    if (w != null && await _closeDialog(w)) return;
     if (w != null && await w.canGoBack()) return w.goBack();
     if (page != 0) return _show(0);
     SystemNavigator.pop();
