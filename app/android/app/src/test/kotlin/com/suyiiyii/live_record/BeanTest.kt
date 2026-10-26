@@ -359,6 +359,91 @@ class BeanTest {
         assertTrue(bean.sent.filter { it[5] == 0x18.toByte() }.all { it.contentEquals(Bean.start()) })
     }
 
+    /** A live transfer never polls info: reports must follow the new file, stop, and battery/charge pushes. */
+    @Test fun liveStatusFollowsPushes() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.startable = true
+        bean.onTransfer = { file, _, live ->
+            assertTrue(live)
+            bean.header(file, 0xFFFFFFFFL)
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        bean.script += {
+            assertTrue("new file updates hardware immediately", sync.hw["recording"] == true)
+            bean.push(0x0103, byteArrayOf(8, 6))
+            bean.push(0x0104, byteArrayOf(1, 1))
+        }
+        bean.script += { bean.now += 60_000 }
+        bean.script += {
+            val hw = bean.reports.last()
+            assertEquals(listOf(true, 90, 70, "charging", true),
+                listOf(hw["recording"], hw["battery"], hw["case_battery"], hw["charge"], hw["case_charging"]))
+            bean.push(0x1882, byteArrayOf(0))
+            bean.push(0x0104, byteArrayOf(0, 0))
+            bean.push(0x0103, byteArrayOf(7, 5))
+        }
+        bean.script += { bean.now += 60_000 }
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertFalse(sync.recording)
+        assertEquals(listOf(false, 80, 60, "battery", false), bean.reports.last().let {
+            listOf(it["recording"], it["battery"], it["case_battery"], it["charge"], it["case_charging"])
+        })
+        assertEquals("no info command during live", 1, bean.sent.count { it[5] == 1.toByte() && it[6] == 1.toByte() })
+        assertEquals("free space remains the last info reading", 20_000_000L, bean.reports.last()["free_kb"])
+        assertEquals("previous reports are immutable snapshots", false, bean.reports.first()["recording"])
+    }
+
+    /** A button's record push updates status even before a file notification. */
+    @Test fun buttonStatusFollowsPushes() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        repeat(3) { bean.script += {} }  // auto-start only echoes: this is still idle
+        bean.script += {
+            assertFalse(sync.recording)
+            assertEquals(false, sync.hw["recording"])
+            bean.push(0x1882, byteArrayOf(1))
+        }
+        bean.script += {
+            assertTrue(sync.recording)
+            assertEquals(true, sync.hw["recording"])
+            bean.push(0x1882, byteArrayOf(0))
+        }
+        bean.script += {
+            assertFalse(sync.recording)
+            assertEquals(false, sync.hw["recording"])
+        }
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+    }
+
+    /** A one-byte charge notification updates the bean alone; an empty push changes nothing. */
+    @Test fun shortChargePushKeepsCaseStatus() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = t0 / 1000
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.push(0x0104, byteArrayOf(0, 1))
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        bean.script += {
+            assertEquals("battery", sync.hw["charge"])
+            assertEquals(true, sync.hw["case_charging"])
+            bean.push(0x0104, byteArrayOf(1))
+            bean.push(0x0104, byteArrayOf())
+            bean.push(0x0103, byteArrayOf(0))
+        }
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals("charging", sync.hw["charge"])
+        assertEquals(true, sync.hw["case_charging"])
+        assertEquals(80, sync.hw["battery"])
+        assertEquals(60, sync.hw["case_battery"])
+    }
+
     /** The bean echoes the start and records nothing (03.44 does, per ws/soundcore): not taken for a start; logged,
      *  not asked again, and the backlog goes on. */
     @Test fun startEchoedOnly() {
@@ -374,6 +459,7 @@ class BeanTest {
         assertEquals(1, bean.starts)
         assertEquals(listOf("自动开始录音没成功（答了，3 s 内没开始录新文件），这次连接不再试"), bean.logs.filter { it.first == "bean_start" }.map { it.second })
         assertFalse(sync.recording)
+        assertEquals(false, sync.hw["recording"])
         assertEquals(listOf(Triple(p, 0L, false)), bean.transfers)
     }
 
@@ -390,6 +476,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertTrue(bean.logs.any { it.first == "bean_stop" })
         assertEquals("the stop holds", 0, bean.starts)
+        assertEquals(false, sync.hw["recording"])
     }
 
     /** A transfer stalled 30 s ends the session (the link is let go), as a cut does: no new connection either, so a
@@ -543,7 +630,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun now() = now
     override fun liveUnits() = 50
     override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text }
-    override fun report(hw: Map<String, Any?>) {}
+    val reports = mutableListOf<Map<String, Any?>>()
+    override fun report(hw: Map<String, Any?>) { reports += hw.toMap() }
     override fun hold(at: Long?) { held = at }
     override fun held() = held
     override fun end(at: Long) { ends += at }

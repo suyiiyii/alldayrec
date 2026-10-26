@@ -290,11 +290,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     @Volatile var state: Map<String, Any?> = say("encrypting")
+    // Immutable status snapshots; free_kb stays at the last 01/01 reading while a transfer is live.
     @Volatile var hw: Map<String, Any?> = emptyMap()
     @Volatile var syncDoneKb = 0L
     @Volatile var syncTotalKb = 0L
-    @Volatile var recording = false
-        private set
+    var recording: Boolean
+        get() = hw["recording"] == true
+        private set(value) { hw = hw + ("recording" to value) }
     /** The file being deleted, while it is: the one id a 1A/10 may carry (Bean.allowed). */
     @Volatile var deletable: Set<Long> = emptySet()
         private set
@@ -365,7 +367,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             key = step("encrypting", "密钥交换") { Bean.session(mine, ask(Bean.hello(Bean.pub(mine.public as ECPublicKey)), 0x2E01).payload) }
             io.trace("session", mapOf("key" to Bean.hex(key)))
             val p = step("status", "读设备信息") { ask(Bean.info(), 0x0101).payload }
-            hw = Bean.info(p); recording = hw["recording"] == true
+            hw = Bean.info(p)
             step("clock", "对时") { clock() }
             listing = step("status", "读文件列表") { list() }
             io.log("connect", "连上：$t；固件 ${hw["fw"]}，序列号 ${Bean.serial(p)}，电量 ${hw["battery"]}%，" +
@@ -410,10 +412,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             }
             if (xfer == null && now - askedAt > 60_000) {  // not during a transfer: its pushes say battery and charging
                 askedAt = now
-                hw = Bean.info(ask(Bean.info(), 0x0101).payload)
-                val r = hw["recording"] == true
-                if (r && !recording) needList = true
-                recording = r
+                val info = Bean.info(ask(Bean.info(), 0x0101).payload)
+                if (info["recording"] == true && !recording) needList = true
+                hw = info
             }
             if (now - settled >= 5000) { settled = now; settle(); if (xfer == null && !recording) prune() }
             if (now - reported >= 60_000) { reported = now; io.report(hw) }
@@ -552,7 +553,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 2 -> { startDone = true; io.log("bean_pause", "豆子暂停录音") }
             }
             0x0103 -> if (p.size >= 2) hw = hw + mapOf("battery" to Bean.pct(p[0]), "case_battery" to Bean.pct(p[1]))
-            0x0104 -> if (p.isNotEmpty()) hw = hw + mapOf("charge" to if (p[0] == 1.toByte()) "charging" else "battery")
+            0x0104 -> if (p.isNotEmpty()) {
+                hw = hw + mapOf("charge" to if (p[0] == 1.toByte()) "charging" else "battery") +
+                    (p.getOrNull(1)?.let { mapOf("case_charging" to (it == 1.toByte())) } ?: emptyMap())
+            }
             else -> if (unknown.add(f.cmd)) io.log("bean_frame", "豆子发来 %02X/%02X（%d B），不认识，略过".format(f.type, f.id, p.size))
         }
     }
