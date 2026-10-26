@@ -54,14 +54,16 @@ def is_late(device: str, start_ms: int) -> bool:
 def record(t, device: str, start_ms: int, end_ms: int, now_ms: int):
     """Called only by audio.save, before replacing its pieces row, inside that write transaction."""
     if not is_late(device, start_ms):
-        return
+        return False
     # All these pieces predate this save (including a shorter copy being replaced). A timestamp tie is
     # still earlier: the append lock serializes uploads. NULL receipt times predate the ledger too.
     covered = [(r[0], round(r[0] + r[1] * 1000)) for r in t.execute(
         "SELECT start_ms, seconds FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ?",
         (device, end_ms, start_ms))]
-    for a, b in subtract([[start_ms, end_ms]], covered):
+    ranges = subtract([[start_ms, end_ms]], covered)
+    for a, b in ranges:
         enqueue(t, device, a, b, now_ms)
+    return bool(ranges)
 
 
 def enqueue(t, device: str, a: int, b: int, now_ms: int, ready: bool = False):

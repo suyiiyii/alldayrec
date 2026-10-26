@@ -7,7 +7,7 @@ import anyio
 import numpy as np
 import pytest
 
-from alldayrec import audio, core, db, late, late_backfill, late_merge, late_store, monitor, routes_api, routes_speakers, tenant
+from alldayrec import audio, core, db, late, late_backfill, late_merge, late_store, monitor, routes_api, routes_speakers, routes_upload, tenant
 from alldayrec.tenant import T
 from test_backlog import EnergyVad, flac, heard, tone
 
@@ -77,6 +77,28 @@ def test_ledger_subtracts_all_prior_coverage_and_preserves_holes(store):
     assert [json.loads(r[0]) for r in db.conn().execute("SELECT ranges FROM late_spans ORDER BY start_ms")] == [
         [[ms(0), ms(10)]], [[ms(20), ms(30)]], [[ms(40), ms(50)]]]
     assert late_store.subtract([[0, 10]], [[1, 2], [2, 6], [8, 10]]) == [[0, 1], [6, 8]]
+
+
+def test_upload_note_uses_save_snapshot_when_reader_advances_during_await(store, monkeypatch):
+    monkeypatch.setattr(audio, "decode", lambda *a, **kw: np.zeros(audio.SR, np.int16))
+    monkeypatch.setattr(audio, "health", lambda x: (0, 0, 0, 0))
+    save = audio.save
+    def advancing(*args):
+        result = save(*args)
+        db.put_kv(f"read_to:{D}", ms(100))
+        return result
+    monkeypatch.setattr(audio, "save", advancing)
+    class Upload:
+        headers = {"content-type": "audio/wav"}
+        async def body(self):
+            return b"audio"
+    anyio.run(routes_upload.chunk, Upload(), D, ms(0))
+    assert late_store.is_late(D, ms(0)), "the reader advanced before the route resumed"
+    assert T().events[-1]["kind"] == "info"
+    assert db.conn().execute("SELECT count(*) FROM late_spans").fetchone()[0] == 0
+    anyio.run(routes_upload.chunk, Upload(), D, ms(-10))
+    assert T().events[-1]["kind"] == "warn"
+    assert db.conn().execute("SELECT count(*) FROM late_spans").fetchone()[0] == 1
 
 
 def test_settle_defer_release_and_final_commit_barrier(store, monkeypatch):

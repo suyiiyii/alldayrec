@@ -60,7 +60,8 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     released = hold is None and db.kv(f"hold:{device}") is not None
     audio.hold(device, hold)  # before the piece is in: the queue must not hand it out ahead of the older audio
     body, kind = await request.body(), request.headers.get("content-type", "")
-    seconds = await anyio.to_thread.run_sync(audio.save, device, start, body, kind, n, limiter=threads.MEDIA)
+    saved = {}
+    seconds = await anyio.to_thread.run_sync(audio.save, device, start, body, kind, n, saved, limiter=threads.MEDIA)
     if seconds is None:  # the app drops it on a 400 (audio.save keeps its bytes in rejected/): say so, it is lost audio
         log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, len(body))
         ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端收到 400 会丢弃它；原始字节留在 recordings/rejected/", "error")
@@ -69,7 +70,7 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
         late_store.release(device)
     T().chunks = {"device": device, "at": time.time()}
     late = ((" (late audio; queued for transcription)" if T().lang == "en" else "（迟到音频，稍后补转写）")
-            if late_store.is_late(device, start) else "")
+            if saved.get("late") else "")
     ws.note(f"收到 {device} 的块 {seconds:.1f} s，起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}{late}", "warn" if late else "info")
     return {"seconds": round(seconds, 2), "slice": slices()}
 

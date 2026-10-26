@@ -221,12 +221,14 @@ def append(path: Path, body: bytes) -> int:
     return pos
 
 
-def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | None = None) -> float | None:
+def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | None = None, report: dict | None = None) -> float | None:
     """Keeps one uploaded piece (start_ms: its device time, n: the samples its client wrote, when it says); returns
     its seconds, None when it is not audio. It is on disk and in the index before this returns, so the client may
     delete its copy once told so. Of a piece sent again (same device and start) the longer copy (in bytes) is kept: a
     resend as long or shorter only gets the kept copy's seconds back; a longer one replaces the row, appended to the
     hour file (an Android batch retried with more pieces after the answer to the first try was lost)."""
+    if report is not None:
+        report["late"] = False  # the upload's note uses the save transaction, not a cursor read after the await
     kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
                                      (device, start_ms, len(body))).fetchone()
     if r := kept():
@@ -246,7 +248,9 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
         pos = append(path, body)
         received = int(time.time() * 1000)
         with db.tx() as t:
-            late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
+            queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
+            if report is not None:
+                report["late"] = queued_late
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                           (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h))
