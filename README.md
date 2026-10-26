@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-dark.svg">
+  <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-light.svg" height="48" alt="">
+</picture>
+
 # alldayrec（全天录）
 
 ### 开源心力球，私有第二大脑。

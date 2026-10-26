@@ -91,7 +91,10 @@ export default defineConfig({
   rewrites: { "asr-benchmark.md": "explanation/asr-benchmark.md" },
   srcExclude: ["**/README.md", "parts/**", "public/**"], // parts/: pieces other pages include; public/: served as is
   sitemap: { hostname: host + base },
-  head: [["meta", { name: "keywords", content: KEYWORDS }]],
+  head: [
+    ["meta", { name: "keywords", content: KEYWORDS }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: `${base}brand/favicon.svg` }], // head is not run through base
+  ],
   // per page: the canonical address (the one the sitemap lists) and the tags link previews read
   transformHead: ({ page, siteData, title, description }) => {
     if (page === "404.md") return [];
@@ -126,6 +129,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: { light: "/brand/mark-light.svg", dark: "/brand/mark-dark.svg", alt: "" }, // public/brand/: the logo files
     socialLinks: [{ icon: "github", link: REPO }],
     editLink: { pattern: `${REPO}/edit/main/docs/:path` },
     search: {

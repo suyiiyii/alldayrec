@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ themed icons: the logo's disc with the five bars cut out, one colour (the system tints it) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.6087"
+        android:scaleY="0.6087"
+        android:translateX="23.565"
+        android:translateY="23.565">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M50,4 A46,46 0 1,1 50,96 A46,46 0 1,1 50,4 Z M17.25,46.75 A4.75,4.75 0 0,1 26.75,46.75 L26.75,53.25 A4.75,4.75 0 0,1 17.25,53.25 Z M31.25,38.75 A4.75,4.75 0 0,1 40.75,38.75 L40.75,61.25 A4.75,4.75 0 0,1 31.25,61.25 Z M45.25,27.75 A4.75,4.75 0 0,1 54.75,27.75 L54.75,72.25 A4.75,4.75 0 0,1 45.25,72.25 Z M59.25,38.75 A4.75,4.75 0 0,1 68.75,38.75 L68.75,61.25 A4.75,4.75 0 0,1 59.25,61.25 Z M73.25,46.75 A4.75,4.75 0 0,1 82.75,46.75 L82.75,53.25 A4.75,4.75 0 0,1 73.25,53.25 Z" />
+    </group>
+</vector>

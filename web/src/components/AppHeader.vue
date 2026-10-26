@@ -34,7 +34,7 @@ const DEMO = import.meta.env.MODE === "demo";
 <template>
   <header :class="{ bare: !inApp }">
     <div class="bar">
-      <h1>alldayrec</h1>
+      <h1><img src="../brand/mark.svg" alt="" width="24" height="24" />alldayrec</h1>
       <a v-if="DEMO" class="demo-tag" :href="lang() === 'en' ? '../en/' : '../'">{{
         t("common.demo")
       }}</a>
@@ -118,6 +118,9 @@ header {
   column-gap: var(--space-4);
 }
 h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--fs-lg);
   margin: 0;
   color: var(--accent);
