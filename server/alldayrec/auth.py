@@ -42,27 +42,11 @@ class Tenants:
             # Route and measure the canonical endpoint. Downstream errors and
             # redirects cannot reflect a credential path, nor can metrics retain it.
             scope = {**scope, "path": "/mcp", "raw_path": b"/mcp", "mcp_link_id": link_id}
-            acquired = False
-
-            async def body_ready():
-                nonlocal acquired
-                message = await receive()
-                if message["type"] == "http.request" and not message.get("more_body", False) and not acquired:
-                    # A partial-body sender must not hold up revocation. Once
-                    # complete, protect execution AND response send from revoke.
-                    await t.mcp_gate.acquire()
-                    acquired = True
-                return message
-
             async def private_send(message):
                 if message["type"] == "http.response.start":
                     message = {**message, "headers": [*message.get("headers", []), (b"cache-control", b"no-store")]}
                 await send(message)
-            try:
-                return await self.app(scope, body_ready, private_send)
-            finally:
-                if acquired:
-                    t.mcp_gate.release()
+            return await self.app(scope, receive, private_send)
         q = c.query_params.get("token")
         if scope["type"] == "http" and q and (t := tenant.by_token(core.TENANTS, q)) and t.token:
             u = c.url.remove_query_params("token")

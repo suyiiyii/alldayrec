@@ -3,10 +3,12 @@ import datetime as dt
 import hashlib
 import hmac
 import secrets
+import time
 
 from alldayrec import db, mcp_server, tenant
 
 MAX_LINKS = 20
+REVOKE_WAIT_S = 2.0
 
 
 class LimitReached(Exception):
@@ -53,18 +55,36 @@ def resolve(tenants: list[tenant.Tenant], secret: str) -> tuple[tenant.Tenant, s
 
 
 def handle(link_id: str, msg, headers):
-    """After the body and DB queue: check again, run and commit before revoke can succeed.
+    """After the body and DB slot, lease execution with a live autocommit check.
 
-    auth.Tenants holds the tenant's gate until the response has been sent; the
-    transaction also keeps a deletion from racing a tool's database operations.
+    The condition protects checking + registration, not the whole tool: readers
+    run concurrently and never take a SQLite write transaction. Revoke deletes
+    first, then waits for this link's leases (including the short usage update).
     """
-    with db.tx() as c:
+    t, c = tenant.T(), db.conn()
+    with t.mcp_gate:
         row = c.execute("SELECT last_used_at FROM mcp_links WHERE id = ?", (link_id,)).fetchone()
         if row is None:
             return 404, None
+        t.mcp_active[link_id] = t.mcp_active.get(link_id, 0) + 1
+    try:
         status, out = mcp_server.handle(msg, headers)
         if 200 <= status < 300 and (out is None or ("error" not in out and not out.get("result", {}).get("isError"))):
             at = now()
             if row["last_used_at"] is None or dt.datetime.fromisoformat(at) - dt.datetime.fromisoformat(row["last_used_at"]) >= dt.timedelta(minutes=1):
-                c.execute("UPDATE mcp_links SET last_used_at = ? WHERE id = ?", (at, link_id))
+                before = (dt.datetime.fromisoformat(at) - dt.timedelta(minutes=1)).isoformat(timespec="seconds")
+                c.execute("UPDATE mcp_links SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at <= ?)",
+                          (at, link_id, before))
         return status, out
+    finally:
+        with t.mcp_gate:
+            t.mcp_active[link_id] -= 1
+            if not t.mcp_active[link_id]:
+                del t.mcp_active[link_id]
+            t.mcp_gate.notify_all()
+
+
+def drained(link_id: str, deadline: float) -> bool:
+    t = tenant.T()
+    with t.mcp_gate:
+        return t.mcp_gate.wait_for(lambda: not t.mcp_active.get(link_id), timeout=max(0, deadline - time.monotonic()))

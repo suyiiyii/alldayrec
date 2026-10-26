@@ -163,7 +163,8 @@
     "linkUsed": "上次使用 {at}",
     "linkUnused": "尚未使用",
     "linkSafety": "网址就是密钥，能查询对话和修改待办。每个 Agent 单独创建一个，不再使用时作废。",
-    "linkCopyError": "复制失败，请手动选中并复制网址。"
+    "linkCopyError": "复制失败，请手动选中并复制网址。",
+    "linkDraining": "连接已作废；已有调用可能继续完成，新的调用已被拒绝。"
   },
   "conv": {
     "regenerating": "摘要重新生成中",

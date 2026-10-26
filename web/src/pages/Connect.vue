@@ -116,6 +116,7 @@ const aiLinks = ref<AiLink[]>([]),
   linkLabel = ref(""),
   linkError = ref(""),
   linkBusy = ref(false);
+const linkNotice = ref("");
 const freshLink = ref<{ id: string; path: string } | null>(null),
   linkCopied = ref(false);
 const freshUrl = computed(() =>
@@ -159,8 +160,10 @@ async function revokeLink(link: AiLink) {
   if (!window.confirm(t("connect.linkConfirm", { label: link.label }))) return;
   linkBusy.value = true;
   linkError.value = "";
+  linkNotice.value = "";
   try {
-    await post(`/api/mcp-links/${link.id}`, undefined, "DELETE");
+    const result = await post<{ pending?: boolean }>(`/api/mcp-links/${link.id}`, undefined, "DELETE");
+    if (result.pending) linkNotice.value = t("connect.linkDraining");
     aiLinks.value = aiLinks.value.filter((x) => x.id !== link.id);
     if (freshLink.value?.id === link.id) freshLink.value = null;
   } catch (e) {
@@ -367,6 +370,7 @@ async function copy(c: (typeof CLIENTS)[number]) {
           <button @click="freshLink = null">{{ t("connect.linkHide") }}</button>
         </div>
         <p v-if="linkError" role="alert" class="link-error">{{ linkError }}</p>
+        <p v-if="linkNotice" id="link-notice" role="status">{{ linkNotice }}</p>
         <ul v-if="aiLinks.length" class="link-list">
           <li v-for="link in aiLinks" :key="link.id">
             <div class="link-meta">

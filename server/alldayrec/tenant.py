@@ -19,6 +19,7 @@ import math
 import os
 import secrets
 import sys
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -62,7 +63,8 @@ class Tenant:
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
     undo: dict = field(default_factory=dict)        # renames that can be taken back, by undo id (routes_speakers.keep_undo)
     requests: dict = field(default_factory=dict)    # its HTTP requests this minute by (method, route, status): (ms, bytes) each (perf)
-    mcp_gate: anyio.Lock = field(default_factory=anyio.Lock)  # body-complete link calls through response send; revoke waits for them
+    mcp_gate: threading.Condition = field(default_factory=threading.Condition)  # atomic liveness check + execution leases, in workers
+    mcp_active: dict = field(default_factory=dict)  # active calls by link id; concurrent readers share the gate
     summaries: tuple = None                         # (send, receive): its conversations waiting for a summary
     tg: "anyio.abc.TaskGroup | None" = None         # its tasks (run_tenant): pipelines, live analyses, loops
     scope: anyio.CancelScope | None = None          # cancelled: the tenant stops, every task of it with it

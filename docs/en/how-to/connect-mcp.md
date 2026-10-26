@@ -122,7 +122,7 @@ Configuration: [Hermes MCP](https://hermes-agent.nousresearch.com/docs/reference
 3. Open **Advanced: connect an AI → AI connection links** and create a link named after your agent.
 4. Copy the full `https://alldayrec.example.com/mcp/k/<secret>` link. It appears once; the list then keeps its name, prefix, creation time and last use.
 
-Each account can keep up to 20 links; revoke an old one before adding another at the limit. Last use records successful MCP calls, at most once per minute per link. Revocation disables the credential first, then waits for calls already executing and their response sends to finish. After it succeeds, requests still receiving their bodies and later requests cannot execute tools with that link.
+Each account can keep up to 20 links; revoke an old one before adding another at the limit. Last use records successful MCP calls, at most once per minute per link. Revocation blocks new calls and waits up to 2 seconds for existing calls to finish. If calls remain active, the web page says they may still finish. An already-computed response may still be in transit.
 
 The link is a key. Create one per agent and revoke it when finished. It grants all MCP tools, including todo updates, but cannot log in to the web UI or use other HTTP APIs. The server does not log credential paths; reverse-proxy access logs contain the full URL. Disable or redact logs for this path, and keep the link out of chats, screenshots and shared configs.
 

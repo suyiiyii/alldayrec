@@ -230,7 +230,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `DELETE` | Revoke this tenant's connection link by id (204); unknown ids return 404. | `link_id` (path, string) |
+| `DELETE` | Disable this tenant's link: 204 when calls finish, 202 {pending: true} after 2 s; unknown ids return 404. | `link_id` (path, string) |
 
 ### `/api/recap`
 

@@ -3,6 +3,7 @@ endpoint, recaps and todos, tags, feedback and summaries redone."""
 import datetime as dt
 import json
 import logging
+import time
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException, Request
@@ -203,16 +204,19 @@ async def mcp_links_create(request: Request):
 
 @router.delete("/api/mcp-links/{link_id}")
 async def mcp_links_revoke(link_id: str, request: Request):
-    """Revoke this tenant's connection link by id (204); unknown ids return 404."""
+    """Disable this tenant's link: 204 when calls finish, 202 {pending: true} after 2 s; unknown ids return 404."""
     if not mcp_server.origin_ok(request.headers):
         raise HTTPException(403, "Origin not allowed")
-    # Delete first: queued calls must fail their point-of-use check. An executing
-    # tool's transaction makes deletion wait for its reads/writes to finish.
-    # Use the default pool so a saturated threads.DB cannot prevent revocation.
+    # Delete before draining: no new execution lease can pass its live check.
+    # Default pool: queued MCP calls must not tie revocation to threads.DB.
     if not await anyio.to_thread.run_sync(mcp_links.revoke, link_id):
         raise HTTPException(404, "Link not found")
-    async with T().mcp_gate:
-        pass  # drain already-authorized response sends before acknowledging 204
+    done = False
+    with anyio.move_on_after(mcp_links.REVOKE_WAIT_S):
+        done = await anyio.to_thread.run_sync(mcp_links.drained, link_id, time.monotonic() + mcp_links.REVOKE_WAIT_S,
+                                             abandon_on_cancel=True)
+    if not done:
+        return JSONResponse({"pending": True}, status_code=202, headers={"Cache-Control": "no-store"})
     return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 

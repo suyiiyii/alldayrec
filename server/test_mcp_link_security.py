@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import socket
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -52,7 +53,7 @@ async def live_http():
                 while not runner.started:
                     await anyio.sleep(0.001)
             try:
-                async with httpx2.AsyncClient(base_url=f"http://{host}:{port}", timeout=5) as client:
+                async with httpx2.AsyncClient(base_url=f"http://{host}:{port}", timeout=5, trust_env=False) as client:
                     yield client
             finally:
                 runner.should_exit = True
@@ -129,19 +130,20 @@ def test_http_delayed_body_revocation(seeded, monkeypatch, write):
 
 @pytest.mark.parametrize("queued", [False, True], ids=["running-tool", "db-queue"])
 def test_http_revoke_waits_for_execution_and_response(seeded, monkeypatch, queued):
-    """A body-complete call owns the gate through ASGI send; 204 follows its completion."""
+    """Only an executing lease delays 204; DB-queued calls hold no lease and fail later."""
     async def run():
-        entered, release, sent, revoke_done = (anyio.Event() for _ in range(4))
-        revoke_started, deleted = anyio.Event(), anyio.Event()
-        original_call, original_resolve, original_revoke = mcp_server.call, mcp_links.resolve, mcp_links.revoke
-        order = []
-
+        entered, release, deleted, drained = (anyio.Event() for _ in range(4))
+        original_call, original_resolve = mcp_server.call, mcp_links.resolve
+        original_revoke, original_drained = mcp_links.revoke, mcp_links.drained
         def observed_revoke(*args):
-            anyio.from_thread.run_sync(revoke_started.set)
             result = original_revoke(*args)
             anyio.from_thread.run_sync(deleted.set)
             return result
+        def observed_drained(*args):
+            anyio.from_thread.run_sync(drained.set)
+            return original_drained(*args)
         monkeypatch.setattr(mcp_links, "revoke", observed_revoke)
+        monkeypatch.setattr(mcp_links, "drained", observed_drained)
         if not queued:
             def blocked(name, args):
                 anyio.from_thread.run_sync(entered.set)
@@ -150,68 +152,50 @@ def test_http_revoke_waits_for_execution_and_response(seeded, monkeypatch, queue
             monkeypatch.setattr(mcp_server, "call", blocked)
         else:
             monkeypatch.setattr(threads, "DB", anyio.CapacityLimiter(1))
-
             def observed(*args):
                 result = original_resolve(*args)
                 if result:
                     anyio.from_thread.run_sync(entered.set)
                 return result
             monkeypatch.setattr(mcp_links, "resolve", observed)
-
-        # Observe response transport while auth still holds its gate.
-        original_app = server.app
-
-        async def observed_app(scope, receive, send):
-            async def observed_send(message):
-                if scope["path"].startswith("/mcp/k/") and message["type"] == "http.response.body":
-                    order.append("tool-response")
-                    sent.set()
-                await send(message)
-            await original_app(scope, receive, observed_send)
-        monkeypatch.setattr(server, "app", observed_app)
         async with live_http() as c:
             link = await new_link(c)
             stream, head, raw = await wire_start(c, link["path"], body=tool("mark_todo", id=CIDS[0], text="TASK-a", mark="done"))
             await stream.send(head + raw[:1])
             if queued:
-                with anyio.fail_after(5):
-                    await entered.wait()
+                await entered.wait()
                 await threads.DB.acquire()
-                await stream.send(raw[1:])
-                await until(lambda: seeded[0].mcp_gate.locked() and threads.DB.statistics().tasks_waiting == 1)
+                try:
+                    await stream.send(raw[1:])
+                    await until(lambda: threads.DB.statistics().tasks_waiting == 1)
+                    with anyio.fail_after(1):
+                        assert (await revoke(c, link)).status_code == 204
+                finally:
+                    threads.DB.release()
+                status, body, _ = await wire_reply(stream)
+                assert status == 404 and body == b""
             else:
                 await stream.send(raw[1:])
                 with anyio.fail_after(5):
                     await entered.wait()
-
-            async def revoking():
-                r = await revoke(c, link)
-                assert r.status_code == 204
-                order.append("revoke-204")
-                revoke_done.set()
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(revoking)
-                with anyio.fail_after(5):
-                    await revoke_started.wait()
-                    if queued:
-                        await deleted.wait()
-                    else:
-                        assert not deleted.is_set(), "an active tool transaction prevents deletion"
-                assert not revoke_done.is_set()
-                if queued:
-                    threads.DB.release()
-                else:
-                    release.set()
-                status, body, _ = await wire_reply(stream)
-                if queued:
-                    assert status == 404 and body == b""
-                else:
+                completed = anyio.Event()
+                async def revoking():
+                    assert (await revoke(c, link)).status_code == 204
+                    completed.set()
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(revoking)
+                    try:
+                        with anyio.fail_after(5):
+                            await deleted.wait()  # deletion is not held behind a tool transaction
+                            await drained.wait()
+                        assert not completed.is_set()
+                    finally:
+                        release.set()
+                    status, body, _ = await wire_reply(stream)
                     assert status == 200 and not json.loads(body)["result"]["isError"]
-                with anyio.fail_after(5):
-                    await revoke_done.wait()
-            assert sent.is_set() and order == ["tool-response", "revoke-204"]
+                assert completed.is_set()
             assert list(tenant.call(seeded[0], db.closed_todos).values()) == ([] if queued else ["done"])
-            assert (await c.post(link["path"], json=tool("grep", q="PRIVATE-a"))).status_code == 404
+            assert (await c.post(link["path"], json=RPC)).status_code == 404
     anyio.run(run)
 
 
@@ -376,6 +360,7 @@ def test_http_errors_logs_metrics_and_secret_lifecycle(seeded, monkeypatch, capl
             monkeypatch.setitem(mcp_server.TOOLS, "names", (broken, *original[1:]))
             r = await c.post(path, json=tool("names"))
             assert r.status_code == 500 and path not in r.text
+            assert r.headers["cache-control"] == "no-store"
             assert secret not in caplog.text and path not in caplog.text
             def stored():
                 rows = list(db.conn().execute("SELECT route FROM perf_requests"))
@@ -388,8 +373,9 @@ def test_http_errors_logs_metrics_and_secret_lifecycle(seeded, monkeypatch, capl
 
 
 def test_http_revoke_waits_for_response_send(tenants, monkeypatch):
+    """A stalled transport cannot delay revocation: execution has already finished."""
     async def run():
-        ready, release, completed = (anyio.Event() for _ in range(3))
+        ready, release = anyio.Event(), anyio.Event()
         app = server.app
         async def stalled_send(scope, receive, send):
             async def sending(message):
@@ -403,26 +389,113 @@ def test_http_revoke_waits_for_response_send(tenants, monkeypatch):
             link = await new_link(c)
             async def calling():
                 assert (await c.post(link["path"], json=RPC)).status_code == 200
-            async def revoking():
-                assert (await revoke(c, link)).status_code == 204
-                completed.set()
             async with anyio.create_task_group() as tg:
                 tg.start_soon(calling)
                 with anyio.fail_after(5):
                     await ready.wait()
-                tg.start_soon(revoking)
-                await until(lambda: tenants[0].mcp_gate.statistics().tasks_waiting == 1)
-                assert not completed.is_set()
-                release.set()
-            assert completed.is_set()
+                try:
+                    with anyio.fail_after(1):
+                        assert (await revoke(c, link)).status_code == 204
+                    assert not release.is_set()
+                finally:
+                    release.set()
+    anyio.run(run)
+
+
+def test_link_read_does_not_block_autocommit_write(seeded, monkeypatch):
+    """A real grep plus a controlled slow-read interval must not own SQLite's write lock."""
+    async def run():
+        entered = anyio.Event()
+        original = mcp_server.call
+        def slow(name, args):
+            anyio.from_thread.run_sync(entered.set)
+            time.sleep(0.8)  # a coarse, deterministic slow read; no microsecond timing assertion
+            return original(name, args)
+        monkeypatch.setattr(mcp_server, "call", slow)
+        async with live_http() as c:
+            link = await new_link(c)
+            elapsed = []
+            async def reading():
+                start = time.monotonic()
+                r = await c.post(link["path"], json=tool("grep", q="not present"))
+                elapsed.append(time.monotonic() - start)
+                assert r.status_code == 200 and not r.json()["result"]["isError"]
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(reading)
+                with anyio.fail_after(5):
+                    await entered.wait()
+                start = time.monotonic()
+                # Match the real failure: an autocommit write on the event loop thread.
+                tenant.call(seeded[0], db.put_kv, "concurrent-write", "ok")
+                waited = time.monotonic() - start
+            assert waited < elapsed[0] / 3, (waited, elapsed[0])
+    anyio.run(run)
+
+
+def test_http_link_reads_run_concurrently_and_revoke_is_per_link(tenants, monkeypatch):
+    async def run():
+        entered, release = anyio.Event(), anyio.Event()
+        original = mcp_server.call
+        def slow(name, args):
+            if name == "grep":
+                anyio.from_thread.run_sync(entered.set)
+                anyio.from_thread.run(release.wait)
+            return original(name, args)
+        monkeypatch.setattr(mcp_server, "call", slow)
+        async with live_http() as c:
+            link, other = await new_link(c), await new_link(c)
+            async def reading():
+                assert (await c.post(link["path"], json=tool("grep", q="not present"))).status_code == 200
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(reading)
+                with anyio.fail_after(5):
+                    await entered.wait()
+                try:
+                    with anyio.fail_after(1):
+                        assert (await c.post(link["path"], json=tool("names"))).status_code == 200
+                        assert (await revoke(c, other)).status_code == 204
+                    assert not release.is_set()
+                finally:
+                    release.set()
+    anyio.run(run)
+
+
+def test_http_revoke_timeout_reports_pending(tenants, monkeypatch):
+    async def run():
+        entered, release = anyio.Event(), anyio.Event()
+        monkeypatch.setattr(mcp_links, "REVOKE_WAIT_S", 0.1)
+        original = mcp_server.call
+        def slow(*args):
+            anyio.from_thread.run_sync(entered.set)
+            anyio.from_thread.run(release.wait)
+            return original(*args)
+        monkeypatch.setattr(mcp_server, "call", slow)
+        async with live_http() as c:
+            link = await new_link(c)
+            async def calling():
+                assert (await c.post(link["path"], json=tool("names"))).status_code == 200
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(calling)
+                with anyio.fail_after(5):
+                    await entered.wait()
+                try:
+                    with anyio.fail_after(1):
+                        r = await revoke(c, link)
+                    assert r.status_code == 202 and r.json() == {"pending": True}
+                    assert r.headers["cache-control"] == "no-store"
+                    assert (await c.post(link["path"], json=RPC)).status_code == 404
+                finally:
+                    release.set()
+            assert not tenants[0].mcp_active
     anyio.run(run)
 
 
 @pytest.mark.skipif(os.environ.get("MCP_BROWSER") != "1", reason="browser regression runs in the mcp-browser CI job")
-def test_browser_secret_once_not_in_storage(tenants):
+@pytest.mark.parametrize("language", ["en", "zh"])
+def test_browser_secret_once_not_in_storage(tenants, monkeypatch, language):
     """Real /connect UI; all browser output is booleans, never the generated credential."""
     async def run():
-        session = "mcp-security-" + str(os.getpid())
+        session = "mcp-security-" + str(os.getpid()) + "-" + language
         async def browser(*args, script=None):
             r = await anyio.run_process(["agent-browser", "--session", session, *args],
                                         input=script.encode() if script else None)
@@ -431,7 +504,7 @@ def test_browser_secret_once_not_in_storage(tenants):
             origin = str(c.base_url).rstrip("/")
             try:
                 await browser("open", origin + "/api/health")
-                await browser("eval", "--stdin", script="(async()=>{await fetch('/?token=tenant-a');localStorage.lang='en';return true})()")
+                await browser("eval", "--stdin", script="(async()=>{await fetch('/?token=tenant-a');localStorage.lang=" + json.dumps(language) + ";localStorage.setItem('connect.address','https://alldayrec.example.com');return true})()")
                 await browser("open", origin + "/connect#ai")
                 await browser("wait", "#link-label")
                 await browser("fill", "#link-label", "Browser security check")
@@ -455,6 +528,36 @@ def test_browser_secret_once_not_in_storage(tenants):
                 })()""")
                 assert json.loads(result) == {"shown": False, "leaked": False, "metadataOnly": True}
                 rows = (await c.get("/api/mcp-links", headers={"authorization": "Bearer tenant-a"})).json()
+                pending = await new_link(c)
+                await browser("eval", "location.reload()")
+                await browser("wait", ".link-list li:nth-child(2)")
+                entered, release = anyio.Event(), anyio.Event()
+                original = mcp_server.call
+                def held(*args):
+                    anyio.from_thread.run_sync(entered.set)
+                    anyio.from_thread.run(release.wait)
+                    return original(*args)
+                monkeypatch.setattr(mcp_server, "call", held)
+                monkeypatch.setattr(mcp_links, "REVOKE_WAIT_S", 0.1)
+                async def calling():
+                    assert (await c.post(pending["path"], json=tool("names"), timeout=None)).status_code == 200
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(calling)
+                    try:
+                        with anyio.fail_after(5):
+                            await entered.wait()
+                        await browser("eval", "[...document.querySelectorAll('.link-list li')].find(x=>x.querySelector('b').textContent==='security check').querySelector('button').id='pending-revoke'")
+                        await browser("click", "#pending-revoke")
+                        await browser("dialog", "accept")
+                        await browser("wait", "#link-notice")
+                        result = json.loads(await browser("eval", "({notice:!!document.querySelector('#link-notice').textContent, remaining:document.querySelectorAll('.link-list li').length})"))
+                        assert result == {"notice": True, "remaining": 1}
+                        if directory := os.environ.get("MCP_SCREENSHOTS"):
+                            await browser("set", "viewport", "390", "844")
+                            await browser("eval", "document.querySelector('.links').scrollIntoView({block:'start'})")
+                            await browser("screenshot", directory + "/connect-revoke-pending-" + language + "-20261026.png")
+                    finally:
+                        release.set()
                 assert (await revoke(c, rows[0])).status_code == 204
             finally:
                 await browser("close")

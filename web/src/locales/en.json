@@ -163,7 +163,8 @@
     "linkUsed": "Last used {at}",
     "linkUnused": "Not used yet",
     "linkSafety": "The link is a key: it can query conversations and update todos. Create one per agent and revoke it when finished.",
-    "linkCopyError": "Copy failed. Select and copy the link manually."
+    "linkCopyError": "Copy failed. Select and copy the link manually.",
+    "linkDraining": "Link revoked. A call already in progress may finish; new calls are blocked."
   },
   "conv": {
     "regenerating": "Regenerating the summary",

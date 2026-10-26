@@ -26,6 +26,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import anyio
 import anyio.to_thread
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 
 from alldayrec import addresses
 from alldayrec import asr
@@ -130,6 +131,12 @@ async def lasting(device: str):
             log.exception("pipeline %s ended", device)
             ws.note(f"{device} 的处理任务退出：{threads.first(e)!r}"[:140] + f"，{RESTART_S} s 后重来", "error")
         await anyio.sleep(RESTART_S)
+
+
+@app.exception_handler(Exception)
+async def server_error(request, exc):
+    # ServerErrorMiddleware is outside auth.Tenants, including its send wrapper.
+    return PlainTextResponse("Internal Server Error", status_code=500, headers={"Cache-Control": "no-store"})
 
 
 app.add_middleware(perf.Requests)  # inside Tenants (added after it): each request's tenant is known
