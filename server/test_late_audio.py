@@ -7,7 +7,7 @@ import anyio
 import numpy as np
 import pytest
 
-from alldayrec import audio, core, db, late, late_backfill, late_merge, late_store, monitor, routes_api, tenant
+from alldayrec import audio, core, db, late, late_backfill, late_merge, late_store, monitor, routes_api, routes_speakers, tenant
 from alldayrec.tenant import T
 from test_backlog import EnergyVad, flac, heard, tone
 
@@ -281,6 +281,8 @@ def test_bridge_moves_every_reference_and_alias_api(store):
     assert db.feedback(A)[0]["conv"] == A
     anyio.run(routes_api.todo_unmark, todo)
     assert nid not in db.closed_todos()
+    anyio.run(routes_speakers.rename, B, {"from": "S1", "to": "S2"})
+    assert "S2" not in db.conversation(A)["participants"], "both labels of an old-ID rename resolve through its alias"
 
 
 def test_merge_atomic_rollback(store, monkeypatch):

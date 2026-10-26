@@ -42,6 +42,7 @@ async def rename(conv_id: str, body: dict):
     """One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me).
     The answer's undo takes it back (POST /api/speakers/undo)."""
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
+    _, to = db.resolve_voice(conv_id, to)
     conv_id, frm = db.resolve_voice(conv_id, frm)
     me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
@@ -54,6 +55,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     transaction, and the summary is redone. Also returns up to ENROLL of its sentences to teach the diarist that voice
     for later conversations (enroll_soon: seconds of audio work per sentence, after the answer), and what it changed as
     it was before (undo_rename)."""
+    _, to = db.resolve_voice(conv_id, to)
     conv_id, frm = db.resolve_voice(conv_id, frm)
     c = find_conversation(conv_id)
     if not c:
