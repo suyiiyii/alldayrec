@@ -4,6 +4,8 @@ import datetime as dt
 import json
 import logging
 import os
+import subprocess
+import tempfile
 import time
 
 import anyio.to_thread
@@ -48,10 +50,19 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     without it lets go. The answer has the piece's seconds and the piece lengths now (`slice`, slices()): the apps'
     native uploaders take them from here, as Dart does not run in the background to ask /api/client-config."""
     audio.hold(device, hold)  # before the piece is in: the queue must not hand it out ahead of the older audio
-    body, kind = await request.body(), request.headers.get("content-type", "")
-    seconds = await anyio.to_thread.run_sync(audio.save, device, start, body, kind, n, limiter=threads.MEDIA)
-    if seconds is None:  # the app drops it on a 400 (audio.save keeps its bytes in rejected/): say so, it is lost audio
-        log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, len(body))
+    kind = request.headers.get("content-type", "")
+    try:
+        async with anyio.wrap_file(tempfile.NamedTemporaryFile()) as body:
+            async for block in request.stream():
+                await body.write(block)
+            await body.flush()
+            size = await anyio.to_thread.run_sync(lambda: os.fstat(body.wrapped.fileno()).st_size)
+            seconds = await anyio.to_thread.run_sync(audio.save_file, device, start, body.wrapped, kind, n, limiter=threads.MEDIA)
+    except (OSError, subprocess.TimeoutExpired):
+        log.exception("%s: import could not be stored", device)
+        raise HTTPException(503, "Import could not be stored; check free disk space and retry")
+    if seconds is None:
+        log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, size)
         ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端收到 400 会丢弃它；原始字节留在 recordings/rejected/", "error")
         raise HTTPException(400, "could not decode")
     T().chunks = {"device": device, "at": time.time()}

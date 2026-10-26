@@ -7,6 +7,8 @@ description: "Import recordings you already have (MP3, WAV, m4a, Plaud exports) 
 
 Pick the audio files on the web page, check their start times and upload them; the transcripts land on the timeline on the days they were recorded. To import from a script, see [Import from a script](#import-from-a-script).
 
+Long recordings can be imported directly: the server decodes and processes them in bounded blocks, so you do not need to split them first. Leave disk space for the original file and temporary decoded audio.
+
 ## What you can import
 
 | What you have | Can it be imported | How |

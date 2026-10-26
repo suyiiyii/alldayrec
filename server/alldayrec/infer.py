@@ -120,7 +120,8 @@ def fbank(x: np.ndarray, gain_db: np.ndarray | float = 0.0) -> np.ndarray:
     o = knf.FbankOptions()
     o.frame_opts.samp_freq, o.frame_opts.dither, o.frame_opts.snip_edges, o.mel_opts.num_bins = 16000, 0, True, 80
     f = knf.OnlineFbank(o)
-    f.accept_waveform(16000, x.tolist())
+    for i in range(0, len(x), 160000):
+        f.accept_waveform(16000, x[i:i + 160000].tolist())
     _, mean, istd = _vad()
     feat = np.vstack([f.get_frame(i) for i in range(f.num_frames_ready)]) + np.reshape(gain_db, (-1, 1)) * (np.log(10) / 10)
     return ((feat - mean) * istd).astype(np.float32)
@@ -128,8 +129,12 @@ def fbank(x: np.ndarray, gain_db: np.ndarray | float = 0.0) -> np.ndarray:
 
 def levels(x: np.ndarray) -> np.ndarray:
     """dBFS of each fbank frame of int16 samples (mean square over its 25 ms)."""
-    fr = np.lib.stride_tricks.sliding_window_view(x, 400)[::160].astype(np.float64)
-    return 10 * np.log10((fr * fr).mean(1) / 32768 ** 2 + 1e-12)
+    frames = np.lib.stride_tricks.sliding_window_view(x, 400)[::160]
+    out = np.empty(len(frames))
+    for i in range(0, len(frames), 1000):
+        fr = frames[i:i + 1000].astype(np.float64)
+        out[i:i + 1000] = 10 * np.log10((fr * fr).mean(1) / 32768 ** 2 + 1e-12)
+    return out
 
 
 class StreamVad:
@@ -145,8 +150,13 @@ class StreamVad:
         """dB for each frame of x (whole frames, a chunk of the stream): up to the target, from the levels of the
         LEVEL_FRAMES up to and including it. The 90th percentile is the speech when there is some, 10 % of the frames."""
         lv = np.concatenate([self.levels, levels(x)])
-        self.levels = lv[len(lv) - LEVEL_FRAMES + 1:]
-        p90 = np.partition(np.lib.stride_tricks.sliding_window_view(lv, LEVEL_FRAMES), LEVEL_FRAMES * 9 // 10, axis=1)[:, LEVEL_FRAMES * 9 // 10]
+        self.levels = lv[len(lv) - LEVEL_FRAMES + 1:].copy()
+        windows = np.lib.stride_tricks.sliding_window_view(lv, LEVEL_FRAMES)
+        # partition materializes its input: a whole hour x 1000 doubles is 2.7 GiB.
+        # Bound that scratch matrix while keeping the exact order statistic per frame.
+        p90 = np.empty(len(windows))
+        for i in range(0, len(windows), 1000):
+            p90[i:i + 1000] = np.partition(windows[i:i + 1000], LEVEL_FRAMES * 9 // 10, axis=1)[:, LEVEL_FRAMES * 9 // 10]
         return np.clip(VAD_TARGET_DB - p90, 0, VAD_GAIN_MAX_DB)
 
     def detect_chunk(self, x: np.ndarray) -> list:

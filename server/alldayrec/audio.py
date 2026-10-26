@@ -9,11 +9,13 @@ that sends a backlog of older audio while another one is recording is streamed o
 pieces may overlap (a recorder's card read again over what its phone sent live: both kept); each reader takes every
 moment once (fresh).
 """
+import contextlib
 import datetime as dt
 import io
 import logging
 import os
 import re
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -144,12 +146,12 @@ def primed(prev: bytes, body: bytes) -> bytes:
     return ogg(prev + ps[2:], ms, PREROLL * ms * 48, ps[0][9])
 
 
-def before(device: str, start_ms: int) -> bytes | None:
+def before(device: str, start_ms: int, max_bytes: int | None = None) -> bytes | None:
     """The stored Ogg piece of `device` that ends where start_ms begins (within a frame), as uploaded; None after a gap."""
     p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? ORDER BY start_ms DESC LIMIT 1", (device, start_ms)).fetchone()
     if p is None or not p["path"].endswith(".ogg") or abs(p["start_ms"] + p["seconds"] * 1000 - start_ms) >= 10:
         return None
-    return read(p)
+    return None if max_bytes is not None and p["size"] > max_bytes else read(p)
 
 
 def decode(body: bytes, aac: bool = False, n: int | None = None, prev: bytes | None = None) -> np.ndarray | None:
@@ -251,6 +253,148 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
                 held["progress"] = time.time()
                 db.put_kv(f"hold:{device}", held)
     return len(x) / SR
+
+
+BLOCK_S = 10  # long files: bounded decode/health/VAD working sets
+WHOLE_S = 300  # keep ordinary device pieces and <=5-minute imports on their existing read path
+COPY_BYTES = 1024 * 1024
+
+
+@contextlib.contextmanager
+def decoded_file(source, aac=False, n=None, prev=None):
+    """Seekable upload -> disk PCM, with the same priming and AAC trimming as decode().
+    stdout/stderr never accumulate in RAM, even for a small compressed file lasting hours.
+    """
+    with tempfile.NamedTemporaryFile() as pcm, tempfile.NamedTemporaryFile() as priming:
+        source.seek(0)
+        if prev is not None:
+            body = source.read(COPY_BYTES + 1)
+            source.seek(0)
+            if len(body) <= COPY_BYTES:
+                priming.write(primed(prev, body))
+                priming.flush()
+                source = priming
+        source.seek(0)
+        mov = source.read(8)[4:8] == b"ftyp"
+        source.seek(0)
+        args = ["ffmpeg", "-nostdin", "-v", "error", "-threads", "1", *(["-f", "mov"] if mov else []),
+                "-i", source.name, "-f", "s16le", "-ac", "1", "-ar", str(SR), "-y", pcm.name]
+        result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+        count = os.fstat(pcm.fileno()).st_size // 2
+        if result.returncode or not count:
+            yield None
+            return
+        lo = AAC_DELAY if aac and (n or count > AAC_DELAY + AAC_FRAME) else 0
+        hi = min(count, AAC_DELAY + n) if aac and n else count - AAC_FRAME // 2 if aac and lo else count
+        pcm.seek(lo * 2)
+        yield pcm, max(0, hi - lo)
+
+
+def pcm_blocks(pcm, count):
+    """Owned arrays: no view can retain the rest of a file behind a short tail."""
+    while count > 0:
+        x = np.frombuffer(pcm.read(min(count, BLOCK_S * SR) * 2), np.int16)
+        if not len(x):
+            raise OSError("decoded audio ended early")
+        count -= len(x)
+        yield x
+
+
+def file_health(pcm, count):
+    """health() in bounded blocks, carrying zero runs over block boundaries."""
+    energy = hum = full = zeros = run = 0
+    for x in pcm_blocks(pcm, count):
+        f = x.astype(np.float64)
+        energy += np.dot(f, f)
+        hum += sum((2 * np.abs(f[i:i + SR] @ HUM[:len(f[i:i + SR])]) ** 2).sum() / len(f[i:i + SR])
+                   for i in range(0, len(f), SR))
+        full += int(np.count_nonzero((x >= 32767) | (x <= -32767)))
+        if x[0] != 0:
+            zeros += run if run >= ZERO_RUN else 0
+            run = 0
+        edges = np.flatnonzero(np.diff(np.r_[0, x == 0, 0]))
+        carried, run = run, 0
+        for a, b in zip(edges[::2], edges[1::2]):
+            length = b - a + (carried if a == 0 else 0)
+            if b == len(x):
+                run = length
+            elif length >= ZERO_RUN:
+                zeros += length
+    zeros += run if run >= ZERO_RUN else 0
+    dbfs = lambda ms: round(10 * np.log10(max(ms, 1e-3) / 32768 ** 2), 1)
+    return dbfs(energy / max(count, 1)), dbfs(hum / max(count, 1)), zeros * 1000 // SR, full
+
+
+def save_file(device, start_ms, source, content_type, n=None):
+    """HTTP upload already spooled to disk; retain the original bytes and one pieces row.
+    A failed decode publishes no row, so retrying never exposes a partial import to the pipeline.
+    """
+    size = os.fstat(source.fileno()).st_size
+    kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
+                                     (device, start_ms, size)).fetchone()
+    if r := kept():
+        return r[0]
+    ext = {"audio/ogg": "ogg", "audio/webm": "webm", "audio/aac": "aac"}.get(content_type.split(";")[0], "bin")
+    prev = before(device, start_ms, COPY_BYTES) if ext == "ogg" and size <= COPY_BYTES else None
+    with decoded_file(source, ext == "aac", n, prev) as decoded:
+        if decoded is None:
+            path = T().recordings / "rejected" / re.sub(r"[^\w.-]", "_", device) / f"{start_ms}.{ext}"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            source.seek(0)
+            with path.open("wb") as out:
+                shutil.copyfileobj(source, out, COPY_BYTES)
+            return None
+        pcm, count = decoded
+        h = file_health(pcm, count)
+    path = hour_file(device, start_ms, ext)
+    with _append:
+        if r := kept():
+            return r[0]
+        dest = T().recordings / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        source.seek(0)
+        with dest.open("ab") as out:
+            pos = out.tell()
+            shutil.copyfileobj(source, out, COPY_BYTES)
+            out.flush()
+            os.fsync(out.fileno())
+        directory = os.open(dest.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        db.conn().execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          (device, start_ms, round(count / SR, 3), str(path), pos, size, n, int(time.time() * 1000), *h))
+        with _holds:
+            held = db.kv(f"hold:{device}")
+            if held and start_ms < held["at"] and not held.get("released"):
+                held["progress"] = time.time()
+                db.put_kv(f"hold:{device}", held)
+    return count / SR
+
+
+@contextlib.contextmanager
+def piece_blocks(p, end):
+    """Long stored files decoded on disk, then read at the consumer's pace (including its backpressure)."""
+    with tempfile.NamedTemporaryFile() as source:
+        with open(T().recordings / p["path"], "rb") as stored:
+            stored.seek(p["pos"])
+            left = p["size"]
+            while left:
+                data = stored.read(min(left, COPY_BYTES))
+                if not data:
+                    raise OSError("stored audio ended early")
+                source.write(data)
+                left -= len(data)
+        source.flush()
+        with decoded_file(source, p["path"].endswith(".aac"), p["n"]) as decoded:
+            if decoded is None:
+                raise ValueError("stored audio could not be decoded")
+            pcm, count = decoded
+            skip = max(0, round((end - p["start_ms"]) * SR / 1000))
+            pcm.seek(skip * 2, os.SEEK_CUR)
+            yield pcm_blocks(pcm, max(0, count - skip)), skip
 
 
 def read(p) -> bytes:
@@ -471,6 +615,22 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
             p = None  # older audio is still on its way: it goes first
         if p is None:
             await anyio.sleep(1)
+            continue
+        if p["seconds"] > WHOLE_S:
+            # Keep both decode and each read off the loop. The context owns temporary files;
+            # cancellation/close releases them even while the consumer is waiting on ASR.
+            with contextlib.ExitStack() as stack:
+                with perf.timed(spent, "decode_ms"):
+                    blocks, skip = await anyio.to_thread.run_sync(
+                        lambda: stack.enter_context(piece_blocks(p, max(end, ms, lo))), limiter=threads.MEDIA)
+                for_block = lambda: next(blocks, None)
+                while (x := await anyio.to_thread.run_sync(for_block, limiter=threads.MEDIA)) is not None:
+                    s = p["start_ms"] + skip * 1000 / SR
+                    skip += len(x)
+                    end = p["start_ms"] + skip * 1000 / SR
+                    perf.add(spent, fed_s=len(x) / SR)
+                    yield dt.datetime.fromtimestamp(s / 1000), x
+            at = p["start_ms"]
             continue
         with perf.timed(spent, "decode_ms"):
             got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
