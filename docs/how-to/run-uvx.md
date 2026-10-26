@@ -55,3 +55,5 @@ set -a && . ./.env && set +a && alldayrec
 - `ENGINE=local`（在本机跑语音识别）需要带 `local` 的版本：`uvx --env-file .env --from 'alldayrec[local]' alldayrec`，或者 `pip install 'alldayrec[local]'`。
 - 换端口：`alldayrec --port 8771`，或者在 `.env` 里设 `PORT`。
 - 升级见[如何升级与回滚](./upgrade.md)。
+
+没有公网服务器或域名时，可按 [Cloudflare Tunnel](./cloudflare-tunnel.md) 获取公网 HTTPS 地址，再连接手机或云端 Agent。

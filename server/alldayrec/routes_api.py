@@ -15,6 +15,7 @@ from alldayrec import db
 from alldayrec import live
 from alldayrec import local_asr
 from alldayrec import mcp_server
+from alldayrec import mcp_links
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec.core import conversation_rows, find_conversation, queue_summary, tag_counts
@@ -155,7 +156,7 @@ async def ask_voice(request: Request):
 
 @router.post("/mcp")
 async def mcp(request: Request):
-    """Remote MCP for the owner's agents (mcp_server.py), with the same token as every other client: stateless, JSON only."""
+    """Remote MCP, authenticated by a tenant bearer or an MCP-only connection link: stateless, JSON only."""
     if not mcp_server.origin_ok(request.headers):
         return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Origin not allowed"}}, 403)
     try:
@@ -170,6 +171,38 @@ async def mcp(request: Request):
 async def mcp_stream():
     """No server-sent stream and no sessions to end (2026-07-28)."""
     return Response(status_code=405, headers={"Allow": "POST"})
+
+
+@router.get("/api/mcp-links")
+def mcp_links_list():
+    """List this tenant's AI connection links: metadata only, never the secret or its hash."""
+    return JSONResponse(mcp_links.listing(), headers={"Cache-Control": "no-store"})
+
+
+@router.post("/api/mcp-links")
+async def mcp_links_create(request: Request):
+    """Create a revocable MCP-only credential from JSON {label}: returns its path once (201)."""
+    if not mcp_server.origin_ok(request.headers):
+        raise HTTPException(403, "Origin not allowed")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "Invalid JSON")
+    label = body.get("label") if isinstance(body, dict) else None
+    if not isinstance(label, str) or not 1 <= len(label.strip()) <= 80:
+        raise HTTPException(400, "Label must contain 1–80 characters")
+    row = await anyio.to_thread.run_sync(mcp_links.create, label.strip(), limiter=threads.DB)
+    return JSONResponse(row, status_code=201, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/api/mcp-links/{link_id}")
+def mcp_links_revoke(link_id: str, request: Request):
+    """Revoke this tenant's connection link by id (204); unknown ids return 404."""
+    if not mcp_server.origin_ok(request.headers):
+        raise HTTPException(403, "Origin not allowed")
+    if not mcp_links.revoke(link_id):
+        raise HTTPException(404, "Link not found")
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/recap")

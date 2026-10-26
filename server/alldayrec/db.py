@@ -17,6 +17,9 @@ import numpy as np
 from alldayrec import tenant
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS mcp_links (
+    id TEXT PRIMARY KEY, label TEXT NOT NULL, secret_hash TEXT NOT NULL UNIQUE,
+    prefix TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
 CREATE TABLE IF NOT EXISTS sentences (       -- final rows; a finalization pass replaces the ones starting in [from, to)
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
     source TEXT, engine TEXT, shown_at TEXT, dictation TEXT,  -- dictation: the app dictated into (history rows)

@@ -45,3 +45,5 @@ This page clones the code and runs the server directly on a machine, for when yo
 - `uv run alldayrec` is the same as `uv run python -m alldayrec`. For `ENGINE=local`, run `uv sync --extra local` instead of `uv sync`.
 - `HOST` defaults to `127.0.0.1`, so only this machine can reach the server. When the reverse proxy runs on another machine, set `HOST=0.0.0.0`.
 - When `tenants.json` has a single entry and its token is empty, the server does no authentication. Keep such a server on `127.0.0.1` only.
+
+For a home server or a setup without a domain, use [Cloudflare Tunnel](./cloudflare-tunnel.md) to get a public HTTPS address for phones or cloud agents.

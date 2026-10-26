@@ -6,7 +6,7 @@ import { useRoute } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
 import { lang, t } from "../i18n";
-import { get, type Status } from "../lib/api";
+import { get, post, type Status } from "../lib/api";
 
 // Three steps for a new user: the app, the QR, the first caption. A step is ticked when the server can tell: a
 // device appears once an app uploads (so it is installed and logged in), /api/days once a sentence is in
@@ -105,6 +105,70 @@ async function copyToken() {
 // Shown with the token hidden; 复制 always copies the real one. Folded (few need it); /connect#ai opens it (/me links there).
 // where: a key in locales/*.json
 const mcp = computed(() => `${address.value || here}/mcp`);
+type AiLink = {
+  id: string;
+  label: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+};
+const aiLinks = ref<AiLink[]>([]),
+  linkLabel = ref(""),
+  linkError = ref(""),
+  linkBusy = ref(false);
+const freshLink = ref<{ id: string; path: string } | null>(null),
+  linkCopied = ref(false);
+const freshUrl = computed(() =>
+  freshLink.value ? `${address.value || here}${freshLink.value.path}` : "",
+);
+watch(freshUrl, () => (linkCopied.value = false));
+const linkDate = (value: string) =>
+  new Date(value).toLocaleString(lang() === "zh" ? "zh-CN" : "en-US");
+onMounted(async () => {
+  try {
+    aiLinks.value = await get<AiLink[]>("/api/mcp-links");
+  } catch (e) {
+    linkError.value = (e as Error).message;
+  }
+});
+async function createLink() {
+  linkBusy.value = true;
+  linkError.value = "";
+  try {
+    const row = await post<AiLink & { path: string }>("/api/mcp-links", { label: linkLabel.value });
+    const { path, ...metadata } = row;
+    freshLink.value = { id: row.id, path };
+    linkCopied.value = false;
+    aiLinks.value.unshift(metadata);
+    linkLabel.value = "";
+  } catch (e) {
+    linkError.value = (e as Error).message;
+  } finally {
+    linkBusy.value = false;
+  }
+}
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(freshUrl.value);
+    linkCopied.value = true;
+  } catch {
+    linkError.value = t("connect.linkCopyError");
+  }
+}
+async function revokeLink(link: AiLink) {
+  if (!window.confirm(t("connect.linkConfirm", { label: link.label }))) return;
+  linkBusy.value = true;
+  linkError.value = "";
+  try {
+    await post(`/api/mcp-links/${link.id}`, undefined, "DELETE");
+    aiLinks.value = aiLinks.value.filter((x) => x.id !== link.id);
+    if (freshLink.value?.id === link.id) freshLink.value = null;
+  } catch (e) {
+    linkError.value = (e as Error).message;
+  } finally {
+    linkBusy.value = false;
+  }
+}
 const json = (server: object) => JSON.stringify({ mcpServers: { alldayrec: server } }, null, 2);
 const CLIENTS: { name: string; where: string; text: (tok: string) => string }[] = [
   {
@@ -185,14 +249,16 @@ async function copy(c: (typeof CLIENTS)[number]) {
               <input v-model="pick" type="radio" name="addr" :value="o.url" />
               <span class="what"
                 ><b>{{ o.label }}</b> <code>{{ o.url }}</code>
-                <span v-if="o.url === here && loopback" class="muted hint"
-                  >{{ t("connect.unreachable") }}</span
-                ></span
+                <span v-if="o.url === here && loopback" class="muted hint">{{
+                  t("connect.unreachable")
+                }}</span></span
               >
             </label>
             <label class="opt">
               <input v-model="pick" type="radio" name="addr" value="custom" />
-              <span class="what"><b>{{ t("connect.custom") }}</b></span>
+              <span class="what"
+                ><b>{{ t("connect.custom") }}</b></span
+              >
             </label>
             <template v-if="pick === 'custom'">
               <input
@@ -207,7 +273,12 @@ async function copy(c: (typeof CLIENTS)[number]) {
               <p v-if="custom && !address" class="bad">{{ t("connect.badUrl") }}</p>
             </template>
             <p v-if="found?.in_container" class="muted">{{ t("connect.docker") }}</p>
-            <p v-else-if="found && !found.addresses.length && !['0.0.0.0', '::'].includes(found.bind)" class="muted">
+            <p
+              v-else-if="
+                found && !found.addresses.length && !['0.0.0.0', '::'].includes(found.bind)
+              "
+              class="muted"
+            >
               {{ t("connect.bind", { bind: found.bind }) }}
             </p>
           </fieldset>
@@ -221,7 +292,8 @@ async function copy(c: (typeof CLIENTS)[number]) {
                 ><template #address
                   ><code>{{ address }}</code></template
                 ></I18nT
-              > <button v-if="token" class="inline" @click="copyToken">
+              >
+              <button v-if="token" class="inline" @click="copyToken">
                 {{ tokenCopied ? t("connect.copied") : t("connect.copyToken") }}
               </button>
             </p>
@@ -258,13 +330,61 @@ async function copy(c: (typeof CLIENTS)[number]) {
 
     <details v-if="token" id="ai" class="card ai" :open="openAi">
       <summary>
-        <Icon name="sparkles" :size="18" />{{ t("connect.ai") }}<Icon
-          class="chev"
-          name="chevron-down"
-          :size="18"
-        />
+        <Icon name="sparkles" :size="18" />{{ t("connect.ai")
+        }}<Icon class="chev" name="chevron-down" :size="18" />
       </summary>
       <p>{{ t("connect.aiWhat") }}</p>
+      <section class="links" aria-labelledby="link-title">
+        <h2 id="link-title">{{ t("connect.linkTitle") }}</h2>
+        <p class="muted">{{ t("connect.linkHow") }}</p>
+        <p>
+          <a
+            :href="`${DOCS}/${lang() === 'en' ? 'en/' : ''}how-to/cloudflare-tunnel.html`"
+            target="_blank"
+            rel="noopener"
+            >{{ t("connect.linkTunnel") }}</a
+          >
+        </p>
+        <form class="link-form" @submit.prevent="createLink">
+          <label for="link-label">{{ t("connect.linkLabel") }}</label>
+          <div class="link-controls">
+            <input
+              id="link-label"
+              v-model="linkLabel"
+              :placeholder="t('connect.linkPlaceholder')"
+              maxlength="80"
+              required
+              :disabled="linkBusy"
+            />
+            <button :disabled="linkBusy || !linkLabel.trim()">{{ t("connect.linkCreate") }}</button>
+          </div>
+        </form>
+        <div v-if="freshLink" class="fresh-link">
+          <p>{{ t("connect.linkOnce") }}</p>
+          <label for="fresh-link">{{ t("connect.linkTitle") }}</label>
+          <textarea id="fresh-link" :value="freshUrl" readonly rows="3" spellcheck="false" />
+          <button @click="copyLink">{{ t(linkCopied ? "connect.copied" : "connect.copy") }}</button>
+          <button @click="freshLink = null">{{ t("connect.linkHide") }}</button>
+        </div>
+        <p v-if="linkError" role="alert" class="link-error">{{ linkError }}</p>
+        <ul v-if="aiLinks.length" class="link-list">
+          <li v-for="link in aiLinks" :key="link.id">
+            <div class="link-meta">
+              <b>{{ link.label }}</b> <code>{{ link.prefix }}…</code>
+              <small>{{ t("connect.linkCreated", { at: linkDate(link.created_at) }) }}</small>
+              <small>{{
+                link.last_used_at
+                  ? t("connect.linkUsed", { at: linkDate(link.last_used_at) })
+                  : t("connect.linkUnused")
+              }}</small>
+            </div>
+            <button :disabled="linkBusy" @click="revokeLink(link)">
+              {{ t("connect.linkRevoke") }}
+            </button>
+          </li>
+        </ul>
+        <p class="muted">{{ t("connect.linkSafety") }}</p>
+      </section>
       <I18nT keypath="connect.aiUrl" tag="p" scope="global">
         <template #url
           ><code>{{ mcp }}</code></template
@@ -293,6 +413,72 @@ async function copy(c: (typeof CLIENTS)[number]) {
 </template>
 
 <style scoped>
+.links {
+  margin: var(--space-3) 0;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+.link-form {
+  margin: var(--space-3) 0;
+  font-size: var(--fs-sm);
+}
+.link-controls {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.link-controls input {
+  min-width: 0;
+  flex: 1;
+  width: 100%;
+  padding: var(--space-2);
+}
+.link-controls button,
+.link-list button {
+  flex: none;
+}
+.fresh-link {
+  background: var(--bg);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.fresh-link textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  margin: var(--space-2) 0;
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+.fresh-link button {
+  margin-right: var(--space-2);
+}
+.link-list {
+  list-style: none;
+  padding: 0;
+}
+.link-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+}
+.link-meta {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+}
+.link-meta small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.link-error {
+  color: var(--warn);
+}
 h1 {
   margin: var(--space-4) 0;
 }

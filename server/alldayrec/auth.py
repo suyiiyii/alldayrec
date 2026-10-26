@@ -1,9 +1,15 @@
 """Which tenant a request or a WebSocket is: its token (Bearer or the cookie)."""
+import re
+
+import anyio
 from fastapi.responses import RedirectResponse, Response
 from starlette.requests import HTTPConnection
 
 from alldayrec import core
 from alldayrec import tenant
+from alldayrec import mcp_links, threads
+
+LINK = re.compile(r"/mcp/k/([A-Za-z0-9_-]{43})", re.ASCII)
 
 
 class Tenants:
@@ -19,6 +25,28 @@ class Tenants:
         if scope["type"] not in ("http", "websocket") or scope["path"] == "/api/health":  # lifespan; health: no token
             return await self.app(scope, receive, send)
         c = HTTPConnection(scope)
+        if scope["path"].startswith("/mcp/k"):
+            # Only this exact, unencoded HTTP path can use a link. Never let a link
+            # fall through to bearer/cookie auth, redirects, files or another API.
+            match = LINK.fullmatch(scope["path"])
+            raw = scope.get("raw_path", b"").split(b"?", 1)[0]
+            t = None
+            if scope["type"] == "http" and match and raw == scope["path"].encode("ascii"):
+                t = await anyio.to_thread.run_sync(mcp_links.resolve, core.TENANTS, match[1], limiter=threads.DB)
+            if t is None:
+                if scope["type"] == "websocket":
+                    return await send({"type": "websocket.close", "code": 4404})
+                return await Response(status_code=404, headers={"Cache-Control": "no-store"})(scope, receive, send)
+            tenant.enter(t)
+            # Route and measure the canonical endpoint. Downstream errors and
+            # redirects cannot reflect a credential path, nor can metrics retain it.
+            scope = {**scope, "path": "/mcp", "raw_path": b"/mcp"}
+
+            async def private_send(message):
+                if message["type"] == "http.response.start":
+                    message = {**message, "headers": [*message.get("headers", []), (b"cache-control", b"no-store")]}
+                await send(message)
+            return await self.app(scope, receive, private_send)
         q = c.query_params.get("token")
         if scope["type"] == "http" and q and (t := tenant.by_token(core.TENANTS, q)) and t.token:
             u = c.url.remove_query_params("token")

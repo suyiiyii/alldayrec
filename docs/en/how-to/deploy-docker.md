@@ -83,3 +83,5 @@ docker compose up -d --build
 ## Where the data lives
 
 All data is in `./data`: `tenants.json`, the model files (`data/models`), and each person's database and original audio (`data/main` in the quickstart). The full layout is in [Data layout](../reference/data.md); for backups, see [Back up and restore](./backup.md).
+
+For a home server or a setup without a domain, use [Cloudflare Tunnel](./cloudflare-tunnel.md) to get a public HTTPS address for phones or cloud agents.

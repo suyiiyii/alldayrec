@@ -23,7 +23,7 @@ export default defineConfig({
   build: { outDir: "../server/alldayrec/static/dist", emptyOutDir: true },
   server: {
     proxy: {
-      "/api": { target, changeOrigin: true, headers },
+      "/api": { target, changeOrigin: true, xfwd: true, headers },
       "/ws": { target, changeOrigin: true, ws: true, headers },
     },
   },

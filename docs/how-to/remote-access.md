@@ -38,3 +38,5 @@ App 从 `apk-v1.5.1` 起能连 `http://` 地址：在 Tailscale 或局域网里�
 不要把 token 为空的服务器暴露出去：那样任何人都能读写你的数据。
 
 用 nginx 时，它默认只收 1 MB 以内的请求体（`client_max_body_size`），[导入](./import-recordings.md)较大的录音文件会被拒绝（413），需要调大。
+
+没有公网服务器或域名时，可按 [Cloudflare Tunnel](./cloudflare-tunnel.md) 获取公网 HTTPS 地址，再连接手机或云端 Agent。

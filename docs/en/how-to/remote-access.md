@@ -38,3 +38,5 @@ Since `apk-v1.5.1` the app connects to `http://` addresses: inside Tailscale or 
 Don't expose a server whose token is empty: anyone could then read and write your data.
 
 With nginx: by default it accepts request bodies of up to 1 MB only (`client_max_body_size`), so it rejects larger recording files with 413 when you [import recordings](./import-recordings.md). Raise the limit.
+
+For a home server or a setup without a domain, use [Cloudflare Tunnel](./cloudflare-tunnel.md) to get a public HTTPS address for phones or cloud agents.

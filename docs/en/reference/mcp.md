@@ -12,7 +12,7 @@ The server offers remote MCP at `POST /mcp` (Streamable HTTP, stateless, JSON re
 | Item | Value |
 |---|---|
 | Address | `<your-server>/mcp`, `POST` only; `GET` and `DELETE` return 405 |
-| Authentication | As for the other endpoints: `Authorization: Bearer <tenant token>` |
+| Authentication | `Authorization: Bearer <tenant token>`; cloud agents can use a separate `/mcp/k/<secret>` [AI connection link](../how-to/connect-mcp.md#create-an-ai-connection-link), scoped to MCP tools |
 | Protocol versions | `2026-07-28`, `2025-11-25`, `2025-06-18`, `2025-03-26`. A request whose `_meta` names its version is handled as stateless 2026-07-28 (and the value mirrored into the request headers is checked); a session that starts with `initialize` is handled as 2025, without sending `Mcp-Session-Id` |
 | Origin | Requests without `Origin` (agents) and requests from this site's own pages are accepted; requests from other web pages get 403 |
 | Server name | `alldayrec` |

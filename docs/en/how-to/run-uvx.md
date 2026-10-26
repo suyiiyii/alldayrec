@@ -55,3 +55,5 @@ set -a && . ./.env && set +a && alldayrec
 - `ENGINE=local` (speech recognition on this machine) needs the `local` extra: `uvx --env-file .env --from 'alldayrec[local]' alldayrec`, or `pip install 'alldayrec[local]'`.
 - Another port: `alldayrec --port 8771`, or `PORT` in `.env`.
 - To upgrade, see [Upgrade and roll back](./upgrade.md).
+
+For a home server or a setup without a domain, use [Cloudflare Tunnel](./cloudflare-tunnel.md) to get a public HTTPS address for phones or cloud agents.

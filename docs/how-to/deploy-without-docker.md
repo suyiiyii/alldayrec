@@ -45,3 +45,5 @@ type: how-to
 - `uv run alldayrec` 和 `uv run python -m alldayrec` 是一回事。用 `ENGINE=local` 时把 `uv sync` 换成 `uv sync --extra local`。
 - `HOST` 默认是 `127.0.0.1`，只有这台机器能访问。反向代理在另一台机器上时，设 `HOST=0.0.0.0`。
 - `tenants.json` 里只有一条、且 token 为空时，服务器不做认证。这样的服务只能放在 `127.0.0.1` 上。
+
+没有公网服务器或域名时，可按 [Cloudflare Tunnel](./cloudflare-tunnel.md) 获取公网 HTTPS 地址，再连接手机或云端 Agent。

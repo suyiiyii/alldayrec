@@ -81,7 +81,15 @@ yourself). App install (APK from the GitHub Releases, iOS built with Xcode):
 [Install and connect the phone app](en/how-to/install-app.md). Network details:
 [Reach the server from a phone](en/how-to/remote-access.md).
 
+For a home server or a setup without a domain, follow [Cloudflare Tunnel](en/how-to/cloudflare-tunnel.md).
+
 ## 5. Connect an AI agent (MCP)
+
+OpenClaw and Hermes also accept bearer headers. For Grok Bot, ChatGPT or Dots, have the user create a separate
+**AI connection link** in `/connect` and paste it into the agent's private connector URL field, selecting
+**No authentication** where offered. The link grants all MCP tools, including todo updates; it is a credential.
+Never print it. Create one per agent and revoke unused links. Reverse-proxy logs must redact credential paths.
+Client configs, plan requirements and setup: [Connect over MCP](en/how-to/connect-mcp.md).
 
 The MCP endpoint is `POST <server>/mcp` (Streamable HTTP, stateless, JSON only) with the header
 `Authorization: Bearer <token>`. Claude Code:

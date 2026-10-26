@@ -216,8 +216,21 @@ type: reference
 | 方法 | 说明 | 参数 |
 |---|---|---|
 | `GET` | No server-sent stream and no sessions to end (2026-07-28). | — |
-| `POST` | Remote MCP for the owner's agents (mcp_server.py), with the same token as every other client: stateless, JSON only. | — |
+| `POST` | Remote MCP, authenticated by a tenant bearer or an MCP-only connection link: stateless, JSON only. | — |
 | `DELETE` | No server-sent stream and no sessions to end (2026-07-28). | — |
+
+### `/api/mcp-links`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | List this tenant's AI connection links: metadata only, never the secret or its hash. | — |
+| `POST` | Create a revocable MCP-only credential from JSON {label}: returns its path once (201). | — |
+
+### `/api/mcp-links/{link_id}`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `DELETE` | Revoke this tenant's connection link by id (204); unknown ids return 404. | `link_id` (path, string) |
 
 ### `/api/recap`
 

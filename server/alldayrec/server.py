@@ -206,7 +206,8 @@ def main():
     import uvicorn
     # a page's WebSocket would hold a stop for good: 5 s, then the lifespan cancels every task (pipelines resume from
     # their finalized time on the next start)
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=args.port, log_level="warning", timeout_graceful_shutdown=5)
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=args.port, log_level="warning", access_log=False,
+                timeout_graceful_shutdown=5)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ const SECTIONS: [zh: string, en: string, pages: [string, string, string][]][] = 
       ["如何绑定录音设备", "How to bind a recorder", "how-to/bind-recorder"],
       ["如何导入已有录音", "How to import recordings you already have", "how-to/import-recordings"],
       ["如何更换语音识别引擎", "How to change the ASR engine", "how-to/change-asr-engine"],
+      ["如何用 Cloudflare Tunnel 提供公网地址", "How to publish with Cloudflare Tunnel", "how-to/cloudflare-tunnel"],
       ["如何把 AI 助手接入 MCP", "How to connect an AI agent over MCP", "how-to/connect-mcp"],
       ["如何给另一个人开账号", "How to add another person", "how-to/add-person"],
       ["如何升级与回滚", "How to upgrade and roll back", "how-to/upgrade"],

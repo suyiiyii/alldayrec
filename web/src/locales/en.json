@@ -147,7 +147,22 @@
     "warnTools": "In sessions with this connection, don't auto-approve web or shell tools: words in a recording could be taken as instructions and use those tools to send content out.",
     "warnToken": "The token can read and write all the data here. Keep it on your own computer only.",
     "hideToken": "Hide token",
-    "showToken": "Show token"
+    "showToken": "Show token",
+    "linkTitle": "AI connection links",
+    "linkHow": "Paste a link into Grok Bot, ChatGPT or Dots. First select a public HTTPS address above.",
+    "linkTunnel": "Get a public address with Cloudflare Tunnel",
+    "linkLabel": "Agent name",
+    "linkPlaceholder": "For example, Grok Bot",
+    "linkCreate": "Create link",
+    "linkOnce": "The full link is shown here once. Copy it into your agent’s connector settings.",
+    "linkHide": "Hide link",
+    "linkRevoke": "Revoke",
+    "linkConfirm": "Revoke the link for “{label}”? This agent will lose access.",
+    "linkCreated": "Created {at}",
+    "linkUsed": "Last used {at}",
+    "linkUnused": "Not used yet",
+    "linkSafety": "The link is a key: it can query conversations and update todos. Create one per agent and revoke it when finished.",
+    "linkCopyError": "Copy failed. Select and copy the link manually."
   },
   "conv": {
     "regenerating": "Regenerating the summary",

@@ -83,3 +83,5 @@ docker compose up -d --build
 ## 数据在哪
 
 所有数据都在 `./data`：`tenants.json`、模型文件（`data/models`），以及每个人的数据库和原始录音（快速开始里是 `data/main`）。完整的目录结构见[数据目录](../reference/data.md)，备份见[如何备份与恢复](./backup.md)。
+
+没有公网服务器或域名时，可按 [Cloudflare Tunnel](./cloudflare-tunnel.md) 获取公网 HTTPS 地址，再连接手机或云端 Agent。

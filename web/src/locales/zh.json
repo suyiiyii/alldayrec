@@ -147,7 +147,22 @@
     "warnTools": "用这个连接的会话里，别对联网和 Shell 工具开自动批准：录音里的话可能被当成指令，借这些工具把内容发出去。",
     "warnToken": "Token 能读写这里的全部数据，只放在自己的电脑上。",
     "hideToken": "隐藏 Token",
-    "showToken": "显示 Token"
+    "showToken": "显示 Token",
+    "linkTitle": "AI 连接网址",
+    "linkHow": "Grok Bot、ChatGPT、Dots 等云端 Agent 可直接填入此网址。先在上方选择公网 HTTPS 地址。",
+    "linkTunnel": "用 Cloudflare Tunnel 获取公网地址",
+    "linkLabel": "Agent 名称",
+    "linkPlaceholder": "例如 Grok Bot",
+    "linkCreate": "创建网址",
+    "linkOnce": "完整网址只在这里显示一次，请复制到 Agent 的连接器设置。",
+    "linkHide": "隐藏网址",
+    "linkRevoke": "作废",
+    "linkConfirm": "作废「{label}」的连接网址？这个 Agent 将无法继续访问。",
+    "linkCreated": "创建于 {at}",
+    "linkUsed": "上次使用 {at}",
+    "linkUnused": "尚未使用",
+    "linkSafety": "网址就是密钥，能查询对话和修改待办。每个 Agent 单独创建一个，不再使用时作废。",
+    "linkCopyError": "复制失败，请手动选中并复制网址。"
   },
   "conv": {
     "regenerating": "摘要重新生成中",

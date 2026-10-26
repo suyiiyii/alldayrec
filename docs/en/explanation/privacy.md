@@ -13,7 +13,7 @@ AllDayRec starts from one idea: a whole day of audio is very private data and be
 - The database `live.db`: transcripts, conversations, summaries, to-dos, speakers, voiceprints.
 - Speech detection and voiceprints: FireRedVAD and ReDimNet2 run on the local CPU, and voice features never leave the server.
 
-There is no account to sign up for; the server only accepts the tokens in `tenants.json`.
+There is no account to sign up for. Web/API access uses the tokens in `tenants.json`; MCP also accepts separately created, revocable [AI connection links](../how-to/connect-mcp.md#create-an-ai-connection-link).
 
 ## What goes out
 
@@ -27,6 +27,8 @@ There is no account to sign up for; the server only accepts the tokens in `tenan
 Each of these services has its own terms. To keep both the audio and the text on your own machines, use `ENGINE=local` and point `LLM_BASE_URL` at an OpenAI-compatible server you run yourself (vLLM, llama.cpp, Ollama); the model must handle tool calls and JSON output.
 
 Every ASR and LLM call is logged in the `calls` table with only its duration, result and usage, never the content. The MCP request log records only the method, the tool and the number of characters returned, never the arguments or the content.
+
+An AI connection secret is returned only at creation; the database keeps its hash and a short prefix. Server access logging is disabled, and performance records use `/mcp`. Reverse-proxy access logs contain the full URL: disable or redact those logs. With Cloudflare Tunnel, public TLS terminates at Cloudflare and traffic crosses its network.
 
 ## Why keep the original audio
 
