@@ -41,12 +41,15 @@ internal class BeanScanWait<T>(private val name: String, private val start: () -
     private var retryAfter = 0L
     @Volatile var retrying = false
         private set
+    private class ScanFailure(cause: Exception) : IOException(cause.message, cause)
 
     fun await(timeoutMs: Long = TimeUnit.MINUTES.toMillis(10)): T? {
         val f = CompletableFuture<T>()
         synchronized(this) { check(found == null); found = f }
         try {
-            start()
+            try { start() }
+            catch (e: InterruptedException) { throw e }
+            catch (e: Exception) { throw ScanFailure(e) }
             return f.get(timeoutMs, TimeUnit.MILLISECONDS)
         } catch (_: TimeoutException) { return null }  // registration failures may arrive without an error intent
         catch (e: ExecutionException) { throw e.cause!! }
@@ -58,7 +61,9 @@ internal class BeanScanWait<T>(private val name: String, private val start: () -
 
     @Synchronized fun deliver(beanName: String, connectable: Boolean, value: T) =
         beanName == name && connectable && now() >= retryAfter && (found?.complete(value) ?: false)
-    @Synchronized fun fail(e: Exception) { found?.completeExceptionally(e) }
+    @Synchronized fun fail(e: Exception, scanError: Boolean = true) {
+        found?.completeExceptionally(if (scanError) ScanFailure(e) else e)
+    }
 
     /** Register the next scan immediately; only its results wait out a failed attempt. Log once per streak. */
     @Synchronized fun backoff(): Boolean {
@@ -72,7 +77,11 @@ internal class BeanScanWait<T>(private val name: String, private val start: () -
         while (on()) {
             try { if (!attempt()) return }
             catch (_: InterruptedException) { return }
-            catch (e: Exception) { if (retry(e) && backoff()) log(e) }
+            catch (e: Exception) {
+                if (retry(e) && backoff()) log(e)
+                // No scan survives a registration/system error. Keep connection failures result-driven.
+                if (e is ScanFailure) try { Thread.sleep(5000) } catch (_: InterruptedException) { return }
+            }
         }
     }
 }
@@ -95,8 +104,8 @@ fun beanAdv(r: ScanResult): Pair<String, Int>? {
 /** The Feishu recorder bean the person added (prefs bleName, D3200-XXXX), over BLE: found by scanning for its service
  *  and its MAC (its address changes), connected without pairing (the bean asks for none), its notifications into
  *  BeanSync, which does the rest. One thread: scan, connect, session, then scan again as soon as the link goes.
- *  What it advertises is logged at each scan (the Feishu bound bit). A debug capture of each session's
- *  frames, keys and audio goes to <external files>/bean-capture/ while a file `on` is there (adb), for replays. */
+ *  What it advertises is logged when its flags or connectability change (the Feishu bound bit). A debug capture of
+ *  each session's frames, keys and audio goes to <external files>/bean-capture/ while a file `on` is there (adb), for replays. */
 @SuppressLint("MissingPermission")
 class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, chunks: File,
                private val sliceS: () -> Int, private val onPiece: (Int) -> Unit, private val onName: (String) -> Unit,
@@ -245,7 +254,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         val bluetooth = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) != BluetoothAdapter.STATE_ON)
-                    wait.fail(Gone())
+                    wait.fail(Gone(), scanError = false)  // the Bluetooth-off path already waits before retrying
             }
         }
         linkState = lastSeen?.let { say("away", "lastSeen" to it) } ?: say("scanning", "name" to name)

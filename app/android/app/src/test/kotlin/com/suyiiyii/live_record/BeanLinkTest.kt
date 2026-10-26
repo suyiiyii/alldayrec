@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -79,7 +80,7 @@ class BeanLinkTest {
         } finally { worker.interrupt(); worker.join(2000) }
     }
 
-    @Test fun exceptionBackoffKeepsReplacementScanRegistered() {
+    @Test fun scanErrorWaitsFiveSecondsBeforeRegisteringReplacement() {
         val now = AtomicLong(20_000)
         val registrations = LinkedBlockingQueue<Int>()
         val starts = AtomicInteger()
@@ -93,18 +94,69 @@ class BeanLinkTest {
         }.apply { start() }
         try {
             assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            val failedAt = System.nanoTime()
             scan.fail(IOException("scan failed"))
-            assertEquals(2, registrations.poll(2, TimeUnit.SECONDS))
-            assertEquals(1, stops.get())
+            assertNull(registrations.poll(1, TimeUnit.SECONDS))
             assertFalse(scan.deliver(name, true, "during backoff"))
-            now.set(24_999)
-            assertFalse(scan.deliver(name, true, "still during backoff"))
-            assertEquals(1, stops.get())
             now.set(25_001)
+            assertEquals(2, registrations.poll(5, TimeUnit.SECONDS))
+            assertTrue(System.nanoTime() - failedAt >= TimeUnit.SECONDS.toNanos(5))
+            assertEquals(1, stops.get())
             assertTrue(scan.deliver(name, true, "after backoff"))
             assertEquals("after backoff", finished.get(2, TimeUnit.SECONDS))
             assertEquals(2, stops.get())
         } finally { worker.interrupt(); worker.join(2000) }
+    }
+
+    @Test fun bluetoothOffFailureDoesNotAddScanErrorDelay() {
+        val registrations = LinkedBlockingQueue<Int>()
+        val starts = AtomicInteger()
+        val now = AtomicLong(10_000)
+        val finished = CompletableFuture<String?>()
+        val scan = BeanScanWait<String>(name, { registrations.put(starts.incrementAndGet()) }, {}, now::get)
+        val worker = Thread {
+            try {
+                scan.loop({ !finished.isDone }, { finished.complete(scan.await()); true }, { true }, {})
+            } catch (e: Throwable) { finished.completeExceptionally(e) }
+        }.apply { start() }
+        try {
+            assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            scan.fail(IOException("Bluetooth off"), scanError = false)
+            assertEquals(2, registrations.poll(1, TimeUnit.SECONDS))
+            now.set(15_000)
+            assertTrue(scan.deliver(name, true, "Bluetooth back on"))
+            assertEquals("Bluetooth back on", finished.get(2, TimeUnit.SECONDS))
+        } finally { worker.interrupt(); worker.join(2000) }
+    }
+
+    @Test fun repeatedRegistrationFailureWaitsAndStopInterruptsPromptly() {
+        val registrations = LinkedBlockingQueue<Int>()
+        val starts = AtomicInteger()
+        val stops = AtomicInteger()
+        val on = AtomicBoolean(true)
+        val finished = CompletableFuture<Unit>()
+        val scan = BeanScanWait<String>(name, {
+            registrations.put(starts.incrementAndGet())
+            throw IOException("registration failed")
+        }, { stops.incrementAndGet() })
+        val worker = Thread {
+            try {
+                scan.loop(on::get, { scan.await(); true }, { true }, {})
+                finished.complete(Unit)
+            } catch (e: Throwable) { finished.completeExceptionally(e) }
+        }.apply { start() }
+        try {
+            assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            assertNull(registrations.poll(1, TimeUnit.SECONDS))
+            assertEquals(1, starts.get())
+            assertEquals(1, stops.get())
+            on.set(false)
+            worker.interrupt()  // BeanLink.stop() sets on=false and interrupts the same loop
+            finished.get(500, TimeUnit.MILLISECONDS)
+            worker.join(500)
+            assertFalse(worker.isAlive)
+            assertEquals(1, starts.get())
+        } finally { on.set(false); worker.interrupt(); worker.join(2000) }
     }
 
     @Test fun dropRegistersBackgroundScanAndDuplicateResultsConnectOnce() {
