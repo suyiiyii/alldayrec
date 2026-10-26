@@ -263,11 +263,14 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   }
 
   /// Back with a sheet or dialog open on the page (a `<dialog>`: 问 AI, a sentence's menu, /record's 离开吗) closes it, as
-  /// back does in Chrome: its cancel event, then close. True if one was open; a page that cannot answer has none.
+  /// back does in Chrome: its cancel event, then close; also one in an embedded page (/record's captions). True if one
+  /// was open; a page that cannot answer within a second has none.
   Future<bool> _closeDialog(WebViewController c) async {
     try {
-      final r = await c.runJavaScriptReturningResult(
-          "(d=>d?(d.dispatchEvent(new Event('cancel')),d.open&&d.close(),1):0)(document.querySelector('dialog[open]'))");
+      final r = await c
+          .runJavaScriptReturningResult("(d=>d?(d.dispatchEvent(new Event('cancel')),d.open&&d.close(),1):0)"
+              "(document.querySelector('dialog[open]')||document.querySelector('iframe')?.contentDocument?.querySelector('dialog[open]'))")
+          .timeout(const Duration(seconds: 1));  // a hung page must not swallow back: the arrow is the only way out
       return r == 1 || r == '1' || r == true;
     } catch (_) {
       return false;
