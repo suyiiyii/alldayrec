@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { stripTypeScriptTypes } from "node:module";
 import { createServer } from "vite-plus";
-import { createRenderer, markRaw, nextTick } from "vue";
+import { createRenderer, h, markRaw, nextTick } from "vue";
 import { compileScript, parse } from "vue/compiler-sfc";
 import { i18n } from "./src/i18n.ts";
 import type { DeviceStatus } from "./src/lib/api.ts";
@@ -100,7 +100,8 @@ const server = await createServer({
       name: "check-client-vue",
       transform(source, id) {
         if (!id.endsWith(".vue")) return;
-        if (!id.endsWith("/pages/Progress.vue")) return "export default { render: () => null }";
+        if (!/\/pages\/(Progress|Import)\.vue$/.test(id))
+          return "export default { render: () => null }";
         const { descriptor } = parse(source, { filename: id });
         const compiled = compileScript(descriptor, { id: "progress-check", inlineTemplate: true });
         return { code: stripTypeScriptTypes(compiled.content), map: null };
@@ -110,6 +111,7 @@ const server = await createServer({
 });
 try {
   const { default: Page } = await server.ssrLoadModule("/src/pages/Progress.vue");
+  const { default: ImportPage } = await server.ssrLoadModule("/src/pages/Import.vue");
   const { i18n: pageI18n } = await server.ssrLoadModule("/src/i18n.ts");
   for (const [locale, estimate] of [
     ["zh", null],
@@ -139,6 +141,32 @@ try {
     assert.match(text(recorder), locale === "zh" ? /实时延迟/ : /Live lag/);
     assert.match(text(recorder), /8/);
     app.unmount();
+    const history = node("root");
+    Object.assign(status, {
+      imports: [
+        {
+          device: imported.device,
+          audio_start: "2026-01-01T10:00:00",
+          audio_end: "2026-01-01T10:10:00",
+        },
+      ],
+    });
+    const historyApp = renderer.createApp(ImportPage);
+    historyApp.component("RouterLink", {
+      setup:
+        (_, { slots }) =>
+        () =>
+          h("a", slots.default?.()),
+    });
+    historyApp.mount(history);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await nextTick();
+    assert.match(
+      text(history),
+      locale === "zh" ? /已转写 2 \/ 10 分钟音频/ : /Transcribed 2 \/ 10 min of audio/,
+    );
+    assert.doesNotMatch(text(history), /还剩|Transcribing, about/);
+    historyApp.unmount();
   }
 } finally {
   await server.close();
