@@ -11,6 +11,7 @@ from alldayrec.tenant import T
 LATE_SETTLE_S = float(os.environ.get("LATE_SETTLE_S", "180"))
 JOIN_MS = 2000
 MIN_LATE_MS = 500  # timestamp jitter and sub-sentence slivers are not a new ASR job
+MAX_LATE_AUDIO_MS = 30 * 60 * 1000  # each part commits independently of later timeouts
 
 
 def union(ranges):
@@ -72,6 +73,32 @@ def substantial(ranges):
     return [[a, b] for a, b in ranges if b - a >= MIN_LATE_MS]
 
 
+def parts(ranges):
+    """Bound total audio per job, preserving half-open coverage and holes at every seam."""
+    out, part, used = [], [], 0
+    for a, b in union(ranges):
+        while a < b:
+            room = MAX_LATE_AUDIO_MS - used
+            if room < MIN_LATE_MS:
+                out.append(part)
+                part, used = [], 0
+                room = MAX_LATE_AUDIO_MS
+            end = min(b, a + room)
+            # Do not create a sub-jitter tail that substantial() would later discard.
+            if 0 < b - end < MIN_LATE_MS:
+                end = b - MIN_LATE_MS
+                if end - a < MIN_LATE_MS:
+                    out.append(part)
+                    part, used = [], 0
+                    continue
+            part.append([a, end])
+            used += end - a
+            a = end
+    if part:
+        out.append(part)
+    return out
+
+
 def reset_reader(device: str, after_ms: int):
     """A restarted live reader owns audio after its final checkpoint. Invalidate in-flight late snapshots."""
     with db.tx() as t:
@@ -96,7 +123,7 @@ def enqueue(t, device: str, a: int, b: int, now_ms: int, ready: bool = False):
 
 
 def enqueue_ranges(t, device: str, ranges: list, now_ms: int, ready: bool = False, join: bool = True):
-    """Join waiting spans within 2 s. Processing/done intervals never grow beneath their processor."""
+    """Join waiting spans within 2 s, then cap their audio. Processing/done spans never grow."""
     ranges = substantial(union(ranges))
     if not ranges:
         return None
@@ -110,8 +137,10 @@ def enqueue_ranges(t, device: str, ranges: list, now_ms: int, ready: bool = Fals
     ready = ready or now_ms <= released
     if hits:
         t.executemany("DELETE FROM late_spans WHERE id = ?", [(r["id"],) for r in hits])
-    return t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready) VALUES (?,?,?,?,?,?,?)",
-                     (device, ranges[0][0], ranges[-1][1], first, now_ms, json.dumps(ranges), int(ready))).lastrowid
+    ids = [t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready) VALUES (?,?,?,?,?,?,?)",
+                     (device, p[0][0], p[-1][1], first, now_ms, json.dumps(p), int(ready))).lastrowid
+           for p in parts(ranges)]
+    return ids[0]
 
 
 def release(device: str):
@@ -136,10 +165,28 @@ def recover():
 
 def claim(now_ms: int | None = None):
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
+    query = ("SELECT * FROM late_spans WHERE status IN ('waiting','deferred') AND next_ms <= ? "
+             "AND (ready = 1 OR last_ms <= ?) ORDER BY start_ms, id")
+    args = (now_ms, now_ms - LATE_SETTLE_S * 1000)
+    # Idle polling must not reserve SQLite's writer on the event loop. Recheck inside the transaction.
+    if db.conn().execute(query, args).fetchone() is None:
+        return None
     with db.tx() as t:
-        rows = t.execute("SELECT * FROM late_spans WHERE status IN ('waiting','deferred') AND next_ms <= ? "
-                         "AND (ready = 1 OR last_ms <= ?) ORDER BY start_ms, id",
-                         (now_ms, now_ms - LATE_SETTLE_S * 1000)).fetchall()
+        # Older ledgers may already contain hours in one row. Partition before taking an ASR snapshot,
+        # retaining readiness/backoff/attempt counts so a restart never resets a retry budget.
+        for r in t.execute(query, args).fetchall():
+            ps = parts(json.loads(r["ranges"]))
+            if len(ps) <= 1:
+                continue
+            p = ps[0]
+            t.execute("UPDATE late_spans SET start_ms=?,end_ms=?,ranges=? WHERE id=?",
+                      (p[0][0], p[-1][1], json.dumps(p), r["id"]))
+            for p in ps[1:]:
+                t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready,status,tries,next_ms,note) "
+                          "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          (r["device"], p[0][0], p[-1][1], r["first_ms"], r["last_ms"], json.dumps(p),
+                           r["ready"], r["status"], r["tries"], r["next_ms"], r["note"]))
+        rows = t.execute(query, args).fetchall()
         for r in rows:
             remaining = substantial(subtract(json.loads(r["ranges"]), db.processed(r["device"], r["start_ms"], r["end_ms"])))
             if not remaining:
@@ -173,7 +220,7 @@ def failed(span, error: Exception, now_ms: int | None = None):
 
 def ready_work(device: str, now_ms: int | None = None) -> bool:
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
-    return db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND status IN ('waiting','deferred','processing') "
+    return db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND status IN ('waiting','processing') "
                              "AND (status='processing' OR ready=1 OR last_ms<=?) LIMIT 1",
                              (device, now_ms - LATE_SETTLE_S * 1000)).fetchone() is not None
 

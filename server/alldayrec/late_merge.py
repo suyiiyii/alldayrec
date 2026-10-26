@@ -258,11 +258,25 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
             kept.append(r)
         if kept:
             low, high = min(r["start"] for r in kept), max(r["end"] for r in kept)
+            # A committed part can contain less than MIN_S of speech and create no conversation.
+            # Carry those orphan late rows into the next grouping, so splitting cannot strand
+            # short sentences on either side of a seam. Existing conversation rows stay untouched.
+            new_ids = {r["id"] for r in kept}
+            orphaned = [db._sentence(r) for r in t.execute(
+                "SELECT s.* FROM sentences s WHERE s.source=? AND s.late=1 AND s.start>=? AND s.start<=? "
+                "AND NOT EXISTS (SELECT 1 FROM conversations c WHERE c.device=s.source AND c.start<=s.start AND c.end>=s.start)",
+                (device, (P(low) - dt.timedelta(seconds=MAX_S)).isoformat(),
+                 (P(high) + dt.timedelta(seconds=MAX_S)).isoformat())) if r["id"] not in new_ids]
+            grouping = [r for group in split(kept + orphaned, min_s=0)
+                        if any(r["id"] in new_ids for r in group["sentences"]) for r in group["sentences"]]
+            # Only connected orphan groups participate. Include all their neighboring conversations
+            # too, so recovering short speech cannot create a conversation across an existing one.
+            low, high = min(r["start"] for r in grouping), max(r["end"] for r in grouping)
             convs = [db._conversation(r) for r in t.execute(
                 "SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ? ORDER BY start, id",
                 (device, (P(high) + dt.timedelta(seconds=GAP_S)).isoformat(),
                  (P(low) - dt.timedelta(seconds=GAP_S)).isoformat()))]
-            for comp in components(kept, convs):
+            for comp in components(grouping, convs):
                 if not comp["rows"]:
                     continue
                 cs, rs = comp["convs"], comp["rows"]

@@ -122,13 +122,25 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
                 spans[-1].append([a, b])
             else:
                 spans.append([[a, b]])
-        grouped[device] = spans
+        grouped[device] = [part for ranges in spans for part in late_store.parts(ranges)]
     return grouped, {"skipped_null_received_days": sorted(skipped), "skipped_ambiguous_spans": ambiguous}
 
 
 def estimates(plans) -> dict:
+    # Job boundaries are commit boundaries, not conversation boundaries. Estimate a continuous
+    # stretch together, as before the cap, rather than billing one summary for every part.
+    stretches = []
+    for device, ranges, speech in plans:
+        if (stretches and stretches[-1][0] == device
+                and ranges[0][0] <= stretches[-1][1][-1][1] + late_store.JOIN_MS
+                and dt.datetime.fromtimestamp(ranges[0][0] / 1000).date()
+                == dt.datetime.fromtimestamp(stretches[-1][1][0][0] / 1000).date()):
+            stretches[-1][1].extend(ranges)
+            stretches[-1][2].extend(speech)
+        else:
+            stretches.append((device, list(ranges), list(speech)))
     targets, new_count, days = set(), 0, set()
-    for device, ranges, speech_ms in plans:
+    for device, ranges, speech_ms in stretches:
         lo, hi = ranges[0][0], ranges[-1][1]
         stamp = lambda ms: dt.datetime.fromtimestamp(ms / 1000).isoformat(timespec="milliseconds")
         rows = [{"start": stamp(a), "end": stamp(b), "speaker": "S1"} for a, b in speech_ms]
