@@ -84,7 +84,8 @@ def wearer(E: np.ndarray, ci: np.ndarray, sec: np.ndarray, tau: float = TAU, ite
 
 def candidates(vs: list[dict]) -> tuple[list[dict], int]:
     """The candidates of all voices, most likely first, and the number of conversations. vs: voices (conv, label, e,
-    speech_s, level); a candidate: members [{conv, label, speech_s}], bank (unit mean), convs, speech_s, p."""
+    speech_s, level, media); a candidate: members [{conv, label, speech_s}], bank (unit mean), convs, speech_s, p."""
+    vs = [v for v in vs if not v.get("media")]
     if not vs:
         return [], 0
     E = np.array([unit(v["e"]) for v in vs])

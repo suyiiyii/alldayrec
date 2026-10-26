@@ -21,6 +21,7 @@ from alldayrec import profiles
 from alldayrec import routes_audio
 from alldayrec import selfvoice
 from alldayrec import speakers
+from alldayrec import summary
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, queue_summary, state
@@ -99,7 +100,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
 
 ENROLL = 20
 UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not after a restart
-ME_MIN_S = 10.0  # voice cards and 「这是我」 need this much speech; a few words would let others in as 我
+ME_MIN_S = 10.0  # 「这是我」 needs this much embedded audio per click; shorter voices still have cards and suggestions
 
 
 def voice_of(conv: str, label: str) -> tuple[np.ndarray, float] | None:
@@ -273,6 +274,19 @@ def conv_start(conv_id: str) -> str:
     return f"{x[:4]}-{x[4:6]}-{x[6:8]}T{x[8:10]}:{x[10:12]}:{x[12:14]}"
 
 
+def classified_voices(convs: dict | None = None) -> list[dict]:
+    """Annotate stored voices from the current summary, regardless of which path wrote their voiceprints.
+    Nothing is rewritten or backfilled; redoing a media summary can restore eligibility without rebuilding audio."""
+    vs = db.voices()
+    convs = convs if convs is not None else {c["id"]: c for c in all_conversations()}
+    media = {}
+    for cid in {v["conv"] for v in vs}:
+        c = convs.get(cid)
+        if c and (spans := (c.get("summary") or {}).get("media_spans")):
+            media[cid] = summary.media_labels(conversation_rows(c), spans)
+    return [{**v, "media": v["label"] in media.get(v["conv"], ())} for v in vs]
+
+
 def speaker_groups() -> list[dict]:
     """Takes seconds (every conversation and voice): kept 10 min, redone after a rename or new voices."""
     _speakers = T().speakers
@@ -283,12 +297,14 @@ def speaker_groups() -> list[dict]:
     for conv, h in db.name_hints().items():
         for x in hints.shown(h, (convs.get(conv) or {}).get("summary")):
             called.setdefault(f"{conv}|{x['who']}", set()).add(hints.canon(x["name"], al))
-    vs, out = db.voices(), []
+    vs, out = classified_voices(convs), []
     for g in speakers.speakers(vs, SPEAKER_LINK, SPEAKER_SUGGEST, db.apart()):
         out.append({"id": g["id"], "name": g["name"], **describe(g["members"], convs, called),
                     "suggested": [{"id": speakers.key(s["members"][0]), "score": s["score"], **describe(s["members"], convs, called)}
                                   for s in g["suggested"]]})
-        out[-1]["minor"] = not g["name"] and (out[-1]["speech_s"] < OTHERS_MIN_S or out[-1]["count"] < OTHERS_MIN_CONVS)
+        live = [v for v in g["members"] if not v["media"]]
+        out[-1]["minor"] = not g["name"] and (sum(v.get("speech_s", 0) for v in live) < OTHERS_MIN_S
+                                               or len(live) < OTHERS_MIN_CONVS)
     order = lambda g: (g["name"] is not None, g["name"] == "我", -g["count"])  # unnamed and frequent first, 我 last
     out.sort(key=order)
     _speakers.update(at=time.time(), groups=out, vec=speakers.centered(vs))
@@ -647,8 +663,9 @@ async def voice_clip(name: str):
 
 async def voices_loop():
     """Voiceprints for the labels of closed live conversations (history ones are uploaded): up to 4 sentences of
-    >= 1.5 s per label with >= ME_MIN_S of speech, independent of its summary. A conversation without a recording
-    here is marked and not retried. Anonymous people still need OTHERS_MIN_S over OTHERS_MIN_CONVS conversations."""
+    >= 1.5 s, each capped at 15 s, independent of its summary. speech_s counts only the decoded audio embedded.
+    Short voices keep their clips and suggestions; learning 我 still needs ME_MIN_S per click. A conversation without
+    a recording here is marked and not retried. Automatic people need enough non-media speech across conversations."""
     while True:
         await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)  # warm: the page's first load would otherwise wait seconds
         await anyio.sleep(300)
@@ -667,22 +684,22 @@ async def voices_loop():
             out = []
             for label, rs in by.items():
                 dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-                if sum(map(dur, rs)) < ME_MIN_S:
-                    continue
                 long = sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True)[:4]
-                es, ls = [], []
+                es, ls, used, speech_s = [], [], [], 0.0
                 for r in long:
                     try:
                         x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
                     except HTTPException:
                         continue
                     es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
+                    used.append(r)
+                    speech_s += len(x) / 16000
                     if (lv := selfvoice.level(x)) is not None:
                         ls.append(lv)
                 if es:
                     e = np.mean(es, 0)
-                    best = min(long, key=lambda r: abs(dur(r) - 6))
-                    out.append({"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(map(dur, rs)), 1),
+                    best = min(used, key=lambda r: abs(dur(r) - 6))
+                    out.append({"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(speech_s, 1),
                                 "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
                                 "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
                                 "clip_text": best.get("text")})
@@ -706,7 +723,7 @@ async def self_round():
     st = await anyio.to_thread.run_sync(db.kv, "selfvoice", limiter=threads.DB) or {}
     if owner_npz().exists() or st.get("card"):  # the card up waits for the user; nothing else changes st meanwhile
         return
-    vs = db.voices()
+    vs = [v for v in classified_voices() if not v["media"]]
     if not vs:
         return
     now = dt.datetime.now()
@@ -765,7 +782,7 @@ async def self_answer(body: dict):
     if not card or owner_npz().exists():
         raise HTTPException(409, "[no_pending_voice] 没有待确认的声音，刷新页面再试")
     if a == "none":
-        st["wait"] = {"convs": len({v["conv"] for v in db.voices()})}
+        st["wait"] = {"convs": len({v["conv"] for v in classified_voices() if not v["media"]})}
     elif a == "later":
         st["wait"] = {"until": (now + dt.timedelta(seconds=selfvoice.LATER_S)).isoformat(timespec="seconds")}
     elif isinstance(a, int) and not isinstance(a, bool) and 0 <= a < len(card["candidates"]):
