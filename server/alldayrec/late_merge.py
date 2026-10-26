@@ -259,8 +259,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
         if kept:
             low, high = min(r["start"] for r in kept), max(r["end"] for r in kept)
             # A committed part can contain less than MIN_S of speech and create no conversation.
-            # Carry those orphan late rows into the next grouping, so splitting cannot strand
-            # short sentences on either side of a seam. Existing conversation rows stay untouched.
+            # Regroup connected short rows, but never interpret an old S1 with this part's S1 vector.
             new_ids = {r["id"] for r in kept}
             orphaned = [db._sentence(r) for r in t.execute(
                 "SELECT s.* FROM sentences s WHERE s.source=? AND s.late=1 AND s.start>=? AND s.start<=? "
@@ -269,8 +268,21 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
                  (P(high) + dt.timedelta(seconds=MAX_S)).isoformat())) if r["id"] not in new_ids]
             grouping = [r for group in split(kept + orphaned, min_s=0)
                         if any(r["id"] in new_ids for r in group["sentences"]) for r in group["sentences"]]
-            # Only connected orphan groups participate. Include all their neighboring conversations
-            # too, so recovering short speech cannot create a conversation across an existing one.
+            used = {r.get("speaker", "S?") for r in grouping} | set(vectors)
+            used.update(label for vs in existing_vectors.values() for label in vs)
+            collisions = {r.get("speaker") for r in kept} | set(vectors)
+            carried_labels = {}
+            for r in grouping:
+                label = r.get("speaker", "S?")
+                if r["id"] in new_ids or not ANON.fullmatch(label) or label not in collisions:
+                    continue
+                if label not in carried_labels:
+                    n = max([int(x[1:]) for x in used if ANON.fullmatch(x)] or [0]) + 1
+                    carried_labels[label] = f"S{n}"
+                    used.add(f"S{n}")
+                r["speaker"] = carried_labels[label]
+                t.execute("UPDATE sentences SET speaker=? WHERE id=? AND source=?", (r["speaker"], r["id"], device))
+            # Only connected orphan groups participate. Include their neighboring conversations too.
             low, high = min(r["start"] for r in grouping), max(r["end"] for r in grouping)
             convs = [db._conversation(r) for r in t.execute(
                 "SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ? ORDER BY start, id",

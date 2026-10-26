@@ -6,9 +6,9 @@ import anyio
 import numpy as np
 import pytest
 
-from alldayrec import audio, core, db, infer, late, late_backfill, late_merge, late_store
+from alldayrec import audio, core, db, infer, late, late_backfill, late_merge, late_store, transcript
 from alldayrec.tenant import T
-from test_backlog import EnergyVad, flac, heard, tone
+from test_backlog import EnergyVad, flac, tone
 from test_late_audio import A, B, D, E1, E2, conv, iso, ms, row, span, store
 
 
@@ -184,6 +184,7 @@ def test_split_transcription_reads_seam_samples_once(store, monkeypatch):
     # Scale only the cap; exercise real reading, VAD, ASR windows, final rows and attach.
     monkeypatch.setattr(late_store, "MAX_LATE_AUDIO_MS", 30_000, raising=False)
     monkeypatch.setattr(infer, "StreamVad", EnergyVad)
+    monkeypatch.setattr(transcript, "TURN_GAP_S", 0)  # retain each fake engine word as a row
     monkeypatch.setitem(core.state, "embed", lambda x: E1)
     np.savez(store / "owner-redimnet2.npz", owner=E2)
     x = np.zeros(60*audio.SR, np.int16)
@@ -191,16 +192,36 @@ def test_split_transcription_reads_seam_samples_once(store, monkeypatch):
         x[a*audio.SR:b*audio.SR] = tone(idx, b-a)
     audio.save(D, ms(0), flac(x), "audio/flac")
     span(0, 60)
-    read, exact = [], late.read_exact
+    read, lookahead, exact, choosing = [], [], late.read_exact, False
     def read_exact(device, a, b):
         y = exact(device, a, b)
-        read.append(y)
+        if choosing:
+            lookahead.append((a, b))
+        else:
+            read.append(y)
         return y
+    choose = late.quiet_seam
+    async def quiet_seam(s):
+        nonlocal choosing
+        choosing = True
+        try:
+            return await choose(s)
+        finally:
+            choosing = False
     async def engine(x, speech, **kw):
-        return [{**g, "engine": "test"} for g in heard(x)]
+        # Read amplitude changes as words too: adjacent tones 2 and 3 are one VAD utterance,
+        # and a quiet seam must no longer depend on the old hard cut to distinguish them.
+        frames = np.abs(x[:len(x) // 160 * 160].astype(np.int32)).reshape(-1, 160)
+        words = np.rint((np.median(frames, axis=1) - 1000) / 50).astype(int)
+        words[frames.mean(axis=1) < 500] = 0
+        edges = np.r_[0, np.flatnonzero(np.diff(words)) + 1, len(words)]
+        return [{"start_ms": int(a) * 10, "end_ms": int(b) * 10, "speaker": "SPEAKER_0",
+                 "text": str(words[a]), "engine": "test"}
+                for a,b in zip(edges, edges[1:]) if words[a] > 0]
     async def vectors(s):
         return {c["id"]: {"S1": E1} for c in db.conversations()}
     monkeypatch.setattr(late, "read_exact", read_exact)
+    monkeypatch.setattr(late, "quiet_seam", quiet_seam)
     monkeypatch.setattr(late.asr, "engine_segs", engine)
     monkeypatch.setattr(late, "conversation_vectors", vectors)
     async def run():
@@ -208,8 +229,11 @@ def test_split_transcription_reads_seam_samples_once(store, monkeypatch):
             await late.process(s)
     anyio.run(run)
     assert np.array_equal(np.concatenate(read), x)
+    assert lookahead and all(0 < b-a <= 60_000 for a,b in lookahead)
+    assert len({b for _, b in lookahead}) == len(lookahead)
     rs = late_rows()
     assert [r["text"] for r in rs] == ["1", "2", "3", "4"]
     assert len({r["id"] for r in rs}) == 4
     assert all(a["end"] <= b["start"] for a,b in zip(rs, rs[1:]))
     assert len(db.conversations()) == 1
+    assert late_store.union(db.processed(D, ms(0), ms(60))) == [[ms(0), ms(60)]]

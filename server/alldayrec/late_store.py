@@ -163,13 +163,28 @@ def recover():
                       "WHERE status = 'processing'")
 
 
+def final_passed(span):
+    final = db.kv(f"finalized_to:{span['device']}")
+    final_ms = dt.datetime.fromisoformat(final).timestamp() * 1000 if final else -1
+    read_end = db.kv(f"read_end:{span['device']}")
+    return final_ms >= span["end_ms"] or (read_end is not None and final_ms >= read_end)
+
+
+def claim_changes(r):
+    ranges = json.loads(r["ranges"])
+    remaining = substantial(subtract(ranges, db.processed(r["device"], r["start_ms"], r["end_ms"])))
+    if remaining != ranges or not remaining or len(parts(ranges)) > 1:
+        return True  # cleanup/splitting is useful even before the final reader catches up
+    return final_passed(r) and (not blocked(r) or r["status"] != "deferred")
+
+
 def claim(now_ms: int | None = None):
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
     query = ("SELECT * FROM late_spans WHERE status IN ('waiting','deferred') AND next_ms <= ? "
              "AND (ready = 1 OR last_ms <= ?) ORDER BY start_ms, id")
     args = (now_ms, now_ms - LATE_SETTLE_S * 1000)
     # Idle polling must not reserve SQLite's writer on the event loop. Recheck inside the transaction.
-    if db.conn().execute(query, args).fetchone() is None:
+    if not any(claim_changes(r) for r in db.conn().execute(query, args).fetchall()):
         return None
     with db.tx() as t:
         # Older ledgers may already contain hours in one row. Partition before taking an ASR snapshot,
@@ -196,18 +211,47 @@ def claim(now_ms: int | None = None):
                 t.execute("UPDATE late_spans SET ranges=?,start_ms=?,end_ms=? WHERE id=?",
                           (json.dumps(remaining), remaining[0][0], remaining[-1][1], r["id"]))
                 r = t.execute("SELECT * FROM late_spans WHERE id=?", (r["id"],)).fetchone()
-            final = db.kv(f"finalized_to:{r['device']}")
             # The live reader can be ahead of its committing final pass. Wait until that writer
             # has passed the whole span, otherwise replace_sentences could erase the inserted late rows.
-            final_ms = dt.datetime.fromisoformat(final).timestamp() * 1000 if final else -1
-            read_end = db.kv(f"read_end:{r['device']}")
-            if final_ms < r["end_ms"] and (read_end is None or final_ms < read_end):
+            if not final_passed(r):
                 continue
             if blocked(r):
-                t.execute("UPDATE late_spans SET status = 'deferred' WHERE id = ?", (r["id"],))
+                if r["status"] != "deferred":
+                    t.execute("UPDATE late_spans SET status = 'deferred' WHERE id = ?", (r["id"],))
                 continue
             t.execute("UPDATE late_spans SET status = 'processing', tries = tries + 1, note = NULL WHERE id = ?", (r["id"],))
             return dict(t.execute("SELECT * FROM late_spans WHERE id = ?", (r["id"],)).fetchone())
+
+
+def move_seam(span, cut):
+    """Return the untranscribed suffix to the next job, atomically and without resetting retries."""
+    with db.tx() as t:
+        current = t.execute("SELECT * FROM late_spans WHERE id=?", (span["id"],)).fetchone()
+        if not current or any(current[k] != span[k] for k in ("status", "tries", "ranges")):
+            return False  # a reader restart invalidated the lookahead snapshot
+        ranges = json.loads(span["ranges"])
+        tail = [[cut, ranges[-1][1]]]
+        ranges[-1][1] = cut
+        following = t.execute("SELECT * FROM late_spans WHERE device=? AND start_ms=? "
+                              "AND status IN ('waiting','deferred') ORDER BY id LIMIT 1",
+                              (span["device"], span["end_ms"])).fetchone()
+        # The current claim has not sent this suffix to ASR. Its prior attempts still count.
+        meta = dict(following or span)
+        meta["tries"] = max(meta["tries"] if following else 0, span["tries"] - 1)
+        if following:
+            tail += json.loads(following["ranges"])
+            meta.update(first_ms=min(meta["first_ms"], span["first_ms"]),
+                        last_ms=max(meta["last_ms"], span["last_ms"]))
+            t.execute("DELETE FROM late_spans WHERE id=?", (following["id"],))
+        for p in parts(tail):
+            t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready,status,tries,next_ms,note) "
+                      "VALUES (?,?,?,?,?,?,?,'waiting',?,?,?)",
+                      (span["device"], p[0][0], p[-1][1], meta["first_ms"], meta["last_ms"], json.dumps(p),
+                       meta["ready"], meta["tries"], meta["next_ms"], meta["note"]))
+        encoded = json.dumps(ranges)
+        t.execute("UPDATE late_spans SET end_ms=?,ranges=? WHERE id=?", (cut, encoded, span["id"]))
+        span.update(end_ms=cut, ranges=encoded)
+    return True
 
 
 def failed(span, error: Exception, now_ms: int | None = None):

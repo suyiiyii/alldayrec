@@ -13,7 +13,7 @@ from alldayrec import asr, audio, db, late_merge, late_store, threads, ws
 from alldayrec.conversations import GAP_S
 from alldayrec.core import conversation_rows, iso, owner_npz, state
 from alldayrec.diarist import Diarist, relabel
-from alldayrec.segmenter import CHUNK_S, SR, Segmenter, next_cut, speech_in
+from alldayrec.segmenter import CHUNK_S, CUT_SEARCH_S, SR, Segmenter, next_cut, speech_in
 from alldayrec.tenant import T
 from alldayrec.transcript import final_rows, label_sentences
 
@@ -40,6 +40,8 @@ def read_exact(device: str, a: int, b: int) -> np.ndarray:
 
 
 async def transcribe(span: dict) -> tuple[list[dict], dict]:
+    if not await quiet_seam(span):
+        return [], {}  # the final reader invalidated this claim during lookahead
     vp = owner_npz()
     with np.load(vp) if vp.exists() else nullcontext({}) as bank:
         owner = dict(bank)
@@ -108,6 +110,37 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
         return rows, {k: late_merge.unit(np.mean(es, 0)) for k, es in embeddings.items()}
     finally:
         T().dias.remove(dia)
+
+
+async def quiet_seam(span):
+    """A bounded VAD-only lookahead; ASR still hears each sample in exactly one job."""
+    ranges = json.loads(span["ranges"])
+    # A shorter/retried part already has its seam. At a real recording end, force-flush as usual.
+    if sum(b - a for a, b in ranges) < late_store.MAX_LATE_AUDIO_MS - late_store.MIN_LATE_MS:
+        return True
+    if not db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND start_ms=? "
+                             "AND status IN ('waiting','deferred') LIMIT 1",
+                             (span["device"], span["end_ms"])).fetchone():
+        return True
+    a, b = ranges[-1]
+    a = max(a, b - round(CUT_SEARCH_S * 1000))
+    if b - a < 2 * late_store.MIN_LATE_MS:
+        return True
+    x = await anyio.to_thread.run_sync(read_exact, span["device"], a, b, limiter=threads.MEDIA)
+    seg = Segmenter()
+    await seg.apush(dt.datetime.fromtimestamp(a / 1000), x)
+    # A VAD max-utterance split ends at a frame's start and resumes at the next frame.
+    # Include that last 10 ms frame: its bookkeeping gap is not an acoustic silence.
+    speech = [[max(a, a + round(lo * 1000)), min(b, a + round(hi * 1000) + 10)]
+              for lo, hi in speech_in(seg, 0, len(x))]
+    pauses = late_store.subtract([[a, b]], speech)
+    # Keep the cut on the VAD's 10 ms frame grid, including when its midpoint is at 5 ms.
+    pauses = [(hi - lo, (lo + hi) // 20 * 10) for lo, hi in pauses if hi > lo]
+    pauses = [(width, cut) for width, cut in pauses
+              if ranges[-1][0] + late_store.MIN_LATE_MS <= cut <= b - late_store.MIN_LATE_MS]
+    if not pauses:
+        return True  # no VAD silence: the hard cap remains the bounded fallback
+    return late_store.move_seam(span, max(pauses)[1])
 
 
 async def conversation_vectors(span: dict) -> dict:
