@@ -1,7 +1,7 @@
 name: server
 on:
   pull_request:  # only on PRs: main gets what a green PR ran
-    paths: ['server/**', 'web/src/pages/Connect.vue', 'web/src/lib/api.ts', '.github/workflows/server.yml']
+    paths: ['server/**', 'README.md', 'web/src/pages/Connect.vue', 'web/src/lib/api.ts', '.github/scripts/test_pypi_readme.py', '.github/workflows/server.yml', '.github/workflows/pypi.yml']
 
 concurrency:  # a new push to a PR cancels its run still going
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -50,4 +50,6 @@ jobs:
       - run: pipx install uv
       - run: |  # --no-build: every dependency from a wheel, nothing compiled
           uv build
+          uvx twine check dist/*
+          uv run --no-project --with hatchling python ../.github/scripts/test_pypi_readme.py
           uv run --isolated --no-project --no-build --python ${{ matrix.python }} --with dist/alldayrec-*.whl alldayrec --help

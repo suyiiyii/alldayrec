@@ -2,6 +2,7 @@
 name = "alldayrec"
 version = "0.3.0"
 description = "AllDayRec: a self-hosted all-day recorder and private second brain."
+dynamic = ["readme"]  # hatch_build.py renders the repository README for PyPI
 requires-python = ">=3.11,<3.15"  # onnxruntime has no 3.15 wheel yet
 license = "MIT"
 dependencies = [
@@ -34,6 +35,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build]
 artifacts = ["alldayrec/static/dist/"]  # the web app, built into it before uv build (gitignored, so named here)
+
+[tool.hatch.metadata.hooks.custom]
+
+[tool.hatch.build.hooks.custom]
 
 [dependency-groups]
 export = ["torch==2.14.1", "torchaudio==2.11.0", "onnx==1.22.0"]  # export_onnx.py only: the server runs the models on onnxruntime

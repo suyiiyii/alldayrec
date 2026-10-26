@@ -100,6 +100,18 @@ ESP32 二进制包含认证 key，正式固件只能在受信任的私有仓库�
 - 每组产物包含源码提交、版本、型号、工具链和 SHA256。正式 APK 更新时仍需递增 `app/pubspec.yaml` 中 `+` 后的 build number。
 - 构建成功只证明编译和打包；USB/蓝牙刷写、录音、SD 卡及硬件行为仍须在实物上验收。生产发布仍按现有 APK 和固件发布流程明确执行。
 
+## Building the PyPI package locally
+
+Run `cd server && uv build`. Hatch's `hatch_build.py` reads the current root
+`README.md` automatically and uses it as the Markdown long description in both
+distributions. It converts relative links to GitHub blob URLs, images to raw
+URLs, and HTML `<picture>` elements to their default (light) `<img>` fallback
+for PyPI's renderer. The repository README stays unchanged, including its
+language switch. The sdist includes the README snapshot and hook, so `uv build`
+also works in an extracted sdist without the repository. No copy step is needed.
+Check the artifacts with `uvx twine check dist/*` from `server/`. The release
+workflow runs the same build and validation before trusted publishing.
+
 ## Commit messages
 
 Keep the existing form `[type][Area] subject`, in English, imperative, subject at most 72 characters; details go in the body.

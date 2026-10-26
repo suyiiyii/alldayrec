@@ -27,6 +27,8 @@ jobs:
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv build
         working-directory: server
+      - run: uvx twine check dist/*  # reject an invalid PyPI description before uploading
+        working-directory: server
       - run: |  # the pages and COMMIT in the wheel, or fail
           files=$(unzip -l dist/alldayrec-*.whl)
           grep -q 'alldayrec/static/dist/index\.html$' <<< "$files" && grep -q 'alldayrec/COMMIT$' <<< "$files"
