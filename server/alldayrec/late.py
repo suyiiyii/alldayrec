@@ -2,6 +2,7 @@
 import datetime as dt
 import json
 import logging
+import os
 import re
 from contextlib import nullcontext
 
@@ -17,6 +18,7 @@ from alldayrec.tenant import T
 from alldayrec.transcript import final_rows, label_sentences
 
 log = logging.getLogger("live")
+LATE_PROCESS_TIMEOUT_S = float(os.environ.get("LATE_PROCESS_TIMEOUT_S", "1800"))
 
 
 def read_exact(device: str, a: int, b: int) -> np.ndarray:
@@ -142,8 +144,6 @@ async def process(span: dict):
     rows, vectors = await transcribe(span)
     existing = await conversation_vectors(span) if rows else {}
     changed, removed = late_merge.attach(span, rows, vectors, existing)
-    for c in changed:
-        T().summaries[0].send_nowait(c)
     # One range update replaces drafts and refreshes an open transcript with existing edited rows included.
     if changed:
         lo = min(c["start"] for c in changed)
@@ -161,10 +161,13 @@ async def processor():
     while True:
         span = late_store.claim()
         if not span:
+            late_store.queue_summaries()
             await anyio.sleep(2)
             continue
         try:
-            await process(span)
+            with anyio.fail_after(LATE_PROCESS_TIMEOUT_S):
+                await process(span)
         except Exception as e:
             late_store.failed(span, e)
             log.warning("late span %s: %s", span["id"], type(e).__name__)
+        late_store.queue_summaries()

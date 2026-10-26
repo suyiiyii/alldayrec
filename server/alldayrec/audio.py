@@ -466,11 +466,13 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     device's queue (read_to, queued). spent: the ms its pieces took to decode (decode_ms) and the seconds it handed out
     (fed_s) added to it (perf.piece)."""
     ms = int(after.timestamp() * 1000) if after else 0
+    if edge_s is None:
+        late_store.reset_reader(device, ms)
     p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1",
                           (device, ms)).fetchone() if after else None  # None: from 0 all the same, and pieces_end would sort every piece
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
     # audio after `after` still on its way (a pipeline started mid catch-up took 3 such pieces as late)
-    at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, 0.0
+    at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, float(ms)
     while True:
         if edge_s is None:
             T().read_to[device] = at  # the reader came back for more, so the piece it had is done
@@ -480,11 +482,16 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         # the edge reader by the end (pieces_end: its last edge_s); by start (pieces_device), an idle device's reader
         # (at 0: nothing handed out yet) walked all its pieces each second
         h = held(device) if edge_s is None else None
+        query = (f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
+                 "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1")
+        p = db.conn().execute(query, (device, at, lo)).fetchone()
+        if p is None or h is not None and p["start_ms"] >= h:
+            await anyio.sleep(1)
+            continue  # idle readers never take a write lock
         # Save's late predicate and selection's cursor advance are serialized by SQLite. An upload
         # cannot slip between the SELECT and advancing the reader and disappear behind it unregistered.
         with db.tx() if edge_s is None else nullcontext(db.conn()) as t:
-            p = t.execute(f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
-                          "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, at, lo)).fetchone()
+            p = t.execute(query, (device, at, lo)).fetchone()
             if p is not None and h is not None and p["start_ms"] >= h:
                 p = None
             if p is not None and edge_s is None:
@@ -499,8 +506,12 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         if got is not None:
             s, x = got
             end = s + len(x) * 1000 / SR
-            perf.add(spent, fed_s=len(x) / SR)
-            yield dt.datetime.fromtimestamp(s / 1000), x
+            ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
+            for a, b in ranges:
+                y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
+                if len(y):
+                    perf.add(spent, fed_s=len(y) / SR)
+                    yield dt.datetime.fromtimestamp(a / 1000), y
 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> bytes | None:

@@ -9,6 +9,7 @@ import anyio
 from alldayrec import db
 from alldayrec import hints
 from alldayrec import live
+from alldayrec import late_store
 from alldayrec import recap
 from alldayrec import speakers
 from alldayrec import summary
@@ -28,7 +29,7 @@ async def summary_worker():
     prompt does not redo old summaries: the owner redoes one from its page (POST /api/conversation/{id}/summarize)."""
     for c in reversed(all_conversations()):
         s = c["summary"]
-        if not s or s["status"] == "pending":
+        if (not s or s["status"] == "pending") and not db.kv(f"late_summary:{c['id']}"):
             queue_summary(c)
     async with anyio.create_task_group() as tg:
         for _ in range(SUMMARY_WORKERS):
@@ -48,50 +49,62 @@ async def summarize(c: dict, tags: list[str]) -> dict:
 async def summarize_loop():
     while True:
         c = await T().summaries[1].receive()
-        # A late merge may remove a queued conversation or grow one during a model call.
-        if db.resolve_conversation(c["id"]) != c["id"]:
-            continue
-        c = {**c, **(db.conversation(c["id"]) or {})}
-        revision = db.kv(f"conversation_revision:{c['id']}")
-        for delay in (10, 60, 300, None):
-            try:
-                res = await summarize(c, list(tag_counts())[:60])
-                break
-            except Exception as e:  # HTTP errors, timeouts, a reply that is not JSON
-                log.warning("summary %s failed: %r", c["id"], e)
-                if delay == 300:
-                    c.pop("via_live", None)  # the last try takes the plain summary
-                res = {"conversation": c["id"], "status": "failed", "error": repr(e)[:300]}
-                if delay:
-                    await anyio.sleep(delay)
-        if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
-            continue
-        old = db.summary(c["id"])
-        media = summary.media_labels(conversation_rows(c), res.get("media_spans") or [])
-        if res["status"] == "failed" and old and (old["status"] == "done" or old.get("title") or old.get("todos")):
-            db.put_summary({**old, "status": "done", "error": f"[resummarize_failed] {res['error']}"[:300]})
-            ws.note(f"对话 {c['start'][11:19]} 的摘要重新生成失败，保留原来的：{res['error']}", "error")
-            continue
-        with db.tx() as t:
-            if res["status"] == "done":
-                res["todos"] = db.preserve_todos(c["id"], (old or {}).get("todos") or [], res.get("todos") or [], t)
-            db.put_summary(res, t)
-            if media:  # a redone summary found media: its voices leave the voiceprint bank
-                t.executemany("DELETE FROM voices WHERE conv = ? AND label = ?", [(c["id"], m) for m in media])
-        if media:
-            T().speakers["at"] = 0.0
-        ws.note(f"对话 {c['start'][11:19]} 的摘要" + (f"：{res['title']}" if res["status"] == "done" else f"生成失败：{res['error']}"),
-             "state" if res["status"] == "done" else "error")
-        await ws.broadcast({"type": "summary", **res})
-        if res["status"] == "done" and res.get("model") and not db.name_hints(c["id"]):
-            await name_hints(c, media)
-        if res["status"] == "done":  # a profile kept up to date once it exists
-            for p in c.get("participants") or []:
-                if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
-                    try:
-                        await make_profile(p)
-                    except Exception as e:
-                        log.warning("profile %s failed: %r", p, e)
+        try:
+            # A late merge may remove a queued conversation or grow one during a model call.
+            if db.resolve_conversation(c["id"]) != c["id"]:
+                continue
+            c = {**c, **(db.conversation(c["id"]) or {})}
+            revision = db.kv(f"conversation_revision:{c['id']}")
+            if c.get("_late") and c.get("_revision") != revision:
+                continue
+            if db.kv(f"late_summary:{c['id']}") and (not c.get("_late") or late_store.ready_work(c.get("device"))):
+                continue
+            for delay in (10, 60, 300, None):
+                try:
+                    res = await summarize(c, list(tag_counts())[:60])
+                    break
+                except Exception as e:  # HTTP errors, timeouts, a reply that is not JSON
+                    log.warning("summary %s failed: %r", c["id"], e)
+                    if delay == 300:
+                        c.pop("via_live", None)  # the last try takes the plain summary
+                    res = {"conversation": c["id"], "status": "failed", "error": repr(e)[:300]}
+                    if delay:
+                        await anyio.sleep(delay)
+            if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
+                continue
+            old = db.summary(c["id"])
+            media = summary.media_labels(conversation_rows(c), res.get("media_spans") or [])
+            if res["status"] == "failed" and old and (old["status"] == "done" or old.get("title") or old.get("todos")):
+                with db.tx() as t:
+                    db.put_summary({**old, "status": "done", "error": f"[resummarize_failed] {res['error']}"[:300]}, t)
+                    late_store.summary_done(c["id"], t)
+                ws.note(f"对话 {c['start'][11:19]} 的摘要重新生成失败，保留原来的：{res['error']}", "error")
+                continue
+            with db.tx() as t:
+                if res["status"] == "done":
+                    res["todos"] = db.preserve_todos(c["id"], (old or {}).get("todos") or [], res.get("todos") or [], t)
+                db.put_summary(res, t)
+                late_store.summary_done(c["id"], t)
+                if media:  # a redone summary found media: its voices leave the voiceprint bank
+                    t.executemany("DELETE FROM voices WHERE conv = ? AND label = ?", [(c["id"], m) for m in media])
+            if media:
+                T().speakers["at"] = 0.0
+            ws.note(f"对话 {c['start'][11:19]} 的摘要" + (f"：{res['title']}" if res["status"] == "done" else f"生成失败：{res['error']}"),
+                 "state" if res["status"] == "done" else "error")
+            await ws.broadcast({"type": "summary", **res})
+            if res["status"] == "done" and res.get("model") and not db.name_hints(c["id"]):
+                await name_hints(c, media)
+            if res["status"] == "done":  # a profile kept up to date once it exists
+                for p in c.get("participants") or []:
+                    if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
+                        try:
+                            await make_profile(p)
+                        except Exception as e:
+                            log.warning("profile %s failed: %r", p, e)
+
+        finally:
+            if c.get("_late"):
+                T().late_queued.discard(c["id"])
 
 
 async def name_hints(c: dict, media: set[str]):
@@ -127,24 +140,46 @@ async def write_recap(day: str) -> dict | None:
     return r
 
 
+RECAP_RETRY_DELAYS = (60, 300, 1800)
+
+
+async def refresh_stale_recaps(now: dt.datetime | None = None):
+    """Three persisted attempts per changed input generation; keep the old recap after exhaustion."""
+    now_s = (now or dt.datetime.now()).timestamp()
+    for key, body in db.conn().execute("SELECT key,value FROM kv WHERE key LIKE 'recap:%'").fetchall():
+        if not body or not json.loads(body).get("stale"):
+            continue
+        day = key.split(":", 1)[1]
+        revision = db.kv(f"recap_revision:{day}") or 0
+        retry = db.kv(f"recap_retry:{day}") or {}
+        if retry.get("revision") != revision:
+            retry = {"revision": revision, "tries": 0, "next": 0}
+        if retry["tries"] >= len(RECAP_RETRY_DELAYS) or now_s < retry["next"]:
+            continue
+        if any((c["summary"] or {}).get("status") != "done" or (c["summary"] or {}).get("error")
+               for c in db.conversations(day, recap._next(day))):
+            continue
+        try:
+            result = await write_recap(day)
+            if not result or result.get("stale"):
+                raise RuntimeError("recap input changed")
+        except Exception as e:
+            tries = retry["tries"] + 1
+            db.put_kv(f"recap_retry:{day}", {"revision": revision, "tries": tries,
+                      "next": now_s + RECAP_RETRY_DELAYS[tries - 1], "error": type(e).__name__})
+            if tries == len(RECAP_RETRY_DELAYS):
+                log.warning("stale recap %s: stopped after %d attempts (%s)", day, tries, type(e).__name__)
+        else:
+            db.put_kv(f"recap_retry:{day}", None)
+
+
 async def recap_loop():
     """Yesterday's recap at RECAP_AT, or at the start once that has passed and it is missing (a day without summaries
     gets none); a failed one is tried again in an hour."""
     at = dt.time.fromisoformat(RECAP_AT)
     while True:
         now = dt.datetime.now()
-        # Late audio can change any historical day. Keep the cached recap until all its summaries are ready.
-        for key, body in db.conn().execute("SELECT key, value FROM kv WHERE key LIKE 'recap:%'").fetchall():
-            if not body or not json.loads(body).get("stale"):
-                continue
-            d = key.split(":", 1)[1]
-            if any((c["summary"] or {}).get("status") != "done" or (c["summary"] or {}).get("error")
-                   for c in db.conversations(d, recap._next(d))):
-                continue
-            try:
-                await write_recap(d)
-            except Exception as e:
-                log.warning("stale recap %s: %s", d, type(e).__name__)
+        await refresh_stale_recaps(now)
         day = (now.date() - dt.timedelta(days=1)).isoformat()
         if now.time() >= at and db.kv(f"recap:{day}") is None:
             try:

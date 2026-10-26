@@ -72,6 +72,7 @@ def test_ledger_subtracts_all_prior_coverage_and_preserves_holes(store):
     for start, sec in [(10, 10), (30, 10), (15, 2)]:
         db.conn().execute("INSERT INTO pieces (device,start_ms,seconds,path,received_ms) VALUES (?,?,?,?,?)", (D, ms(start), sec, "x", 1))
     db.put_kv(f"read_to:{D}", ms(90))
+    T().read_to[D] = ms(90)
     with db.tx() as t:
         late_store.record(t, D, ms(0), ms(50), 100)
     assert [json.loads(r[0]) for r in db.conn().execute("SELECT ranges FROM late_spans ORDER BY start_ms")] == [
@@ -86,6 +87,7 @@ def test_upload_note_uses_save_snapshot_when_reader_advances_during_await(store,
     def advancing(*args):
         result = save(*args)
         db.put_kv(f"read_to:{D}", ms(100))
+        T().read_to[D] = ms(100)
         return result
     monkeypatch.setattr(audio, "save", advancing)
     class Upload:
@@ -237,7 +239,7 @@ def test_inflight_old_summary_cannot_overwrite_merged_transcript(store, monkeypa
             await started.wait()
             s = span(60, 80)
             cs, _ = late_merge.attach(s, [row(60, 80)], {"S1": E1}, {A: {"S1": E1}})
-            T().summaries[0].send_nowait(cs[0])
+            late_store.queue_summaries()
             finish.set()
             with anyio.fail_after(5):
                 while (db.summary(A) or {}).get("status") != "done":
@@ -359,7 +361,8 @@ def test_backfill_hand_built_history_dry_run_and_idempotence(store, monkeypatch)
         audio.save(D, base+offset*1000, flac(tone(1, 10)), "audio/flac")
         db.conn().execute("UPDATE pieces SET received_ms=? WHERE start_ms=?", (received, base+offset*1000))
     p = {"layer": "final", "device": D, "from": core.iso(dt.datetime.fromtimestamp(base/1000)),
-         "to": core.iso(dt.datetime.fromtimestamp(base/1000)+dt.timedelta(seconds=60))}
+         "to": core.iso(dt.datetime.fromtimestamp(base/1000)+dt.timedelta(seconds=60)),
+         "at": dt.datetime.fromtimestamp(0.15).isoformat()}
     (store/f"{day}.passes.jsonl").write_text(json.dumps(p)+"\n")
     before = db.conn().total_changes
     found = anyio.run(late_backfill.scan, 30, True)

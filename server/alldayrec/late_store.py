@@ -10,6 +10,7 @@ from alldayrec.tenant import T
 
 LATE_SETTLE_S = float(os.environ.get("LATE_SETTLE_S", "180"))
 JOIN_MS = 2000
+MIN_LATE_MS = 500  # timestamp jitter and sub-sentence slivers are not a new ASR job
 
 
 def union(ranges):
@@ -46,7 +47,8 @@ def subtract(ranges, covered):
 
 def is_late(device: str, start_ms: int) -> bool:
     # The in-flight piece counts too: uploads can arrive while its samples are being fed.
-    cursor = max(T().read_to.get(device, -1), db.kv(f"read_to:{device}") or -1)
+    # Persisted read-ahead belongs to the previous reader until this process starts a new one.
+    cursor = max(T().read_to[device], db.kv(f"read_to:{device}") or -1) if device in T().read_to else -1
     final = db.kv(f"finalized_to:{device}")
     return start_ms <= cursor or bool(final and start_ms < dt.datetime.fromisoformat(final).timestamp() * 1000)
 
@@ -60,25 +62,56 @@ def record(t, device: str, start_ms: int, end_ms: int, now_ms: int):
     covered = [(r[0], round(r[0] + r[1] * 1000)) for r in t.execute(
         "SELECT start_ms, seconds FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ?",
         (device, end_ms, start_ms))]
-    ranges = subtract([[start_ms, end_ms]], covered)
+    ranges = substantial(subtract([[start_ms, end_ms]], covered))
     for a, b in ranges:
         enqueue(t, device, a, b, now_ms)
     return bool(ranges)
 
 
+def substantial(ranges):
+    return [[a, b] for a, b in ranges if b - a >= MIN_LATE_MS]
+
+
+def reset_reader(device: str, after_ms: int):
+    """A restarted live reader owns audio after its final checkpoint. Invalidate in-flight late snapshots."""
+    with db.tx() as t:
+        db.put_kv(f"read_to:{device}", after_ms - 1, t)
+        db.put_kv(f"read_end:{device}", after_ms, t)
+        T().read_to[device] = after_ms - 1
+        for r in t.execute("SELECT * FROM late_spans WHERE device=? AND status != 'done'", (device,)).fetchall():
+            ranges = substantial([[a, min(b, after_ms)] for a, b in json.loads(r["ranges"]) if a < after_ms])
+            if ranges == json.loads(r["ranges"]):
+                continue
+            if not ranges:
+                t.execute("DELETE FROM late_spans WHERE id=?", (r["id"],))
+            else:
+                t.execute("UPDATE late_spans SET start_ms=?,end_ms=?,ranges=?,status=?,tries=? WHERE id=?",
+                          (ranges[0][0], ranges[-1][1], json.dumps(ranges),
+                           "waiting" if r["status"] == "processing" else r["status"],
+                           max(0, r["tries"] - (r["status"] == "processing")), r["id"]))
+
+
 def enqueue(t, device: str, a: int, b: int, now_ms: int, ready: bool = False):
+    return enqueue_ranges(t, device, [[a, b]], now_ms, ready)
+
+
+def enqueue_ranges(t, device: str, ranges: list, now_ms: int, ready: bool = False, join: bool = True):
     """Join waiting spans within 2 s. Processing/done intervals never grow beneath their processor."""
+    ranges = substantial(union(ranges))
+    if not ranges:
+        return None
+    a, b = ranges[0][0], ranges[-1][1]
     hits = t.execute("SELECT * FROM late_spans WHERE device = ? AND status IN ('waiting', 'deferred') "
-                     "AND start_ms <= ? AND end_ms >= ?", (device, b + JOIN_MS, a - JOIN_MS)).fetchall()
-    ranges = union([[a, b]] + [x for r in hits for x in json.loads(r["ranges"])])
+                     "AND start_ms <= ? AND end_ms >= ?", (device, b + JOIN_MS, a - JOIN_MS)).fetchall() if join else []
+    ranges = union(ranges + [x for r in hits for x in json.loads(r["ranges"])])
     first = min([now_ms] + [r["first_ms"] for r in hits])
     # An old release does not settle audio uploaded after it. A release's wall clock is persisted.
     released = db.kv(f"late_released:{device}") or 0
     ready = ready or now_ms <= released
     if hits:
         t.executemany("DELETE FROM late_spans WHERE id = ?", [(r["id"],) for r in hits])
-    t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready) VALUES (?,?,?,?,?,?,?)",
-              (device, ranges[0][0], ranges[-1][1], first, now_ms, json.dumps(ranges), int(ready)))
+    return t.execute("INSERT INTO late_spans (device,start_ms,end_ms,first_ms,last_ms,ranges,ready) VALUES (?,?,?,?,?,?,?)",
+                     (device, ranges[0][0], ranges[-1][1], first, now_ms, json.dumps(ranges), int(ready))).lastrowid
 
 
 def release(device: str):
@@ -108,6 +141,14 @@ def claim(now_ms: int | None = None):
                          "AND (ready = 1 OR last_ms <= ?) ORDER BY start_ms, id",
                          (now_ms, now_ms - LATE_SETTLE_S * 1000)).fetchall()
         for r in rows:
+            remaining = substantial(subtract(json.loads(r["ranges"]), db.processed(r["device"], r["start_ms"], r["end_ms"])))
+            if not remaining:
+                t.execute("UPDATE late_spans SET status='done',done_ms=?,note=NULL WHERE id=?", (now_ms, r["id"]))
+                continue
+            if remaining != json.loads(r["ranges"]):
+                t.execute("UPDATE late_spans SET ranges=?,start_ms=?,end_ms=? WHERE id=?",
+                          (json.dumps(remaining), remaining[0][0], remaining[-1][1], r["id"]))
+                r = t.execute("SELECT * FROM late_spans WHERE id=?", (r["id"],)).fetchone()
             final = db.kv(f"finalized_to:{r['device']}")
             # The live reader can be ahead of its committing final pass. Wait until that writer
             # has passed the whole span, otherwise replace_sentences could erase the inserted late rows.
@@ -125,9 +166,32 @@ def claim(now_ms: int | None = None):
 def failed(span, error: Exception, now_ms: int | None = None):
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
     # Provider exceptions may contain URLs or keys. Persist only the exception class.
-    db.conn().execute("UPDATE late_spans SET status = ?, note = ?, next_ms = ? WHERE id = ?",
+    db.conn().execute("UPDATE late_spans SET status = ?, note = ?, next_ms = ? WHERE id = ? AND status='processing'",
                       ("failed" if span["tries"] >= 3 else "waiting", type(error).__name__,
                        now_ms + 30_000 * 2 ** (span["tries"] - 1), span["id"]))
+
+
+def ready_work(device: str, now_ms: int | None = None) -> bool:
+    now_ms = round(time.time() * 1000) if now_ms is None else now_ms
+    return db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND status IN ('waiting','deferred','processing') "
+                             "AND (status='processing' OR ready=1 OR last_ms<=?) LIMIT 1",
+                             (device, now_ms - LATE_SETTLE_S * 1000)).fetchone() is not None
+
+
+def queue_summaries():
+    """Persistent dirty markers survive a restart; one queued revision after a device's ready batch drains."""
+    ids = {db.resolve_conversation(k.split(":", 1)[1]) for k, in db.conn().execute("SELECT key FROM kv WHERE key LIKE 'late_summary:%' AND value='true'")}
+    for cid in ids:
+        c = db.conversation(cid)
+        if c and cid not in T().late_queued and not ready_work(c.get("device")):
+            T().late_queued.add(cid)
+            T().summaries[0].send_nowait({**c, "_late": True, "_revision": db.kv(f"conversation_revision:{cid}")})
+
+
+def summary_done(cid: str, t):
+    for key, in t.execute("SELECT key FROM kv WHERE key LIKE 'late_summary:%' AND value='true'").fetchall():
+        if db.resolve_conversation(key.split(":", 1)[1]) == cid:
+            db.put_kv(key, None, t)
 
 
 def status(device: str, now_ms: int | None = None) -> dict:

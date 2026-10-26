@@ -13,11 +13,13 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from contextlib import nullcontext
 
 import anyio
 
-from alldayrec import db, late_store, threads
+from alldayrec import db, late_merge, late_store, threads
 from alldayrec.late import read_exact
+from alldayrec.conversations import GAP_S, split
 from alldayrec.segmenter import SR, Segmenter, speech_in
 from alldayrec.tenant import T
 
@@ -29,7 +31,7 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
     hi = round(dt.datetime.combine(today + dt.timedelta(days=1), dt.time()).timestamp() * 1000)
     out, skipped, ambiguous = {}, set(), 0
     # New traces carry device. Legacy traces can be attributed only when their audio belongs to one device.
-    passes, legacy = {}, {}
+    passes = {}
     uncertain = []
     for path in sorted(T().data.glob("*.passes.jsonl")):
         if not (str(first - dt.timedelta(days=1)) <= path.name[:10] <= str(today)):
@@ -46,25 +48,27 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
                 device = p.get("device")
                 if device is None:
                     ds = [r[0] for r in db.conn().execute(
-                        "SELECT DISTINCT device FROM pieces WHERE start_ms < ? AND start_ms + seconds * 1000 > ?", (b, a))]
+                        "SELECT DISTINCT source FROM sentences WHERE start >= ? AND start < ? AND source IS NOT NULL",
+                        (p["from"], p["to"]))]
+                    if not ds:
+                        ds = [r[0] for r in db.conn().execute(
+                            "SELECT DISTINCT device FROM pieces WHERE start_ms < ? AND start_ms + seconds * 1000 > ?", (b, a))]
                     if len(ds) != 1:
-                        uncertain.append([a, b])
+                        uncertain.append((None, a, b))
                         continue
                     device = ds[0]
-                if "audio_ranges" in p:
-                    ranges = [[round(dt.datetime.fromisoformat(x).timestamp() * 1000) for x in pair] for pair in p["audio_ranges"]]
-                else:
-                    # A legacy from/to envelope can jump over hours with no samples in the ASR window.
-                    # Its existing final rows prove transcription; its gaps do not. Conservatively recheck
-                    # remaining VAD speech rather than treating that envelope as continuous coverage.
-                    ranges = [[round(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end")]
-                              for r in db.sentences(dt.datetime.fromtimestamp(a / 1000).isoformat(),
-                                                    dt.datetime.fromtimestamp(b / 1000).isoformat(), source=device)]
-                    try:
+                try:
+                    if "audio_ranges" in p:
+                        ranges = [[round(dt.datetime.fromisoformat(x).timestamp() * 1000) for x in pair] for pair in p["audio_ranges"]]
+                    else:
+                        # Legacy passes heard whole pieces already received at completion, including pauses
+                        # and sentence edges. Their rows alone cannot establish acoustic coverage.
                         completed = round(dt.datetime.fromisoformat(p["at"]).timestamp() * 1000)
-                    except (KeyError, ValueError, TypeError):
-                        completed = None
-                    legacy.setdefault(device, []).append((completed, ranges))
+                        ranges = [[max(a, r[0]), min(b, round(r[0] + r[1] * 1000))] for r in db.conn().execute(
+                            "SELECT start_ms,seconds FROM pieces WHERE device=? AND start_ms < ? AND start_ms + seconds * 1000 > ? "
+                            "AND received_ms IS NOT NULL AND received_ms <= ?", (device, b, a, completed))]
+                except (ValueError, KeyError, TypeError):
+                    uncertain.append((device, a, b))
                     continue
                 passes.setdefault(device, []).extend(ranges)
     # Descending per-device scan: the minimum receipt of a later piece is an O(n) suffix minimum.
@@ -86,14 +90,11 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
             "AND (received_ms IS NULL OR received_ms < ?)", (device, b, a, p["received_ms"]))]
         pending = [x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ? AND start_ms < ? AND end_ms > ?", (device, b, a))
                    for x in json.loads(r[0])]
-        # A legacy row's timestamps may bridge the hole too. Audio received after its pass
-        # completed provably was not in that pass, even when the row's wall-clock envelope overlaps.
-        final = passes.get(device, []) + [r for completed, ranges in legacy.get(device, [])
-                                          if completed is None or p["received_ms"] <= completed for r in ranges]
-        rs = late_store.subtract([[a, b]], covers + final + pending)
-        if any(x < b and y > a for x, y in uncertain):
+        final = passes.get(device, []) + db.processed(device, a, b)
+        rs = late_store.substantial(late_store.subtract([[a, b]], covers + final + pending))
+        if any((d is None or d == device) and x < b and y > a for d, x, y in uncertain):
             ambiguous += len(rs)
-            continue  # do not guess which device an old final pass heard
+            continue  # no device/receipt evidence: skip, never reinterpret sentence edges as missing speech
         out.setdefault(device, []).extend(rs)
     # Merge neighboring arrivals as the live ledger does, but preserve exact ranges across small covered holes.
     grouped = {}
@@ -104,7 +105,8 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
             while a < b:
                 midnight = dt.datetime.combine(dt.datetime.fromtimestamp(a / 1000).date() + dt.timedelta(days=1), dt.time())
                 end = min(b, round(midnight.timestamp() * 1000))
-                daily.append([a, end])
+                if end - a >= late_store.MIN_LATE_MS:
+                    daily.append([a, end])
                 a = end
         for a, b in daily:
             same_day = spans and dt.datetime.fromtimestamp(a / 1000).date() == dt.datetime.fromtimestamp(spans[-1][0][0] / 1000).date()
@@ -116,12 +118,35 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
     return grouped, {"skipped_null_received_days": sorted(skipped), "skipped_ambiguous_spans": ambiguous}
 
 
+def estimates(plans) -> dict:
+    targets, new_count, days = set(), 0, set()
+    for device, ranges, speech_ms in plans:
+        lo, hi = ranges[0][0], ranges[-1][1]
+        stamp = lambda ms: dt.datetime.fromtimestamp(ms / 1000).isoformat(timespec="milliseconds")
+        rows = [{"start": stamp(a), "end": stamp(b), "speaker": "S1"} for a, b in speech_ms]
+        convs = [db._conversation(r) for r in db.conn().execute(
+            "SELECT * FROM conversations WHERE device=? AND start<=? AND end>=? ORDER BY start",
+            (device, stamp(hi + GAP_S * 1000), stamp(lo - GAP_S * 1000)))]
+        for comp in late_merge.components(rows, convs):
+            if not comp["rows"]:
+                continue
+            cs = comp["convs"]
+            if cs:
+                targets.add(cs[0]["id"])
+                days.update(c[k][:10] for c in cs for k in ("start", "end"))
+            else:
+                new_count += len(split(comp["rows"]))
+            days.update(r["start"][:10] for r in comp["rows"])
+    return {"estimated_conversations": len(targets) + new_count,
+            "estimated_recaps": sum(bool(db.kv(f"recap:{day}")) for day in days)}
+
+
 async def scan(days: int, dry_run: bool = True) -> dict:
     grouped, info = await anyio.to_thread.run_sync(candidates, days, limiter=threads.DB)
-    per_day, found = {}, []
+    plans = []
     for device, spans in grouped.items():
         for ranges in spans:
-            speech_ms = 0
+            speech = []
             for a, b in ranges:
                 seg, pos = Segmenter(), a
                 while pos < b:
@@ -129,30 +154,37 @@ async def scan(days: int, dry_run: bool = True) -> dict:
                     x = await anyio.to_thread.run_sync(read_exact, device, pos, end, limiter=threads.MEDIA)
                     await seg.apush(dt.datetime.fromtimestamp(pos / 1000), x)
                     start_sample = round((pos - a) * SR / 1000)
-                    speech_ms += sum(max(0, min(len(x) / SR, y) - max(0, z)) * 1000
-                                     for z, y in speech_in(seg, start_sample, len(x)))
+                    speech += [[max(pos, round(pos + z * 1000)), min(end, round(pos + y * 1000))]
+                               for z, y in speech_in(seg, start_sample, len(x)) if min(len(x) / SR, y) > max(0, z)]
                     pos = end
-            if not speech_ms:
-                continue
-            found.append((device, ranges))
-            day = dt.datetime.fromtimestamp(ranges[0][0] / 1000).date().isoformat()
-            d = per_day.setdefault(day, {"spans": 0, "minutes": 0.0, "speech_minutes": 0.0})
-            d["spans"] += 1
-            d["minutes"] += sum(b - a for a, b in ranges) / 60_000
-            d["speech_minutes"] += speech_ms / 60_000
+            speech = late_store.union(speech)
+            if sum(b - a for a, b in speech) >= late_store.MIN_LATE_MS:
+                plans.append((device, ranges, speech))
+    accepted = []
+    now = round(time.time() * 1000)
     enqueued = 0
-    if not dry_run:
-        now = round(time.time() * 1000)
-        with db.tx() as t:
-            for device, ranges in found:
-                # Recheck after VAD: normal ingestion/processing could have added this same history meanwhile.
-                old = [x for r in t.execute("SELECT ranges FROM late_spans WHERE device = ?", (device,)) for x in json.loads(r[0])]
-                rs = late_store.subtract(ranges, old)
-                for a, b in rs:
-                    late_store.enqueue(t, device, a, b, now, ready=True)
-                enqueued += bool(rs)
+    with db.tx() if not dry_run else nullcontext(db.conn()) as t:
+        for device, ranges, speech in plans:
+            if not dry_run:
+                old = [x for r in t.execute("SELECT ranges FROM late_spans WHERE device=? AND start_ms < ? AND end_ms > ?",
+                       (device, ranges[-1][1], ranges[0][0])) for x in json.loads(r[0])]
+                old += db.processed(device, ranges[0][0], ranges[-1][1])
+                if late_store.subtract(ranges, old) != ranges:
+                    info["skipped_changed_spans"] = info.get("skipped_changed_spans", 0) + 1
+                    continue  # a concurrent live/late commit invalidated the plan: never enqueue un-VADed fragments
+                late_store.enqueue_ranges(t, device, ranges, now, ready=True, join=False)
+                enqueued += 1
+            accepted.append((device, ranges, speech))
+    per_day = {}
+    for _, ranges, speech in accepted:
+        day = dt.datetime.fromtimestamp(ranges[0][0] / 1000).date().isoformat()
+        d = per_day.setdefault(day, {"spans": 0, "minutes": 0.0, "speech_minutes": 0.0})
+        d["spans"] += 1
+        d["minutes"] += sum(b - a for a, b in ranges) / 60_000
+        d["speech_minutes"] += sum(b - a for a, b in speech) / 60_000
     return {"days": [{"date": d, **{k: round(v, 2) if isinstance(v, float) else v for k, v in x.items()}}
-                     for d, x in sorted(per_day.items())], "dry_run": dry_run, "enqueued": enqueued, **info}
+                     for d, x in sorted(per_day.items())], "dry_run": dry_run, "enqueued": enqueued,
+            **info, **estimates(accepted)}
 
 
 def main(argv=None):
@@ -172,6 +204,7 @@ def main(argv=None):
         result = json.load(response)
     for day in result["days"]:
         print(f"{day['date']}: {day['spans']} spans, {day['minutes']:.2f} minutes, {day['speech_minutes']:.2f} speech minutes")
+    print(f"Estimated summaries: {result['estimated_conversations']}; estimated recaps: {result['estimated_recaps']}")
     print("Skipped NULL received_ms days: " + (", ".join(result["skipped_null_received_days"]) or "none"))
     print(f"Skipped ambiguous legacy spans: {result['skipped_ambiguous_spans']}; enqueued: {result['enqueued']}")
     return result

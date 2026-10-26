@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS late_spans (
     ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS late_spans_queue ON late_spans(status, start_ms);
 CREATE INDEX IF NOT EXISTS late_spans_device ON late_spans(device, status);
+CREATE TABLE IF NOT EXISTS processed_audio (
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, layer TEXT NOT NULL,
+    PRIMARY KEY(device, start_ms, end_ms, layer));
+CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
@@ -236,6 +240,16 @@ def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict],
 def insert_sentences(c: sqlite3.Connection, rows: list[dict]):
     c.executemany(f"INSERT INTO sentences ({','.join(S_COLS)}) VALUES ({','.join('?' * len(S_COLS))})",
                   [tuple(r.get(k) for k in S_COLS) for r in rows])
+
+
+def processed(device: str, start_ms: int, end_ms: int, layer: str | None = None) -> list[list[int]]:
+    """Committed sample coverage, including pauses; written atomically with its final rows."""
+    return [list(r) for r in conn().execute("SELECT start_ms,end_ms FROM processed_audio WHERE device=? AND start_ms < ? AND end_ms > ? "
+                                           "AND (? IS NULL OR layer=?)", (device, end_ms, start_ms, layer, layer))]
+
+
+def record_processed(t, device: str, ranges: list, layer: str):
+    t.executemany("INSERT OR IGNORE INTO processed_audio VALUES (?,?,?,?)", [(device, a, b, layer) for a, b in ranges if b > a])
 
 
 D_COLS = S_COLS[:-2]  # a draft has no dictation, no music

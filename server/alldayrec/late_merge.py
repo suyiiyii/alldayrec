@@ -10,7 +10,7 @@ import re
 import numpy as np
 
 from alldayrec import db
-from alldayrec.conversations import GAP_S, IGNORE, split
+from alldayrec.conversations import GAP_S, IGNORE, MAX_S, split
 from alldayrec.diarist import TH
 from alldayrec.tenant import T
 
@@ -145,11 +145,16 @@ def merge(t, early: dict, later: dict, mapping: dict) -> dict:
     for table, col in (("summaries", "conversation"), ("timelines", "conversation"), ("name_hints", "conv")):
         t.execute(f"DELETE FROM {table} WHERE {col} = ?", (old,))
     for name, body in t.execute("SELECT name, body FROM profiles").fetchall():
-        changed = rewrite(json.loads(body), ids, voices)
-        t.execute("UPDATE profiles SET body = ? WHERE name = ?", (json.dumps(changed, ensure_ascii=False), name))
+        original = json.loads(body)
+        changed = rewrite(original, ids, voices)
+        if changed != original:
+            t.execute("UPDATE profiles SET body = ? WHERE name = ?", (json.dumps(changed, ensure_ascii=False), name))
     for key, body in t.execute("SELECT key, value FROM kv WHERE key LIKE 'recap:%' OR key LIKE 'live:%' OR key IN ('me_centroids','selfvoice')").fetchall():
         if body is not None:
-            db.put_kv(key, rewrite(json.loads(body), ids, voices), t)
+            original = json.loads(body)
+            changed = rewrite(original, ids, voices)
+            if changed != original:
+                db.put_kv(key, changed, t)
     t.execute("INSERT INTO conversation_aliases (old,new,labels) VALUES (?,?,?)", (old, new, json.dumps(mapping)))
     t.execute("DELETE FROM conversations WHERE id = ?", (old,))
     return ids
@@ -171,6 +176,53 @@ def record(group: dict, device: str) -> dict:
     return {**group, "id": cid, "device": device, "sentences": len(group["sentences"])}
 
 
+def components(rows: list[dict], convs: list[dict]) -> list[dict]:
+    """Only new speech inside a real gap can bridge two deliberately closed conversations."""
+    speech = sorted((r for r in rows if r.get("speaker") not in IGNORE), key=lambda r: r["start"])
+    def bridges(left, right):
+        a, b = P(left["end"]), P(right["start"])
+        if b <= a:
+            return False
+        inside = [(max(a, P(r["start"])), min(b, P(r["end"]))) for r in speech
+                  if P(r["start"]) < b and P(r["end"]) > a]
+        if not inside:
+            return False
+        end = a
+        for lo, hi in inside:
+            if (lo - end).total_seconds() >= GAP_S:
+                return False
+            end = max(end, hi)
+        return (b - end).total_seconds() < GAP_S
+    out = []
+    for c in sorted(convs, key=lambda c: (c["start"], c["id"])):
+        if out and (P(c["end"]) - P(out[-1]["start"])).total_seconds() <= MAX_S and bridges(out[-1]["convs"][-1], c):
+            out[-1]["convs"].append(c)
+            out[-1]["end"] = max(out[-1]["end"], c["end"])
+        else:
+            out.append({"start": c["start"], "end": c["end"], "convs": [c], "rows": []})
+    unassigned = []
+    for r in rows:
+        choices = []
+        for i, comp in enumerate(out):
+            start, end = min(r["start"], comp["start"]), max(r["end"], comp["end"])
+            distance = max(0.0, (P(comp["start"]) - P(r["end"])).total_seconds(), (P(r["start"]) - P(comp["end"])).total_seconds())
+            if distance >= GAP_S or (P(end) - P(start)).total_seconds() > MAX_S:
+                continue
+            # Never grow across the next closed component merely to attach one row.
+            if any(j != i and start < other["end"] and end > other["start"] for j, other in enumerate(out)):
+                continue
+            choices.append((distance, i))
+        if choices:
+            comp = out[min(choices)[1]]
+            comp["rows"].append(r)
+            comp["start"], comp["end"] = min(comp["start"], r["start"]), max(comp["end"], r["end"])
+        else:
+            unassigned.append(r)
+    if unassigned:
+        out.append({"convs": [], "rows": unassigned})
+    return out
+
+
 def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) -> tuple[list[dict], list[str]]:
     """Insert-only late rows, attach their connected groups, then move references atomically.
 
@@ -180,6 +232,11 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
     device = span["device"]
     changed, removed = [], []
     with db.tx() as t:
+        current = t.execute("SELECT * FROM late_spans WHERE id=?", (span["id"],)).fetchone()
+        if not current or current["status"] in ("done", "failed") or any(current[k] != span[k] for k in ("status", "tries", "ranges")):
+            return [], []  # restarted reader/processor invalidated this ASR snapshot, or its commit already succeeded
+        from alldayrec.late_store import substantial, subtract
+        remaining = substantial(subtract(json.loads(current["ranges"]), db.processed(device, current["start_ms"], current["end_ms"])))
         # An open conversation may have appeared while model calls ran: caller retries after it closes.
         from alldayrec.late_store import blocked
         if blocked(span):
@@ -189,7 +246,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
         for r in rows:
             # Full containment in one exact uncovered range; existing corrections and overlapping final rows win.
             a, b = round(P(r["start"]).timestamp() * 1000), round(P(r["end"]).timestamp() * 1000)
-            if not any(lo <= a < b <= hi for lo, hi in json.loads(span["ranges"])):
+            if not any(lo <= a < b <= hi for lo, hi in remaining):
                 continue
             # A pre-existing row can bridge a clock gap even though its ASR window never heard
             # that gap's audio. Coverage was subtracted at ingestion; an interval overlap alone
@@ -205,16 +262,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
                 "SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ? ORDER BY start, id",
                 (device, (P(high) + dt.timedelta(seconds=GAP_S)).isoformat(),
                  (P(low) - dt.timedelta(seconds=GAP_S)).isoformat()))]
-            # Connected components of late rows plus existing closed conversation intervals.
-            events = [(c["start"], c["end"], "conv", c) for c in convs] + [(r["start"], r["end"], "row", r) for r in kept]
-            components = []
-            for a, b, kind, item in sorted(events, key=lambda e: e[0]):
-                if not components or (P(a) - P(components[-1]["end"])).total_seconds() >= GAP_S:
-                    components.append({"end": b, "convs": [], "rows": []})
-                comp = components[-1]
-                comp["end"] = max(comp["end"], b)
-                comp["convs" if kind == "conv" else "rows"].append(item)
-            for comp in components:
+            for comp in components(kept, convs):
                 if not comp["rows"]:
                     continue
                 cs, rs = comp["convs"], comp["rows"]
@@ -267,11 +315,14 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
             db.put_summary({**s, "status": "pending", "error": None}, t)
             key = f"conversation_revision:{c['id']}"
             db.put_kv(key, (db.kv(key) or 0) + 1, t)
+            db.put_kv(f"late_summary:{c['id']}", True, t)
             # Preserve the cached recap and references; regenerate once its new summaries have finished.
             days = {c["start"][:10], c["end"][:10]} | {r["start"][:10] for r in kept}
             for day in days:
                 if recap := db.kv(f"recap:{day}"):
                     db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
+                    db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
+        db.record_processed(t, device, remaining, "late")
         t.execute("UPDATE late_spans SET status = 'done', done_ms = ?, note = NULL WHERE id = ?",
                   (round(dt.datetime.now().timestamp() * 1000), span["id"]))
     # An undo snapshot predating a merge could restore obsolete voice rows and participant lists. Expire it.
