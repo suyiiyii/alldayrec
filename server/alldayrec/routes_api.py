@@ -163,8 +163,11 @@ async def mcp(request: Request):
         msg = await request.json()
     except ValueError:
         return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, 400)
-    status, out = await anyio.to_thread.run_sync(mcp_server.handle, msg, request.headers, limiter=threads.DB)
-    return Response(status_code=202) if out is None else JSONResponse(out, status)
+    args = (mcp_server.handle, msg, request.headers)
+    if link_id := request.scope.get("mcp_link_id"):
+        args = (mcp_links.handle, link_id, msg, request.headers)
+    status, out = await anyio.to_thread.run_sync(*args, limiter=threads.DB)
+    return Response(status_code=status) if out is None else JSONResponse(out, status)
 
 
 @router.api_route("/mcp", methods=["GET", "DELETE"])
@@ -191,17 +194,25 @@ async def mcp_links_create(request: Request):
     label = body.get("label") if isinstance(body, dict) else None
     if not isinstance(label, str) or not 1 <= len(label.strip()) <= 80:
         raise HTTPException(400, "Label must contain 1–80 characters")
-    row = await anyio.to_thread.run_sync(mcp_links.create, label.strip(), limiter=threads.DB)
+    try:
+        row = await anyio.to_thread.run_sync(mcp_links.create, label.strip(), limiter=threads.DB)
+    except mcp_links.LimitReached:
+        raise HTTPException(409, "[mcp_link_limit] Revoke a connection link before creating another (limit 20)")
     return JSONResponse(row, status_code=201, headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/api/mcp-links/{link_id}")
-def mcp_links_revoke(link_id: str, request: Request):
+async def mcp_links_revoke(link_id: str, request: Request):
     """Revoke this tenant's connection link by id (204); unknown ids return 404."""
     if not mcp_server.origin_ok(request.headers):
         raise HTTPException(403, "Origin not allowed")
-    if not mcp_links.revoke(link_id):
+    # Delete first: queued calls must fail their point-of-use check. An executing
+    # tool's transaction makes deletion wait for its reads/writes to finish.
+    # Use the default pool so a saturated threads.DB cannot prevent revocation.
+    if not await anyio.to_thread.run_sync(mcp_links.revoke, link_id):
         raise HTTPException(404, "Link not found")
+    async with T().mcp_gate:
+        pass  # drain already-authorized response sends before acknowledging 204
     return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
 

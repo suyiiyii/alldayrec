@@ -30,23 +30,39 @@ class Tenants:
             # fall through to bearer/cookie auth, redirects, files or another API.
             match = LINK.fullmatch(scope["path"])
             raw = scope.get("raw_path", b"").split(b"?", 1)[0]
-            t = None
+            found = None
             if scope["type"] == "http" and match and raw == scope["path"].encode("ascii"):
-                t = await anyio.to_thread.run_sync(mcp_links.resolve, core.TENANTS, match[1], limiter=threads.DB)
-            if t is None:
+                found = await anyio.to_thread.run_sync(mcp_links.resolve, core.TENANTS, match[1], limiter=threads.DB)
+            if found is None:
                 if scope["type"] == "websocket":
                     return await send({"type": "websocket.close", "code": 4404})
                 return await Response(status_code=404, headers={"Cache-Control": "no-store"})(scope, receive, send)
+            t, link_id = found
             tenant.enter(t)
             # Route and measure the canonical endpoint. Downstream errors and
             # redirects cannot reflect a credential path, nor can metrics retain it.
-            scope = {**scope, "path": "/mcp", "raw_path": b"/mcp"}
+            scope = {**scope, "path": "/mcp", "raw_path": b"/mcp", "mcp_link_id": link_id}
+            acquired = False
+
+            async def body_ready():
+                nonlocal acquired
+                message = await receive()
+                if message["type"] == "http.request" and not message.get("more_body", False) and not acquired:
+                    # A partial-body sender must not hold up revocation. Once
+                    # complete, protect execution AND response send from revoke.
+                    await t.mcp_gate.acquire()
+                    acquired = True
+                return message
 
             async def private_send(message):
                 if message["type"] == "http.response.start":
                     message = {**message, "headers": [*message.get("headers", []), (b"cache-control", b"no-store")]}
                 await send(message)
-            return await self.app(scope, receive, private_send)
+            try:
+                return await self.app(scope, body_ready, private_send)
+            finally:
+                if acquired:
+                    t.mcp_gate.release()
         q = c.query_params.get("token")
         if scope["type"] == "http" and q and (t := tenant.by_token(core.TENANTS, q)) and t.token:
             u = c.url.remove_query_params("token")

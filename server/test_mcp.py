@@ -164,3 +164,13 @@ def test_http_token(monkeypatch):
     assert post(call, {"Authorization": "Bearer s3cret"}, "GET")[0] == 405 and post(call, {"Authorization": "Bearer s3cret"}, "DELETE")[0] == 405
     assert post(call, {"Authorization": "Bearer s3cret"}, "GET")[0] == 405
     assert post(call, {}, "GET")[0] == 401
+
+
+def test_non_object_meta_is_invalid_request():
+    for value in (None, False, 0, "", "x", [], ["x"]):
+        for method in ("initialize", "tools/list", "tools/call"):
+            body = {"jsonrpc": "2.0", "id": 9, "method": method, "params": {"_meta": value}}
+            status, out = m.handle(body, {})
+            assert status == 400 and out["id"] == 9 and out["error"]["code"] == -32600
+            body.pop("id")
+            assert m.handle(body, {})[0] == 400

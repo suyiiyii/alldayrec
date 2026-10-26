@@ -1,13 +1,26 @@
 name: server
 on:
   pull_request:  # only on PRs: main gets what a green PR ran
-    paths: ['server/**', '.github/workflows/server.yml']
+    paths: ['server/**', 'web/src/pages/Connect.vue', 'web/src/lib/api.ts', '.github/workflows/server.yml']
 
 concurrency:  # a new push to a PR cancels its run still going
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  mcp-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: pipx install uv
+      - run: npm install -g pnpm@12.8.1 agent-browser@0.33.2
+      - run: agent-browser install --with-deps
+      - run: pnpm install --frozen-lockfile && pnpm exec vp build
+        working-directory: web
+      - run: MCP_BROWSER=1 uv run --locked --with pytest pytest -q test_mcp_link_security.py -k browser
+        working-directory: server
+
   server:
     runs-on: ubuntu-24.04
     timeout-minutes: 15  # ~4 min on a hosted runner; one slow run went past 10

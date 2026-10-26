@@ -275,6 +275,8 @@ def handle(msg, headers) -> tuple[int, dict | None]:
                 or not isinstance(msg.get("params") or {}, dict):
             return 400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
         m, p = msg["method"], msg.get("params") or {}
+        if "_meta" in p and not isinstance(p["_meta"], dict):
+            return 400, {"jsonrpc": "2.0", "id": msg.get("id"), "error": {"code": -32600, "message": "_meta must be an object"}}
         if "id" not in msg:
             return 202, None
         v, hv = (p.get("_meta") or {}).get(PV), headers.get("mcp-protocol-version")

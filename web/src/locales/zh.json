@@ -49,7 +49,8 @@
       "analyzing": "正在分析",
       "no_open_conversation": "没有进行中的对话",
       "no_new_speech": "没有新的语音",
-      "bad_audio": "没录到能听的声音，再说一次"
+      "bad_audio": "没录到能听的声音，再说一次",
+      "mcp_link_limit": "最多保留 20 条 AI 连接网址，请先作废一条旧网址"
     }
   },
   "speaker": {

@@ -49,7 +49,8 @@
       "analyzing": "Already analyzing",
       "no_open_conversation": "No conversation is going on",
       "no_new_speech": "No new speech yet",
-      "bad_audio": "That recording could not be played. Say it again"
+      "bad_audio": "That recording could not be played. Say it again",
+      "mcp_link_limit": "You can keep 20 AI connection links. Revoke an old link first"
     }
   },
   "speaker": {
