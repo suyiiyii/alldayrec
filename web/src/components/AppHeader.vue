@@ -165,6 +165,12 @@ nav a.on {
 .demo-tag.phone {
   display: none;
 }
+/* the logo costs the bar 32 px: below this width (the online demo's tag included) it would push 我的 to a 2nd row */
+@media (max-width: 680px) {
+  h1 img {
+    display: none;
+  }
+}
 /* a phone: no name bar (a page with nothing in the header has none), the tabs at the bottom over the safe area */
 @media (max-width: 600px) {
   .bar {
