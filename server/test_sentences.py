@@ -78,8 +78,8 @@ def test_one_sentence_and_undo(store):
     assert anyio.run(speaker_undo, {"undo": r["undo"]}) == {"undone": 1} and dump() == was
 
     n1 = queued()
-    r = fix("f2", "我")  # S? is no participant, 我 one already: no new summary, nothing learnt
-    assert r["participants"] == ["S1", "S2", "我"] and r["voiceprints"] == 0 and queued() == n1 and len(store) == 1
+    r = fix("f2", "我")  # S? is no participant, 我 one already: summary redone, nothing learnt
+    assert r["participants"] == ["S1", "S2", "我"] and r["voiceprints"] == 0 and queued() == n1 + 1 and len(store) == 1
     anyio.run(speaker_undo, {"undo": r["undo"]})
     assert dump() == was
 

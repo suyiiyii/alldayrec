@@ -58,8 +58,8 @@ async def unstar(sid: str):
 @router.post("/api/sentences/{sid}/speaker")
 async def sentence_speaker(sid: str, body: dict):
     """This sentence was said by `to`. The only one of its label: the label renamed (apply_rename: its voice, pins and
-    name hints go with it). Else the row alone, and the participants gain `to` when new: only then is the summary
-    redone. A named person's voice is learnt from it after the answer (enroll); 我 and S<n> teach nothing here. A row
+    name hints go with it). Else the row alone, and the participants gain `to` when new. Every correction redoes the
+    summary. A named person's voice is learnt from it after the answer (enroll); 我 and S<n> teach nothing here. A row
     heard as music (S?: always the row alone) given to someone is a voice: its music flag goes, the undo puts it back."""
     c, r = sentence(sid, body.get("conv"))
     frm, to = r.get("speaker") or "", (body.get("to") or "").strip()
@@ -83,7 +83,7 @@ async def sentence_speaker(sid: str, body: dict):
         bank.sync(frm)
         if after != c["participants"]:
             T().speakers["at"] = 0.0
-            queue_summary(c, keep=True)
+        queue_summary({**c, "participants": after}, keep=True)
         learn = to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed")
         rows = [{**r, "conv": c["id"], "music": None}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
         ws.note(f"对话 {c['start'][11:19]}：{r['start'][11:19]} 这一句 {frm} 改为 {to}", "state")
