@@ -85,7 +85,7 @@ check() {  # dir unit: active, running the commit in its COMMIT, serving the pag
   got=$(get "$d" "$t" /api/status | python3 -c 'import json, sys; print(json.load(sys.stdin)["commit"])') || got="(no /api/status)"
   [ "$got" = "$want" ] || bad+=" running:'$got'-not-'$want'"
   for p in / /conversations; do get "$d" "$t" "$p" | cmp -s - "$dist/index.html" || bad+=" $p"; done
-  for a in $(grep -o '/assets/[^"]*' "$dist/index.html"); do
+  for a in $(grep -oE '(src|href)="/assets/[^"]+"' "$dist/index.html" | sed 's/^[^"]*"//; s/"$//'); do
     get "$d" "$t" "$a" | cmp -s - "$dist$a" || bad+=" $a"; n=$((n + 1))
   done
   [ $n -gt 0 ] || bad+=" no-assets-in-index.html"
