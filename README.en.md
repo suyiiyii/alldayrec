@@ -15,7 +15,7 @@ Record every day with the devices you already have: wear a recorder, use your ph
 
 [中文](README.md) | **English**
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-en-summary-20261026.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-en-named-20261026c.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-en-summary-20261026.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
 
 Live captions · Timeline · One conversation
 

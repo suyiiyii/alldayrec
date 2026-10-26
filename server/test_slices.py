@@ -17,7 +17,7 @@ WATCHED = {"foreground": 1, "background": 2, "screenOff": 2}
 def test_slices(tmp_path, monkeypatch):
     t = db.open_db(tmp_path / "live.db")  # one tenant without a token: no auth
     monkeypatch.setattr(core, "TENANTS", [t])
-    monkeypatch.setattr(audio, "save", lambda *a: 2.0)  # a piece of 2 s, not decoded
+    monkeypatch.setattr(audio, "save_file", lambda *a: 2.0)  # a piece of 2 s, not decoded
     c = TestClient(server.app)  # no `with`: the lifespan does not start
     up = lambda: c.post("/api/chunks", params={"device": "phone", "start": 1_000}, content=b"x", headers={"content-type": "audio/ogg"}).json()
     cfg = lambda: c.get("/api/client-config").json()["slice"]

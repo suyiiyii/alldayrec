@@ -10,7 +10,10 @@ const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
-const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-name-20261026.png";
+const OG_IMAGE = {
+  zh: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-zh-20261026c.png",
+  en: "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-agent-en-20261026d.png",
+};
 // the English README tagline; en/index.md repeats it in its title and hero
 const EN_TAGLINE = "An open-source Plaud for your whole day, so your agent knows you";
 
@@ -107,7 +110,7 @@ export default defineConfig({
       ["meta", { property: "og:url", content: url }],
       ["meta", { property: "og:title", content: title }],
       ["meta", { property: "og:description", content: description }],
-      ["meta", { property: "og:image", content: OG_IMAGE }],
+      ["meta", { property: "og:image", content: OG_IMAGE[page.startsWith("en/") ? "en" : "zh"] }],
       ["meta", { property: "og:image:width", content: "1280" }],
       ["meta", { property: "og:image:height", content: "640" }],
       ["meta", { property: "og:locale", content: siteData.lang.replace("-", "_") }],

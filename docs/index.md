@@ -8,7 +8,7 @@ hero:
   text: *tagline
   tagline: 用你已有的设备记录每一天：戴着录、用手机录，或导入其他设备的录音，都整理成你自己服务器上、Agent 能查询的个人记忆。<br>读作 all day rec。
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-zh-summary-20261026.gif
     alt: 实时页：边说边出字幕，AI 实时摘要跟着更新（示例数据）
   actions:
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link

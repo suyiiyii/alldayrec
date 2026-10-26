@@ -66,6 +66,7 @@ class Tenant:
     mcp_gate: threading.Condition = field(default_factory=threading.Condition)  # atomic liveness check + execution leases, in workers
     mcp_active: dict = field(default_factory=dict)  # active calls by link id; concurrent readers share the gate
     summaries: tuple = None                         # (send, receive): its conversations waiting for a summary
+    summary_generations: dict[str, int] = field(default_factory=dict)  # newest queued request per conversation
     tg: "anyio.abc.TaskGroup | None" = None         # its tasks (run_tenant): pipelines, live analyses, loops
     scope: anyio.CancelScope | None = None          # cancelled: the tenant stops, every task of it with it
 

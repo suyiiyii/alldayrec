@@ -22,7 +22,7 @@ from alldayrec import summary
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.conversations import IGNORE, Grouper
-from alldayrec.core import iso, owner_npz, state
+from alldayrec.core import iso, owner_npz, queue_summary, state
 from alldayrec.pipeline_state import PipelineState
 from alldayrec.segmenter import BUFFER_S, MERGE_GAP_S, SR, Segmenter, next_cut, speech_in
 from alldayrec.tenant import T
@@ -200,6 +200,9 @@ async def pipeline(device: str):
             live_ends = bool(lv) and (attached or open_view() is None)
             if live_ends:
                 db.put_kv(f"live:{device}", None, t)
+        # Reserve each request before yielding: a rename during a broadcast must supersede this final/live run.
+        for rec in recs:
+            queue_summary(rec)
         if hi:
             st.finalized(hi, time.time())
         if rows is not None:
@@ -212,7 +215,6 @@ async def pipeline(device: str):
         for rec in recs:
             dia.reset()
             ddia.reset()
-            T().summaries[0].send_nowait(rec)
             log.info("%s conversation closed %s", device, rec)
             ws.note(f"对话结束：{rec['start'][11:19]} 到 {rec['end'][11:19]}，{rec['sentences']} 句，参与 {'、'.join(rec['participants']) or '—'}", "state")
             await ws.broadcast({"type": "conversation", **db.conversation(rec["id"])})

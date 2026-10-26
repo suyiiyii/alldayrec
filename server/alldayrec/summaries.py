@@ -47,17 +47,26 @@ async def summarize(c: dict, tags: list[str]) -> dict:
 async def summarize_loop():
     while True:
         c = await T().summaries[1].receive()
+        generation = c.get("_summary_generation")  # direct queue producers may omit it; run those normally
         for delay in (10, 60, 300, None):
+            if generation is not None and generation != T().summary_generations.get(c["id"]):
+                break  # a queued request or retry superseded by an edit/manual regeneration
             try:
                 res = await summarize(c, list(tag_counts())[:60])
                 break
             except Exception as e:  # HTTP errors, timeouts, a reply that is not JSON
+                if generation is not None and generation != T().summary_generations.get(c["id"]):
+                    break
                 log.warning("summary %s failed: %r", c["id"], e)
                 if delay == 300:
                     c.pop("via_live", None)  # the last try takes the plain summary
                 res = {"conversation": c["id"], "status": "failed", "error": repr(e)[:300]}
                 if delay:
                     await anyio.sleep(delay)
+        # No await between this check and the write: edits cannot interleave with the commit. Discard failures too,
+        # before todo preservation, media cleanup, notifications or other side effects from obsolete input.
+        if generation is not None and generation != T().summary_generations.get(c["id"]):
+            continue
         old = db.summary(c["id"])
         media = summary.media_labels(conversation_rows(c), res.get("media_spans") or [])
         if res["status"] == "failed" and old and old["status"] == "done":

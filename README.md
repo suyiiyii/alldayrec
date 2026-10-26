@@ -15,7 +15,7 @@
 
 **中文** | [English](README.en.md)
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-zh-summary-20261026.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-zh-named-20261026c.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-zh-summary-20261026.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
 
 实时字幕 · 时间线 · 一段对话
 

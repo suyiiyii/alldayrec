@@ -8,7 +8,7 @@ hero:
   text: *tagline
   tagline: 'Record every day with the devices you already have: wear a recorder, use your phone, or import recordings from other devices. It all becomes a personal memory on your own server that your agent can query.<br>Pronounced "all day rec".'
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-en-summary-20261026.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link

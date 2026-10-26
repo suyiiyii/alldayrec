@@ -347,9 +347,10 @@ def test_undo_this_is_me_omits_carried_other_person_action(tmp_path, monkeypatch
         async with anyio.create_task_group() as tg:
             tg.start_soon(summaries.summarize_loop)
             with anyio.fail_after(2):
-                while db.summary(C1).get("summary") != "round2":
+                while db.summary(C1).get("summary") != "round1":
                     await anyio.sleep(.01)
             tg.cancel_scope.cancel()
+        assert rounds == 1, "undo supersedes the rename before its queued model call starts"
         assert db.todo(id)["id"] == id and db.todo(id)["owner"] == "S1"
         assert db.closed_todos() == {id: mark}
         assert (await recap_get("2026-10-01"))["todos"] == []

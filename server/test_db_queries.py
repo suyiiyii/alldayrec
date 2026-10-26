@@ -209,21 +209,32 @@ def test_edge_reader(tmp_path, monkeypatch):
     1.3 M pieces)."""
     db.open_db(tmp_path / "t.db")
     monkeypatch.setattr(audio, "samples", lambda p: np.zeros(round(p["seconds"] * audio.SR), np.int16))
+    # Media is outside this query-plan test: long files now expose bounded
+    # blocks and the edge reader seeks directly to the newest edge_s.
+    from contextlib import contextmanager
+    @contextmanager
+    def blocks(p, end):
+        skip = max(0, round((end - p["start_ms"]) * audio.SR / 1000))
+        count = round(p["seconds"] * audio.SR) - skip
+        yield (np.zeros(min(audio.BLOCK_S * audio.SR, count - i), np.int16)
+               for i in range(0, count, audio.BLOCK_S * audio.SR)), skip
+    monkeypatch.setattr(audio, "piece_blocks", blocks)
     now = int(time.time()) * 1000
+    monkeypatch.setattr(audio.time, "time", lambda: now / 1000)
     put = lambda a, s: db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES ('d', ?, ?, 'x')", (now + a * 1000, s))
     for i in range(180):
         put(-18000 + 20 * i, 20)  # older than the edge
     put(-14400, 14150)  # an import, ending 250 s ago
     for i in range(9):
         put(-240 + 20 * i, 20)
-    want = [now - 14400_000] + [now + (-240 + 20 * i) * 1000 for i in range(9)] + [now - 60_000]
+    want = [now + i * 1000 for i in range(-300, -250, 10)] + [now + (-240 + 20 * i) * 1000 for i in range(9)] + [now - 60_000]
     got, seen = [], []
 
     async def read():
         with anyio.move_on_after(10):
             async for t, _ in audio.stream("d", None, edge_s=300):
                 got.append(round(t.timestamp() * 1000))
-                if len(got) == 10:
+                if len(got) == len(want) - 1:
                     put(-60, 20)  # one arrives
                 if len(got) == len(want):
                     break
