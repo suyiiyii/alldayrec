@@ -99,6 +99,48 @@ def test_single_rename_runs_exactly_one_rewrite(model):
     run_workers(scenario)
 
 
+@pytest.mark.parametrize("existing_generation", [None, 7])
+def test_request_without_generation_runs_normally(model, existing_generation):
+    async def scenario():
+        if existing_generation is not None:
+            tenant.T().summary_generations[CID] = existing_generation
+        tenant.T().summaries[0].send_nowait(db.conversation(CID))
+        await model.started(1)
+        await model.finish(0)
+        assert db.summary(CID)["summary"] == model.calls[0]["text"]
+        assert [p["summary"] for p in model.pushes] == [model.calls[0]["text"]]
+        # The worker survives and can process the next generation-aware request.
+        await routes_api.resummarize(CID)
+        await model.started(2)
+        await model.finish(1)
+        assert len(model.pushes) == 2
+    run_workers(scenario)
+
+
+@pytest.mark.parametrize("keep", [False, True])
+def test_failed_queue_write_keeps_inflight_summary_current(model, monkeypatch, keep):
+    def fail_write(*args, **kwargs):
+        raise RuntimeError("synthetic database write failure")
+
+    async def scenario():
+        await routes_api.resummarize(CID)
+        await model.started(1)
+        generation = tenant.T().summary_generations[CID]
+        if keep:
+            db.put_summary({**db.summary(CID), "error": "previous attempt failed"})
+        with monkeypatch.context() as patch:
+            patch.setattr(db, "put_summary", fail_write)
+            with pytest.raises(RuntimeError, match="synthetic database write failure"):
+                core.queue_summary(db.conversation(CID), keep=keep)
+        assert tenant.T().summary_generations[CID] == generation
+        assert tenant.T().summaries[1].statistics().current_buffer_used == 0
+        await model.finish(0)
+        assert db.summary(CID)["summary"] == model.calls[0]["text"]
+        assert db.summary(CID)["error"] is None
+        assert [p["summary"] for p in model.pushes] == [model.calls[0]["text"]]
+    run_workers(scenario)
+
+
 def test_superseded_queued_requests_skip_model_calls(model):
     async def scenario():
         # These endpoints don't yield between queuing: only the last request should need a model call.

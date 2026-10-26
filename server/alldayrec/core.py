@@ -40,13 +40,13 @@ def conversation_rows(c: dict) -> list[dict]:
 def queue_summary(c: dict, keep: bool = False):
     """keep: the current summary stays until the new one is written. Only the newest request may replace it.
     Generations live with the tenant's queue/workers; a restart drops all of them together."""
-    generations = T().summary_generations
-    generation = generations[c["id"]] = generations.get(c["id"], 0) + 1
     old = db.summary(c["id"]) if keep else None
     if not old or old["status"] != "done":
         db.put_summary({"conversation": c["id"], "status": "pending", "error": None})
     elif old.get("error"):
         db.put_summary({**old, "error": None})
+    generations = T().summary_generations
+    generation = generations[c["id"]] = generations.get(c["id"], 0) + 1
     T().summaries[0].send_nowait({**c, "_summary_generation": generation})
 
 
