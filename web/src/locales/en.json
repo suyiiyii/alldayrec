@@ -762,7 +762,10 @@
     "stop": "Stop",
     "start": "Start recording",
     "log": "Log",
-    "captions": "Captions"
+    "captions": "Captions",
+    "leaveQ": "Recording. Leaving stops it.",
+    "leaveStop": "Stop and leave",
+    "leaveStay": "Keep recording"
   },
   "selfVoice": {
     "tier": {

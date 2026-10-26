@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 import { intl, t } from "../i18n";
 import { oggOpus } from "../lib/ogg";
 import { RecordStream } from "../lib/stream";
@@ -309,10 +310,35 @@ const toggle = () =>
 const onVisible = () =>
   recording.value &&
   note(t(document.hidden ? "record.hidden" : "record.visible", { n: sent.value }, sent.value));
-onMounted(() => document.addEventListener("visibilitychange", onVisible));
-// leaving the page stops it: no button would be left to (its pieces still go up, then the end)
+// leaving while recording asks first: 停止并离开 stops it as 停止 does and goes (its pieces still go up, then the end),
+// 继续录音, Escape or a tap outside stays. Not window.confirm: inside the app's WebView it can return false unseen.
+// Answered from the buttons and cancel, not the close event: Chrome can skip that one after an Escape
+const leaveDlg = useTemplateRef<HTMLDialogElement>("leaveDlg");
+let answer: ((go: boolean) => void) | null = null;
+function leave(go: boolean) {
+  leaveDlg.value?.close();
+  if (go && recording.value) void stop();
+  answer?.(go);
+  answer = null;
+}
+onBeforeRouteLeave(() => {
+  if (!recording.value) return;
+  answer?.(false); // a second leave while it asks: the first is dropped
+  if (!leaveDlg.value!.open) leaveDlg.value!.showModal();
+  return new Promise<boolean>((r) => (answer = r));
+});
+// a reload or a closed tab: the browser's own prompt
+const onUnload = (e: BeforeUnloadEvent) => {
+  if (recording.value) e.preventDefault();
+};
+onMounted(() => {
+  document.addEventListener("visibilitychange", onVisible);
+  addEventListener("beforeunload", onUnload);
+});
+// whatever left the page without asking stops it too: no button would be left to
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", onVisible);
+  removeEventListener("beforeunload", onUnload);
   if (recording.value) void stop();
 });
 </script>
@@ -341,6 +367,15 @@ onUnmounted(() => {
       </details>
     </div>
     <iframe src="/live" :title="t('record.captions')"></iframe>
+    <dialog ref="leaveDlg" class="leave" @cancel="leave(false)" @click.self="leave(false)">
+      <div class="in">
+        <p>{{ t("record.leaveQ") }}</p>
+        <div class="acts">
+          <button class="btn-ghost" @click="leave(false)">{{ t("record.leaveStay") }}</button>
+          <button class="btn-primary" @click="leave(true)">{{ t("record.leaveStop") }}</button>
+        </div>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -408,5 +443,59 @@ iframe {
   flex: 1;
   border: 0;
   width: 100%;
+}
+/* 离开吗: a small card in the middle; a phone gets it as a sheet from the bottom, as the row menu */
+.leave {
+  width: min(360px, calc(100% - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.leave::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+.leave .in {
+  padding: var(--space-4);
+}
+.leave p {
+  margin: 0 0 var(--space-4);
+}
+.acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.acts .btn-primary {
+  background: var(--err);
+  border-color: var(--err);
+}
+@media (max-width: 600px) {
+  .leave {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+  .leave .in {
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
+  .acts {
+    flex-direction: column-reverse;
+  }
+  .acts button {
+    min-height: 48px;
+  }
+}
+@media (max-width: 600px) and (prefers-reduced-motion: no-preference) {
+  .leave[open] {
+    animation: up 0.2s ease-out;
+  }
+}
+@keyframes up {
+  from {
+    transform: translateY(100%);
+  }
 }
 </style>

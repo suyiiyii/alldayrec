@@ -762,7 +762,10 @@
     "stop": "停止",
     "start": "开始录音",
     "log": "日志",
-    "captions": "字幕"
+    "captions": "字幕",
+    "leaveQ": "正在录音，离开会停止录音。",
+    "leaveStop": "停止并离开",
+    "leaveStay": "继续录音"
   },
   "selfVoice": {
     "tier": {
