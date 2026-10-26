@@ -36,28 +36,41 @@ def test_true_bridge_still_respects_four_hour_limit(store):
 
 
 def test_restart_mid_late_processing_hands_unfinalized_audio_back_to_live(store, monkeypatch):
-    monkeypatch.setattr(audio, "decode", lambda *a, **kw: np.ones(10*audio.SR, np.int16))
+    monkeypatch.setattr(audio, "decode", lambda body, **kw: np.ones((20 if len(body) > 5 else 10)*audio.SR, np.int16))
     monkeypatch.setattr(audio, "health", lambda x: (0, 0, 0, 0))
-    for i in (0, 20):
-        audio.save(D, ms(i), b"audio", "audio/wav")
-    db.put_kv(f"read_to:{D}", ms(20))
-    T().read_to[D] = ms(20)
-    db.put_kv(f"read_end:{D}", ms(30))
-    db.put_kv(f"finalized_to:{D}", iso(5))
-    audio.save(D, ms(10), b"audio", "audio/wav")
-    s = dict(db.conn().execute("SELECT * FROM late_spans").fetchone())
-    db.conn().execute("UPDATE late_spans SET status='processing', tries=1 WHERE id=?", (s["id"],))
-    s.update(status="processing", tries=1)
+    audio.save(D, ms(0), b"short", "audio/wav")
+    T().read_to[D] = ms(0)
+    db.put_kv(f"read_to:{D}", ms(0))
+    db.put_kv(f"read_end:{D}", ms(10))
+    db.put_kv(f"finalized_to:{D}", iso(10))
+    # A longer resend's unfinalized tail legitimately enters the late processor.
+    audio.save(D, ms(0), b"longer", "audio/wav")
+    late_store.release(D)
+    s = late_store.claim()
+    assert s and s["status"] == "processing"
     async def run():
-        stream = audio.stream(D, dt.datetime.fromisoformat(iso(5)))
-        await anext(stream)  # deployment/pipeline restart while late ASR is still in flight
-        await stream.aclose()
+        entered, finish, completed = anyio.Event(), anyio.Event(), anyio.Event()
+        async def transcribe(span):
+            entered.set()
+            await finish.wait()
+            return [row(10.1, 19.9, text="same audio, new ASR timing")], {"S1": E1}
+        monkeypatch.setattr(late, "transcribe", transcribe)
+        async def processing():
+            await late.process(s)
+            completed.set()
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(processing)
+            await entered.wait()
+            stream = audio.stream(D, dt.datetime.fromisoformat(iso(10)))
+            await anext(stream)  # pipeline restarts while the real process() is awaiting its provider
+            await stream.aclose()
+            with db.tx() as t:
+                db.replace_sentences(t, iso(10), iso(20), [row(10.2, 19.8, text="finalized during restart")], D)
+            finish.set()
+            with anyio.fail_after(5):
+                await completed.wait()
+            tg.cancel_scope.cancel()
     anyio.run(run)
-    assert not list(db.conn().execute("SELECT 1 FROM late_spans WHERE status != 'done' AND end_ms > ?", (ms(5),)))
-    live = row(10.2, 19.7, text="finalized during restart")
-    with db.tx() as t:
-        db.replace_sentences(t, iso(10), iso(20), [live], D)
-    late_merge.attach(s, [row(10.3, 19.8, text="same audio, new ASR timing")], {"S1": E1}, {})
     assert len(db.sentences("", "z", source=D)) == 1
     assert db.sentences("", "z", source=D)[0]["text"] == "finalized during restart"
 
