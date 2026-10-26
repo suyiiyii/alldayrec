@@ -205,6 +205,41 @@ class BeanTest {
 
     @Test fun rolloverWithLateComplete() = rollover(true)
 
+    @Test fun reconnectListingKeepsClosedFileRanges() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val a = t0 / 1000; val b = a + 1
+        val c = a - 1
+        val state = File(dir, "state.json")
+        // State flushed by the old live connection before rollover; the bean briefly lists only the new file.
+        state.writeText("""{"$a":{"a":$t0,"h":[[0,25]],"t":-1,"r":0},"$c":{"a":${t0 - 1000},"h":[[0,25]],"t":25,"r":0}}""")
+        val bean = FakeBean(t0 + 5000)
+        bean.recording = true; bean.open = b; bean.listed[b] = 0
+        val sync = BeanSync("D3200-0A0B", state, chunks, bean)
+        bean.onTransfer = { file, from, live ->
+            if (live) {
+                assertEquals(b, file)
+                assertEquals("listing must keep closed files with received ranges", setOf(a, c), sync.files.keys)
+                assertEquals(25L, sync.gap(sync.files[a]!!))
+                val restored = BeanSync("D3200-0A0B", state, chunks, bean)
+                assertEquals("ranges also survive saving and reloading", 25L, restored.gap(restored.files[a]!!))
+                assertNull("a complete file must not be fetched again either", restored.gap(restored.files[c]!!))
+                bean.header(b, 0xFFFFFFFFL); bean.units(b, (0L..24L).toList(), last = 24)
+                bean.script += {
+                    bean.recording = false; bean.open = 0; bean.listed[a] = 600; bean.listed[b] = 500
+                    bean.push(0x1882, byteArrayOf(0)); bean.complete(b)
+                }
+            } else {
+                assertEquals(a, file); assertEquals("only the real tail is fetched", 25L, from)
+                bean.header(a, 30L * Bean.UNIT); bean.units(a, (25L..29L).toList(), last = 29); bean.complete(a)
+            }
+        }
+        assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
+        assertEquals(listOf(Triple(b, 0L, true), Triple(a, 25L, false)), bean.transfers)
+        assertNull(sync.gap(sync.files[a]!!))
+    }
+
     /** The bean may open the next file without ending the old transfer; its tail waits until recording stops. */
     private fun rollover(late: Boolean) {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -244,6 +279,9 @@ class BeanTest {
                 else -> fail("asked for $file from $from live $live")
             }
         }
+        assertEquals("file $a: rolled over to $b", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }.message)
+        assertEquals("no rejoin on the old connection", listOf(Triple(a, 0L, true)), bean.transfers)
+        assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(a, 25L, false)), bean.transfers)
         val seen = mutableMapOf<Long, MutableList<Long>>()
@@ -276,10 +314,10 @@ class BeanTest {
         repeat(30) { bean.script += {} }
         bean.script += { bean.push(0x0103, byteArrayOf(7, 5), wait = 1001) }  // the link is up, but no audio arrives
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
-        assertEquals("file $id: no audio for 30 s", assertThrows(Exception::class.java) { sync.session(t0 - 3_600_000, "") }.message)
+        assertEquals("file $id: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }.message)
         assertEquals(25L, sync.gap(sync.files[id]!!))
         assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
-        assertEquals(1, bean.logs.count { it.first == "bean_xfer" && "30 s" in it.second })
+        assertEquals(1, bean.logs.count { it.first == "bean_stall" && "30 s" in it.second })
 
         // A fresh handshake discards any old stream still in flight before joining at the saved offset.
         bean.units(id, listOf(25L))
@@ -294,6 +332,76 @@ class BeanTest {
         for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
             val seq = ByteBuffer.wrap(p, 1, 4).int.toLong()
             assertEquals(sync.files[id]!!.anchor + seq * Bean.FRAME_MS, Uploader.startMs(piece) + i * Bean.FRAME_MS)
+        }
+    }
+
+    @Test fun liveHeaderWithoutUnitsReconnects() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val id = t0 / 1000
+        bean.recording = true; bean.open = id; bean.listed[id] = 0
+        bean.onTransfer = { file, _, _ -> bean.header(file, 0xFFFFFFFFL) }
+        repeat(100) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        repeat(2) {
+            val before = bean.now
+            assertEquals("file $id: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 1000, "") }.message)
+            assertTrue("each reconnect waits for 30 s, even without BeanLink backoff", bean.now - before in 30_000L..36_000L)
+        }
+        assertEquals("one warning for the whole silent streak", 1, bean.logs.count { it.first == "bean_stall" })
+    }
+
+    @Test fun rolloverCode4LoopReconnects() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val a = t0 / 1000; val b = a + 1
+        bean.recording = true; bean.open = a; bean.listed[a] = 0
+        bean.onTransfer = { file, _, _ ->
+            if (file == a) {
+                bean.header(a, 0xFFFFFFFFL); bean.units(a, (0L..24L).toList()); bean.rotation(b)
+                bean.open = b; bean.listed[b] = 0
+            } else bean.header(b, 0xFFFFFFFFL, code = 4)
+        }
+        repeat(150) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
+        assertEquals("file $a: rolled over to $b", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 1000, "") }.message)
+        assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
+        repeat(2) {
+            val before = bean.now
+            assertEquals("file $b: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 1000, "") }.message)
+            assertTrue("code 4 cannot cause rapid reconnects", bean.now - before in 30_000L..36_000L)
+        }
+        assertTrue("several code-4 answers per connection", bean.transfers.count { it.first == b } > 4)
+        assertEquals(1, bean.logs.count { "code 4" in it.second })
+        assertEquals(1, bean.logs.count { it.first == "bean_stall" })
+    }
+
+    @Test fun pausedLiveDoesNotStall() {
+        for (audio in listOf(false, true)) {
+            val dir = Files.createTempDirectory("bean").toFile()
+            val t0 = 1_793_000_000_000L
+            val bean = FakeBean(t0)
+            val id = t0 / 1000
+            bean.recording = true; bean.open = id; bean.listed[id] = 0
+            bean.onTransfer = { file, _, _ ->
+                bean.header(file, 0xFFFFFFFFL)
+                if (audio) bean.units(file, (0L..24L).toList())
+                bean.push(0x1882, byteArrayOf(2))
+            }
+            repeat(45) { bean.script += {} }
+            bean.script += {
+                assertTrue("pause passed 30 s without reconnect", bean.now - t0 >= 45_000)
+                bean.push(0x1882, byteArrayOf(1))
+            }
+            repeat(20) { bean.script += {} }
+            bean.script += { bean.units(id, listOf(25L)) }
+            val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+            assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
+            assertEquals("resume gets a fresh grace period", 0, bean.logs.count { it.first == "bean_stall" })
+            assertEquals(1, bean.transfers.size)
         }
     }
 
@@ -549,7 +657,7 @@ class BeanTest {
             bean.push(0x0103, byteArrayOf(8, 6))
             bean.push(0x0104, byteArrayOf(1, 1))
         }
-        bean.script += { bean.now += 60_000 }
+        repeat(3) { seq -> bean.script += { bean.units(bean.open, listOf(seq.toLong()), wait = 20_000) } }
         bean.script += {
             val hw = bean.reports.last()
             assertEquals(listOf(true, 90, 70, "charging", true),
@@ -558,7 +666,7 @@ class BeanTest {
             bean.push(0x0104, byteArrayOf(0, 0))
             bean.push(0x0103, byteArrayOf(7, 5))
         }
-        bean.script += { bean.now += 60_000 }
+        repeat(3) { seq -> bean.script += { bean.units(bean.open, listOf(seq + 3L), wait = 20_000) } }
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertFalse(sync.recording)
         assertEquals(listOf(false, 80, 60, "battery", false), bean.reports.last().let {
