@@ -142,11 +142,8 @@ def test_attach_inside_adjacent_and_earlier_keeps_id(store, a, b):
     before = [tuple(r) for r in db.conn().execute("SELECT rowid,* FROM sentences")]
     s = span(a, b)
     changed, removed = late_merge.attach(s, [row(a, b)], {"S1": E1}, {A: {"S1": E1}})
-    if a >= 0 and b <= 60:
-        assert changed == [] and not removed
-    else:
-        assert not removed and changed[0]["id"] == A and changed[0]["sentences"] == 2
-        assert db.summary(A)["status"] == "pending"
+    assert not removed and changed[0]["id"] == A and changed[0]["sentences"] == 2
+    assert db.summary(A)["status"] == "pending"
     assert tuple(db.conn().execute("SELECT rowid,* FROM sentences ORDER BY rowid").fetchone()) == before[0]
 
 
@@ -391,3 +388,19 @@ def test_backfill_exact_pass_ranges_skip_final_speech_but_keep_clock_holes(store
     path.write_text(json.dumps(p)+"\n")
     found, _ = late_backfill.candidates(1)
     assert not found[D]
+
+
+def test_legacy_pass_row_crossing_hole_does_not_hide_audio_received_after_pass(store):
+    day = dt.date.today()
+    start = dt.datetime.combine(day, dt.time(10))
+    base = round(start.timestamp()*1000)
+    for offset, received in [(0, base+100_000), (20, base+200_000), (40, base+100_000)]:
+        db.conn().execute("INSERT INTO pieces (device,start_ms,seconds,path,received_ms) VALUES (?,?,?,?,?)",
+                          (D, base+offset*1000, 10, "x", received))
+    t = lambda s: core.iso(start+dt.timedelta(seconds=s))
+    with db.tx() as tx:
+        db.insert_sentences(tx, [{"id": "crosses-gap", "start": t(5), "end": t(45), "source": D, "text": "heard on either side"}])
+    trace = {"layer": "final", "device": D, "from": t(0), "to": t(50), "at": t(150)}
+    (store/f"{day}.passes.jsonl").write_text(json.dumps(trace)+"\n")
+    found, _ = late_backfill.candidates(1)
+    assert found[D] == [[[base+20_000, base+30_000]]]

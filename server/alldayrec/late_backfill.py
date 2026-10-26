@@ -29,7 +29,7 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
     hi = round(dt.datetime.combine(today + dt.timedelta(days=1), dt.time()).timestamp() * 1000)
     out, skipped, ambiguous = {}, set(), 0
     # New traces carry device. Legacy traces can be attributed only when their audio belongs to one device.
-    passes = {}
+    passes, legacy = {}, {}
     uncertain = []
     for path in sorted(T().data.glob("*.passes.jsonl")):
         if not (str(first - dt.timedelta(days=1)) <= path.name[:10] <= str(today)):
@@ -60,6 +60,12 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
                     ranges = [[round(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end")]
                               for r in db.sentences(dt.datetime.fromtimestamp(a / 1000).isoformat(),
                                                     dt.datetime.fromtimestamp(b / 1000).isoformat(), source=device)]
+                    try:
+                        completed = round(dt.datetime.fromisoformat(p["at"]).timestamp() * 1000)
+                    except (KeyError, ValueError, TypeError):
+                        completed = None
+                    legacy.setdefault(device, []).append((completed, ranges))
+                    continue
                 passes.setdefault(device, []).extend(ranges)
     # Descending per-device scan: the minimum receipt of a later piece is an O(n) suffix minimum.
     # Do not materialize a month's one-second pieces or run a history scan for each piece.
@@ -80,7 +86,11 @@ def candidates(days: int, today: dt.date | None = None) -> tuple[dict, dict]:
             "AND (received_ms IS NULL OR received_ms < ?)", (device, b, a, p["received_ms"]))]
         pending = [x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ? AND start_ms < ? AND end_ms > ?", (device, b, a))
                    for x in json.loads(r[0])]
-        rs = late_store.subtract([[a, b]], covers + passes.get(device, []) + pending)
+        # A legacy row's timestamps may bridge the hole too. Audio received after its pass
+        # completed provably was not in that pass, even when the row's wall-clock envelope overlaps.
+        final = passes.get(device, []) + [r for completed, ranges in legacy.get(device, [])
+                                          if completed is None or p["received_ms"] <= completed for r in ranges]
+        rs = late_store.subtract([[a, b]], covers + final + pending)
         if any(x < b and y > a for x, y in uncertain):
             ambiguous += len(rs)
             continue  # do not guess which device an old final pass heard

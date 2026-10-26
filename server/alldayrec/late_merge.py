@@ -191,8 +191,10 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
             a, b = round(P(r["start"]).timestamp() * 1000), round(P(r["end"]).timestamp() * 1000)
             if not any(lo <= a < b <= hi for lo, hi in json.loads(span["ranges"])):
                 continue
-            if t.execute("SELECT 1 FROM sentences WHERE source = ? AND (id = ? OR (start < ? AND end > ?)) LIMIT 1",
-                         (device, r["id"], r["end"], r["start"])).fetchone():
+            # A pre-existing row can bridge a clock gap even though its ASR window never heard
+            # that gap's audio. Coverage was subtracted at ingestion; an interval overlap alone
+            # is not a duplicate. Row identity still protects corrections and retry idempotence.
+            if t.execute("SELECT 1 FROM sentences WHERE source = ? AND id = ? LIMIT 1", (device, r["id"])).fetchone():
                 continue
             db.insert_sentences(t, [r])
             t.execute("UPDATE sentences SET late = 1 WHERE id = ? AND source = ?", (r["id"], device))
