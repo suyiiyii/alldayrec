@@ -1,11 +1,11 @@
 ---
 layout: home
-# the README's tagline, written once: the page title reuses it
-title: &tagline 开源心力球，让 Agent 更懂你
+# Keep the SEO title aligned with the README hook; the hero uses the brand tagline.
+title: 开源心力球，让 Agent 更懂你
 titleTemplate: "AllDayRec（全天录）：:title"
 hero:
   name: AllDayRec（全天录）
-  text: *tagline
+  text: 全天记录，让 Agent 更懂你
   tagline: 用你已有的设备记录每一天：戴着录、用手机录，或导入其他设备的录音，都整理成你自己服务器上、Agent 能查询的个人记忆。<br>读作 all day rec。
   image:
     src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-zh-summary-20261026.gif

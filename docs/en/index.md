@@ -1,11 +1,11 @@
 ---
 layout: home
-# the README's tagline, written once here (also EN_TAGLINE in .vitepress/config.ts): the page title reuses it
-title: &tagline "An open-source Plaud for your whole day, so your agent knows you"
+# Keep the SEO title aligned with the README hook; the hero uses the brand tagline.
+title: "An open-source Plaud for your whole day, so your agent knows you"
 titleTemplate: "AllDayRec — :title"
 hero:
   name: AllDayRec（全天录）
-  text: *tagline
+  text: "Record your whole day, so your agent knows you"
   tagline: 'Record every day with the devices you already have: wear a recorder, use your phone, or import recordings from other devices. It all becomes a personal memory on your own server that your agent can query.<br>Pronounced "all day rec".'
   image:
     src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-en-summary-20261026.gif
