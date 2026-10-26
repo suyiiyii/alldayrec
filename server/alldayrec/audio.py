@@ -36,7 +36,7 @@ log = logging.getLogger("live")
 SR = 16000
 # the current tenant's recordings dir: T().recordings; per device, the start of the last piece its reader has finished
 # with (later ones are queued): T().read_to
-HOLD_MAX_S = 12 * 3600  # a hold not said again for this long is let go: a phone that never comes back must not stop finals for good
+HOLD_MAX_S = 12 * 3600  # total life of one hold boundary, including silence, reconnects and progress
 HOLD_STALE_S = int(os.environ.get("HOLD_STALE_S", "1200"))  # no older audio arriving while the phone keeps saying hold
 _holds = threading.RLock()  # a hold refresh, older-piece arrival and expiry must preserve each other's persisted state
 _append = threading.Lock()  # uploads are saved in threads (threads.MEDIA): one append (and its index row) at a time
@@ -375,22 +375,30 @@ def hold(device: str, at_ms: int | None):
         if at_ms is None:
             h = None
         elif h and h["at"] == at_ms:
+            h.setdefault("since", h["seen"])  # a legacy hold's earliest known contact, before seen is refreshed
             if now - h["seen"] > 5 * 60:
                 h["progress"] = now  # reconnect: live pieces upload first, so give the backlog a fresh grace period
             h.setdefault("progress", now)  # a pre-timeout store gets one full grace period after upgrade
             h["seen"] = now  # repeating a hold does not mean older audio made progress, or rearm an expired hold
         else:
-            h = {"at": at_ms, "seen": now, "progress": now}
+            h = {"at": at_ms, "since": now, "seen": now, "progress": now}
         db.put_kv(f"hold:{device}", h)
 
 
 def held(device: str) -> int | None:
     """Where finals wait (unix ms). The no-progress clock advances only as the phone repeats the hold.
-    A silent phone keeps HOLD_MAX_S to return; new older audio or a reconnect renews the grace period.
+    New older audio or a reconnect renews stale grace, within HOLD_MAX_S from this boundary's first set.
     Expiry is persisted: repeated uploads and restarts cannot rearm the same hold or repeat its warning."""
     with _holds:
         h = db.kv(f"hold:{device}")
-        if not h or h.get("released") or time.time() - h["seen"] >= HOLD_MAX_S:
+        if not h or h.get("released"):
+            return None
+        if "since" not in h:
+            h["since"] = h["seen"]
+            db.put_kv(f"hold:{device}", h)
+        if time.time() - h["since"] >= HOLD_MAX_S:
+            h["released"] = "max"
+            db.put_kv(f"hold:{device}", h)
             return None
         done = db.kv(f"finalized_to:{device}")
         if done and int(dt.datetime.fromisoformat(done).timestamp() * 1000) >= h["at"]:
@@ -424,9 +432,15 @@ def hold_expired(device: str) -> dict | None:
 
 
 def hold_seen(device: str) -> float | None:
-    """When a phone last said the device's hold (unix s): it lets go HOLD_MAX_S after that."""
+    """When a phone last said the device's hold (unix s)."""
     h = db.kv(f"hold:{device}")
     return h and h["seen"]
+
+
+def hold_until(device: str) -> float | None:
+    """The hold's total-life deadline (unix s), unchanged by reconnects or older-piece arrivals."""
+    h = db.kv(f"hold:{device}")
+    return h.get("since", h["seen"]) + HOLD_MAX_S if h else None
 
 
 async def stream(device: str, after: dt.datetime | None, edge_s: float | None = None, spent: dict | None = None):

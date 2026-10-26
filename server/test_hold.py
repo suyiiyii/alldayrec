@@ -98,6 +98,47 @@ def test_max_s_still_applies(held_store):
     assert audio.held("bean") is None and audio.hold_expired("bean") is None
 
 
+def test_repeated_reconnects_cannot_extend_total_hold_life(held_store):
+    clock = held_store
+    since = clock[0]
+    for elapsed in range(6 * 60, audio.HOLD_MAX_S, 6 * 60):
+        clock[0] = since + elapsed
+        audio.hold("bean", 1_000_000)  # each six-minute silence gives fresh stale grace
+        assert audio.held("bean") == 1_000_000
+        if elapsed == audio.HOLD_MAX_S // 2:
+            t = tenant.T()
+            tenant.enter(tenant.Tenant(t.id, "", t.data, t.recordings, db=t.db))
+    clock[0] = since + audio.HOLD_MAX_S - 1
+    audio.hold("bean", 1_000_000)
+    audio.save("bean", 900_000, b"older", "audio/test")
+    d = monitor.device_status("bean", pipeline_state.PipelineState())
+    assert d["hold"] is not None
+    assert d["hold_until"] == dt.datetime.fromtimestamp(since + audio.HOLD_MAX_S).isoformat(timespec="seconds")
+    clock[0] += 1
+    audio.hold("bean", 1_000_000)
+    assert audio.held("bean") is None
+    clock[0] += 6 * 60
+    audio.hold("bean", 1_000_000)
+    audio.save("bean", 800_000, b"older", "audio/test")
+    assert audio.held("bean") is None  # another reset or genuine progress cannot revive the same boundary
+    audio.hold("bean", 1_100_000)
+    assert audio.held("bean") == 1_100_000  # a different boundary starts its own lifetime
+
+
+@pytest.mark.parametrize("refresh_first", [False, True])
+def test_legacy_hold_caps_from_last_known_seen(held_store, refresh_first):
+    clock = held_store
+    since = clock[0]
+    db.put_kv("hold:bean", {"at": 1_000_000, "seen": since, "progress": since})
+    clock[0] = since + audio.HOLD_MAX_S - 1
+    if refresh_first:
+        audio.hold("bean", 1_000_000)
+    assert audio.held("bean") == 1_000_000
+    clock[0] += 1
+    audio.hold("bean", 1_000_000)
+    assert audio.held("bean") is None
+
+
 def test_silent_phone_returns_live_first_then_backlog(held_store):
     clock = held_store
     clock[0] += 30 * 60

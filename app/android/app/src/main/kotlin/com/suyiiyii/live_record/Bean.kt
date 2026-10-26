@@ -246,8 +246,9 @@ object Bean {
  * after a drop starts at the first unit missing (its byte offset), units had already are dropped, a hole is asked
  * for again (three times); when a long stretch the phone has follows it, the session ends once the hole is in and the
  * next hole is asked for from its own offset (rest()), not by taking that stretch again. A pause inside a file would
- * date what follows it early (the app never pauses the bean): logged as bean_gap_time. Pieces of what is said now go up ahead of a backlog (the hold, as BleLink's); the end of
- * the last recording goes to the server once its pieces are up. A file the server has whole is then deleted on the
+ * date what follows it early (the app never pauses the bean): logged as bean_gap_time. Live transfers never hold
+ * finals; backlog is fetched only after recording stops. The end of the last recording goes to the server once
+ * its pieces are up. A file the server has whole is then deleted on the
  * bean (prune()); nothing else is.
  */
 class BeanSync(private val tag: String, private val stateFile: File, private val chunks: File, private val io: Io) {

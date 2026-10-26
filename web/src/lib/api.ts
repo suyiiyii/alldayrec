@@ -131,7 +131,7 @@ export interface DeviceStatus {
   eta_s: number | null;
   hold?: string | null; // finals wait here for older audio the phone is still sending
   hold_seen?: string | null; // when its phone last said the hold
-  hold_until?: string | null; // when the queue stops waiting without the phone (12 h after hold_seen)
+  hold_until?: string | null; // absolute deadline: 12 h from this hold boundary's first set
   hold_expired?: { reason: "stale"; seconds: number } | null;
   recording?: boolean; // its newest audio came in the last 2 min: behind_s and latency_s are about now
   queued: number;
