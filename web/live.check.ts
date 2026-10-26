@@ -1,5 +1,6 @@
 // node --experimental-strip-types live.check.ts: useLive keeps pushes on the fetched day.
 import assert from "node:assert/strict";
+import { mock } from "node:test";
 import { createServer } from "vite-plus";
 import { createRenderer, defineComponent, nextTick, ref } from "vue";
 import type { Row } from "./src/lib/api.ts";
@@ -46,6 +47,8 @@ const renderer = createRenderer<object, object>({
 });
 let app: ReturnType<typeof renderer.createApp> | undefined;
 try {
+  const openedAt = new Date("2026-01-31T23:59:00").getTime();
+  mock.timers.enable({ apis: ["Date"], now: openedAt });
   const { useLive } = await server.ssrLoadModule("/src/lib/live.ts");
   const { today, shiftDay } = await server.ssrLoadModule("/src/lib/calendar.ts");
   const day = ref(today());
@@ -154,10 +157,68 @@ try {
     app!.unmount();
     day.value = today();
   }
+  for (const page of [true, false]) {
+    mock.timers.setTime(openedAt);
+    day.value = today();
+    const openedDay = day.value;
+    const socket = mount(page);
+    await loaded();
+    assert.equal(store.live.value, true);
+    mock.timers.setTime(openedAt + 2 * 60 * 1000); // 00:01, without changing the caller's day ref
+    const currentDay = today();
+    assert.notEqual(currentDay, openedDay);
+    final(socket, [row("after-midnight", currentDay, "00:01:00")]);
+    final(socket, [row("old-import", openedDay, "23:58:00")]);
+    assert.deepEqual(
+      store.rows.value.map((r) => r.id),
+      ["after-midnight"],
+      "a view following today accepts next-day finals after midnight and excludes old imports",
+    );
+    socket.push({ type: "partial", device: "mic", row: row("new-partial", currentDay) });
+    socket.push({ type: "draft", device: "mic", rows: [row("old-draft", openedDay)] });
+    assert.equal(store.partials.value.mic?.id, "new-partial");
+    socket.push({
+      type: "draft",
+      device: "mic",
+      rows: [row("new-draft", currentDay, "00:02:00", "draft")],
+    });
+    assert.deepEqual(
+      store.rows.value.map((r) => r.id),
+      ["after-midnight", "new-draft"],
+    );
+    assert.deepEqual(store.partials.value, {});
+
+    day.value = shiftDay(openedDay, -1); // explicitly pick a past date after midnight
+    await nextTick();
+    await loaded();
+    assert.equal(store.live.value, false);
+    assert.ok(requests.includes(`/api/sentences?date=${day.value}`));
+    final(socket, [row("current-push", currentDay)]);
+    final(socket, [row("past-push", day.value)]);
+    assert.deepEqual(store.rows.value, [], "picked past dates remain fetch-only after midnight");
+    socket.push({
+      type: "conversation",
+      id: "past-conversation",
+      start: `${day.value}T12:00:00`,
+      state: "closed",
+    });
+    socket.push({
+      type: "conversation",
+      id: "current-conversation",
+      start: `${currentDay}T12:00:00`,
+      state: "closed",
+    });
+    assert.deepEqual(
+      store.convs.value.map((c) => c.id),
+      ["past-conversation"],
+    );
+    app!.unmount();
+  }
   console.log("useLive date filtering checks passed");
 } finally {
   app?.unmount();
   await server.close();
+  mock.timers.reset();
   for (const key of ["window", "document", "location", "WebSocket", "fetch"]) {
     if (saved[key]) Object.defineProperty(globalThis, key, saved[key]!);
     else Reflect.deleteProperty(globalThis, key);

@@ -7,11 +7,9 @@ import { useSocket, useWatch } from "./socket";
 // its closed conversations, the live analyses and the status. The live page and 时间线's live card both use it; a
 // day other than today is loaded once and gets no pushes. page: the live page (its watch asks for short pieces).
 export function useLive(day: Ref<string>, page = false) {
-  const now = today(); // as the page opened: pushes still belong to the selected day after midnight
+  const now = today(); // as the page opened: one left open past midnight keeps following the stream
   const live = computed(() => day.value === now);
-  const nextDay = computed(() => shiftDay(day.value, 1));
-  // /api/sentences selects row starts in [date, next date), in the recording's local wall time.
-  const inDay = (r: { start: string }) => day.value <= r.start && r.start < nextDay.value;
+  const shownDay = () => (live.value ? today() : day.value);
   const rows = ref<Row[]>([]),
     partials = ref<Record<string, Row>>({}), // per device, the sentence being said now (DRAFT_ENGINE qwen-stream)
     convs = ref<Conversation[]>([]),
@@ -52,14 +50,14 @@ export function useLive(day: Ref<string>, page = false) {
   }
 
   async function load() {
-    const d = day.value;
+    const d = shownDay();
     const [rs, cs, ls, st] = await Promise.all([
       get<Row[]>("/api/sentences", { date: d }),
       get<Conversation[]>("/api/conversations", { date: d }),
       get<LiveState[]>("/api/live"),
       get<Status>("/api/status"), // at once, not at the first push 2 s later
     ]);
-    if (d !== day.value) return; // another day was picked meanwhile
+    if (d !== shownDay()) return; // another day was picked meanwhile
     rows.value = rs;
     lives.value = ls;
     status.value = st;
@@ -74,9 +72,14 @@ export function useLive(day: Ref<string>, page = false) {
   void load();
 
   const { connected, send } = useSocket((m) => {
+    // Read the clock on every push: a view following today rolls over without remounting.
+    const d = shownDay(),
+      nextDay = shiftDay(d, 1);
+    // /api/sentences selects row starts in [date, next date), in the recording's local wall time.
+    const inDay = (r: { start: string }) => d <= r.start && r.start < nextDay;
     // rows and conversations of another day than the one shown are not for this page
     if (m.type === "final") {
-      if (live.value && m.from < nextDay.value && m.to > day.value)
+      if (live.value && m.from < nextDay && m.to > d)
         finalize({ ...m, rows: m.rows.filter(inDay) });
     } else if (m.type === "draft") {
       const rs = m.rows.filter(inDay);
