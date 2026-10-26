@@ -76,7 +76,7 @@ async def hold_release(device: str):
     in its place), or its backlog is all up and no upload follows to let go (a recorder that stopped). Finalization
     stops waiting for it now, not HOLD_MAX_S after the phone last said the hold (10-07: LR-P3-116C's 261 pieces waited
     from 17:47 to 05:47)."""
-    if audio.held(device) is not None:
+    if db.kv(f"hold:{device}"):
         log.info("%s hold let go: no older audio is coming from its phone", device)
         ws.note(f"{device} 的旧录音不用再等了，继续定稿")
     audio.hold(device, None)  # clear an expired hold's reason too

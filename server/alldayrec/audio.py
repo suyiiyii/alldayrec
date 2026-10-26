@@ -37,7 +37,7 @@ SR = 16000
 # the current tenant's recordings dir: T().recordings; per device, the start of the last piece its reader has finished
 # with (later ones are queued): T().read_to
 HOLD_MAX_S = 12 * 3600  # a hold not said again for this long is let go: a phone that never comes back must not stop finals for good
-HOLD_STALE_S = int(os.environ.get("HOLD_STALE_S", "1200"))  # no older audio arriving, even if the phone keeps saying hold
+HOLD_STALE_S = int(os.environ.get("HOLD_STALE_S", "1200"))  # no older audio arriving while the phone keeps saying hold
 _holds = threading.RLock()  # a hold refresh, older-piece arrival and expiry must preserve each other's persisted state
 _append = threading.Lock()  # uploads are saved in threads (threads.MEDIA): one append (and its index row) at a time
 
@@ -375,6 +375,8 @@ def hold(device: str, at_ms: int | None):
         if at_ms is None:
             h = None
         elif h and h["at"] == at_ms:
+            if now - h["seen"] > 5 * 60:
+                h["progress"] = now  # reconnect: live pieces upload first, so give the backlog a fresh grace period
             h.setdefault("progress", now)  # a pre-timeout store gets one full grace period after upgrade
             h["seen"] = now  # repeating a hold does not mean older audio made progress, or rearm an expired hold
         else:
@@ -383,7 +385,8 @@ def hold(device: str, at_ms: int | None):
 
 
 def held(device: str) -> int | None:
-    """Where finals wait (unix ms). Only new audio starting before it renews the no-progress grace period.
+    """Where finals wait (unix ms). The no-progress clock advances only as the phone repeats the hold.
+    A silent phone keeps HOLD_MAX_S to return; new older audio or a reconnect renews the grace period.
     Expiry is persisted: repeated uploads and restarts cannot rearm the same hold or repeat its warning."""
     with _holds:
         h = db.kv(f"hold:{device}")
@@ -395,7 +398,7 @@ def held(device: str) -> int | None:
         if "progress" not in h:
             h["progress"] = time.time()
             db.put_kv(f"hold:{device}", h)
-        if time.time() - h["progress"] < HOLD_STALE_S:
+        if h["seen"] - h["progress"] < HOLD_STALE_S:
             return h["at"]
         h.update(released="stale", stale_s=HOLD_STALE_S)
         db.put_kv(f"hold:{device}", h)

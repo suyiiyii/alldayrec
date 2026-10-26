@@ -5,7 +5,7 @@ import anyio
 import numpy as np
 import pytest
 
-from alldayrec import audio, db, monitor, pipeline_state, routes_upload, tenant, ws
+from alldayrec import audio, db, monitor, pipeline_state, routes_upload, tenant
 
 
 @pytest.fixture
@@ -20,14 +20,21 @@ def held_store(tmp_path, monkeypatch):
     return clock
 
 
+def refresh_until(clock, until):
+    """The phone stays connected and repeats its hold at intervals shorter than the silence threshold."""
+    while clock[0] < until:
+        clock[0] = min(until, clock[0] + 200)
+        audio.hold("bean", 1_000_000)
+
+
 def test_live_uploads_do_not_renew_stale_hold(held_store, caplog):
     clock = held_store
     for second in (3000, 3199):
-        clock[0] = second
-        audio.hold("bean", 1_000_000)
+        refresh_until(clock, second)
         audio.save("bean", second * 1000, b"live", "audio/test")
         assert audio.held("bean") == 1_000_000
     clock[0] = 3200
+    audio.hold("bean", 1_000_000)
     assert audio.held("bean") is None
     assert audio.hold_expired("bean") == {"reason": "stale", "seconds": 1200}
     audio.hold("bean", 1_000_000)
@@ -42,29 +49,28 @@ def test_live_uploads_do_not_renew_stale_hold(held_store, caplog):
 
 def test_older_pieces_renew_but_retries_and_other_devices_do_not(held_store):
     clock = held_store
-    clock[0] = 3100
+    refresh_until(clock, 3100)
     audio.save("bean", 900_000, b"older", "audio/test")
-    clock[0] = 3200
+    refresh_until(clock, 3200)
     assert audio.held("bean") == 1_000_000
-    clock[0] = 4200
+    refresh_until(clock, 4200)
     audio.save("bean", 900_000, b"older", "audio/test")  # identical retry
     audio.save("other", 800_000, b"older", "audio/test")
     audio.save("bean", 1_000_000, b"boundary", "audio/test")
     assert audio.held("bean") == 1_000_000
-    clock[0] = 4300
+    refresh_until(clock, 4300)
     assert audio.held("bean") is None
 
 
 def test_progress_and_expiry_survive_restart(held_store):
     clock = held_store
-    clock[0] = 3100
+    refresh_until(clock, 3100)
     audio.save("bean", 900_000, b"older", "audio/test")
     t = tenant.T()
     tenant.enter(tenant.Tenant(t.id, "", t.data, t.recordings, db=t.db))
-    clock[0] = 4000
-    audio.hold("bean", 1_000_000)
+    refresh_until(clock, 4000)
     assert audio.held("bean") == 1_000_000
-    clock[0] = 4300
+    refresh_until(clock, 4300)
     assert audio.held("bean") is None
     tenant.enter(tenant.Tenant(t.id, "", t.data, t.recordings, db=t.db))
     audio.hold("bean", 1_000_000)
@@ -78,16 +84,61 @@ def test_legacy_hold_gets_one_persisted_grace_period(held_store):
     db.put_kv("hold:bean", {"at": 1_000_000, "seen": 2000})
     clock[0] = 3000
     assert audio.held("bean") == 1_000_000
-    clock[0] = 4199
-    audio.hold("bean", 1_000_000)
+    audio.hold("bean", 1_000_000)  # the returning phone confirms the legacy hold at this grace period's start
+    refresh_until(clock, 4199)
     assert audio.held("bean") == 1_000_000
-    clock[0] = 4200
+    refresh_until(clock, 4200)
     assert audio.held("bean") is None
 
 
 def test_max_s_still_applies(held_store):
-    held_store[0] += audio.HOLD_MAX_S
+    held_store[0] += audio.HOLD_MAX_S - 1
+    assert audio.held("bean") == 1_000_000 and audio.hold_expired("bean") is None
+    held_store[0] += 1
     assert audio.held("bean") is None and audio.hold_expired("bean") is None
+
+
+def test_silent_phone_returns_live_first_then_backlog(held_store):
+    clock = held_store
+    clock[0] += 30 * 60
+    assert audio.held("bean") == 1_000_000 and audio.hold_expired("bean") is None
+    assert not tenant.T().events
+    audio.hold("bean", 1_000_000)  # live uploads first on reconnect: a fresh grace period for the backlog
+    audio.save("bean", 1_100_000, b"live", "audio/test")
+    assert audio.held("bean") == 1_000_000
+    refresh_until(clock, 4900)  # more than the original grace period has passed, less than the fresh one
+    assert audio.held("bean") == 1_000_000
+    audio.save("bean", 900_000, b"older", "audio/test")
+    refresh_until(clock, 5000)
+    assert audio.held("bean") == 1_000_000 and not tenant.T().events
+    audio.hold("bean", None)  # the backlog is uploaded: the client releases it
+
+    async def run():
+        stream = audio.stream("bean", None)
+        with anyio.fail_after(2):
+            starts = [(await anext(stream))[0] for _ in range(2)]
+        await stream.aclose()
+        assert starts == [dt.datetime.fromtimestamp(s) for s in (900, 1100)]
+    anyio.run(run)
+
+
+def test_explicit_release_does_not_trigger_stale_warning(held_store, caplog):
+    refresh_until(held_store, 3200)  # eligible to expire, but neither the stream nor status has checked it
+    anyio.run(routes_upload.hold_release, "bean")
+    anyio.run(routes_upload.hold_release, "bean")  # an explicit release is idempotent
+    assert audio.held("bean") is None and audio.hold_expired("bean") is None
+    assert [e["kind"] for e in tenant.T().events] == ["info"]
+    assert "不用再等了" in tenant.T().events[0]["text"]
+    assert not any("没有进展" in r.message for r in caplog.records)
+
+
+def test_reconnect_grace_expires_if_backlog_never_arrives(held_store):
+    held_store[0] += 30 * 60
+    audio.hold("bean", 1_000_000)
+    refresh_until(held_store, 4999)
+    assert audio.held("bean") == 1_000_000
+    refresh_until(held_store, 5000)
+    assert audio.held("bean") is None and audio.hold_expired("bean")["reason"] == "stale"
 
 
 def test_hold_behind_finalized_position_is_ignored(held_store):
@@ -99,7 +150,7 @@ def test_hold_behind_finalized_position_is_ignored(held_store):
 
 def test_stream_itself_expires_the_hold(held_store):
     audio.save("bean", 1_100_000, b"live", "audio/test")
-    held_store[0] = 3200
+    refresh_until(held_store, 3200)
 
     async def run():
         stream = audio.stream("bean", None)
@@ -118,7 +169,7 @@ def test_stale_hold_stream_resumes_and_warns_from_status_thread(held_store):
     async def run():
         async with anyio.create_task_group() as tg:
             tenant.T().tg = tg
-            clock[0] = 3200
+            refresh_until(clock, 3200)
             d = await anyio.to_thread.run_sync(monitor.device_status, "bean", pipeline_state.PipelineState())
             assert d["hold"] is None and len(tenant.T().events) == 1
             stream = audio.stream("bean", None)

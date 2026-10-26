@@ -93,7 +93,7 @@
       "free": "{free} / {total} GB free"
     },
     "holdLeft": "the phone has been silent since {seen}; waiting until {until} at the latest",
-    "holdStale": "No backfill progress for {minutes} minutes. Finalizing now; older audio arriving later is saved without transcription.",
+    "holdStale": "No backfill progress for {minutes} min, so finals went on; older audio arriving later is saved, not transcribed.",
     "view": "View",
     "summaryFailed": "Summary failed",
     "summaryPending": "Writing summary…"

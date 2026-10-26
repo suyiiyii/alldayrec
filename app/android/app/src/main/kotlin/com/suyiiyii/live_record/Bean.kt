@@ -488,16 +488,15 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         send(Bean.transfer(x.file, x.from * Bean.UNIT, x.live))
     }
 
-    /** Only closed-file backlog can justify waiting. Holes in the open file cannot be fetched while it records;
-     *  waiting for them would stop finals until the bean closes the file (up to six hours). */
+    /** Closed files still to fetch. The bean reads them only after recording stops. */
     private fun older() = pending().isNotEmpty()
 
-    /** No older audio to come and none of it waiting to go up: the hold goes; once nothing records and all is up, the
-     *  end of the last recording. */
+    /** Release legacy holds while recording: even closed-file backlog cannot be fetched then. After a stop,
+     *  finish reading it first. Already-cut older pieces must be uploaded before letting go in either case. */
     private fun settle() {
-        if (older()) return
+        if (!recording && older()) return
         val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs)
-        io.held()?.let { h -> if (q.none { it < h + HOLD_MARGIN_MS }) { io.hold(null); io.log("hold", "补传完了，不再压住定稿") } }
+        io.held()?.let { h -> if (q.none { it < h + HOLD_MARGIN_MS }) { io.hold(null); io.log("hold", "旧录音不再压住定稿") } }
         if (!recording && xfer == null && pendingEnd > 0 && q.isEmpty()) {
             io.log("end", "录音到 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(pendingEnd))} 结束，都上传了：告诉服务端", fields = mapOf("at" to pendingEnd))
             io.end(pendingEnd); pendingEnd = 0; save()
@@ -623,7 +622,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (run.size >= if (x.live) io.liveUnits() else Bean.PIECE_UNITS) flush()
     }
 
-    /** A transfer's first unit: the file's anchor when it is new; live, the hold ahead of a backlog. */
+    /** A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop. */
     private fun first(x: Xfer, s: Bean.Slice, audio: ByteArray) {
         x.first = s.seq
         val now = io.now()
@@ -635,18 +634,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.live) io.log("bean_clock", "文件 ${x.file} 的起点按${if (phone) "手机" else "豆子"}的钟：豆子的钟比手机${if (est >= byId) "慢" else "快"} ${kotlin.math.abs(est - byId)} ms",
                 fields = mapOf("file" to x.file, "ms" to est - byId))
         }
-        val f = files[x.file]!!
         io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 开始：首单元 ${s.seq}（请求从 ${x.from} 起），Opus 配置 ${(audio.getOrNull(0)?.toInt() ?: 0) and 255 shr 3}",
             fields = mapOf("file" to x.file, "seq" to s.seq, "from" to x.from, "toc" to ((audio.getOrNull(0)?.toInt() ?: 0) and 255)))
-        if (x.live) {
-            state = say("connected")
-            if (older() && io.held() == null) {
-                val at = f.anchor + s.seq * Bean.FRAME_MS - HOLD_MARGIN_MS
-                io.hold(at)
-                io.log("hold", "压住定稿到 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(at))}，因为还有已关闭文件等补传",
-                    fields = mapOf("at" to at, "reason" to "closed_backlog"))
-            }
-        }
+        if (x.live) state = say("connected")
     }
 
     private fun complete(x: Xfer, result: Int) {
