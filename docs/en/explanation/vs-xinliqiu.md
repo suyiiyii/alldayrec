@@ -2,7 +2,7 @@
 type: explanation
 title: "alldayrec: an open-source alternative to OPPO's 心力球 (Xinliqiu) and the Feishu recorder bean"
 titleTemplate: false
-description: "alldayrec (全天录), the open-source 心力球 (开源心力球), compared with OPPO's AI 心力球 (Xinliqiu) and the Anker × Feishu AI recorder bean: price, hardware, phones, original audio, where data lives, speakers, summaries and to-dos, MCP, self-hosting, open source, which to pick and how to try it."
+description: "alldayrec, the open-source 心力球 (开源心力球), compared with OPPO's AI 心力球 (Xinliqiu) and the Feishu recorder bean: price, hardware, audio, data, MCP, self-hosting."
 ---
 
 # alldayrec vs OPPO's 心力球 (Xinliqiu) and the Feishu recorder bean

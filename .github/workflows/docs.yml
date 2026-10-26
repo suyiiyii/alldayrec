@@ -69,8 +69,9 @@ jobs:
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
       # IndexNow: tell Bing and the engines it shares pings with about every page in the sitemap just deployed.
       # The key file is docs/public/<KEY>.txt; under /alldayrec/ it covers URLs under that path, the whole docs site.
-      - if: github.event_name == 'push'
-        continue-on-error: true  # a failed ping never fails the deploy
+      - name: IndexNow ping
+        if: github.event_name == 'push'
+        continue-on-error: true  # a failed ping shows as a warning, never fails the deploy
         env:
           SITE: ${{ steps.deploy.outputs.page_url }}
           KEY: 8c6a8184eb62258611a113a1b1e63e4d
@@ -78,8 +79,10 @@ jobs:
           site=${SITE%/}/
           host=${site#*://}; host=${host%%/*}
           urls=$(curl -fsS --retry 3 "${site}sitemap.xml?$GITHUB_SHA" | grep -oE '<loc>[^<]+' | cut -c6- | jq -Rn '[inputs][:10000]')
-          echo "IndexNow: $(jq length <<<"$urls") URLs from ${site}sitemap.xml"
+          n=$(jq length <<<"$urls")
+          echo "IndexNow: $n URLs from ${site}sitemap.xml"
+          [ "$n" -gt 0 ] || exit 0
           jq -n --arg host "$host" --arg key "$KEY" --arg loc "$site$KEY.txt" --argjson urls "$urls" \
             '{host: $host, key: $key, keyLocation: $loc, urlList: $urls}' |
-            curl -sS --max-time 30 --retry 2 -H 'Content-Type: application/json; charset=utf-8' --data-binary @- \
+            curl -sS --fail-with-body --max-time 30 --retry 2 -H 'Content-Type: application/json; charset=utf-8' --data-binary @- \
               -w '\nHTTP %{http_code} (200: received; 202: received, key check pending)\n' https://api.indexnow.org/indexnow

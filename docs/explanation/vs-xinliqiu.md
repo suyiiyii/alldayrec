@@ -2,7 +2,7 @@
 type: explanation
 title: alldayrec（全天录）：开源心力球，和 OPPO 心力球、飞书录音豆对比
 titleTemplate: false
-description: "开源心力球 alldayrec（全天录）和 OPPO AI 心力球、安克×飞书 AI 录音豆逐项对比：价格、硬件、手机、原始录音、数据去向、说话人、摘要待办、MCP、自部署和开源，以及怎么选、怎么试。"
+description: "开源心力球 alldayrec（全天录）和 OPPO AI 心力球、安克×飞书 AI 录音豆逐项对比：价格、硬件、原始录音、数据去向、MCP 和自部署，以及怎么选。"
 ---
 
 # 开源心力球：alldayrec 和 OPPO 心力球、飞书录音豆对比
@@ -53,6 +53,6 @@ description: "开源心力球 alldayrec（全天录）和 OPPO AI 心力球、�
 [^xlq]: [极客公园，OPPO AI 心力球体验（2026-10-16；重量、续航、收音、声纹、今日 / 项目 / 觉察、只留文字、PCC 私密云、微信飞书问答、MCP、适配机型）](https://www.geekpark.net/news/372428)
 [^xlq-price]: [新浪科技转 IT之家，OPPO 推出「AI 心力球」，体验价 499 元，主打「AI 成长教练」（2026-09-22）](https://finance.sina.com.cn/tech/digi/2026-09-22/doc-inistexc1962351.shtml)
 [^xlq-buy]: [搜狐，OPPO AI 心力球限时开售，凭邀请码购买（2026-10-16；先行者计划、499 元、60 天 Ultra 版权益）](https://www.sohu.com/a/1088638076_115831)
-[^xlq-plan]: [X 用户 @QiBoden 转发的心力球套餐说明截图：「预计 2026 年 11 月底公布正式软件版本定价」（2026-10-20）](https://x.com/QiBoden/status/2112436871234256981)
+[^xlq-plan]: [X 用户 @QiBoden 发的心力球套餐说明截图：「预计 2026 年 11 月底公布正式软件版本定价」（2026-10-20）](https://x.com/QiBoden/status/2112436871234256981)
 [^lrd]: [爱搞机，安克×飞书 AI 录音豆评测（上架日期、价格、权益与会员、重量、续航、传输后删除本机录音、音频导出）](https://m.igao7.com/news/202601/M0rs0SQkAdD05EZY.html)
 [^lrd2]: [52audio，安克 AI 录音豆（飞书 App 配对、声纹、纪要与待办、AI 问答、转写和翻译）](https://www.52audio.com/archives/267283.html)
