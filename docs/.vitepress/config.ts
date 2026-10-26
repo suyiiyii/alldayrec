@@ -63,6 +63,7 @@ const SECTIONS: [zh: string, en: string, pages: [string, string, string][]][] = 
     "Explanation",
     [
       ["简介与定位", "What alldayrec is", "explanation/intro"],
+      ["和心力球、录音豆对比", "vs 心力球 and the Feishu bean", "explanation/vs-xinliqiu"],
       ["架构与数据流", "Architecture and data flow", "explanation/architecture"],
       ["隐私与数据去向", "Privacy: where your data goes", "explanation/privacy"],
       ["语音识别评测", "ASR benchmark", "explanation/asr-benchmark"],

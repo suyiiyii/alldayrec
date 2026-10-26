@@ -54,6 +54,8 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 
 As of 2026-10-25. "No" means no published design files or source code; "Unknown" means we found no reliable source.
 
+For a closer look at OPPO's 心力球 and the Feishu recorder bean, and which to pick, see [alldayrec vs 心力球 and the Feishu bean](./vs-xinliqiu.md).
+
 Limitless was bought by Meta on 2025-12-05 and is no longer sold[^limitless].
 
 ## Name and license
