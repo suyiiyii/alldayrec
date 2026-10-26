@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { t } from "../i18n";
-import { card, caughtUp, chargeText, hhmm, type DeviceStatus, type Recorder } from "../lib/api";
+import { card, caseText, caughtUp, chargeText, hhmm, type DeviceStatus, type Recorder } from "../lib/api";
 import { today } from "../lib/calendar";
 
 // A device as a status card (我的); a tap opens its own page. The third tile: how far behind the words come up while
@@ -43,6 +43,7 @@ const seen = (iso: string | null) => {
           >{{ t("deviceCard.battery")
           }}{{ d.hw?.charge ? " · " + chargeText(d.hw.charge) : "" }}</span
         >
+        <span v-if="caseText(d.hw)" class="k">{{ caseText(d.hw) }}</span>
       </div>
       <div>
         <span class="v" :class="{ long: cardTile(d).length > 8, bad: d.hw?.store }">{{

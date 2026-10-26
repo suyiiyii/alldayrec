@@ -204,6 +204,7 @@
   "onBattery": "On battery",
   "charging": "Charging",
   "charged": "Charged",
+  "caseBattery": "case {percent}%",
   "cardFullTile": "Full",
   "cardFull": "Card full",
   "cardFullSub": "Offline recording stopped",

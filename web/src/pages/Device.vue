@@ -5,6 +5,7 @@ import LineChart from "../components/LineChart.vue";
 import Skeleton from "../components/Skeleton.vue";
 import { t } from "../i18n";
 import {
+  caseText,
   chargeText,
   get,
   hot,
@@ -235,7 +236,12 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
             >{{ t("device.batterySub")
             }}{{
               charge
-                ? t("device.chargeAt", { charge: chargeText(charge.charge!), at: when(charge.at) })
+                ? t("device.chargeAt", {
+                    charge: [chargeText(charge.charge!), caseText(charge)]
+                      .filter(Boolean)
+                      .join(" · "),
+                    at: when(charge.at),
+                  })
                 : ""
             }}</span
           >

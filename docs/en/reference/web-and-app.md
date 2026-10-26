@@ -19,7 +19,7 @@ The server serves the web pages (`web/` builds into `server/alldayrec/static/dis
 | `/calendar` | 日历 (Calendar) | How many conversations each day has |
 | `/speakers` | 人物 (People) | Recognized speakers |
 | `/p/<name>` | 人物 (Person) | One person's conversations, points and to-dos |
-| `/me` | 我的 (Me) | Every device that has recorded, with its battery, free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices)), the sentences under 「收藏」 (Starred) (each opens its conversation's transcript), links to the to-dos and the pages below, and the page language |
+| `/me` | 我的 (Me) | Every device that has recorded, with its battery (a Feishu recorder bean also shows its charging case's), free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices)), the sentences under 「收藏」 (Starred) (each opens its conversation's transcript), links to the to-dos and the pages below, and the page language |
 | `/progress` | 处理进度 (Progress) | How far along transcription and summaries are, AI calls and the system log |
 | `/device/<name>` | 设备日志 (Device log) | One device's events and status history |
 | `/connect` | 连接手机 (Connect a phone) | The Android app download, the QR code to sign in by scanning, and the settings for connecting AI (MCP) |
@@ -39,7 +39,7 @@ Of the app's four bottom tabs, **时间线** (Timeline), **实时** (Live) and *
 
 | Entry | Content |
 |---|---|
-| 录音设备 (Recorder) | The bound Bluetooth recorder: battery, card, pause, live listening, offline recording sync, USB disk mode, firmware update, unbind (a Feishu recorder bean has no pause, live listening, USB disk mode or firmware update) |
+| 录音设备 (Recorder) | The bound Bluetooth recorder: battery (a Feishu recorder bean also shows its charging case's), card, pause, live listening, offline recording sync, USB disk mode, firmware update, unbind (a Feishu recorder bean has no pause, live listening, USB disk mode or firmware update) |
 | 设备状态与更多 (Device status and more) | The web page `/me`: battery, card, progress, connecting AI |
 | 上传 (Upload) | The phone's upload queue, and how far the server has processed this device's audio |
 | 设置 (Settings) | See below |

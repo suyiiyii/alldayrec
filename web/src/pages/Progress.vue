@@ -5,6 +5,7 @@ import Listen from "../components/Listen.vue";
 import Skeleton from "../components/Skeleton.vue";
 import { t } from "../i18n";
 import {
+  caseText,
   chargeText,
   build,
   card,
@@ -323,7 +324,11 @@ const eta = (d: DeviceStatus) => {
           }}</span>
           <span>{{ t("progress.battery") }}</span
           ><span>{{
-            [d.hw.battery != null && d.hw.battery + "%", d.hw.charge && chargeText(d.hw.charge)]
+            [
+              d.hw.battery != null && d.hw.battery + "%",
+              d.hw.charge && chargeText(d.hw.charge),
+              caseText(d.hw),
+            ]
               .filter(Boolean)
               .join(" · ") || "—"
           }}</span>

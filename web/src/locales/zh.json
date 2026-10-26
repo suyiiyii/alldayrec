@@ -76,6 +76,7 @@
       "hot": "发热",
       "overheated": "过热"
     },
+    "caseBattery": "充电仓 {n}%",
     "phoneBattery": "手机电量 {n}%",
     "phoneBatteryCharging": "手机电量 {n}%（充电中）",
     "lowPower": "省电模式",

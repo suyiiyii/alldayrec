@@ -151,6 +151,9 @@ export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw"> & { aud
 
 export type Charge = "battery" | "charging" | "full";
 export const chargeText = (c: Charge) => t(`api.charge.${c}`);
+// a Feishu bean's charging case, as the bean last read it: out of the case it keeps the level the case had then
+export const caseText = (h?: RecorderStatus | null) =>
+  h?.case_battery != null ? t("api.caseBattery", { n: h.case_battery }) : "";
 
 export interface RecorderStatus {
   at: string;
@@ -164,6 +167,8 @@ export interface RecorderStatus {
   backlog_kb?: number; // left on the card for the phone to read in the background
   backlog_eta_s?: number; // at the phone's own reading rate
   rssi?: number | null; // the link's signal, dBm
+  case_battery?: number; // a Feishu bean's charging case (caseText)
+  case_charging?: boolean; // that case on USB power
   // its phone (App 1.4.6 on): the build (1.4.6+21), system, model identifier; its battery, power saving and heat
   // (the system slows or ends apps then), the app's memory; this recorder's pieces waiting to go up and how uploads go
   app?: string;

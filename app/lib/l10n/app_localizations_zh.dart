@@ -715,6 +715,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get charged => '已充满';
 
   @override
+  String caseBattery(Object percent) {
+    return '充电仓 $percent%';
+  }
+
+  @override
   String get cardFullTile => '已满';
 
   @override

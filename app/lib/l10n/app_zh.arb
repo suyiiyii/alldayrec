@@ -424,6 +424,12 @@
   "onBattery": "用电池",
   "charging": "充电中",
   "charged": "已充满",
+  "caseBattery": "充电仓 {percent}%",
+  "@caseBattery": {
+    "placeholders": {
+      "percent": {}
+    }
+  },
   "cardFullTile": "已满",
   "cardFull": "存储卡已满",
   "cardFullSub": "离线录音已停止",

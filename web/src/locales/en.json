@@ -76,6 +76,7 @@
       "hot": "hot",
       "overheated": "overheated"
     },
+    "caseBattery": "case {n}%",
     "phoneBattery": "Phone battery {n}%",
     "phoneBatteryCharging": "Phone battery {n}% (charging)",
     "lowPower": "Low Power Mode",
