@@ -100,6 +100,28 @@ def test_import_failure_can_retry(tmp_path, monkeypatch):
         assert c.post(url, content=f).json()['seconds'] == 2
 
 
+@pytest.mark.parametrize('diagnostic', ['No space left on device', 'Disk quota exceeded', 'Input/output error'])
+def test_decoder_storage_failure_is_retryable(tmp_path, monkeypatch, diagnostic):
+    import sys
+    t = db.open_db(tmp_path / 'live.db')
+    c = client(t)
+    path = tmp_path / 'valid.wav'
+    wav_file(path, 2)
+    url = '/api/chunks?device=import-test&start=1700000000000'
+    popen = audio.subprocess.Popen
+    with monkeypatch.context() as full:
+        def fail_write(args, **kwargs):
+            return popen([sys.executable, '-c', 'import sys; sys.stderr.write(sys.argv[1]); sys.exit(1)', diagnostic + '\n' + 'x' * 20000], **kwargs)
+        full.setattr(audio.subprocess, 'Popen', fail_write)
+        with path.open('rb') as f:
+            r = c.post(url, content=f)
+        assert r.status_code == 503 and 'retry' in r.json()['detail']
+        assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
+        assert not (t.recordings / 'rejected').exists(), 'valid audio must not be permanently rejected'
+    with path.open('rb') as f:
+        assert c.post(url, content=f).json()['seconds'] == 2
+
+
 @pytest.mark.parametrize('seconds', [1, 10, 21, 300])
 def test_import_health_matches_legacy(seconds):
     x = np.random.default_rng(42).integers(-32768, 32768, seconds * audio.SR + 17, dtype=np.int16)

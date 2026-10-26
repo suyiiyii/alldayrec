@@ -260,6 +260,34 @@ WHOLE_S = 300  # keep ordinary device pieces and <=5-minute imports on their exi
 COPY_BYTES = 1024 * 1024
 
 
+
+def decode_process(args):
+    """Drain ffmpeg diagnostics without retaining an unbounded error log.
+    Output I/O failures are retryable, not invalid audio (a device drops a 400).
+    """
+    tail, storage_failed = bytearray(), False
+    storage_errors = (b"no space left on device", b"disk quota exceeded", b"input/output error", b"read-only file system",
+                      b"error opening output", b"error writing", b"error closing file")
+    with subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+        def drain():
+            nonlocal storage_failed
+            while data := process.stderr.read(4096):
+                tail[:] = (tail + data)[-8192:]
+                storage_failed |= any(error in tail.lower() for error in storage_errors)
+        reader = threading.Thread(target=drain)
+        reader.start()
+        try:
+            code = process.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            reader.join()
+    if code < 0 or (code and storage_failed):
+        raise OSError("decoder could not write temporary audio; check free disk space and retry")
+    return code
+
 @contextlib.contextmanager
 def decoded_file(source, aac=False, n=None, prev=None):
     """Seekable upload -> disk PCM, with the same priming and AAC trimming as decode().
@@ -279,9 +307,9 @@ def decoded_file(source, aac=False, n=None, prev=None):
         source.seek(0)
         args = ["ffmpeg", "-nostdin", "-v", "error", "-threads", "1", *(["-f", "mov"] if mov else []),
                 "-i", source.name, "-f", "s16le", "-ac", "1", "-ar", str(SR), "-y", pcm.name]
-        result = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+        code = decode_process(args)
         count = os.fstat(pcm.fileno()).st_size // 2
-        if result.returncode or not count:
+        if code or not count:
             yield None
             return
         lo = AAC_DELAY if aac and (n or count > AAC_DELAY + AAC_FRAME) else 0
