@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { get, type Conversation, type LiveState, type Row, type Status } from "./api";
-import { today } from "./calendar";
+import { shiftDay, today } from "./calendar";
 import { useSocket, useWatch } from "./socket";
 
 // One day's sentences as the server pushes them (final rows replacing drafts, the sentence being said as a partial),
@@ -9,6 +9,7 @@ import { useSocket, useWatch } from "./socket";
 export function useLive(day: Ref<string>, page = false) {
   const now = today(); // as the page opened: one left open past midnight keeps following the stream
   const live = computed(() => day.value === now);
+  const shownDay = () => (live.value ? today() : day.value);
   const rows = ref<Row[]>([]),
     partials = ref<Record<string, Row>>({}), // per device, the sentence being said now (DRAFT_ENGINE qwen-stream)
     convs = ref<Conversation[]>([]),
@@ -49,14 +50,14 @@ export function useLive(day: Ref<string>, page = false) {
   }
 
   async function load() {
-    const d = day.value;
+    const d = shownDay();
     const [rs, cs, ls, st] = await Promise.all([
       get<Row[]>("/api/sentences", { date: d }),
       get<Conversation[]>("/api/conversations", { date: d }),
       get<LiveState[]>("/api/live"),
       get<Status>("/api/status"), // at once, not at the first push 2 s later
     ]);
-    if (d !== day.value) return; // another day was picked meanwhile
+    if (d !== shownDay()) return; // another day was picked meanwhile
     rows.value = rs;
     lives.value = ls;
     status.value = st;
@@ -71,16 +72,23 @@ export function useLive(day: Ref<string>, page = false) {
   void load();
 
   const { connected, send } = useSocket((m) => {
+    // Read the clock on every push: a view following today rolls over without remounting.
+    const d = shownDay(),
+      nextDay = shiftDay(d, 1);
+    // /api/sentences selects row starts in [date, next date), in the recording's local wall time.
+    const inDay = (r: { start: string }) => d <= r.start && r.start < nextDay;
     // rows and conversations of another day than the one shown are not for this page
     if (m.type === "final") {
-      if (live.value) finalize(m);
+      if (live.value && m.from < nextDay && m.to > d)
+        finalize({ ...m, rows: m.rows.filter(inDay) });
     } else if (m.type === "draft") {
-      if (live.value) addDrafts(m);
+      const rs = m.rows.filter(inDay);
+      if (live.value && rs.length) addDrafts({ ...m, rows: rs });
     } else if (m.type === "partial") {
-      if (live.value && m.row) partials.value[m.device] = m.row;
+      if (live.value && m.row && inDay(m.row)) partials.value[m.device] = m.row;
       else delete partials.value[m.device];
     } else if (m.type === "conversation") {
-      if (m.start.slice(0, 10) === day.value) addConv(m);
+      if (inDay(m)) addConv(m);
     } else if (m.type === "summary") {
       const c = convs.value.find((x) => x.id === m.conversation);
       if (c) c.summary = { ...m };

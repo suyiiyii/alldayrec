@@ -32,7 +32,17 @@ description: "用 .env 里的 ENGINE 更换定稿用的语音识别引擎（默�
 
 它要装 `local` 这一组依赖：Docker 镜像里已经有了；用 uvx 或 pip 运行时装 `alldayrec[local]`（见[如何用 uvx 或 pip 运行](./run-uvx.md)）；从源码运行时用 `uv sync --extra local`。
 
-第一段音频到达时，服务器会下载约 136 MB 的模型包，所以第一条转写要等一分钟左右。下载慢的话，把 `LOCAL_ASR_URL` 设成同一个模型包在镜像站上的地址；文件按 sha256 校验。
+在 `.env` 里设置：
+
+```ini
+ENGINE=local
+DRAFT_ENGINE=local
+ENGINE_FALLBACK=
+```
+
+再填好 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`，供总结和问答使用。`DRAFT_ENGINE=local` 让页面开着时的初稿也在本机转写；初稿按音频窗口更新。
+
+首次转写请求会下载约 136 MB 的 X-ASR 模型包并加载模型，这一步在启动日志的 `ready` 之后发生，耗时取决于网络和 CPU。建议先导入一段短录音，等转写完成后再开始全天录音。模型保存在 `MODELS_DIR`，Docker 默认是挂载的数据目录里的 `data/models`，后续复用。下载慢的话，把 `LOCAL_ASR_URL` 设成同一个模型包在镜像站上的地址；文件按 sha256 校验。
 
 ## 初稿和兜底
 

@@ -9,9 +9,9 @@
 
 Pronounced **"all day rec"**.
 
-### An open-source Plaud for your whole day: a private second brain.
+### An open-source Plaud for your whole day, so your agent knows you.
 
-Works on every platform, no hardware to buy: your phone is the recorder.
+Record every day with the devices you already have: wear a recorder, use your phone, or import recordings from other devices. It all becomes a personal memory on your own server that your agent can query.
 
 [中文](README.md) | **English**
 
@@ -29,7 +29,7 @@ AllDayRec is an all-day recording and memory service that runs on your own serve
 
 ## What it does
 
-- **Every platform, no hardware to buy**: the Android app, the iPhone app and a browser all record directly.
+- **Use the devices you already have**: the Feishu recorder bean (Android only) and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
 - **Transcribes in two layers**: the final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
 - **Knows who spoke**: it learns your own voice and remembers the names you give others.
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
