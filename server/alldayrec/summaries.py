@@ -68,8 +68,6 @@ async def summarize_loop():
             if res["status"] == "done":
                 res["todos"] = db.preserve_todos(c["id"], (old or {}).get("todos") or [], res.get("todos") or [], t)
             db.put_summary(res, t)
-            if media:  # a redone summary found media: its voices leave the voiceprint bank
-                t.executemany("DELETE FROM voices WHERE conv = ? AND label = ?", [(c["id"], m) for m in media])
         if media:
             T().speakers["at"] = 0.0
         ws.note(f"对话 {c['start'][11:19]} 的摘要" + (f"：{res['title']}" if res["status"] == "done" else f"生成失败：{res['error']}"),

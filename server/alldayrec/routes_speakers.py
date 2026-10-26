@@ -21,7 +21,6 @@ from alldayrec import profiles
 from alldayrec import routes_audio
 from alldayrec import selfvoice
 from alldayrec import speakers
-from alldayrec import summary
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, queue_summary, state
@@ -100,7 +99,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
 
 ENROLL = 20
 UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not after a restart
-ME_MIN_S = 10.0  # 「这是我」: less speech than this relabels only; a voiceprint from a few words would let others in as 我
+ME_MIN_S = 10.0  # voice cards and 「这是我」 need this much speech; a few words would let others in as 我
 
 
 def voice_of(conv: str, label: str) -> tuple[np.ndarray, float] | None:
@@ -137,7 +136,7 @@ def learn_me(to: str, vs: list[tuple[np.ndarray, float] | None], befores: list[d
     ME_MIN_S of speech with a voiceprint learns nothing. Another name: nothing to say. vs: one per befores."""
     if to != "我":
         return {}
-    # a label without one: an open conversation, under 3 sentences, no recording here
+    # a label without one: an open conversation, too little speech, no recording here
     vs, convs = [v for v in vs if v], [b["conv"] for v, b in zip(vs, befores) if v]
     s = sum(x for _, x in vs)
     if s < ME_MIN_S or not befores:
@@ -648,7 +647,8 @@ async def voice_clip(name: str):
 
 async def voices_loop():
     """Voiceprints for the labels of closed live conversations (history ones are uploaded): up to 4 sentences of
-    >= 1.5 s per label with >= 3 sentences. A conversation without a recording here is marked and not retried."""
+    >= 1.5 s per label with >= ME_MIN_S of speech, independent of its summary. A conversation without a recording
+    here is marked and not retried. Anonymous people still need OTHERS_MIN_S over OTHERS_MIN_CONVS conversations."""
     while True:
         await anyio.to_thread.run_sync(speaker_groups, limiter=threads.DB)  # warm: the page's first load would otherwise wait seconds
         await anyio.sleep(300)
@@ -657,20 +657,18 @@ async def voices_loop():
         seen, convs = await anyio.to_thread.run_sync(lambda: (db.voiced_conversations(), all_conversations()), limiter=threads.DB)
         since = (dt.date.today() - dt.timedelta(days=3)).isoformat()
         for c in convs:
-            s = c["summary"]
-            if c["start"] < since or c["id"] in seen or not s or s["status"] == "pending":  # the summary tells media apart
+            if c["start"] < since or c["id"] in seen:
                 continue
             rows = conversation_rows(c)
-            media = summary.media_labels(rows, s.get("media_spans") or [])
             by = {}
             for r in rows:
-                if r.get("speaker") and r["speaker"] != "S?" and r["speaker"] not in media and not r.get("music"):
+                if r.get("speaker") and r["speaker"] != "S?" and not r.get("music"):
                     by.setdefault(r["speaker"], []).append(r)
             out = []
             for label, rs in by.items():
-                if len(rs) < 3:
-                    continue
                 dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
+                if sum(map(dur, rs)) < ME_MIN_S:
+                    continue
                 long = sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True)[:4]
                 es, ls = [], []
                 for r in long:
