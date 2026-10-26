@@ -71,6 +71,12 @@ type: reference
 |---|---|---|
 | `GET` | What /app.apk is: the Android app compares versionCode with its own build number and offers the update. | — |
 
+### `/api/late-backfill`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean) |
+
 ### `/api/chunks`
 
 | 方法 | 说明 | 参数 |

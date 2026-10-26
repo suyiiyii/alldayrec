@@ -1,5 +1,6 @@
 """Each tenant's summaries (a queue and its workers), the names its labels were called, and the daily recap."""
 import datetime as dt
+import json
 import logging
 import os
 
@@ -47,6 +48,11 @@ async def summarize(c: dict, tags: list[str]) -> dict:
 async def summarize_loop():
     while True:
         c = await T().summaries[1].receive()
+        # A late merge may remove a queued conversation or grow one during a model call.
+        if db.resolve_conversation(c["id"]) != c["id"]:
+            continue
+        c = {**c, **(db.conversation(c["id"]) or {})}
+        revision = db.kv(f"conversation_revision:{c['id']}")
         for delay in (10, 60, 300, None):
             try:
                 res = await summarize(c, list(tag_counts())[:60])
@@ -58,10 +64,12 @@ async def summarize_loop():
                 res = {"conversation": c["id"], "status": "failed", "error": repr(e)[:300]}
                 if delay:
                     await anyio.sleep(delay)
+        if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
+            continue
         old = db.summary(c["id"])
         media = summary.media_labels(conversation_rows(c), res.get("media_spans") or [])
-        if res["status"] == "failed" and old and old["status"] == "done":
-            db.put_summary({**old, "error": f"[resummarize_failed] {res['error']}"[:300]})
+        if res["status"] == "failed" and old and (old["status"] == "done" or old.get("title") or old.get("todos")):
+            db.put_summary({**old, "status": "done", "error": f"[resummarize_failed] {res['error']}"[:300]})
             ws.note(f"对话 {c['start'][11:19]} 的摘要重新生成失败，保留原来的：{res['error']}", "error")
             continue
         with db.tx() as t:
@@ -91,10 +99,13 @@ async def name_hints(c: dict, media: set[str]):
     apply_rename). A failure is logged."""
     if not set(c.get("participants") or []) - {"我", "S?"} - media:
         return
+    revision = db.kv(f"conversation_revision:{c['id']}")
     try:
         h = await hints.hints(c, conversation_rows(c), media)
     except Exception as e:
         log.warning("name hints %s failed: %r", c["id"], e)
+        return
+    if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
         return
     db.put_name_hints(h)
     if h["names"]:
@@ -106,7 +117,11 @@ RECAP_AT = os.environ.get("RECAP_AT", "10:00")  # yesterday's recap (recap.py) i
 
 
 async def write_recap(day: str) -> dict | None:
+    version = [(c["id"], db.kv(f"conversation_revision:{c['id']}"), c["summary"]) for c in db.conversations(day, recap._next(day))]
     r = await recap.make(day)
+    after = [(c["id"], db.kv(f"conversation_revision:{c['id']}"), c["summary"]) for c in db.conversations(day, recap._next(day))]
+    if after != version:
+        return db.kv(f"recap:{day}")
     if r:
         db.put_kv(f"recap:{day}", r)
     return r
@@ -118,6 +133,18 @@ async def recap_loop():
     at = dt.time.fromisoformat(RECAP_AT)
     while True:
         now = dt.datetime.now()
+        # Late audio can change any historical day. Keep the cached recap until all its summaries are ready.
+        for key, body in db.conn().execute("SELECT key, value FROM kv WHERE key LIKE 'recap:%'").fetchall():
+            if not body or not json.loads(body).get("stale"):
+                continue
+            d = key.split(":", 1)[1]
+            if any((c["summary"] or {}).get("status") != "done" or (c["summary"] or {}).get("error")
+                   for c in db.conversations(d, recap._next(d))):
+                continue
+            try:
+                await write_recap(d)
+            except Exception as e:
+                log.warning("stale recap %s: %s", d, type(e).__name__)
         day = (now.date() - dt.timedelta(days=1)).isoformat()
         if now.time() >= at and db.kv(f"recap:{day}") is None:
             try:
@@ -127,4 +154,4 @@ async def recap_loop():
                 await anyio.sleep(3600)
                 continue
         nxt = dt.datetime.combine(now.date() + dt.timedelta(days=now.time() >= at), at)
-        await anyio.sleep(max(1.0, (nxt - dt.datetime.now()).total_seconds()))
+        await anyio.sleep(min(60.0, max(1.0, (nxt - dt.datetime.now()).total_seconds())))

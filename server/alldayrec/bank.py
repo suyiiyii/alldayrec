@@ -56,6 +56,7 @@ def recompute(t, name: str) -> None:
 def learn(t, name: str, conv: str | None, sentences: list[tuple[dict, np.ndarray]]) -> int:
     """Sentences (a row of sentences, its voiceprint) into the name's ledger, each only while it still says `name` (an
     undo of the rename can come before the learning: it took 40 s for a card of 10 conversations). How many."""
+    conv = db.resolve_conversation(conv) if conv else conv
     k = 0
     for r, e in sentences:
         row = t.execute("SELECT rowid FROM sentences WHERE start = ? AND source IS ? AND speaker = ?",

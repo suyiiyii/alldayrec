@@ -45,7 +45,7 @@ description: "在网页的「导入录音」页把已有的录音文件（MP3、
 导入走 HTTP 接口 `POST /api/chunks`：一个文件一个请求，请求体是一个完整的音频文件，服务器用 ffmpeg 解码。脚本要守三条规则，网页上的导入也是这样做的：
 
 - **每一批用一个新的设备名**，比如 `import-2026-10`。下一条规则只管同一个设备名。名字是 `import` 或以 `import-` 开头的设备算导入的批次，列在「导入录音」页的「导入记录」里。
-- **按时间从早到晚传。** 一个设备名下，早于服务器已经处理到的位置的音频只保存、不转写。
+- **按时间从早到晚传。** 迟到的音频会在之后补转写并合入对话；跨过两段对话的录音会将它们合并，旧链接仍可打开。进度页显示补转写状态。
 - **传完最后一个文件后，告诉服务器这一批结束了。** 不然最后一段会一直等后面的音频，不会定稿。
 
 步骤：
@@ -70,3 +70,14 @@ description: "在网页的「导入录音」页把已有的录音文件（MP3、
    返回 `{"ok":true}`。
 
 [`firmware/devkit/lr_sync.py`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/lr_sync.py) 是一个从录音设备读卡再上传的 Python 客户端，可以参考。接口参数见 [HTTP API](../reference/api.md#api-chunks)。
+
+## 回填历史迟到音频
+
+管理员先检查最近 30 天中已保存、尚未转写的迟到录音：
+
+```bash
+cd server
+uv run python -m alldayrec.late_backfill --days 30 --dry-run
+```
+
+设置 `LIVE_RECORD_URL`，Token 通过 `LIVE_RECORD_TOKEN` 或标准输入第一行提供。命令逐日列出段数、录音分钟数和语音分钟数；预览不写入补转写队列。确认后去掉 `--dry-run`，交给正常补转写流程处理。没有 `received_ms` 的旧录音会跳过并列出日期；旧定稿日志在多设备重叠时无法归属的区间也会跳过并报告数量。补转写失败最多尝试三次，进度页保留失败原因。

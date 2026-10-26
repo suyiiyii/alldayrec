@@ -122,6 +122,7 @@ export interface LiveState {
 }
 
 export interface DeviceStatus {
+  late?: Partial<Record<"waiting" | "deferred" | "processing" | "failed" | "done", { spans: number; minutes: number; note?: string }>>;
   device: string;
   audio_end: string | null;
   received_to: string | null;

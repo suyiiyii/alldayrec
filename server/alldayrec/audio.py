@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import wave
+from contextlib import nullcontext
 from pathlib import Path
 
 import anyio
@@ -27,6 +28,7 @@ import anyio.to_thread
 import numpy as np
 
 from alldayrec import db
+from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import threads
 from alldayrec import ws
@@ -242,9 +244,12 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
         if r := kept():  # the same piece in two requests at once
             return r[0]
         pos = append(path, body)
-        db.conn().execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
+        received = int(time.time() * 1000)
+        with db.tx() as t:
+            late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, int(time.time() * 1000), *h))
+                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -371,6 +376,7 @@ def hold(device: str, at_ms: int | None):
     again; kept across a restart."""
     with _holds:
         h = db.kv(f"hold:{device}")
+        released = at_ms is None and h is not None
         now = time.time()
         if at_ms is None:
             h = None
@@ -383,6 +389,8 @@ def hold(device: str, at_ms: int | None):
         else:
             h = {"at": at_ms, "since": now, "seen": now, "progress": now}
         db.put_kv(f"hold:{device}", h)
+    if released:
+        late_store.release(device)
 
 
 def held(device: str) -> int | None:
@@ -399,6 +407,7 @@ def held(device: str) -> int | None:
         if time.time() - h["since"] >= HOLD_MAX_S:
             h["released"] = "max"
             db.put_kv(f"hold:{device}", h)
+            late_store.release(device)
             return None
         done = db.kv(f"finalized_to:{device}")
         if done and int(dt.datetime.fromisoformat(done).timestamp() * 1000) >= h["at"]:
@@ -410,7 +419,8 @@ def held(device: str) -> int | None:
             return h["at"]
         h.update(released="stale", stale_s=HOLD_STALE_S)
         db.put_kv(f"hold:{device}", h)
-    text = f"{device}：补传等了 {HOLD_STALE_S / 60:g} 分钟没有进展，先定稿；之后到的更早录音只保存不转写"
+    late_store.release(device)
+    text = f"{device}：补传等了 {HOLD_STALE_S / 60:g} 分钟没有进展，先定稿；之后到的更早录音会补转写"
     log.warning("%s", text)
     # monitor.status runs in an AnyIO worker; ws.note schedules its broadcast on the tenant's event loop.
     if T().tg:
@@ -465,10 +475,17 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
             lo = max(last[0] if last else 0, time.time() * 1000) - edge_s * 1000
         # the edge reader by the end (pieces_end: its last edge_s); by start (pieces_device), an idle device's reader
         # (at 0: nothing handed out yet) walked all its pieces each second
-        p = db.conn().execute(f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
-                              "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, at, lo)).fetchone()
-        if p is not None and edge_s is None and (h := held(device)) is not None and p["start_ms"] >= h:
-            p = None  # older audio is still on its way: it goes first
+        h = held(device) if edge_s is None else None
+        # Save's late predicate and selection's cursor advance are serialized by SQLite. An upload
+        # cannot slip between the SELECT and advancing the reader and disappear behind it unregistered.
+        with db.tx() if edge_s is None else nullcontext(db.conn()) as t:
+            p = t.execute(f"SELECT * FROM pieces{' INDEXED BY pieces_end' if edge_s else ''} WHERE device = ? AND start_ms > ? "
+                          "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1", (device, at, lo)).fetchone()
+            if p is not None and h is not None and p["start_ms"] >= h:
+                p = None
+            if p is not None and edge_s is None:
+                db.put_kv(f"read_to:{device}", p["start_ms"], t)
+                db.put_kv(f"read_end:{device}", round(p["start_ms"] + p["seconds"] * 1000), t)
         if p is None:
             await anyio.sleep(1)
             continue

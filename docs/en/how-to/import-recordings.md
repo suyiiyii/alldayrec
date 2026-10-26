@@ -45,7 +45,7 @@ A conversation with less than 10 seconds of speech is not kept as a conversation
 Importing goes through the HTTP endpoint `POST /api/chunks`: one file per request, the body a whole audio file, decoded by ffmpeg on the server. A script follows three rules, as the web page does:
 
 - **Use a new device name for each batch**, e.g. `import-2026-10`. The next rule holds per device name. Devices named `import` or starting with `import-` count as import batches and are listed under Past imports on the Import recordings page.
-- **Upload oldest first.** Under one device name, audio earlier than where the server has already processed is kept but not transcribed.
+- **Upload oldest first.** Audio that arrives late is transcribed and merged afterwards. Audio bridging two conversations joins them, and old links keep working. The progress page shows late-audio status.
 - **After the last file, tell the server the batch is over.** Otherwise the last stretch keeps waiting for more audio and never gets a final transcript.
 
 Steps:
@@ -70,3 +70,14 @@ Steps:
    It returns `{"ok":true}`.
 
 [`firmware/devkit/lr_sync.py`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/lr_sync.py) is a Python client that reads a recorder's card and uploads it, for reference. The endpoint's parameters are in [HTTP API](../reference/api.md#api-chunks).
+
+## Backfill historical late audio
+
+Administrators first inspect stored, untranscribed late recordings from the last 30 days:
+
+```bash
+cd server
+uv run python -m alldayrec.late_backfill --days 30 --dry-run
+```
+
+Set `LIVE_RECORD_URL`; provide the token through `LIVE_RECORD_TOKEN` or the first line of stdin. The command reports spans, audio minutes and speech minutes per day. Previewing leaves the late queue unchanged. After approval, omit `--dry-run` to enqueue the audio for the normal processor. Old recordings without `received_ms` are skipped, with their dates reported. Ambiguous legacy final-pass logs overlapping multiple devices are also skipped and counted. Failed spans have up to three attempts; the progress page retains their failure reason.

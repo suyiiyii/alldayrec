@@ -75,6 +75,10 @@ async function load() {
     const x = await get<NonNullable<typeof c.value>>(`/api/conversation/${encodeURIComponent(id)}`);
     if (id !== props.id) return; // another conversation opened meanwhile (back/forward): not its
     c.value = x;
+    if (x.id !== id) {
+      await router.replace({ path: `/c/${encodeURIComponent(x.id)}`, query: route.query, hash: route.hash });
+      return;
+    }
     missing.value = false;
     failed.value = null;
     trackOpen(Date.parse(x.start), Date.parse(x.end), x.device ?? x.rows.find((r) => r.source)?.source ?? "");
@@ -214,6 +218,11 @@ watch(
   { immediate: true },
 );
 useSocket((m) => {
+  if (m.type === "conversation_removed" && m.id === props.id) {
+    void router.replace({ path: `/c/${encodeURIComponent(m.new)}`, query: route.query, hash: route.hash });
+  } else if (m.type === "conversation" && m.id === props.id) {
+    void reload();
+  }
   if (m.type === "summary" && m.conversation === props.id) {
     load();
     loadSug();

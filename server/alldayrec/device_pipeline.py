@@ -364,8 +364,11 @@ async def pipeline(device: str):
                           "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") and not g.get("music") else None}
                          for g, m in zip(segs, marks)]
         with open(T().data / f"{lo.date()}.passes.jsonl", "a") as f:  # every piece's raw engine output, for tracing lost rows
-            f.write(json.dumps({"at": dt.datetime.now().isoformat(timespec="seconds"), "layer": "final", "t0": iso(base), "since": 0.0,
-                                "from": iso(lo), "to": iso(hi), "segs": segs}, ensure_ascii=False) + "\n")
+            points = [a0] + [i for i, _ in seg.anchors if a0 < i < b0] + [b0]
+            ranges = [[iso(seg.time_at(a)), iso(seg.time_at(a) + dt.timedelta(seconds=(b - a) / SR))]
+                      for a, b in zip(points, points[1:])]
+            f.write(json.dumps({"at": dt.datetime.now().isoformat(timespec="seconds"), "layer": "final", "device": device, "t0": iso(base), "since": 0.0,
+                                "from": iso(lo), "to": iso(hi), "audio_ranges": ranges, "segs": segs}, ensure_ascii=False) + "\n")
         shown = dt.datetime.now()
         for r in rows:
             r["source"], r["engine"], r["shown_at"] = device, engine, iso(shown)
