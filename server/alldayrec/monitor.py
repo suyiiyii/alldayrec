@@ -43,7 +43,18 @@ def device_status(device: str, st: PipelineState) -> dict:
     hold, seen, until, arrived = audio.held(device), audio.hold_seen(device), audio.hold_until(device), audio.arrival(device)
     # seconds of audio finalized per second, over the commits of the last 10 min (silence goes fast, speech ~8x)
     rate = (pr[-1][1] - pr[0][1]).total_seconds() / (pr[-1][0] - pr[0][0]) if len(pr) > 1 and pr[-1][0] > pr[0][0] else None
+    import_progress = None
+    if imported(device):
+        total, _ = audio.backlog(device, None)
+        import_progress = {"done_s": round(total - left, 1), "total_s": total}
+        # Recording dates can have gaps: measure finalized audio, not distance along the calendar.
+        rate = None
+        if len(pr) > 1 and pr[-1][0] > pr[0][0] and time.time() - pr[-1][0] < 600:
+            before, _ = audio.backlog(device, pr[0][1])
+            after, _ = audio.backlog(device, pr[-1][1])
+            rate = (before - after) / (pr[-1][0] - pr[0][0])
     return {"device": device, "audio_end": end.isoformat(timespec="seconds") if end else None,
+            "import_progress": import_progress,
             "behind_s": round((dt.datetime.now() - end).total_seconds(), 1) if end else None,
             "queued": audio.queued(device), "done_to": done.isoformat(timespec="seconds") if done else None,
             "received_to": received_to.isoformat(timespec="seconds") if received_to else None, "left_s": left,

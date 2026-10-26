@@ -539,6 +539,8 @@
     "left": "Left",
     "leftVal": "{left} · {n} queued",
     "leftAudio": "{span} of audio",
+    "import": "Import",
+    "importAudio": "Transcribed {done} / {total} min of audio",
     "catchUp": "Catch-up",
     "speed": "Speed",
     "speedVal": "{rate}× real time",

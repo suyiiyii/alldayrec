@@ -539,6 +539,8 @@
     "left": "待处理",
     "leftVal": "{left} · 排队 {n} 块",
     "leftAudio": "{span} 录音",
+    "import": "导入",
+    "importAudio": "已转写 {done} / {total} 分钟音频",
     "catchUp": "补传",
     "speed": "速度",
     "speedVal": "{rate} 倍实时",
