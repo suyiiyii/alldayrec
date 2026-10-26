@@ -360,7 +360,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** One connection, from the key exchange until the link goes (io.receive throws). `steps`: the link's own, for the log. */
     fun session(since: Long, steps: String) {
         this.since = since
-        reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now(); liveFile = 0
+        reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now(); liveFile = 0; paused = false
         val t = StringBuilder(steps)
         fun <T> step(code: String, what: String, block: () -> T): T {
             state = say(code)
@@ -422,7 +422,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 // then go to the next one's
                 else if (!x.live && now - x.seen > 30_000) {
                     complete(x, -1, "；30 s 没收到单元，断开重连")
-                    throw Exception("file ${x.file}: no audio for 30 s")
+                    throw Again("file ${x.file}: no audio for 30 s")
                 }
             }
             if (xfer == null && now - askedAt > 60_000) {  // not during a transfer: its pushes say battery and charging
@@ -469,10 +469,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (all.size == n) break
         }
         needList = false; listedAt = io.now()
-        // A just-closed file can be absent briefly. Keep received ranges until a confirmed delete (prune()).
-        for (id in files.filter { (id, f) -> id !in all && id != open && f.have.isEmpty() }.keys) {
+        // A just-closed file can be absent briefly. Keep its ranges until the server has every piece.
+        val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs) + io.refused()
+        for (id in files.filter { (id, f) -> id !in all && id != open && (f.have.isEmpty() ||
+            gap(f) == null && q.none { it in f.anchor until f.anchor + f.total * Bean.FRAME_MS }) }.keys) {
             val f = files.remove(id)!!
-            if (gap(f) != null && id * 1000 >= since) io.log("bean_gone", "文件 $id 已不在豆子上，手机还缺它的一部分", "warn", mapOf("file" to id))
+            if (id * 1000 >= since) {
+                val missing = gap(f) != null
+                io.log("bean_gone", "文件 $id 已不在豆子上，" + (if (missing) "手机还缺它的一部分" else "服务端都有了，清掉手机记录"),
+                    if (missing) "warn" else null, mapOf("file" to id))
+            }
         }
         save()
         return Bean.Listing(all.toList(), open)
@@ -570,7 +576,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.log("bean_file", "豆子开始录新文件 ${listing.open}", fields = mapOf("file" to listing.open, "pre" to (p.getOrNull(if (p.size > 8) 8 else 4)?.toInt() ?: -1)))
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
-                0 -> { paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音") }
+                0 -> { liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音") }
                 1 -> { if (!recording) needList = true; if (paused) liveSeen = io.now(); paused = false; recording = true; io.log("bean_record", "豆子开始录音") }
                 2 -> { paused = true; startDone = true; io.log("bean_pause", "豆子暂停录音") }
             }

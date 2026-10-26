@@ -205,6 +205,87 @@ class BeanTest {
 
     @Test fun rolloverWithLateComplete() = rollover(true)
 
+    @Test fun handStopThenRecordDoesNotStallOldFile() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val a = t0 / 1000; val b = a + 60
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = a; bean.listed[a] = 0
+        bean.onTransfer = { file, _, live ->
+            if (live) {
+                bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..24L).toList())
+            } else {
+                bean.header(file, 25L * Bean.UNIT, code = 3)
+            }
+        }
+        bean.script += {
+            bean.recording = false; bean.open = 0; bean.listed[a] = 500
+            bean.push(0x1882, byteArrayOf(0)); bean.complete(a)
+        }
+        repeat(40) { bean.script += {} }
+        bean.script += {
+            bean.recording = true; bean.open = b; bean.listed[b] = 0
+            bean.push(0x1882, byteArrayOf(1)); bean.rotation(b)
+        }
+        bean.script += {}
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
+        assertEquals(0, bean.logs.count { it.first == "bean_stall" })
+        assertEquals(listOf(Triple(a, 0L, true), Triple(a, 25L, false), Triple(b, 0L, true)), bean.transfers)
+        assertEquals("the button alone restarts recording", 0, bean.starts)
+    }
+
+    @Test fun reconnectAfterMissedResumeRestoresLiveGuard() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val id = t0 / 1000
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = id; bean.listed[id] = 0
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..24L).toList())
+            bean.push(0x1882, byteArrayOf(2))
+        }
+        repeat(40) { bean.script += {} }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
+        assertEquals(0, bean.logs.count { it.first == "bean_stall" })
+        // The bean resumes off-link: info says recording, with no 18/82 resume push on this connection.
+        bean.onTransfer = { file, _, _ -> bean.header(file, 0xFFFFFFFFL) }
+        repeat(40) { bean.script += {} }
+        val before = bean.now
+        assertEquals("file $id: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 1000, "") }.message)
+        assertTrue(bean.now - before in 30_000L..36_000L)
+        assertEquals(1, bean.logs.count { it.first == "bean_stall" })
+        assertEquals(listOf(Triple(id, 0L, true), Triple(id, 25L, true)), bean.transfers)
+        assertEquals(0, bean.starts)
+    }
+
+    @Test fun vanishedFilesDropOnlyServerConfirmedRanges() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val whole = t0 / 1000 - 600; val queued = whole + 1; val refused = whole + 2; val hole = whole + 3
+        val open = t0 / 1000
+        val chunks = File(dir, "chunks").apply { mkdirs() }
+        val state = File(dir, "state.json")
+        state.writeText("{" + listOf(whole, queued, refused, hole).joinToString(",") { id ->
+            "\"$id\":{\"a\":${id * 1000},\"h\":[[0,${if (id == hole) 5 else 10}]],\"t\":10,\"r\":0}"
+        } + "}")
+        File(chunks, "${queued * 1000}@D3200-0A0B.ogg").writeBytes(ByteArray(8))
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = open; bean.listed[open] = 0
+        bean.refused = setOf(refused * 1000)
+        bean.onTransfer = { file, _, _ -> bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..24L).toList()) }
+        val sync = BeanSync("D3200-0A0B", state, chunks, bean)
+        repeat(2) { assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") } }
+        assertEquals(setOf(queued, refused, hole, open), sync.files.keys)
+        val restored = BeanSync("D3200-0A0B", state, chunks, bean)
+        assertEquals(sync.files.keys, restored.files.keys)
+        assertEquals(listOf(queued, refused, hole).map { sync.gap(sync.files[it]!!) }, listOf(null, null, 5L))
+        assertEquals(1, bean.logs.count { it.first == "bean_gone" && "$whole" in it.second })
+        assertTrue("listing cleanup never sends a delete", bean.deleted.isEmpty())
+        assertEquals(setOf(open), bean.listed.keys)
+    }
+
     @Test fun reconnectListingKeepsClosedFileRanges() {
         val dir = Files.createTempDirectory("bean").toFile()
         val chunks = File(dir, "chunks")
@@ -214,6 +295,8 @@ class BeanTest {
         val state = File(dir, "state.json")
         // State flushed by the old live connection before rollover; the bean briefly lists only the new file.
         state.writeText("""{"$a":{"a":$t0,"h":[[0,25]],"t":-1,"r":0},"$c":{"a":${t0 - 1000},"h":[[0,25]],"t":25,"r":0}}""")
+        chunks.mkdirs()
+        File(chunks, "${(c * 1000)}@D3200-0A0B.ogg").writeBytes(ByteArray(8))
         val bean = FakeBean(t0 + 5000)
         bean.recording = true; bean.open = b; bean.listed[b] = 0
         val sync = BeanSync("D3200-0A0B", state, chunks, bean)
@@ -781,7 +864,7 @@ class BeanTest {
         }
         repeat(40) { bean.script += {} }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
-        assertEquals("file ${t0 / 1000}: no audio for 30 s", assertThrows(Exception::class.java) { sync.session(since, "") }.message)
+        assertEquals("file ${t0 / 1000}: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }.message)
         assertEquals(1, bean.starts)
         bean.script.clear()
         assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }  // back for the rest of the head
