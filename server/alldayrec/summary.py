@@ -43,7 +43,7 @@ SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[�
 ai_spans 是任意说话人对 AI 说话的连续时间段（第一句和最后一句的时间）。每段只能是同一个说话人对 AI 说的话：换说话人（即使也在对 AI 说话）、或中间夹着对人说的话（包括人类回应、嗯、对、这个、你让他们上去吧），就在那里断开分段；人类回应不算 AI 话语，不进 ai_spans；没有就给空数组。
 media_spans 是外放媒体的连续时间段（第一句和最后一句的时间）：中间夹着在场的人说话（包括我对媒体内容的点评），就在那里断开分成两段；没有就给空数组。
 媒体里的声音即使有姓名也不是现场参与人；媒体里的话不是任何在场的人说的：不进 people、todos、decisions、topics，不要写成「我」说的或做的。
-所有说话人对 AI 说的话只进 ai_requests，不进 todos、decisions、people、topics；ai_requests 每条只概括同一个说话人的请求，保留该说话人的主体，不把其他标签改成「我」。夹在 AI 请求之间的对人说话和人类回应，仍按人的对话提取。todos 只收人要做的事：我答应别人的、别人答应的、别人要我做的、我自己说要做的。
+所有说话人对 AI 说的话只进 ai_requests，不进 todos、decisions、people、topics；ai_requests 每句请求各一条，即使同一说话人在同一个 ai_spans 段内连续请求也不合并；每条保留该句说话人的主体和原句时间，不把其他标签改成「我」。夹在 AI 请求之间的对人说话和人类回应，仍按人的对话提取。todos 只收人要做的事：我答应别人的、别人答应的、别人要我做的、我自己说要做的。
 todos 的 owner 是要去做这件事的人，不是说这句话的人：别人要我做的事（我答应了，或者没有拒绝），owner 是「我」、to 是对方；我让在场的 S1 去做的事，owner 是 S1、to 是「我」。
 due_date 按这段对话的日期换算（最后一行写了这段对话哪天几点开始、星期几）：今天、今晚、待会儿是当天，明天、后天往后数，周五、下周一按星期数；原句的时间比开始时间早，说明过了午夜，那句话是第二天说的。「X 之前」「X 之内」取最后一天，「X 之后」取之后的第一天（国庆之后 = 国庆假期结束后的第一天）。说不出是哪一天（过几天、以后、有空、下周、最近）或者 due 是 null 时写 null，不要猜。
 任何说话人对 AI 助手的吩咐（帮我查、改、跑、开分支、合并、部署、派人去调研……）说得再像吩咐人，也只进 ai_requests，不是任何人的待办。这种话前后没有人用人的口吻接话，常常是一个人连着说一长段；其他标签也可能在对 AI 说话，仍按该标签或姓名记录主体，不据语气改写成「我」。
@@ -62,8 +62,10 @@ EN = ("Write everything in English, though these instructions are in Chinese. Ne
       "JSON keys, speaker labels (我, S1, S2, S?, 未知), names, quotes, times (HH:MM:SS) and dates (YYYY-MM-DD). "
       "我 is the recorder: \"I\" in prose, and only for what the recorder said or did; keep other people's actions, requests, observations and stories "
       "attributed to their speaker label or name, even when they sound like instructions to an AI. "
-      "Use the same AI-speech criteria for every speaker: each ai_spans interval and each ai_requests item belongs to one speaker; "
+      "Use the same AI-speech criteria for every speaker: each ai_spans interval belongs to one speaker; "
       "split at speaker changes and human-directed speech, keeping human replies out of AI spans. "
+      "One ai_requests item per request sentence, even within one speaker's continuous AI span; never merge sentences. "
+      "Keep each item's original speaker and sentence time. "
       "Keep recorder requests in first person (I); start other speakers' AI request text with their original label or name; "
       "AI speech from any speaker is excluded from todos, decisions, people, topics and a mixed-conversation summary. "
       "An all-AI conversation may summarize who asked the AI to do what. Named voices in played media are not participants. "

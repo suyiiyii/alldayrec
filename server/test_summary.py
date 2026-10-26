@@ -135,7 +135,8 @@ def assert_ai_speaker_contract(prompt, lang):
     assert '换说话人（即使也在对 AI 说话）' in prompt
     assert '人类回应不算 AI 话语，不进 ai_spans' in prompt
     assert '其他人以原说话人标签或姓名开头，如「S1 让 AI 查日志」' in prompt
-    assert 'ai_requests 每条只概括同一个说话人的请求' in prompt
+    assert 'ai_requests 每句请求各一条，即使同一说话人在同一个 ai_spans 段内连续请求也不合并' in prompt
+    assert '每条保留该句说话人的主体和原句时间' in prompt
     assert '所有说话人对 AI 说的话只进 ai_requests，不进 todos、decisions、people、topics' in prompt
     assert '夹在 AI 请求之间的对人说话和人类回应，仍按人的对话提取' in prompt
     assert '闲聊、外放的媒体、任何说话人对 AI 说的话都不写进去' in prompt
@@ -147,6 +148,7 @@ def assert_ai_speaker_contract(prompt, lang):
         assert 'Use the same AI-speech criteria for every speaker' in prompt
         assert 'split at speaker changes and human-directed speech' in prompt
         assert "start other speakers' AI request text with their original label or name" in prompt
+        assert 'One ai_requests item per request sentence, even within one speaker\'s continuous AI span; never merge sentences' in prompt
         assert 'AI speech from any speaker is excluded from todos, decisions, people, topics and a mixed-conversation summary' in prompt
         assert 'An all-AI conversation may summarize who asked the AI to do what' in prompt
 
@@ -207,10 +209,37 @@ def test_ai_speaker_prompt_and_result(tmp_path, monkeypatch, lang, path):
     assert db.summary(conv['id'])['ai_requests'] == result['ai_requests']
 
 
-def test_resummarize_picks_v12():
-    from alldayrec import resummarize
-    assert resummarize.PROMPT_VERSION == summary.PROMPT_VERSION == 13
-    assert resummarize.due({'state': 'closed', 'speech_s': 120, 'summary': {'status': 'done', 'prompt_version': 12}}) is None
+@pytest.mark.parametrize('lang', ['zh', 'en'])
+@pytest.mark.parametrize('path', ['summary', 'live_final'])
+def test_ai_requests_per_sentence_in_one_span(tmp_path, monkeypatch, lang, path):
+    """No model: the prompt asks for separate sentences; parsing keeps both texts and jump anchors in one span."""
+    import anyio
+    from alldayrec import live
+    from alldayrec.tenant import T
+    db.open_db(tmp_path / 't.db')
+    T().lang = lang
+    rows = [dict(start=f'2026-10-26T10:00:{i:02d}.000', end=f'2026-10-26T10:00:{i:02d}.900',
+                 speaker='S1', text=text) for i, text in enumerate([
+                     'ChatGPT，帮我查一下测试日志。', '再把日志按日期排序。'])]
+    texts = (['S1 让 AI 查测试日志', 'S1 让 AI 按日期排序日志'] if lang == 'zh'
+             else ['S1 asks AI to check test logs', 'S1 asks AI to sort logs by date'])
+    captured = []
+    async def complete(messages, **kwargs):
+        captured.extend(messages)
+        return {'ai_spans': [{'from': '10:00:00', 'to': '10:00:01'}],
+                'ai_requests': [{'text': text, 'at': f'10:00:{i:02d}'} for i, text in enumerate(texts)]}, {'model': 'test'}
+    monkeypatch.setattr(live if path == 'live_final' else summary, 'complete', complete)
+    conv = {'id': 'c1', 'start': rows[0]['start'], 'speech_s': 120}
+    if path == 'live_final':
+        res, raw = anyio.run(live.final, live.new(conv['start'], 'mic', []), rows, [], conv['start'])
+        result = summary.result(conv, rows, res, raw)
+    else:
+        result = anyio.run(summary.summarize, conv, rows)
+    assert_ai_speaker_contract(captured[-1 if path == 'live_final' else 0]['content'], lang)
+    assert result['ai_spans'] == [{'from': rows[0]['start'], 'to': rows[1]['start']}]
+    assert result['ai_requests'] == [{'text': text, 'at': row['start']} for text, row in zip(texts, rows)]
+    db.put_summary(result)
+    assert db.summary(conv['id'])['ai_requests'] == result['ai_requests']
 
 
 @pytest.mark.parametrize('lang', ['zh', 'en'])
