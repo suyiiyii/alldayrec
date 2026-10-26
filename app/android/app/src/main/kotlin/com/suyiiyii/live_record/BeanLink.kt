@@ -21,6 +21,8 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.ParcelUuid
+import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
 import java.io.File
@@ -33,16 +35,21 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 /** One system scan at a time; duplicate or late deliveries cannot start a second connection. */
-internal class BeanScanWait<T>(private val name: String, private val start: () -> Unit, private val stop: () -> Unit) {
+internal class BeanScanWait<T>(private val name: String, private val start: () -> Unit, private val stop: () -> Unit,
+                               private val now: () -> Long = { System.nanoTime() / 1_000_000 }) {
     private var found: CompletableFuture<T>? = null
+    private var retryAfter = 0L
+    @Volatile var retrying = false
+        private set
 
-    fun await(): T {
+    fun await(timeoutMs: Long = TimeUnit.MINUTES.toMillis(10)): T? {
         val f = CompletableFuture<T>()
         synchronized(this) { check(found == null); found = f }
         try {
             start()
-            return f.get()  // no app timer has to fire while the CPU is asleep
-        } catch (e: ExecutionException) { throw e.cause!! }
+            return f.get(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) { return null }  // registration failures may arrive without an error intent
+        catch (e: ExecutionException) { throw e.cause!! }
         finally {
             synchronized(this) { found = null }
             stop()
@@ -50,8 +57,24 @@ internal class BeanScanWait<T>(private val name: String, private val start: () -
     }
 
     @Synchronized fun deliver(beanName: String, connectable: Boolean, value: T) =
-        beanName == name && connectable && (found?.complete(value) ?: false)
+        beanName == name && connectable && now() >= retryAfter && (found?.complete(value) ?: false)
     @Synchronized fun fail(e: Exception) { found?.completeExceptionally(e) }
+
+    /** Register the next scan immediately; only its results wait out a failed attempt. Log once per streak. */
+    @Synchronized fun backoff(): Boolean {
+        retryAfter = now() + 5000
+        return (!retrying).also { retrying = true }
+    }
+    @Synchronized fun connected() { retryAfter = 0; retrying = false }
+
+    /** The service and JVM regression tests use the same exception/retry path. */
+    fun loop(on: () -> Boolean, attempt: () -> Boolean, retry: (Exception) -> Boolean, log: (Exception) -> Unit) {
+        while (on()) {
+            try { if (!attempt()) return }
+            catch (_: InterruptedException) { return }
+            catch (e: Exception) { if (retry(e) && backoff()) log(e) }
+        }
+    }
 }
 
 /** The existing connectedDevice service owns the session; this receiver only wakes its scan waiter. */
@@ -92,6 +115,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     private var advConnectable: Boolean? = null
     private var capture: Writer? = null
     private var captured = 0L
+    private var linkEstablished = false
 
     private class Gone : IOException("link gone")  // an IOException: BeanSync starts the bean again on the next connection
     private val GONE = ByteArray(0)
@@ -144,25 +168,26 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         gatt?.disconnect()
     }
 
-    private fun loop() {
-        while (on) {
-            try {
-                if (!Bean.isBean(name) || prefs.getString("bleName", null) != name) { linkState = say("unbound"); return }
-                if (adapter?.isEnabled != true) { linkState = say("bluetoothOff"); Thread.sleep(5000); continue }
-                val d = find() ?: continue
-                onName(name)
-                connect(d)
-            } catch (e: InterruptedException) {
-                return
-            } catch (e: BeanSync.Again) {  // a transfer stopped by letting the link go (logged): straight back
-            } catch (e: Gone) {
-            } catch (e: Exception) {
-                Log.w("live-record", "bean: $e")
+    private fun loop() = scan.loop({ on }, {
+        linkEstablished = false
+        if (!Bean.isBean(name) || prefs.getString("bleName", null) != name) {
+            linkState = say("unbound")
+            false
+        } else {
+            if (adapter?.isEnabled != true) { linkState = say("bluetoothOff"); Thread.sleep(5000) }
+            else find()?.let { onName(name); connect(it) }
+            true
+        }
+    }, { e ->
+        when (e) {
+            is BeanSync.Again -> false  // a transfer stopped by letting the link go (logged): straight back
+            is Gone -> !linkEstablished
+            else -> {
                 if (on) linkState = say("linkError", "detail" to (e.message ?: "$e"))
-                try { Thread.sleep(5000) } catch (_: InterruptedException) { return }  // stack/scan error only, never an absent bean
+                true
             }
         }
-    }
+    }, { e -> Log.w("live-record", "bean: $e; retry on scan results after 5 s") })
 
     private val scanIntent by lazy {
         PendingIntent.getBroadcast(ctx, 0, Intent(ctx, BeanScanReceiver::class.java).setAction("${ctx.packageName}.BEAN_SCAN"),
@@ -186,27 +211,36 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
                     if (flags >= 0 && flags and 0x80 != 0) "已绑定飞书" else "未绑定飞书", if (r.isConnectable) "可连接" else "不可连接", r.rssi),
                     fields = mapOf("flags" to flags, "connectable" to r.isConnectable, "rssi" to r.rssi))
             }
-            if (wait.deliver(n, r.isConnectable, r.device)) {
-                Log.i("live-record", "bean connect: 系统后台扫描发现豆子，开始重连")
-                DeviceLog.app(name, "connect", "系统后台扫描发现豆子，开始重连", fields = mapOf("path" to "pendingIntent"))
+            if (wait.deliver(n, r.isConnectable, r.device) && !wait.retrying) {
+                val power = ctx.getSystemService(PowerManager::class.java)
+                val interactive = power.isInteractive
+                val idle = power.isDeviceIdleMode
+                val text = "系统扫描发现豆子，开始重连（interactive=$interactive，deviceIdle=$idle）"
+                Log.i("live-record", "bean connect: $text")
+                DeviceLog.app(name, "connect", text, fields = mapOf("path" to "pendingIntent",
+                    "interactive" to interactive, "deviceIdle" to idle))
             }
         }
     }
 
-    /** A filtered PendingIntent scan wakes us in the background, without a 10-minute rescan timer or a wake lock.
+    /** A filtered PendingIntent scan wakes us in the background without a wake lock.
      *  The bean is unpaired and changes address, so autoConnect to an old address is insufficient. Android's BLE
      *  background guide recommends this API: https://developer.android.com/develop/connectivity/bluetooth/ble/background
      *  Keep ALL_MATCHES: a bean can first advertise as non-connectable, then become connectable at the same address.
-     *  Filtered scans continue at low power after Android's long-scan downgrade; no periodic restart is needed. */
-    private fun find(): BluetoothDevice? {
-        val scanner = adapter?.bluetoothLeScanner ?: return null
-        advFlags = -2; advConnectable = null
-        val wait = BeanScanWait<BluetoothDevice>(name, {
+     *  Renew after 10 minutes: Android can silently drop a failed PendingIntent scanner registration. */
+    private val scan by lazy {
+        BeanScanWait<BluetoothDevice>(name, {
+            val scanner = adapter?.bluetoothLeScanner ?: throw Gone()
             scanner.stopScan(scanIntent)  // also removes a registration left by a killed service process
             val error = scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Bean.SERVICE)).build()),
                 ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build(), scanIntent)
             check(error == 0) { "scan failed: $error" }
-        }, { try { scanner.stopScan(scanIntent) } catch (_: Exception) {} })
+        }, { try { adapter?.bluetoothLeScanner?.stopScan(scanIntent) } catch (_: Exception) {} },
+            now = { SystemClock.elapsedRealtime() })
+    }
+
+    private fun find(): BluetoothDevice? {
+        val wait = scan
         scanWait = wait
         val bluetooth = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
@@ -233,6 +267,8 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
             step("connecting", "连接") { op("connect", 30) { d.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE).also { gatt = it } != null } }
             val g = gatt ?: throw Gone()
             up = true
+            linkEstablished = true
+            scan.connected()
             step("mtu", "协商包长") { op("mtu") { g.requestMtu(512) } }
             if (mtu < 78) throw Exception("MTU $mtu: too small for the key exchange")
             step("services", "读取设备服务") { op("services") { g.discoverServices() } }

@@ -8,10 +8,104 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /** Drive the same waiter as the PendingIntent receiver, without Android or a real bean. */
 class BeanLinkTest {
     private val name = "D3200-ABCD"
+
+    @Test fun waitTimesOutAndReregistersImmediately() {
+        val registrations = LinkedBlockingQueue<Int>()
+        val stops = AtomicInteger()
+        val starts = AtomicInteger()
+        val finished = CompletableFuture<String?>()
+        val scan = BeanScanWait<String>(name, { registrations.put(starts.incrementAndGet()) }, { stops.incrementAndGet() })
+        val worker = Thread {
+            try {
+                var first = true
+                scan.loop({ !finished.isDone }, {
+                    if (first) { assertNull(scan.await(30)); first = false }
+                    else finished.complete(scan.await())
+                    true
+                }, { throw AssertionError(it) }, {})
+            } catch (e: Throwable) { finished.completeExceptionally(e) }
+        }.apply { start() }
+        try {
+            assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            assertEquals(2, registrations.poll(2, TimeUnit.SECONDS))
+            assertEquals(1, stops.get())  // the replacement stays registered until delivery
+            assertTrue(scan.deliver(name, true, "renewed registration"))
+            assertEquals("renewed registration", finished.get(2, TimeUnit.SECONDS))
+            assertEquals(2, stops.get())
+        } finally { worker.interrupt(); worker.join(2000) }
+    }
+
+    @Test fun fastConnectFailureIgnoresResultsForFiveSecondsThenConnectsOnce() {
+        val now = AtomicLong(10_000)
+        val registrations = LinkedBlockingQueue<Int>()
+        val starts = AtomicInteger()
+        val stops = AtomicInteger()
+        val scan = BeanScanWait<String>(name, { registrations.put(starts.incrementAndGet()) }, { stops.incrementAndGet() }, now::get)
+        val attempts = AtomicInteger()
+        val logs = AtomicInteger()
+        val finished = CompletableFuture<Unit>()
+        val worker = Thread {
+            try {
+                scan.loop({ attempts.get() < 2 }, {
+                    scan.await() ?: error("unexpected timeout")
+                    if (attempts.incrementAndGet() == 1) throw IOException("connect failed before link up")
+                    true
+                }, { true }, { logs.incrementAndGet() })
+                finished.complete(Unit)
+            } catch (e: Throwable) { finished.completeExceptionally(e) }
+        }.apply { start() }
+        try {
+            assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            assertTrue(scan.deliver(name, true, "first attempt"))
+            assertEquals(2, registrations.poll(2, TimeUnit.SECONDS))
+            now.set(14_999)
+            assertFalse(scan.deliver(name, true, "too soon"))
+            assertEquals(1, stops.get())
+            assertEquals(1, attempts.get())
+            now.set(15_000)
+            assertTrue(scan.deliver(name, true, "retry"))
+            assertFalse(scan.deliver(name, true, "duplicate"))
+            finished.get(2, TimeUnit.SECONDS)
+            assertEquals(2, attempts.get())
+            assertEquals(1, logs.get())
+            assertFalse(scan.backoff())  // another failure in this streak does not log again
+            scan.connected()
+            assertTrue(scan.backoff())  // a new streak logs once again
+        } finally { worker.interrupt(); worker.join(2000) }
+    }
+
+    @Test fun exceptionBackoffKeepsReplacementScanRegistered() {
+        val now = AtomicLong(20_000)
+        val registrations = LinkedBlockingQueue<Int>()
+        val starts = AtomicInteger()
+        val stops = AtomicInteger()
+        val scan = BeanScanWait<String>(name, { registrations.put(starts.incrementAndGet()) }, { stops.incrementAndGet() }, now::get)
+        val finished = CompletableFuture<String?>()
+        val worker = Thread {
+            try {
+                scan.loop({ !finished.isDone }, { finished.complete(scan.await()); true }, { true }, {})
+            } catch (e: Throwable) { finished.completeExceptionally(e) }
+        }.apply { start() }
+        try {
+            assertEquals(1, registrations.poll(2, TimeUnit.SECONDS))
+            scan.fail(IOException("scan failed"))
+            assertEquals(2, registrations.poll(2, TimeUnit.SECONDS))
+            assertEquals(1, stops.get())
+            assertFalse(scan.deliver(name, true, "during backoff"))
+            now.set(24_999)
+            assertFalse(scan.deliver(name, true, "still during backoff"))
+            assertEquals(1, stops.get())
+            now.set(25_001)
+            assertTrue(scan.deliver(name, true, "after backoff"))
+            assertEquals("after backoff", finished.get(2, TimeUnit.SECONDS))
+            assertEquals(2, stops.get())
+        } finally { worker.interrupt(); worker.join(2000) }
+    }
 
     @Test fun dropRegistersBackgroundScanAndDuplicateResultsConnectOnce() {
         val registered = LinkedBlockingQueue<Int>()
