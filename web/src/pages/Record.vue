@@ -367,7 +367,13 @@ onUnmounted(() => {
       </details>
     </div>
     <iframe src="/live" :title="t('record.captions')"></iframe>
-    <dialog ref="leaveDlg" class="leave" @cancel="leave(false)" @click.self="leave(false)">
+    <dialog
+      ref="leaveDlg"
+      class="leave"
+      :aria-label="t('record.leaveQ')"
+      @cancel="leave(false)"
+      @click.self="leave(false)"
+    >
       <div class="in">
         <p>{{ t("record.leaveQ") }}</p>
         <div class="acts">
