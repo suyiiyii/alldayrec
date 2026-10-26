@@ -1,6 +1,8 @@
 package com.suyiiyii.live_record
 
 import android.annotation.SuppressLint
+import android.app.PendingIntent
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
@@ -8,11 +10,14 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.ParcelUuid
@@ -27,6 +32,33 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
+/** One system scan at a time; duplicate or late deliveries cannot start a second connection. */
+internal class BeanScanWait<T>(private val name: String, private val start: () -> Unit, private val stop: () -> Unit) {
+    private var found: CompletableFuture<T>? = null
+
+    fun await(): T {
+        val f = CompletableFuture<T>()
+        synchronized(this) { check(found == null); found = f }
+        try {
+            start()
+            return f.get()  // no app timer has to fire while the CPU is asleep
+        } catch (e: ExecutionException) { throw e.cause!! }
+        finally {
+            synchronized(this) { found = null }
+            stop()
+        }
+    }
+
+    @Synchronized fun deliver(beanName: String, connectable: Boolean, value: T) =
+        beanName == name && connectable && (found?.complete(value) ?: false)
+    @Synchronized fun fail(e: Exception) { found?.completeExceptionally(e) }
+}
+
+/** The existing connectedDevice service owns the session; this receiver only wakes its scan waiter. */
+class BeanScanReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) { RecorderService.bean?.scanResult(intent) }
+}
+
 /** A scan result's bean: its name (from the MAC in its manufacturer data) and the flags byte it advertises (bit 7:
  *  bound to a Feishu account); null when it is no bean. */
 fun beanAdv(r: ScanResult): Pair<String, Int>? {
@@ -39,8 +71,8 @@ fun beanAdv(r: ScanResult): Pair<String, Int>? {
 
 /** The Feishu recorder bean the person added (prefs bleName, D3200-XXXX), over BLE: found by scanning for its service
  *  and its MAC (its address changes), connected without pairing (the bean asks for none), its notifications into
- *  BeanSync, which does the rest. One thread: scan, connect, session, again 2 s after the link goes (5 s after a
- *  failure). What it advertises is logged at each scan (the Feishu bound bit). A debug capture of each session's
+ *  BeanSync, which does the rest. One thread: scan, connect, session, then scan again as soon as the link goes.
+ *  What it advertises is logged at each scan (the Feishu bound bit). A debug capture of each session's
  *  frames, keys and audio goes to <external files>/bean-capture/ while a file `on` is there (adb), for replays. */
 @SuppressLint("MissingPermission")
 class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, chunks: File,
@@ -113,54 +145,79 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     }
 
     private fun loop() {
-        var wait = 0L
         while (on) {
             try {
-                if (wait > 0) Thread.sleep(wait)
-                wait = 5000
                 if (!Bean.isBean(name) || prefs.getString("bleName", null) != name) { linkState = say("unbound"); return }
-                if (adapter?.isEnabled != true) { linkState = say("bluetoothOff"); continue }
+                if (adapter?.isEnabled != true) { linkState = say("bluetoothOff"); Thread.sleep(5000); continue }
                 val d = find() ?: continue
                 onName(name)
                 connect(d)
-                wait = 2000
             } catch (e: InterruptedException) {
                 return
             } catch (e: BeanSync.Again) {  // a transfer stopped by letting the link go (logged): straight back
-                wait = 1000
+            } catch (e: Gone) {
             } catch (e: Exception) {
                 Log.w("live-record", "bean: $e")
                 if (on) linkState = say("linkError", "detail" to (e.message ?: "$e"))
+                try { Thread.sleep(5000) } catch (_: InterruptedException) { return }  // stack/scan error only, never an absent bean
             }
         }
     }
 
-    /** The bean, once it advertises as connectable; null after 10 minutes without (then a new scan: Android makes a
-     *  scan of over 30 minutes opportunistic). Each scan logs what the bean advertises when first seen and on change. */
+    private val scanIntent by lazy {
+        PendingIntent.getBroadcast(ctx, 0, Intent(ctx, BeanScanReceiver::class.java).setAction("${ctx.packageName}.BEAN_SCAN"),
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0))
+    }
+    @Volatile private var scanWait: BeanScanWait<BluetoothDevice>? = null
+
+    @Suppress("DEPRECATION")
+    internal fun scanResult(intent: Intent) {
+        val wait = scanWait ?: return
+        val error = intent.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, 0)
+        if (error != 0) { wait.fail(Exception("scan failed: $error")); return }
+        val results = intent.getParcelableArrayListExtra<ScanResult>(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT).orEmpty()
+        for (r in results) {
+            val (n, flags) = beanAdv(r) ?: continue
+            if (n != name || !on || prefs.getString("bleName", null) != name) continue
+            rssi = r.rssi
+            if (flags != advFlags || r.isConnectable != advConnectable) {
+                advFlags = flags; advConnectable = r.isConnectable
+                DeviceLog.app(name, "bean_adv", "豆子在广播：标志 0x%02X（%s），%s，信号 %d dBm".format(flags,
+                    if (flags >= 0 && flags and 0x80 != 0) "已绑定飞书" else "未绑定飞书", if (r.isConnectable) "可连接" else "不可连接", r.rssi),
+                    fields = mapOf("flags" to flags, "connectable" to r.isConnectable, "rssi" to r.rssi))
+            }
+            if (wait.deliver(n, r.isConnectable, r.device)) {
+                Log.i("live-record", "bean connect: 系统后台扫描发现豆子，开始重连")
+                DeviceLog.app(name, "connect", "系统后台扫描发现豆子，开始重连", fields = mapOf("path" to "pendingIntent"))
+            }
+        }
+    }
+
+    /** A filtered PendingIntent scan wakes us in the background, without a 10-minute rescan timer or a wake lock.
+     *  The bean is unpaired and changes address, so autoConnect to an old address is insufficient. Android's BLE
+     *  background guide recommends this API: https://developer.android.com/develop/connectivity/bluetooth/ble/background
+     *  Keep ALL_MATCHES: a bean can first advertise as non-connectable, then become connectable at the same address.
+     *  Filtered scans continue at low power after Android's long-scan downgrade; no periodic restart is needed. */
     private fun find(): BluetoothDevice? {
         val scanner = adapter?.bluetoothLeScanner ?: return null
-        val found = CompletableFuture<BluetoothDevice>()
         advFlags = -2; advConnectable = null
-        val cb = object : ScanCallback() {
-            override fun onScanResult(type: Int, r: ScanResult) {
-                val (n, flags) = beanAdv(r) ?: return
-                if (n != name) return
-                rssi = r.rssi
-                if (flags != advFlags || r.isConnectable != advConnectable) {
-                    advFlags = flags; advConnectable = r.isConnectable
-                    DeviceLog.app(name, "bean_adv", "豆子在广播：标志 0x%02X（%s），%s，信号 %d dBm".format(flags,
-                        if (flags >= 0 && flags and 0x80 != 0) "已绑定飞书" else "未绑定飞书", if (r.isConnectable) "可连接" else "不可连接", r.rssi),
-                        fields = mapOf("flags" to flags, "connectable" to r.isConnectable, "rssi" to r.rssi))
-                }
-                if (r.isConnectable) found.complete(r.device)
+        val wait = BeanScanWait<BluetoothDevice>(name, {
+            scanner.stopScan(scanIntent)  // also removes a registration left by a killed service process
+            val error = scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Bean.SERVICE)).build()),
+                ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_POWER).build(), scanIntent)
+            check(error == 0) { "scan failed: $error" }
+        }, { try { scanner.stopScan(scanIntent) } catch (_: Exception) {} })
+        scanWait = wait
+        val bluetooth = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                if (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR) != BluetoothAdapter.STATE_ON)
+                    wait.fail(Gone())
             }
-            override fun onScanFailed(code: Int) { found.completeExceptionally(Exception("scan failed: $code")) }
         }
         linkState = lastSeen?.let { say("away", "lastSeen" to it) } ?: say("scanning", "name" to name)
-        scanner.startScan(listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(Bean.SERVICE)).build()),
-            ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb)
-        return try { found.get(10, TimeUnit.MINUTES) } catch (e: TimeoutException) { null } catch (e: ExecutionException) { throw e.cause!! }
-        finally { try { scanner.stopScan(cb) } catch (_: Exception) {} }
+        ctx.registerReceiver(bluetooth, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+        return try { wait.await() }
+        finally { scanWait = null; ctx.unregisterReceiver(bluetooth) }
     }
 
     private fun connect(d: BluetoothDevice) {
