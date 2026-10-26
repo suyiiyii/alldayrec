@@ -13,7 +13,7 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例。
 
-| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-zh-summary-20261026.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-zh-summary-20261026.png) |
+| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-zh-named-20261026c.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-zh-summary-20261026.png) |
 |:--:|:--:|
 | 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
 
