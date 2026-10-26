@@ -405,11 +405,14 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             next(if (xfer == null && quiet > 0) quiet else 1000)?.let(::take)
             xfer?.takeIf { it.cut }?.let { complete(it, 0); throw Again("file ${it.file}: the rest is here already") }
             val now = io.now()
-            xfer?.let { x ->  // the bean did not answer, or an offline transfer stopped: on with the next
+            xfer?.let { x ->  // the bean did not answer, or a transfer stopped: on with the next
                 if (x.key == null && now - x.at > 15_000) failed(x, "no answer")
                 // the bean cannot be stopped mid-file: a new connection starts it afresh, no stray units of this file
                 // then go to the next one's
-                else if (!x.live && now - x.seen > 30_000) { complete(x, -1); throw Exception("file ${x.file}: no audio for 30 s") }
+                else if ((!x.live || x.last >= 0) && now - x.seen > 30_000) {
+                    complete(x, -1, "；30 s 没收到单元，断开重连")
+                    throw Exception("file ${x.file}: no audio for 30 s")
+                }
             }
             if (xfer == null && now - askedAt > 60_000) {  // not during a transfer: its pushes say battery and charging
                 askedAt = now
@@ -542,8 +545,14 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             0x1A08, 0x1A12 -> if (x?.key != null) Bean.slices(p).forEach { unit(x, it) }
             0x1A0A -> if (x != null && (p.size < 9 || Bean.u32(p, 5).let { it == 0L || it == x.file })) complete(x, p.getOrNull(0)?.toInt()?.and(255) ?: 0)
             0x1A06 -> if (p.size >= 4) {  // a new file: recording began, or the bean went on in the next file
+                val open = Bean.u32(p, 0)
+                if (x != null && x.live && x.file != open) {
+                    // The bean may skip 1A/0A at rollover: flush as usual, fetch the old tail after stop.
+                    complete(x, 0, "；豆子开始录新文件 $open，缺的停录后补传")
+                    liveAgain = 0
+                }
                 recording = true
-                listing = Bean.Listing(listing.files, Bean.u32(p, 0))
+                listing = Bean.Listing(listing.files, open)
                 io.log("bean_file", "豆子开始录新文件 ${listing.open}", fields = mapOf("file" to listing.open, "pre" to (p.getOrNull(if (p.size > 8) 8 else 4)?.toInt() ?: -1)))
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
@@ -640,14 +649,14 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (x.live) state = say("connected")
     }
 
-    private fun complete(x: Xfer, result: Int) {
+    private fun complete(x: Xfer, result: Int, why: String = "") {
         flush()
         xfer = null
         quietUntil = io.now() + PACE_MS
         val f = files[x.file]
         io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} ${if (x.cut) "缺的取到了" else "传完（结果 $result）"}：${x.units} 个单元，seq ${x.first}..${x.last}，" +
             "重复 ${x.dupes}，缺 ${x.lost}，用时 ${(io.now() - x.at) / 1000} s" +
-            (if (x.cut) "；单元 ${x.until} 起的一段手机已有，断开连接让豆子停下，缺的再从各自的位置要" else ""), if (result == 0 && x.lost == 0L) null else "warn",
+            (if (x.cut) "；单元 ${x.until} 起的一段手机已有，断开连接让豆子停下，缺的再从各自的位置要" else "") + why, if (result == 0 && x.lost == 0L) null else "warn",
             mapOf("file" to x.file, "units" to x.units, "first" to x.first, "last" to x.last, "dupes" to x.dupes, "lost" to x.lost, "result" to result, "cut" to x.cut))
         if (x.live) {
             listing = Bean.Listing(listing.files, 0); needList = true; askedAt = 0  // recording on? the info says

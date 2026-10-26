@@ -201,6 +201,102 @@ class BeanTest {
         assertEquals("whole on the server: off the bean, once", listOf(a, b), bean.deleted)
     }
 
+    @Test fun rolloverWithoutComplete() = rollover(false)
+
+    @Test fun rolloverWithLateComplete() = rollover(true)
+
+    /** The bean may open the next file without ending the old transfer; its tail waits until recording stops. */
+    private fun rollover(late: Boolean) {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val a = t0 / 1000; val b = a + 1
+        bean.recording = true; bean.open = a; bean.listed[a] = 0
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
+        bean.onTransfer = { file, from, live ->
+            when {
+                live && file == a -> {
+                    bean.header(file, 0xFFFFFFFFL)
+                    bean.units(file, (0L..24L).toList())
+                    bean.rotation(b, wait = 500)
+                    bean.open = b; bean.listed[a] = 600; bean.listed[b] = 0
+                }
+                live && file == b -> {
+                    assertEquals("rollover flushed the old partial piece", 25, packets(Uploader.queue(chunks).single()).size - 2)
+                    assertEquals("old tail remains pending", 25L, sync.gap(sync.files[a]!!))
+                    assertEquals(-1L, sync.files[a]!!.total)
+                    bean.header(file, 0xFFFFFFFFL)
+                    bean.units(file, (0L..11L).toList())
+                    if (late) bean.complete(a)
+                    bean.units(file, (12L..24L).toList(), last = 24)
+                    bean.script += {
+                        assertEquals("old completion cannot end the new transfer", 1, bean.logs.count { it.first == "bean_xfer" && "文件 $a 传完" in it.second })
+                        bean.push(0x1882, byteArrayOf(0)); bean.complete(b)
+                        bean.recording = false; bean.open = 0; bean.listed[b] = 500
+                    }
+                }
+                !live && file == a -> {
+                    assertEquals(25L, from)
+                    bean.header(file, 30L * Bean.UNIT)
+                    bean.units(file, (from..29L).toList(), last = 29); bean.complete(file)
+                }
+                else -> fail("asked for $file from $from live $live")
+            }
+        }
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(a, 25L, false)), bean.transfers)
+        val seen = mutableMapOf<Long, MutableList<Long>>()
+        for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
+            val file = if (p[5] == (a % 251).toByte()) a else b
+            val seq = ByteBuffer.wrap(p, 1, 4).int.toLong()
+            assertEquals(0xBC.toByte(), p[0])
+            assertTrue("anchor near the file's start", sync.files[file]!!.anchor - file * 1000 in 0L..3000L)
+            assertEquals("dated by its own file and seq", sync.files[file]!!.anchor + seq * Bean.FRAME_MS, Uploader.startMs(piece) + i * Bean.FRAME_MS)
+            seen.getOrPut(file) { mutableListOf() } += seq
+        }
+        assertEquals("old units and recovered tail, each once", (0L..29L).toList(), seen[a]!!.sorted())
+        assertEquals("new units, including after the late completion", (0L..24L).toList(), seen[b]!!.sorted())
+        assertEquals(2, bean.logs.count { it.first == "bean_xfer" && "文件 $a 传完" in it.second })  // live, then its missing tail
+        assertEquals(1, bean.logs.count { it.first == "bean_xfer" && "文件 $b 传完" in it.second })
+        assertNull(sync.gap(sync.files[a]!!))
+    }
+
+    @Test fun silentLiveStallReconnects() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val id = t0 / 1000
+        bean.recording = true; bean.open = id; bean.listed[id] = 0
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (0L..24L).toList())
+        }
+        repeat(30) { bean.script += {} }
+        bean.script += { bean.push(0x0103, byteArrayOf(7, 5), wait = 1001) }  // the link is up, but no audio arrives
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
+        assertEquals("file $id: no audio for 30 s", assertThrows(Exception::class.java) { sync.session(t0 - 3_600_000, "") }.message)
+        assertEquals(25L, sync.gap(sync.files[id]!!))
+        assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
+        assertEquals(1, bean.logs.count { it.first == "bean_xfer" && "30 s" in it.second })
+
+        // A fresh handshake discards any old stream still in flight before joining at the saved offset.
+        bean.units(id, listOf(25L))
+        bean.onTransfer = { file, from, live ->
+            assertTrue(live); assertEquals(25L, from)
+            bean.header(file, 0xFFFFFFFFL); bean.units(file, (30L..54L).toList())
+        }
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(Triple(id, 0L, true), Triple(id, 25L, true)), bean.transfers)
+        val seqs = Uploader.queue(chunks).flatMap { packets(it).drop(2).map { p -> ByteBuffer.wrap(p, 1, 4).int.toLong() } }
+        assertEquals((0L..24L).toList() + (30L..54L).toList(), seqs.sorted())
+        for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
+            val seq = ByteBuffer.wrap(p, 1, 4).int.toLong()
+            assertEquals(sync.files[id]!!.anchor + seq * Bean.FRAME_MS, Uploader.startMs(piece) + i * Bean.FRAME_MS)
+        }
+    }
+
     /** A closed file is pending while live runs in another file. It cannot be fetched until stop, so live never
      *  sets a hold for it, and a previous app's persisted hold is released after its queued older pieces upload. */
     @Test fun closedBacklogWhileRecordingDoesNotHold() {
