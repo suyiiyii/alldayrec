@@ -7,10 +7,6 @@ description: "Tutorial: run alldayrec with Docker on your computer, record a few
 
 In this tutorial, you run alldayrec with Docker on your own computer, record a few sentences in the browser, and then see their transcript in the web UI. It takes about 15 minutes.
 
-::: info Version
-`docker-compose.yml` pulls the image `ghcr.io/suyiiyii/alldayrec:latest`, which matches the newest version tag (v0.2.0 when this page was written). The page addresses used below (`/record`, `/conversations`) exist in every version and on main; they may look different.
-:::
-
 ## What you need
 
 - A computer with Docker (amd64 or arm64) that can reach GitHub.

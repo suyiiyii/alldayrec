@@ -8,7 +8,7 @@ The web pages come in Chinese and English: pick one under **语言 · Language**
 
 ## Web pages
 
-The server serves the web pages (`web/` builds into `server/alldayrec/static/dist`). The table lists the pages in `web/src/router.ts` on the main branch; v0.2.0 and later have all of them. v0.1.0 doesn't have 「我的」 (Me), 「待办」 (To-dos) or `/live` yet, and there `/` is the live captions page. Four tabs sit at the top of the pages (at the bottom on a phone): **时间线** (Timeline), **实时** (Live), **人物** (People) and **我的** (Me).
+The server serves the web pages (`web/` builds into `server/alldayrec/static/dist`). The table lists the pages in `web/src/router.ts` on the main branch; v0.3.0 and later have all of them. v0.1.0 doesn't have 「我的」 (Me), 「待办」 (To-dos) or `/live` yet, and there `/` is the live captions page. Four tabs sit at the top of the pages (at the bottom on a phone): **时间线** (Timeline), **实时** (Live), **人物** (People) and **我的** (Me).
 
 | Address | Page | Content |
 |---|---|---|

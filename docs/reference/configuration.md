@@ -6,10 +6,6 @@ type: reference
 
 服务器的设置分两处：`tenants.json` 列出它为哪些人服务，环境变量（通常写在 `.env` 里）设置其余一切。服务器缺必填项时拒绝启动，并在日志里写出缺了哪些。
 
-::: info 适用版本
-这一页按 main 分支写。v0.2.0 没有 `MUSIC_DETECT` 和 `SLICE_WATCHED_S`，`LOOP_STALL_MS` 默认不检测，其余各项相同。v0.1.0 还没有 `DATA_DIR`、`UI_LANG` 和 `tenants.json` 的 `lang` 字段，`tenants.json` 和模型文件的默认位置也不同。
-:::
-
 ## tenants.json
 
 一个 JSON 数组，每个人（租户）一条。权限必须是 600。

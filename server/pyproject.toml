@@ -1,6 +1,6 @@
 [project]
 name = "alldayrec"
-version = "0.2.0"
+version = "0.3.0"
 description = "alldayrec server: a continuous audio stream in, conversations out — local VAD + cloud or local ASR + web page"
 requires-python = ">=3.11,<3.15"  # onnxruntime has no 3.15 wheel yet
 license = "MIT"

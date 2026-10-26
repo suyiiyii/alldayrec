@@ -9,10 +9,6 @@ type: reference
 这一页由 [`docs/gen-api.py`](https://github.com/suyiiyii/alldayrec/blob/main/docs/gen-api.py) 从服务端的 OpenAPI 生成。
 说明是各个接口函数文档字符串的第一句（英文）。
 
-::: info 适用版本
-这一页对应 main 分支的服务端。Docker 镜像 `latest`（v0.2.0）比它旧，没有之后加的接口，比如 `/api/stars` 和 `/api/perf`。
-:::
-
 ## 认证
 
 - 除了 `GET /api/health`，每个请求都要带一个租户的 token：请求头 `Authorization: Bearer <token>`，或者 cookie `token`。

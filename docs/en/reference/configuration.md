@@ -6,10 +6,6 @@ type: reference
 
 The server's settings live in two places: `tenants.json` lists the people it serves, and environment variables (usually in `.env`) set everything else. When a required setting is missing, the server refuses to start and writes the missing ones to its log.
 
-::: info Version
-This page follows the main branch. v0.2.0 has no `MUSIC_DETECT` or `SLICE_WATCHED_S`, and its `LOOP_STALL_MS` is off by default; everything else is the same. v0.1.0 also has no `DATA_DIR`, no `UI_LANG` and no `lang` field in `tenants.json`, and keeps `tenants.json` and the model files in other default places.
-:::
-
 ## tenants.json
 
 A JSON array with one entry per person (tenant). Its permissions must be 600.

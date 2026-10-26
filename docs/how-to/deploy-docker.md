@@ -8,7 +8,7 @@ description: "在 Linux 或 macOS 机器上用 Docker Compose 长期运行 allda
 这篇讲在一台 Linux 或 macOS 机器上用 Docker Compose 长期运行 alldayrec。第一次接触的话，先跟着[第一次跑起来](../tutorial/first-run.md)走一遍。
 
 ::: info 适用版本
-`docker-compose.yml` 默认用镜像 `ghcr.io/suyiiyii/alldayrec:latest`，即最新的版本标签（写这一页时是 v0.2.0）；`main` 标签跟着 main 分支。要用哪个版本见下面的[固定镜像版本](#固定镜像版本)。
+`docker-compose.yml` 默认用镜像 `ghcr.io/suyiiyii/alldayrec:latest`，即最新的版本标签；`main` 标签跟着 main 分支。要用哪个版本见下面的[固定镜像版本](#固定镜像版本)。
 :::
 
 ## 前提

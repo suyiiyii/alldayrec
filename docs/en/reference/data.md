@@ -58,16 +58,16 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `pieces` | The index of uploaded pieces, which is also the processing queue |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
-| `stars` | Starred sentences: the sentence id, its conversation, when it was starred (new on main) |
+| `stars` | Starred sentences: the sentence id, its conversation, when it was starred (since v0.3.0) |
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |
 | `calls` | Duration, result and usage of each ASR and LLM call, without content |
 | `balances` | Prepaid account balances, recorded hourly |
-| `perf_stalls` | Times the event loop was held up: when it ended, how many milliseconds, in which functions (only in the first tenant's store; new on main) |
-| `perf_samples` | The process, one row a minute: CPU seconds, memory, loop lag, thread pool use, queued pieces, open pages (only in the first tenant's store; new on main) |
-| `perf_requests` | HTTP requests: one row for each that took 50 ms or more, and each minute one row per method, route and status (new on main) |
-| `perf_pieces` | How long each step of each final piece and draft pass took: decode, VAD, ASR, voiceprints, store (new on main) |
+| `perf_stalls` | Times the event loop was held up: when it ended, how many milliseconds, in which functions (only in the first tenant's store; since v0.3.0) |
+| `perf_samples` | The process, one row a minute: CPU seconds, memory, loop lag, thread pool use, queued pieces, open pages (only in the first tenant's store; since v0.3.0) |
+| `perf_requests` | HTTP requests: one row for each that took 50 ms or more, and each minute one row per method, route and status (since v0.3.0) |
+| `perf_pieces` | How long each step of each final piece and draft pass took: decode, VAD, ASR, voiceprints, store (since v0.3.0) |
 
 The `perf_` tables hold durations and resource use only, never content, and keep 90 days. `GET /api/perf?day=YYYY-MM-DD` reads one day; `python -m alldayrec.perf export <live.db> <YYYY-MM-DD>` exports one from a copy of the store.
 

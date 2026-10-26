@@ -7,10 +7,6 @@ description: "教程：用 Docker 在自己的电脑上跑起 alldayrec，在浏
 
 在这个教程里，我们用 Docker 在你自己的电脑上跑起 alldayrec，用浏览器录一段话，然后在网页上看到它的转写。全程大约 15 分钟。
 
-::: info 适用版本
-`docker-compose.yml` 拉取的是镜像 `ghcr.io/suyiiyii/alldayrec:latest`，它对应最新的版本标签（写这一页时是 v0.2.0）。下面用到的页面地址（`/record`、`/conversations`）在各个版本和 main 上都有，界面样式可能不同。
-:::
-
 ## 准备
 
 - 一台装了 Docker 的电脑（amd64 或 arm64），能访问 GitHub。
