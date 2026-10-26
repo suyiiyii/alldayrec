@@ -60,15 +60,15 @@ const current = computed(() => {
 const said = (s: number) =>
   s < 60 ? t("common.sec", { n: s }) : t("common.minSec", { m: Math.floor(s / 60), s: s % 60 });
 // the head: what it is (label), the newest topic or how long the conversation has gone before there is one (headline)
-const sub = computed(() =>
+const subs = computed(() =>
   [
     current.value && t("livePanel.updated", { at: hhmm(current.value.at) }),
     barDev.value?.analyzing && t("livePanel.analyzing"),
-  ]
-    .filter(Boolean)
-    .join(" · "),
+  ].filter((s): s is string => !!s),
 );
-const label = computed(() => t("livePanel.label") + (sub.value && " · " + sub.value));
+const sub = computed(() => subs.value.join(" · "));
+// in parts: a narrow card breaks the line between them (「Live AI summary ·」「Updated 17:59」), never inside one
+const label = computed(() => [t("livePanel.label"), ...subs.value]);
 const headline = computed(() => {
   const c = talk.value,
     l = current.value;
@@ -240,7 +240,13 @@ watch(
         :aria-expanded="current ? paneOpen : undefined"
         @click="toggle"
       >
-        <span class="label"><Icon name="sparkles" :size="14" />{{ label }}</span>
+        <span class="label"
+          ><Icon name="sparkles" :size="14" /><span
+            ><template v-for="(s, i) in label" :key="i"
+              >{{ i ? " · " : "" }}<span class="seg">{{ s }}</span></template
+            ></span
+          ></span
+        >
         <b class="title">{{ headline }}</b>
         <span v-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</span>
       </button>
@@ -376,9 +382,18 @@ watch(
 .label svg {
   color: var(--accent);
 }
+.seg {
+  white-space: nowrap;
+}
 .title {
   font-size: var(--fs-md);
   line-height: 1.45;
+}
+/* a long headline wraps, even a link with no space in it, and stays clear of the button beside it */
+.title,
+.mini-text b {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .fold .bad {
   font-size: var(--fs-xs);

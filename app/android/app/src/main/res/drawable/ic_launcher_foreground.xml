@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The logo (docs/public/brand/mark-light.svg) in its 0–100 box, scaled to a 56 dp disc in the middle of the
+     108 dp adaptive-icon layer (safe zone 66 dp): day and night halves, five bars in the other half's colour -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.6087"
+        android:scaleY="0.6087"
+        android:translateX="23.565"
+        android:translateY="23.565">
+        <path android:fillColor="#F7C948" android:pathData="M50,4 A46,46 0 0,0 50,96 Z" />
+        <path android:fillColor="#0F6569" android:pathData="M50,4 A46,46 0 0,1 50,96 Z" />
+        <path android:fillColor="#0F6569" android:pathData="M17.25,46.75 A4.75,4.75 0 0,1 26.75,46.75 L26.75,53.25 A4.75,4.75 0 0,1 17.25,53.25 Z M31.25,38.75 A4.75,4.75 0 0,1 40.75,38.75 L40.75,61.25 A4.75,4.75 0 0,1 31.25,61.25 Z M50,23 L50,77 A4.75,4.75 0 0,1 45.25,72.25 L45.25,27.75 A4.75,4.75 0 0,1 50,23 Z" />
+        <path android:fillColor="#F7C948" android:pathData="M50,23 A4.75,4.75 0 0,1 54.75,27.75 L54.75,72.25 A4.75,4.75 0 0,1 50,77 Z M59.25,38.75 A4.75,4.75 0 0,1 68.75,38.75 L68.75,61.25 A4.75,4.75 0 0,1 59.25,61.25 Z M73.25,46.75 A4.75,4.75 0 0,1 82.75,46.75 L82.75,53.25 A4.75,4.75 0 0,1 73.25,53.25 Z" />
+    </group>
+</vector>

@@ -62,6 +62,11 @@ defineEmits<{ jump: [start: string]; flip: [i: number] }>();
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
+/* a long title wraps (even a long word or link, folding or not), the badge after it stays whole */
+.head b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 /* a title that folds: the chevron, the title and the time centred on one line */
 .head:has(.fold) {
   align-items: center;

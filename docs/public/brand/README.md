@@ -1,0 +1,3 @@
+The alldayrec logo: `mark-{light,dark}.svg` the mark, `favicon.svg` its 16 px form (follows the browser's colour scheme), `app-icon-{light,dark}.svg` the app icon tile, `lockup-{light,dark}.svg` the mark with the name.
+The lockup's text is PingFang SC (Semibold, Medium) converted to outlines, so the SVGs need no font; `-dark` files are for dark backgrounds.
+Copies to redo when the logo changes: `web/src/brand/` (favicon, PNGs, `mark.svg` with both palettes), the Android vectors `app/android/app/src/main/res/drawable/ic_launcher_{foreground,monochrome}.xml` (hand-written paths), the iOS PNGs in `app/ios/Runner/Assets.xcassets/` (AppIcon, LaunchImage), and the og card (`og:image` in `docs/.vitepress/config.ts`, on the `assets` branch).

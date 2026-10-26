@@ -5,6 +5,7 @@ import LineChart from "../components/LineChart.vue";
 import Skeleton from "../components/Skeleton.vue";
 import { t } from "../i18n";
 import {
+  caseText,
   chargeText,
   get,
   hot,
@@ -49,17 +50,20 @@ const lo = ref(0),
   hi = ref(0);
 const local = (t: number) =>
   new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 23);
+let seq = 0;
 watch(
   [() => props.name, hours],
   async () => {
     document.title = `${props.name} · ${t("title.device")}`;
+    const my = ++seq;
     hi.value = Date.now();
     lo.value = hi.value - hours.value * 3600_000;
     const q = { device: props.name, since: local(lo.value) };
-    [log.value, ups.value] = await Promise.all([
+    const got = await Promise.all([
       get<DeviceLog>("/api/device-log", q),
       get<Upgrade[]>("/api/upgrades", q),
     ]);
+    if (my === seq) [log.value, ups.value] = got; // a range picked meanwhile: its answer, not this older one
   },
   { immediate: true },
 );
@@ -232,7 +236,12 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
             >{{ t("device.batterySub")
             }}{{
               charge
-                ? t("device.chargeAt", { charge: chargeText(charge.charge!), at: when(charge.at) })
+                ? t("device.chargeAt", {
+                    charge: [chargeText(charge.charge!), caseText(charge)]
+                      .filter(Boolean)
+                      .join(" · "),
+                    at: when(charge.at),
+                  })
                 : ""
             }}</span
           >

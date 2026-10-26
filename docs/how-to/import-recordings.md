@@ -1,70 +1,72 @@
 ---
 type: how-to
-description: "通过 HTTP 接口 POST /api/chunks 把已有录音导入 alldayrec：MP3、WAV、转码后的 m4a 和 Plaud 导出的文件，以及让它们转写、定稿要守的规则。"
+description: "在网页的「导入录音」页把已有的录音文件（MP3、WAV、m4a、Plaud 导出的文件）导入 alldayrec。"
 ---
 
 # 如何导入已有录音
 
-App 和网页里还没有导入按钮，导入走 HTTP 接口 `POST /api/chunks`：一个文件一个请求，请求体是一个完整的音频文件，服务器用 ffmpeg 解码。
+在网页上选好录音文件、核对开始时间、上传，转写会落到录音那一天的时间线上。要用脚本批量导入，见[用脚本导入](#用脚本导入)。
 
 ## 能导入什么
 
 | 你手上的 | 能导入吗 | 怎么做 |
 |---|---|---|
-| 录音笔、手机录音（MP3、WAV） | 能 | 直接上传 |
-| `.m4a`（比如 iPhone 语音备忘录） | 能，先转码 | 长的 `.m4a` 从管道解码不了，先运行 `ffmpeg -i in.m4a out.mp3` |
+| 录音笔、手机录音（MP3、WAV、`.m4a`） | 能 | 直接上传 |
 | Plaud | 能 | 在 Plaud App 里导出 MP3 或 WAV，再上传 |
 | 飞书录音豆 | 能，直接连接 | 安卓 App 直接连接录音豆，绑定之后录的音频自动上传，见[如何绑定录音设备](./bind-recorder.md#飞书录音豆)。绑定之前录的，从飞书妙记网页端逐条下载后再上传 |
 | OPPO 心力球 | 不能 | 它不保留原音，没有音频可导 |
 
 第三方产品的情况见[简介与定位](../explanation/intro.md#和市面产品比)里的出处。
 
-## 规则
+## 在网页上导入
 
-- **用一个单独的设备名**，比如 `import`。每一批用一个新名字（比如 `import-2026-10`）最省心：下一条规则只管同一个设备名，新的一批里有比上一批更早的录音也照样转写。
+1. 打开网页的「我的」页，点「导入录音」。在 App 里是：我的 › 设备状态与更多 › 导入录音。
+
+   ::: tip 安卓 App
+   安卓 App 1.5.5 及更早的版本里，点「选择录音文件」没有反应。用手机或电脑的浏览器打开网页导入。
+   :::
+
+2. 点「选择录音文件」，可以一次选多个。
+3. 核对每个文件的开始时间。对话按它落到哪一天、几点。页面按下面的顺序猜开始时间，每个文件下面写着用的是哪一种：
+   - **文件信息**：`.m4a` 文件头里写的时间（页面把它当作录音结束的时刻，减去时长），和录音笔 WAV 文件 `bext` 块里的录音时间；
+   - **文件名**：比如 `20261020_093000`、`2026-10-20 09.30.00`、`录音 2026-10-20 09-30`；
+   - **修改时间**：文件的修改时间减去时长。文件拷贝过以后，修改时间就是拷贝的时间，不准。
+
+   猜得不对就改。两个文件的时间重叠，或者结束时间在未来，页面会提示。
+4. 点「导入 N 个文件」。文件按开始时间从早到晚上传，每个文件显示上传进度。哪个文件失败了，点「重试」，或者点 × 把它移出这一批。
+5. 上传完，页面列出对话所在的日期，点日期打开那一天的时间线。转写要一段时间，页面下方的「导入记录」显示还剩多久。
+
+每一批用一个自己的设备名，默认是 `import-` 加导入的时刻（比如 `import-20261026-093000`），可以在「批次名」里改。导入的批次列在「导入记录」里。
+
+说话少于 10 秒的对话不保留成一段对话，它的句子还在转写里（见[架构与数据流](../explanation/architecture.md#对话、摘要和回顾)）。
+
+## 用脚本导入
+
+导入走 HTTP 接口 `POST /api/chunks`：一个文件一个请求，请求体是一个完整的音频文件，服务器用 ffmpeg 解码。脚本要守三条规则，网页上的导入也是这样做的：
+
+- **每一批用一个新的设备名**，比如 `import-2026-10`。下一条规则只管同一个设备名。名字是 `import` 或以 `import-` 开头的设备算导入的批次，列在「导入录音」页的「导入记录」里。
 - **按时间从早到晚传。** 一个设备名下，早于服务器已经处理到的位置的音频只保存、不转写。
 - **传完最后一个文件后，告诉服务器这一批结束了。** 不然最后一段会一直等后面的音频，不会定稿。
 
-## 步骤
+步骤：
 
-1. 把 token 放进环境变量：
+1. 上传一个文件。`start` 是这段录音开始的时刻（Unix 毫秒）。下面用 GNU `date`；macOS 上换成 `date -j -f '%Y-%m-%d %H:%M:%S' '2026-10-20 09:30:00' +%s`。
 
    ```bash
    TOKEN=<你的 token>
-   ```
-
-2. 上传一个文件。`start` 是这段录音开始的时刻（Unix 毫秒），对话按它落到哪一天、几点。
-
-   Linux（GNU date）：
-
-   ```bash
    curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-binary @rec.mp3 \
-     "https://<你的服务器>/api/chunks?device=import&start=$(date -d '2026-10-20 09:30:00' +%s)000"
+     "https://<你的服务器>/api/chunks?device=import-2026-10&start=$(date -d '2026-10-20 09:30:00' +%s)000"
    ```
 
-   macOS（BSD date）：
+   成功时返回的 `seconds` 是这个文件的秒数。返回 400 表示服务器解码不了这个文件。`Content-Type` 写 `audio/ogg`、`audio/webm`、`audio/aac` 之外的类型时，服务器原样保存，由 ffmpeg 自己识别格式。
+
+2. 按时间顺序传完这一批的其他文件。
+3. 结束这一批。`t` 是最后一个文件结束的时刻（Unix 毫秒），也就是它的 `start` 加上第 1 步返回的秒数：
 
    ```bash
-   curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: audio/mpeg" --data-binary @rec.mp3 \
-     "https://<你的服务器>/api/chunks?device=import&start=$(date -j -f '%Y-%m-%d %H:%M:%S' '2026-10-20 09:30:00' +%s)000"
+   curl -X POST -H "Authorization: Bearer $TOKEN" "https://<你的服务器>/api/chunks/end?device=import-2026-10&t=<结束时刻>"
    ```
 
-   成功时返回这个文件的秒数，比如 `{"seconds":14.19}`。返回 400 表示服务器解码不了这个文件。
+   返回 `{"ok":true}`。
 
-3. 按时间顺序传完这一批的其他文件。
-
-4. 结束这一批。`t` 是最后一个文件结束的时刻（Unix 毫秒），也就是它的 `start` 加上它的时长：
-
-   ```bash
-   curl -X POST -H "Authorization: Bearer $TOKEN" "https://<你的服务器>/api/chunks/end?device=import&t=<结束时刻>"
-   ```
-
-   返回 `{"ok":true}`。服务器处理完剩下的音频后，转写会出现在那一天的页面上，这一批的最后一段对话也随之结束，不再显示「进行中」。说话少于 10 秒的对话不保留成一段对话，它的句子还在转写里（见[架构与数据流](../explanation/architecture.md#对话、摘要和回顾)）。
-
-## Content-Type
-
-App 发的 Ogg Opus 用 `audio/ogg`，也收 `audio/webm` 和 `audio/aac`。其他类型（比如 MP3 的 `audio/mpeg`、WAV 的 `audio/wav`）原样保存，由 ffmpeg 自己识别格式。
-
-## 参考客户端
-
-[`firmware/devkit/lr_sync.py`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/lr_sync.py) 是一个从录音设备读卡再上传的 Python 客户端。接口参数见 [HTTP API](../reference/api.md#api-chunks)。
+[`firmware/devkit/lr_sync.py`](https://github.com/suyiiyii/alldayrec/blob/main/firmware/devkit/lr_sync.py) 是一个从录音设备读卡再上传的 Python 客户端，可以参考。接口参数见 [HTTP API](../reference/api.md#api-chunks)。

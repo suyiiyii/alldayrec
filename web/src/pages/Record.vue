@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 import { intl, t } from "../i18n";
 import { oggOpus } from "../lib/ogg";
 import { RecordStream } from "../lib/stream";
@@ -125,6 +126,8 @@ async function startMic() {
       autoGainControl: false,
     },
   });
+  // stopped, or the page left, while the permission prompt was open: no recorder (it would leave an empty piece)
+  if (!recording.value) return stream.getTracks().forEach((t) => t.stop());
   const track = stream.getAudioTracks()[0];
   track.onended = () => note(t("record.micEnded"));
   rec = piece();
@@ -258,6 +261,7 @@ async function onDrop() {
 }
 async function startBle() {
   ble = await navigator.bluetooth.requestDevice({ filters: [{ services: [STORE] }], optionalServices: ["battery_service"] });
+  if (!recording.value) return void (ble = null); // the same, with the chooser open
   ble.addEventListener("gattserverdisconnected", () => void onDrop());
   follower.follow(-1, 0);
   packets.value = 0;
@@ -288,9 +292,9 @@ async function stop() {
     stream!.getTracks().forEach((t) => t.stop());
   }
   if (ble) {
+    follower.cut(); // the last piece, while target() still names the board
     ble.gatt?.disconnect();
     ble = null;
-    follower.cut();
   }
   note(t("record.stopping"));
   await sleep(500);
@@ -306,25 +310,58 @@ const toggle = () =>
 const onVisible = () =>
   recording.value &&
   note(t(document.hidden ? "record.hidden" : "record.visible", { n: sent.value }, sent.value));
-onMounted(() => document.addEventListener("visibilitychange", onVisible));
-onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
+// leaving while recording asks first: 停止并离开 stops it as 停止 does and goes (its pieces still go up, then the end),
+// 继续录音, Escape or a tap outside stays. Not window.confirm: inside the app's WebView it can return false unseen.
+// Answered from the buttons and cancel, not the close event: Chrome can skip that one after an Escape
+const leaveDlg = useTemplateRef<HTMLDialogElement>("leaveDlg");
+let answer: ((go: boolean) => void) | null = null;
+function leave(go: boolean) {
+  leaveDlg.value?.close();
+  if (go && recording.value) void stop();
+  answer?.(go);
+  answer = null;
+}
+onBeforeRouteLeave(() => {
+  if (!recording.value) return;
+  answer?.(false); // a second leave while it asks: the first is dropped
+  if (!leaveDlg.value!.open) leaveDlg.value!.showModal();
+  return new Promise<boolean>((r) => (answer = r));
+});
+// a reload or a closed tab: the browser's own prompt
+const onUnload = (e: BeforeUnloadEvent) => {
+  if (recording.value) e.preventDefault();
+};
+onMounted(() => {
+  document.addEventListener("visibilitychange", onVisible);
+  addEventListener("beforeunload", onUnload);
+});
+// whatever left the page without asking stops it too: no button would be left to
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", onVisible);
+  removeEventListener("beforeunload", onUnload);
+  if (recording.value) void stop();
+});
 </script>
 
 <template>
   <div class="page">
     <div class="top">
       <div class="ctl">
-        <input v-model="device" :placeholder="t('record.device')" />
-        <select v-model="source" :disabled="recording">
-          <option value="mic">{{ t("record.mic") }}</option>
-          <option value="ble">{{ t("record.ble") }}</option>
-        </select>
-        <label
-          ><input v-model="upload" type="checkbox" :disabled="recording" />{{ t("record.upload") }}</label
-        >
-        <button class="btn-primary" :class="{ on: recording }" @click="toggle">
-          {{ recording ? t("record.stop") : t("record.start") }}
-        </button>
+        <div>
+          <input v-model="device" :placeholder="t('record.device')" />
+          <label
+            ><input v-model="upload" type="checkbox" :disabled="recording" />{{ t("record.upload") }}</label
+          >
+        </div>
+        <div>
+          <select v-model="source" :disabled="recording">
+            <option value="mic">{{ t("record.mic") }}</option>
+            <option value="ble">{{ t("record.ble") }}</option>
+          </select>
+          <button class="btn-primary" :class="{ on: recording }" @click="toggle">
+            {{ recording ? t("record.stop") : t("record.start") }}
+          </button>
+        </div>
       </div>
       <p class="stat">{{ stat }}</p>
       <audio v-if="lastPiece" :src="lastPiece" controls></audio>
@@ -334,6 +371,21 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
       </details>
     </div>
     <iframe src="/live" :title="t('record.captions')"></iframe>
+    <dialog
+      ref="leaveDlg"
+      class="leave"
+      :aria-label="t('record.leaveQ')"
+      @cancel="leave(false)"
+      @click.self="leave(false)"
+    >
+      <div class="in">
+        <p>{{ t("record.leaveQ") }}</p>
+        <div class="acts">
+          <button class="btn-ghost" @click="leave(false)">{{ t("record.leaveStay") }}</button>
+          <button class="btn-primary" @click="leave(true)">{{ t("record.leaveStop") }}</button>
+        </div>
+      </div>
+    </dialog>
   </div>
 </template>
 
@@ -348,10 +400,15 @@ onUnmounted(() => document.removeEventListener("visibilitychange", onVisible));
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.ctl {
+.ctl,
+.ctl > div {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+.ctl > div:first-child {
+  flex: 1;
+  min-width: 0;
 }
 .ctl button {
   font-size: var(--fs-md);
@@ -378,6 +435,17 @@ audio {
   flex: 1;
   min-width: 0;
 }
+/* a phone: the device name and 上传 on one line, the source and the button under them */
+@media (max-width: 600px) {
+  .ctl {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ctl select {
+    flex: 1;
+    min-width: 0;
+  }
+}
 .stat {
   color: var(--fg-2);
   font-size: var(--fs-sm);
@@ -401,5 +469,59 @@ iframe {
   flex: 1;
   border: 0;
   width: 100%;
+}
+/* 离开吗: a small card in the middle; a phone gets it as a sheet from the bottom, as the row menu */
+.leave {
+  width: min(360px, calc(100% - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg);
+}
+.leave::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+.leave .in {
+  padding: var(--space-4);
+}
+.leave p {
+  margin: 0 0 var(--space-4);
+}
+.acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.acts .btn-primary {
+  background: var(--err);
+  border-color: var(--err);
+}
+@media (max-width: 600px) {
+  .leave {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: 16px 16px 0 0;
+  }
+  .leave .in {
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom));
+  }
+  .acts {
+    flex-direction: column-reverse;
+  }
+  .acts button {
+    min-height: 48px;
+  }
+}
+@media (max-width: 600px) and (prefers-reduced-motion: no-preference) {
+  .leave[open] {
+    animation: up 0.2s ease-out;
+  }
+}
+@keyframes up {
+  from {
+    transform: translateY(100%);
+  }
 }
 </style>

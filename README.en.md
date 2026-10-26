@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-dark.svg">
+  <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-light.svg" height="48" alt="">
+</picture>
+
 # alldayrec（全天录）
 
 ### An open-source Plaud for your whole day: a private second brain.
@@ -8,9 +13,11 @@ Works on every platform, no hardware to buy: your phone is the recorder.
 
 [中文](README.md) | **English**
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="The Live page: captions as people speak, with the AI live summary keeping up"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="Timeline: the conversation going on, due to-dos, each day's conversations"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="One conversation: the summary, to-dos and decisions, each with its audio one tap away">
 
 Live captions · Timeline · One conversation
+
+[Try the demo](https://suyiiyii.github.io/alldayrec/demo/)
 
 The web UI switches to English on the 「我的」 (Me) page.
 
@@ -25,7 +32,7 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 - **Knows who spoke**: it learns your own voice and remembers the names you give others.
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
 - **Opens up**: a web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
-- **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) over the HTTP API.
+- **Imports recordings**: audio files you already have can be [imported](https://suyiiyii.github.io/alldayrec/en/how-to/import-recordings.html) from the web page.
 
 <div align="center">
 

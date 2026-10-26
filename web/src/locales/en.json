@@ -1,5 +1,6 @@
 {
   "common": {
+    "demo": "Online demo · sample data",
     "today": "Today",
     "yesterday": "Yesterday",
     "todayAt": "Today {t}",
@@ -11,6 +12,7 @@
     "minSec": "{m} min {s} s",
     "hourMin": "{h} h {m} min",
     "back": "Back",
+    "retry": "Retry",
     "undo": "Undo",
     "undone": "Undone",
     "loading": "Loading",
@@ -29,6 +31,7 @@
     "person": "Person",
     "device": "Device log",
     "record": "alldayrec recorder",
+    "import": "Import recordings",
     "connect": "Connect a phone"
   },
   "err": {
@@ -37,6 +40,7 @@
     "server": "Something went wrong on the server. Try again later",
     "http": "The request didn't go through ({status})",
     "code": {
+      "demo": "This is the online demo. Run your own instance to use it",
       "speakers_changed": "The speaker groups have changed. Refresh the page and try again",
       "undo_gone": "This rename can no longer be undone",
       "no_pending_voice": "No voice is waiting to be confirmed. Refresh the page and try again",
@@ -72,6 +76,7 @@
       "hot": "hot",
       "overheated": "overheated"
     },
+    "caseBattery": "case {n}%",
     "phoneBattery": "Phone battery {n}%",
     "phoneBatteryCharging": "Phone battery {n}% (charging)",
     "lowPower": "Low Power Mode",
@@ -288,6 +293,7 @@
     "caughtUp": "Caught up",
     "offline": "Offline",
     "battery": "Battery",
+    "case": "Case {n}%",
     "card": "Card",
     "cardFree": "Card free",
     "lag": "Lag",
@@ -368,6 +374,8 @@
     "aiSub": "Let Claude Code, Codex or Cursor search the conversations and to-dos here",
     "record": "Web recording",
     "recordSub": "No app? Record with the browser's microphone or a Bluetooth recorder",
+    "import": "Import recordings",
+    "importSub": "Transcribe audio files from a phone or recorder into the timeline",
     "lang": "Language · 语言",
     "langSub": "The pages, and the summaries, recaps and answers the AI writes",
     "about": "About",
@@ -378,6 +386,31 @@
     "starsAll": "All {n}",
     "starsLess": "Show less",
     "older": "Earlier devices ({n})"
+  },
+  "import": {
+    "pick": "Choose audio files",
+    "lead": "You can pick several. Each file goes into the timeline at its start time; change any guess that is wrong.",
+    "from": {
+      "meta": "Start time from the file's metadata",
+      "name": "Start time from the file name",
+      "modified": "Start time worked out from when the file was saved"
+    },
+    "overlap": "Overlaps {name} by {d}",
+    "future": "Ends in the future",
+    "remove": "Remove",
+    "batch": "Batch name",
+    "nameUsed": "This batch name is taken; pick another",
+    "go": "Import {n} file | Import {n} files",
+    "sending": "Uploading {p}%",
+    "decoding": "The server is decoding",
+    "sent": "Uploaded, {d}",
+    "failed": "Failed: {error}",
+    "retry": "Retry",
+    "undecodable": "The server cannot decode this file",
+    "done": "Imported {n} file. Once transcribed, its conversations appear on: | Imported {n} files. Once transcribed, their conversations appear on:",
+    "again": "Import another batch",
+    "history": "Past imports",
+    "transcribing": "Transcribing, about {n} min left"
   },
   "mediaFold": {
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"
@@ -731,7 +764,10 @@
     "stop": "Stop",
     "start": "Start recording",
     "log": "Log",
-    "captions": "Captions"
+    "captions": "Captions",
+    "leaveQ": "Recording. Leaving stops it.",
+    "leaveStop": "Stop and leave",
+    "leaveStay": "Keep recording"
   },
   "selfVoice": {
     "tier": {

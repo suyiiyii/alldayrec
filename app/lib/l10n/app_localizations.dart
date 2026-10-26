@@ -1322,6 +1322,12 @@ abstract class AppLocalizations {
   /// **'已充满'**
   String get charged;
 
+  /// No description provided for @caseBattery.
+  ///
+  /// In zh, this message translates to:
+  /// **'充电仓 {percent}%'**
+  String caseBattery(Object percent);
+
   /// No description provided for @cardFullTile.
   ///
   /// In zh, this message translates to:

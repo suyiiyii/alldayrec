@@ -8,10 +8,15 @@ hero:
   text: *tagline
   tagline: 全平台可用，不用买硬件，手机就能录。
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: 实时页：边说边出字幕，AI 实时摘要跟着更新（示例数据）
   actions:
+    # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
     - theme: brand
+      text: 在线体验
+      link: /demo/
+      target: _self
+    - theme: alt
       text: 快速开始
       link: /tutorial/first-run
     - theme: alt
@@ -32,7 +37,7 @@ features:
     details: 网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
     link: /how-to/connect-mcp
   - title: 导入已有录音
-    details: 录音文件可以通过 HTTP 接口导入。
+    details: 在网页上选录音文件导入。
     link: /how-to/import-recordings
 ---
 

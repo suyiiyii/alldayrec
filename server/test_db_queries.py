@@ -85,6 +85,26 @@ def test_init_drops_the_dictation_kind(tmp_path):
                                          speech_s=30, sentences=2, source="phone", device="phone", state="closed")
 
 
+def test_relabel_finds_rows_by_index(tmp_path):
+    """A closed conversation's relabel writes its rows by (source, id): an index, made at the start on a store from
+    before it too (without it each row scanned the whole table: 3 s for 100 rows at 186 k sentences, on the event loop)."""
+    with sqlite3.connect(tmp_path / "old.db") as c:
+        c.execute("CREATE TABLE sentences (id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL,"
+                  " text TEXT, source TEXT, engine TEXT, shown_at TEXT, dictation TEXT)")
+        c.execute("CREATE INDEX sentences_start ON sentences(start)")
+        c.execute("INSERT INTO sentences (id, start, end, speaker, source) VALUES ('r1', '2026-10-01T10:00:00', '2026-10-01T10:00:02', 'S1', 'mic')")
+    db.open_db(tmp_path / "old.db")
+    q = "UPDATE sentences SET speaker = ? WHERE source = ? AND id = ?"  # device_pipeline.commit's
+    plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q, ("我", "mic", "r1")))
+    assert "sentences_id_source" in plan, plan
+    db.conn().execute(q, ("我", "mic", "r1"))
+    assert [r["speaker"] for r in db.sentences("2026-10-01", "2026-10-02")] == ["我"]
+    # a pass's rows replaced (every final piece, on the event loop) stay on the start range, not the device's history
+    q = "DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ?"  # db.replace_sentences'
+    plan = " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q, ("a", "b", "mic")))
+    assert "sentences_start" in plan, plan
+
+
 @pytest.mark.parametrize("limit", [0, -1, 1, 2, 30])
 def test_order_pagination_and_limits(history, limit):
     assert db.search(limit=limit) == legacy_search(limit=limit)

@@ -32,6 +32,15 @@ class Recorder {
   static Future<void> pause(int s) => _ch.invokeMethod('pause', {'s': s});  // 0: record again
   static Future<void> usbDisk(bool on) => _ch.invokeMethod('usbDisk', {'on': on});
   static Future<void> listen(bool on) => _ch.invokeMethod('listen', {'on': on});  // the recorder's sound played on this phone
+  /// A web page's <input type=file> (导入录音) on Android: the system's file picker; the chosen files' content:// URIs.
+  /// Always answers: on a throw the WebView never releases the input, which stays dead until the page reloads.
+  static Future<List<String>> pickFiles(bool multiple, List<String> types) async {
+    try {
+      return await _ch.invokeListMethod<String>('pickFiles', {'multiple': multiple, 'types': types}) ?? const [];
+    } catch (_) {
+      return const [];
+    }
+  }
   static bool hold = false;  // the link is taken down on purpose (unbind, firmware update): do not bring it back meanwhile
   static final _errors = <String>{};
 

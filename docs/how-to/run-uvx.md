@@ -8,7 +8,7 @@ description: "不用 Docker、不用克隆代码：用 uvx 或 pip 从 PyPI 运�
 服务器发布在 PyPI 上，包名 `alldayrec`，网页已经打包在里面：不用 Docker，也不用克隆代码。
 
 ::: info 适用版本
-PyPI 上的 `alldayrec` 从 v0.1.0 之后的第一个版本标签起发布；v0.1.0 只有 Docker 镜像。
+PyPI 上的 `alldayrec` 从 v0.2.0 起发布；v0.1.0 只有 Docker 镜像。
 :::
 
 ## 前提

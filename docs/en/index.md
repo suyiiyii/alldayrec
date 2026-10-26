@@ -8,10 +8,15 @@ hero:
   text: *tagline
   tagline: "Works on every platform, no hardware to buy: your phone is the recorder."
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
+    # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
     - theme: brand
+      text: Try the demo
+      link: /demo/
+      target: _self
+    - theme: alt
       text: Quickstart
       link: /en/tutorial/first-run
     - theme: alt
@@ -32,7 +37,7 @@ features:
     details: A web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
     link: /en/how-to/connect-mcp
   - title: Imports recordings
-    details: Audio files you already have can be imported over the HTTP API.
+    details: Audio files you already have can be imported from the web page.
     link: /en/how-to/import-recordings
 ---
 

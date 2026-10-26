@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS sentences (       -- final rows; a finalization pass 
     source TEXT, engine TEXT, shown_at TEXT, dictation TEXT,  -- dictation: the app dictated into (history rows)
     music INTEGER);  -- music: 1 when music.py heard music (no voiceprint taken: its speaker is S?)
 CREATE INDEX IF NOT EXISTS sentences_start ON sentences(start);
+CREATE INDEX IF NOT EXISTS sentences_id_source ON sentences(id, source);  -- a row by its id (relabel); id first: on (source, id) a
+                                                                          -- pass's DELETE (start range and source) took it and walked the device's history
 CREATE TABLE IF NOT EXISTS drafts (          -- the draft layer's rows (only while a page watches); kept after final rows cover their time
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
     source TEXT, engine TEXT, shown_at TEXT);

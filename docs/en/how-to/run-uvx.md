@@ -8,7 +8,7 @@ description: "Run the alldayrec server from PyPI with uvx or pip, web pages incl
 The server is published on PyPI as `alldayrec`, with the web pages packed in: no Docker, no clone of the code.
 
 ::: info Version
-`alldayrec` is on PyPI from the first version tag after v0.1.0; v0.1.0 is a Docker image only.
+`alldayrec` is on PyPI from v0.2.0; v0.1.0 is a Docker image only.
 :::
 
 ## Prerequisites

@@ -16,7 +16,8 @@ description: "用 .env 里的 ENGINE 更换定稿用的语音识别引擎（默�
    | `qwen` | `DASHSCOPE_API_KEY` |
    | `volc` | `VOLC_ASR_KEY` |
    | `stepfun-sse` | `STEPFUN_API_KEY` |
-   | `stepfun`、`stepfun-file` | `STEPFUN_API_KEY`，以及你自己的上传桥和文件模式语音识别服务：`ASR_UPLOAD_BRIDGE_URL`、`ASR_UPLOAD_BRIDGE_TOKEN`、`ASR_SERVICE_URL`、`ASR_SERVICE_BASIC_AUTH` |
+   | `stepfun` | `STEPFUN_API_KEY`，以及你自己的上传桥和文件模式语音识别服务：`ASR_UPLOAD_BRIDGE_URL`、`ASR_UPLOAD_BRIDGE_TOKEN`、`ASR_SERVICE_URL`、`ASR_SERVICE_BASIC_AUTH` |
+   | `stepfun-file` | 你自己的上传桥和文件模式语音识别服务：`ASR_UPLOAD_BRIDGE_URL`、`ASR_UPLOAD_BRIDGE_TOKEN`、`ASR_SERVICE_URL`、`ASR_SERVICE_BASIC_AUTH` |
    | `local` | 不需要 key |
 
 2. 重启服务器。Docker 里运行 `docker compose up -d`，Compose 会用新的 `.env` 重建容器。
@@ -28,6 +29,8 @@ description: "用 .env 里的 ENGINE 更换定稿用的语音识别引擎（默�
 ## 不用任何语音识别 key：`ENGINE=local`
 
 `local` 在服务器进程里用 sherpa-onnx 跑 X-ASR 中英模型，只出文字，说话人靠服务器自己的声纹区分；远场录音的效果比 `qwen` 差。
+
+它要装 `local` 这一组依赖：Docker 镜像里已经有了；用 uvx 或 pip 运行时装 `alldayrec[local]`（见[如何用 uvx 或 pip 运行](./run-uvx.md)）；从源码运行时用 `uv sync --extra local`。
 
 第一段音频到达时，服务器会下载约 136 MB 的模型包，所以第一条转写要等一分钟左右。下载慢的话，把 `LOCAL_ASR_URL` 设成同一个模型包在镜像站上的地址；文件按 sha256 校验。
 

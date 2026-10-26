@@ -29,6 +29,8 @@ import TodoMarks from "../components/TodoMarks.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import { t } from "../i18n";
 import {
+  ApiError,
+  errorTitle,
   fold,
   get,
   inSpans,
@@ -59,18 +61,26 @@ const route = useRoute(),
 const c = ref<
     (Conversation & { rows: Row[]; timeline?: LiveState | null; feedback: Feedback[] }) | null
   >(null),
-  missing = ref(false);
+  missing = ref(false), // the server says there is none (404); not a load that failed
+  failed = ref<{ msg: string; title: string } | null>(null); // the first load failed: the page has nothing to show
 const s = computed(() => c.value?.summary ?? null);
 const media = (r: Row) => inSpans(r, s.value?.media_spans);
 const segs = computed(() => fold(c.value?.rows ?? [], media));
 
+// a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
 async function load() {
+  const id = props.id;
   try {
-    const x = await get<NonNullable<typeof c.value>>(`/api/conversation/${encodeURIComponent(props.id)}`);
+    const x = await get<NonNullable<typeof c.value>>(`/api/conversation/${encodeURIComponent(id)}`);
+    if (id !== props.id) return; // another conversation opened meanwhile (back/forward): not its
     c.value = x;
+    missing.value = false;
+    failed.value = null;
     trackOpen(Date.parse(x.start), Date.parse(x.end), x.device ?? x.rows.find((r) => r.source)?.source ?? "");
-  } catch {
-    missing.value = true;
+  } catch (e) {
+    if (id !== props.id) return;
+    if (e instanceof ApiError && e.status === 404) missing.value = true;
+    else if (!c.value) failed.value = { msg: (e as Error).message, title: errorTitle(e) };
   }
 }
 
@@ -112,6 +122,7 @@ const reload = () => Promise.all([load(), loadSug()]); // a sentence's speaker f
 async function listen(at: string | null, start = true) {
   if (!at) return;
   trackSeek(Date.parse(at), start); // first: inside the tap, where iOS lets the audio start
+  if (import.meta.env.MODE === "demo" && start) return; // no recordings (src/demo.ts): it said so, the page stays
   jumped.value = true;
   await setTab("transcript");
   await nextTick();
@@ -181,6 +192,8 @@ watch(
   () => props.id,
   async () => {
     c.value = null;
+    missing.value = false;
+    failed.value = null;
     jumped.value = false;
     aiOpen.value = false;
     opened.clear();
@@ -655,6 +668,10 @@ async function alias(name: string, of: string) {
       <!-- on 摘要 too while it plays: what plays can always be stopped -->
       <PlayerBar v-if="tab === 'transcript' || track.playing" />
     </template>
+    <div v-else-if="failed" class="empty" :title="failed.title">
+      <Icon name="alert-circle" :size="48" />{{ failed.msg }}
+      <button class="btn" @click="load">{{ t("common.retry") }}</button>
+    </div>
   </main>
 </template>
 

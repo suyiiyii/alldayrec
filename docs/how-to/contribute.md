@@ -4,7 +4,7 @@ type: how-to
 
 # 如何参与开发
 
-欢迎提 [issue](https://github.com/suyiiyii/alldayrec/issues) 和 PR。代码边界、CI 流程、发布构建和它们的密钥见 [CONTRIBUTING.md](https://github.com/suyiiyii/alldayrec/blob/main/CONTRIBUTING.md)（英文）。
+欢迎提 [issue](https://github.com/suyiiyii/alldayrec/issues) 和 PR。代码边界、CI 流程、发布构建和它们的密钥见 [CONTRIBUTING.md](https://github.com/suyiiyii/alldayrec/blob/main/CONTRIBUTING.md)。
 
 ## 本地检查
 

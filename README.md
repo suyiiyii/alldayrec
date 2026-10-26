@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-dark.svg">
+  <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/main/docs/public/brand/mark-light.svg" height="48" alt="">
+</picture>
+
 # alldayrec（全天录）
 
 ### 开源心力球，私有第二大脑。
@@ -8,9 +13,11 @@
 
 **中文** | [English](README.en.md)
 
-<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
+<img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif" width="240" align="top" alt="实时页：边说边出字幕，AI 实时摘要跟着更新"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png" width="240" align="top" alt="时间线：进行中的对话、到期待办、每天的对话"> <img src="https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png" width="240" align="top" alt="一段对话：摘要、待办和决定，每条都能点开听原声">
 
 实时字幕 · 时间线 · 一段对话
+
+[在线体验](https://suyiiyii.github.io/alldayrec/demo/)
 
 </div>
 
@@ -23,7 +30,7 @@
 - **认人**：认得出你自己，记得你给别人起的名字。
 - **记忆**：对话摘要、待办和截止日期、每日回顾、全文搜索。
 - **开放**：网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
-- **导入已有录音**：录音文件可以通过 HTTP 接口[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
+- **导入已有录音**：在网页上选录音文件[导入](https://suyiiyii.github.io/alldayrec/how-to/import-recordings.html)。
 
 <div align="center">
 

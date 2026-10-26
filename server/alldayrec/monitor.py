@@ -53,8 +53,8 @@ def device_status(device: str, st: PipelineState) -> dict:
             "hold_seen": dt.datetime.fromtimestamp(seen).isoformat(timespec="seconds") if hold and seen else None,
             "hold_until": dt.datetime.fromtimestamp(seen + audio.HOLD_MAX_S).isoformat(timespec="seconds") if hold and seen else None,
             # its newest audio came in device_pipeline.LIVE_AUDIO_S ago at most: behind_s and the latencies are about now (otherwise
-            # behind_s is how long ago it last recorded)
-            "recording": bool(arrived) and time.time() * 1000 - arrived["at"] < device_pipeline.LIVE_AUDIO_S * 1000,
+            # behind_s is how long ago it last recorded); an import batch never records, its audio only just came in
+            "recording": not imported(device) and bool(arrived) and time.time() * 1000 - arrived["at"] < device_pipeline.LIVE_AUDIO_S * 1000,
             "rate": round(rate, 1) if rate else None, "eta_s": round(left / rate) if rate and rate > 0.1 and left > 30 else None,
             "last_speech": st.last_speech.isoformat(timespec="seconds") if st.last_speech else None,
             "refine": st.refine, "conversation": st.conversation, "drafting": st.drafting, "draft": st.draft,
@@ -74,29 +74,37 @@ def sound(device: str, end: dt.datetime | None) -> dict | None:
     return {"s": round(sum(r["s"] for r in m), 1), "zero_s": round(sum(r["zero_s"] for r in m), 2), "full": sum(r["full"] for r in m)} if m else None
 
 
+def imported(device: str) -> bool:
+    """A batch the 导入录音 page sent (import-<when>), or the docs' scripts' `import`: not a recorder."""
+    return device == "import" or device.startswith("import-")
+
+
 def recorders(ds: list[dict]) -> list[dict]:
-    """Every device with audio, its newest recording first (我的 lists them): where its stored audio ends and its
-    recorder's newest status. devices (ds) has only those whose pipeline runs: after a restart, one whose audio is all
-    final has none until it records again. Two index lookups a device, none started for it."""
+    """Every device with audio, its newest recording first: where its stored audio starts and ends and its recorder's
+    newest status. devices (ds) has only those whose pipeline runs: after a restart, one whose audio is all final has
+    none until it records again. Three index lookups a device, none started for it."""
     hw = {d["device"]: d["hw"] for d in ds}
+    ts = lambda ms: dt.datetime.fromtimestamp(ms / 1000).isoformat(timespec="seconds")
     out = []
     for d in audio.devices():
         end = db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (d,)).fetchone()[0]
-        out.append({"device": d, "audio_end": dt.datetime.fromtimestamp(end / 1000).isoformat(timespec="seconds"),
-                    "hw": hw[d] if d in hw else db.device_status(d)})
+        start = db.conn().execute("SELECT min(start_ms) FROM pieces WHERE device = ?", (d,)).fetchone()[0]
+        out.append({"device": d, "audio_start": ts(start), "audio_end": ts(end), "hw": hw[d] if d in hw else db.device_status(d)})
     return sorted(out, key=lambda r: r["audio_end"], reverse=True)
 
 
 def status() -> dict:
     """What the page's status line shows (the device whose audio came in last), every device's pipeline, every device
-    with audio (recorders), and the pieces still queued over all devices. Its callers run it in a thread (threads.DB):
-    its reads of the pieces held the event loop up to 0.8 s under load (10-24)."""
+    with audio (recorders; the import batches apart), and the pieces still queued over all devices. Its callers run it
+    in a thread (threads.DB): its reads of the pieces held the event loop up to 0.8 s under load (10-24)."""
     ds = [{**device_status(d, st), "hw": db.device_status(d)} for d, st in list(T().devices.items())]  # a pipeline may start meanwhile
     top = max(ds, key=lambda d: d["audio_end"] or "", default={"device": None, "audio_end": None, "behind_s": None, "done_to": None,
                                                                  "last_speech": None, "refine": None, "conversation": None, "latency_s": None,
                                                                  "latency_med_s": None, "final_latency_s": None})
     summaries = db.conn().execute("SELECT count(*) FROM summaries WHERE status = 'pending'").fetchone()[0]
-    return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "recorders": recorders(ds), "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
+    rs = recorders(ds)  # 我的 lists the recorders, 导入录音 the batches it sent
+    return {**top, "queued": sum(d["queued"] for d in ds), "devices": ds, "recorders": [r for r in rs if not imported(r["device"])],
+            "imports": [r for r in rs if imported(r["device"])], "summaries_pending": summaries, "summary_queue": T().summaries[1].statistics().current_buffer_used,
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
             "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,

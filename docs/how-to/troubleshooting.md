@@ -19,14 +19,14 @@ type: how-to
 
 这个浏览器还没登录。用 `http(s)://<你的服务器>/?token=<你的 token>` 打开一次，之后靠 cookie 保持登录。
 
-## 摘要失败，或者「问 AI」报「模型调用失败」
+## 摘要失败，或者「问 AI」报「服务器出错了，稍后再试」
 
 - 百炼的 key 在控制台里限定了可用模型时，调对话模型会返回 403。换一把没有限定模型的 key。
 - 用别的大模型服务时，它必须支持工具调用和 JSON 输出（`response_format` 为 `json_object`）。
 
 ## 有的对话没有摘要
 
-说话不到 60 秒的对话不调大模型：标题取第一句，没有摘要和待办（`server/alldayrec/summary.py` 里的 `MIN_SPEECH_S`）。
+说话不到 60 秒的对话不调大模型（进行中时点过「立即总结」的除外）：标题取第一句，没有摘要和待办（`server/alldayrec/summary.py` 里的 `MIN_SPEECH_S`）。
 
 ## 用 `ENGINE=local` 时第一条转写很慢
 

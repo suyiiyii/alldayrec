@@ -10,7 +10,7 @@ const base = process.env.DOCS_BASE || "/alldayrec/";
 const host = (process.env.DOCS_HOST || "https://suyiiyii.github.io").replace(/\/$/, "");
 const REPO = "https://github.com/suyiiyii/alldayrec";
 // social card for every page, also the repo's social preview; binaries live on the assets branch, not main
-const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261026.png";
+const OG_IMAGE = "https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/og-card-20261026c.png";
 // the English README tagline; en/index.md repeats it in its title and hero
 const EN_TAGLINE = "An open-source Plaud for your whole day: a private second brain";
 
@@ -63,6 +63,7 @@ const SECTIONS: [zh: string, en: string, pages: [string, string, string][]][] = 
     "Explanation",
     [
       ["简介与定位", "What alldayrec is", "explanation/intro"],
+      ["和心力球、录音豆对比", "vs 心力球 and the Feishu bean", "explanation/vs-xinliqiu"],
       ["架构与数据流", "Architecture and data flow", "explanation/architecture"],
       ["隐私与数据去向", "Privacy: where your data goes", "explanation/privacy"],
       ["语音识别评测", "ASR benchmark", "explanation/asr-benchmark"],
@@ -91,7 +92,10 @@ export default defineConfig({
   rewrites: { "asr-benchmark.md": "explanation/asr-benchmark.md" },
   srcExclude: ["**/README.md", "parts/**", "public/**"], // parts/: pieces other pages include; public/: served as is
   sitemap: { hostname: host + base },
-  head: [["meta", { name: "keywords", content: KEYWORDS }]],
+  head: [
+    ["meta", { name: "keywords", content: KEYWORDS }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: `${base}brand/favicon.svg` }], // head is not run through base
+  ],
   // per page: the canonical address (the one the sitemap lists) and the tags link previews read
   transformHead: ({ page, siteData, title, description }) => {
     if (page === "404.md") return [];
@@ -126,6 +130,7 @@ export default defineConfig({
   },
 
   themeConfig: {
+    logo: { light: "/brand/mark-light.svg", dark: "/brand/mark-dark.svg", alt: "" }, // public/brand/: the logo files
     socialLinks: [{ icon: "github", link: REPO }],
     editLink: { pattern: `${REPO}/edit/main/docs/:path` },
     search: {

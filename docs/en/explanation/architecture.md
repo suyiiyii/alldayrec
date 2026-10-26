@@ -26,7 +26,7 @@ The diagram's source is [`docs/diagrams/architecture.drawio`](https://github.com
 | Directory | What |
 |---|---|
 | `server/` | The server: upload queue, VAD and voiceprints, ASR engines, conversations, summaries, MCP (Python 3.11, uv) |
-| `web/` | The web UI: today, conversations, people, calendar, live transcript, device pages (Vue, pnpm) |
+| `web/` | The web UI: timeline, live, people and me, plus the conversation, calendar, to-do and device pages (Vue, pnpm) |
 | `app/` | The phone app for iOS and Android: records the phone's mic or the BLE recorder, uploads, firmware updates (Flutter) |
 | `firmware/devkit/` | The BLE recorder firmware for nRF52840 boards (Zephyr / nRF Connect SDK), based on the Omi devkit |
 | `firmware/selftest/`, `firmware/blerelay/` | Board self-test firmware; an ESP32 BLE relay used for testing |

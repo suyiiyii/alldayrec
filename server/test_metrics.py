@@ -80,9 +80,10 @@ def test_status_off_the_loop(monkeypatch):
 
 
 def test_recorders(tmp_path):
-    """recorders (我的) has every device with audio, its newest recording first, with where its audio ends and its
-    recorder's newest status: also one with no pipeline, its audio all final (none starts after a restart: the bean
-    was missing, 10-25). devices stays the running pipelines; the ends are looked up by pieces_end."""
+    """recorders (我的) has every device with audio but the import batches (imports), its newest recording first, with
+    where its audio starts and ends and its recorder's newest status: also one with no pipeline, its audio all final
+    (none starts after a restart: the bean was missing, 10-25). devices stays the running pipelines; the ends are
+    looked up by pieces_end, the starts by pieces_device."""
     t = db.open_db(tmp_path / "t.db")
     now = int(time.time()) * 1000
     put = lambda dev, a: db.conn().execute("INSERT INTO pieces (device, start_ms, seconds, path) VALUES (?, ?, 10, 'x')", (dev, now + a))
@@ -91,19 +92,26 @@ def test_recorders(tmp_path):
         put("LR-P3-OLD", a)
     put("phone", -3600_000)
     put("LR-BEAN", -600_000)
+    put("import-20261020-093000", -7200_000)  # a batch from 导入录音: listed apart, not recording though its audio just came
+    db.conn().execute("UPDATE pieces SET received_ms = ? WHERE device = 'import-20261020-093000'", (now,))
     db.add_device_status("LR-BEAN", iso(-700_000), {"battery": 80})
     db.add_device_status("LR-BEAN", iso(-590_000), {"battery": 79})
     t.devices["phone"] = pipeline_state.PipelineState()
+    t.devices["import-20261020-093000"] = pipeline_state.PipelineState()
     seen = []
     db.conn().set_trace_callback(seen.append)
     s = monitor.status()
     db.conn().set_trace_callback(None)
-    assert [d["device"] for d in s["devices"]] == ["phone"]
-    assert s["recorders"] == [{"device": "LR-BEAN", "audio_end": iso(-590_000), "hw": {"battery": 79, "at": iso(-590_000)}},
-                              {"device": "phone", "audio_end": iso(-3590_000), "hw": None},
-                              {"device": "LR-P3-OLD", "audio_end": iso(-9 * 86400_000 + 20_000), "hw": None}], s["recorders"]
+    assert [(d["device"], d["recording"]) for d in s["devices"]] == [("phone", False), ("import-20261020-093000", False)]
+    assert s["recording"] is False
+    assert s["recorders"] == [{"device": "LR-BEAN", "audio_start": iso(-600_000), "audio_end": iso(-590_000), "hw": {"battery": 79, "at": iso(-590_000)}},
+                              {"device": "phone", "audio_start": iso(-3600_000), "audio_end": iso(-3590_000), "hw": None},
+                              {"device": "LR-P3-OLD", "audio_start": iso(-9 * 86400_000), "audio_end": iso(-9 * 86400_000 + 20_000), "hw": None}], s["recorders"]
+    assert s["imports"] == [{"device": "import-20261020-093000", "audio_start": iso(-7200_000), "audio_end": iso(-7190_000), "hw": None}]
     ends = [q for q in seen if re.fullmatch(r"SELECT max\(start_ms \+ seconds \* 1000\) FROM pieces WHERE device = '[^']*'", q)]
     assert len(ends) >= 3 and all("pieces_end" in " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q)) for q in ends), ends
+    starts = [q for q in seen if q.startswith("SELECT min(start_ms) FROM pieces")]
+    assert len(starts) == 4 and all("pieces_device" in " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q)) for q in starts), starts
 
 
 def test_metrics(monkeypatch):

@@ -2,7 +2,7 @@ name: docs
 on:
   push:  # main: build and publish the site on GitHub Pages
     branches: [main]
-    paths: &paths ['docs/**', 'server/alldayrec/*.py', 'server/pyproject.toml', 'server/uv.lock', '.github/workflows/docs.yml']
+    paths: &paths ['docs/**', 'server/alldayrec/*.py', 'server/pyproject.toml', 'server/uv.lock', 'web/**', '.github/workflows/docs.yml']
   pull_request:  # PRs: build only (dead links fail it)
     paths: *paths
   workflow_dispatch:
@@ -40,6 +40,14 @@ jobs:
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
           ORIGIN: ${{ steps.pages.outputs.origin }}
+      # the online demo at /demo/: the pages in demo mode (web/src/demo.ts), after the docs (VitePress empties its dist)
+      - run: pnpm install --frozen-lockfile && pnpm exec vp build --mode demo --base ./ --outDir ../docs/.vitepress/dist/demo --emptyOutDir
+        working-directory: web
+      # and the API answers they read: a snapshot of fictional sample data on the assets branch (add-only), pinned by its hash
+      - run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/snap.tgz" https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/demo/snapshot-20261026.tgz
+          echo "800b9a59f82aecc21084549cef4f8d95b11a7e1524923b24568ecbd0fdbc26b9  $RUNNER_TEMP/snap.tgz" | sha256sum -c
+          tar xzf "$RUNNER_TEMP/snap.tgz" -C docs/.vitepress/dist/demo
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:
@@ -59,3 +67,22 @@ jobs:
     steps:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1
+      # IndexNow: tell Bing and the engines it shares pings with about every page in the sitemap just deployed.
+      # The key file is docs/public/<KEY>.txt; under /alldayrec/ it covers URLs under that path, the whole docs site.
+      - name: IndexNow ping
+        if: github.event_name == 'push'
+        continue-on-error: true  # a failed ping shows as a warning, never fails the deploy
+        env:
+          SITE: ${{ steps.deploy.outputs.page_url }}
+          KEY: 8c6a8184eb62258611a113a1b1e63e4d
+        run: |
+          site=${SITE%/}/
+          host=${site#*://}; host=${host%%/*}
+          urls=$(curl -fsS --retry 3 "${site}sitemap.xml?$GITHUB_SHA" | grep -oE '<loc>[^<]+' | cut -c6- | jq -Rn '[inputs][:10000]')
+          n=$(jq length <<<"$urls")
+          echo "IndexNow: $n URLs from ${site}sitemap.xml"
+          [ "$n" -gt 0 ] || exit 0
+          jq -n --arg host "$host" --arg key "$KEY" --arg loc "$site$KEY.txt" --argjson urls "$urls" \
+            '{host: $host, key: $key, keyLocation: $loc, urlList: $urls}' |
+            curl -sS --fail-with-body --max-time 30 --retry 2 -H 'Content-Type: application/json; charset=utf-8' --data-binary @- \
+              -w '\nHTTP %{http_code} (200: received; 202: received, key check pending)\n' https://api.indexnow.org/indexnow

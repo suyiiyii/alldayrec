@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { t } from "../i18n";
+import { lang, t } from "../i18n";
 import Icon, { type IconName } from "./Icon.vue";
 
 // inApp: what the header shows inside the Android app, which has its own navigation (nothing: hidden)
@@ -27,12 +27,17 @@ const router = useRouter();
 const under = computed(() => TABS.find((x) => x.under.test(route.path)));
 const sub = computed(() => !!under.value && route.path !== under.value.to);
 const back = () => (history.state?.back ? router.back() : router.push(under.value?.to ?? "/"));
+// the online demo (src/demo.ts): one label on every page, next to the name (a phone: above the page), to the docs home
+const DEMO = import.meta.env.MODE === "demo";
 </script>
 
 <template>
   <header :class="{ bare: !inApp }">
     <div class="bar">
-      <h1>alldayrec</h1>
+      <h1><img src="../brand/mark.svg" alt="" width="24" height="24" />alldayrec</h1>
+      <a v-if="DEMO" class="demo-tag" :href="lang() === 'en' ? '../en/' : '../'">{{
+        t("common.demo")
+      }}</a>
       <!-- a wide screen: 时间线 / 实时 / 人物 next to the name, 我的 apart on the right -->
       <nav class="nav-top">
         <RouterLink
@@ -67,6 +72,9 @@ const back = () => (history.state?.back ? router.back() : router.push(under.valu
       ><Icon :name="tab.icon" :size="22" />{{ t(tab.label) }}</RouterLink
     >
   </nav>
+  <a v-if="DEMO" class="demo-tag phone" :href="lang() === 'en' ? '../en/' : '../'">{{
+    t("common.demo")
+  }}</a>
 </template>
 
 <style scoped>
@@ -110,6 +118,9 @@ header {
   column-gap: var(--space-4);
 }
 h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-size: var(--fs-lg);
   margin: 0;
   color: var(--accent);
@@ -143,6 +154,23 @@ nav a.on {
 .nav-tabs {
   display: none;
 }
+.demo-tag {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px var(--space-2);
+  white-space: nowrap;
+}
+.demo-tag.phone {
+  display: none;
+}
+/* the logo costs the bar 32 px: below this width (the online demo's tag included) it would push 我的 to a 2nd row */
+@media (max-width: 680px) {
+  h1 img {
+    display: none;
+  }
+}
 /* a phone: no name bar (a page with nothing in the header has none), the tabs at the bottom over the safe area */
 @media (max-width: 600px) {
   .bar {
@@ -150,8 +178,15 @@ nav a.on {
   }
   h1,
   .nav-top,
+  .bar .demo-tag,
   header.bare {
     display: none;
+  }
+  /* in the page's flow, above its content (main's own side padding): nothing to cover, nothing covers it */
+  .demo-tag.phone {
+    display: block;
+    width: fit-content;
+    margin: var(--space-2) var(--space-3) 0;
   }
   .nav-tabs {
     display: flex;

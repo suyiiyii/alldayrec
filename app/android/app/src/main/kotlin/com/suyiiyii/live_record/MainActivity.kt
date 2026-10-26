@@ -26,6 +26,7 @@ import java.nio.ByteBuffer
 
 class MainActivity : FlutterActivity() {
     private var nearby: Nearby? = null  // the add-recorder page's scan, while it is open
+    private var picked: MethodChannel.Result? = null  // a web page's file picker, open: its answer (onActivityResult)
 
     private fun granted(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
@@ -179,10 +180,34 @@ class MainActivity : FlutterActivity() {
                         "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                     result.success(null)
                 }
+                "pickFiles" -> {  // a web page's <input type=file> (导入录音): the system's picker, by the accept's MIME types (audio/*; not its .m4a)
+                    picked?.success(emptyList<String>())
+                    picked = null
+                    val types = call.argument<List<String>>("types").orEmpty().filter { "/" in it }.ifEmpty { listOf("*/*") }
+                    try {
+                        startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                            .putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, call.argument<Boolean>("multiple") == true), PICK_FILES)
+                        picked = result
+                    } catch (e: Exception) {  // no picker (ActivityNotFoundException): no files, the page's input stays usable
+                        result.success(emptyList<String>())
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
     }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_FILES) return  // the files a page's picker chose, or none when it was closed
+        val clip = data?.clipData
+        val uris = if (clip != null) (0 until clip.itemCount).map { clip.getItemAt(it).uri } else listOfNotNull(data?.data)
+        picked?.success(if (resultCode == RESULT_OK) uris.map { it.toString() } else emptyList())
+        picked = null
+    }
+
+    private companion object { const val PICK_FILES = 3 }
 }
 
 /** Opus frames from the microphone's encoder cut into self-contained Ogg files whose length depends on the app state,

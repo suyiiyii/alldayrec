@@ -736,6 +736,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get charged => 'Charged';
 
   @override
+  String caseBattery(Object percent) {
+    return 'case $percent%';
+  }
+
+  @override
   String get cardFullTile => 'Full';
 
   @override

@@ -1,12 +1,18 @@
 import { reactive } from "vue";
+import { t } from "../i18n";
 import type { Row } from "./api";
+import { toast } from "./toast";
 import { windowAsk, windowLen, windowStart } from "./track";
 
 // one sound at a time, on every page: a clip (play) stops the conversation player (track), and it a clip
 export const player = reactive({ playing: "", failed: new Set<string>() });
 let audio: HTMLAudioElement | null = null;
 
+// the online demo has no recordings: a play says so
+const DEMO = import.meta.env.MODE === "demo";
+
 export function play(id: string, src: string) {
+  if (DEMO) return toast(t("err.code.demo"));
   audio?.pause();
   trackPause();
   if (player.playing === id) {
@@ -153,6 +159,7 @@ export function trackPause() {
 // Inside the window the element holds it is a currentTime; anywhere else the windows start over from ms (a short
 // first one, so the sound comes fast)
 export function trackSeek(ms: number, start: boolean) {
+  if (DEMO && start) return toast(t("err.code.demo"));
   ms = Math.max(track.from, Math.min(ms, track.to - 500));
   audio?.pause();
   player.playing = "";

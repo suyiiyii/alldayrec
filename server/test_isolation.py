@@ -162,7 +162,7 @@ REQUESTS = {
     ("POST", "/api/sentences/{sid}/speaker"): ("POST", "/api/sentences/f1/speaker", dict(json={"conv": CID, "to": "我"})),
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
-    "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/speakers": "page",
+    "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/import": "page", "/speakers": "page",
     "/live": "page", "/me": "page", "/todos": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
     "/assets/{name}": "the web app's files", "/app.apk": "the Android app: one for all", "/api/app/latest": "the Android app's version",
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",

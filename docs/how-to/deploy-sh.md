@@ -27,7 +27,7 @@ scp 会把发布包和 APK 放到主机上登录用户的 home 目录。远程 s
 ```bash
 server/deploy.sh            # 构建网页、备份、安装（uv sync）、检查模型文件、逐个重启实例并检查
 server/deploy.sh check      # 只读取正在运行的状态
-server/deploy.sh rollback   # 把上一次部署替换掉的代码、网页和它加的数据库列放回去，重启并检查
+server/deploy.sh rollback   # 放回上一次部署替换掉的代码和网页，删掉它加的数据库列，重启并检查
 ```
 
 每次部署在 `<实例目录>/backup-deploy-<时间>` 留一份备份，里面有每个租户 `live.db` 的副本，`<实例目录>/backup-last` 指向它。通过检查的部署只保留自己和上一次的备份。

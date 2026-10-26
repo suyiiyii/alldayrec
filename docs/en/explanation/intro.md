@@ -9,11 +9,11 @@ alldayrec is an all-day recording and memory service that runs on your own serve
 
 ## What it looks like
 
-![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+![Live captions and the live summary](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif)
 
 The Live page: captions come up as people speak, and the AI live summary keeps up. Below, the web UI on a phone, filled with made-up data.
 
-| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
+| ![Timeline](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png) | ![One conversation](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png) |
 |:--:|:--:|
 | Timeline: the conversation going on, due to-dos, each day's conversations | One conversation: the summary, to-dos and decisions, each with its audio one tap away |
 
@@ -32,7 +32,7 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 - **Knows who spoke.** It learns your own voice and remembers the names you give others.
 - **Remembers.** Conversation summaries, to-dos with due dates, a daily recap, and full-text search.
 - **Opens up.** A web UI, a remote MCP endpoint (Claude Code, Codex, Cursor), a CLI.
-- **Imports recordings.** Audio files you already have can be [imported](../how-to/import-recordings.md) over the HTTP API.
+- **Imports recordings.** Audio files you already have can be [imported](../how-to/import-recordings.md) from the Me page.
 
 ## How it compares
 
@@ -53,6 +53,8 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 </div>
 
 As of 2026-10-25. "No" means no published design files or source code; "Unknown" means we found no reliable source.
+
+For a closer look at OPPO's 心力球 and the Feishu recorder bean, and which to pick, see [alldayrec vs 心力球 and the Feishu bean](./vs-xinliqiu.md).
 
 Limitless was bought by Meta on 2025-12-05 and is no longer sold[^limitless].
 

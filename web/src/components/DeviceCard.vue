@@ -43,6 +43,9 @@ const seen = (iso: string | null) => {
           >{{ t("deviceCard.battery")
           }}{{ d.hw?.charge ? " · " + chargeText(d.hw.charge) : "" }}</span
         >
+        <span v-if="d.hw?.case_battery != null" class="k">{{
+          t("deviceCard.case", { n: d.hw.case_battery })
+        }}</span>
       </div>
       <div>
         <span class="v" :class="{ long: cardTile(d).length > 8, bad: d.hw?.store }">{{
@@ -77,7 +80,6 @@ const seen = (iso: string | null) => {
   font-weight: 600;
   padding: var(--space-1) var(--space-3);
   border-radius: var(--radius-pill);
-  white-space: nowrap;
 }
 .badge.ok {
   color: var(--ok);

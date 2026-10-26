@@ -145,11 +145,15 @@ export interface DeviceStatus {
   sound?: { s: number; zero_s: number; full: number } | null; // its last 10 min of audio: s of it, s in zero runs, full-scale samples
 }
 
-// a device with audio (Status.recorders): where its stored audio ends, its recorder as its phone last read it
-export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw">;
+// a device with audio (Status.recorders, Status.imports): where its stored audio starts and ends, its recorder as its
+// phone last read it
+export type Recorder = Pick<DeviceStatus, "device" | "audio_end" | "hw"> & { audio_start?: string };
 
 export type Charge = "battery" | "charging" | "full";
 export const chargeText = (c: Charge) => t(`api.charge.${c}`);
+// a Feishu bean's charging case, as the bean last read it: out of the case it keeps the level the case had then
+export const caseText = (h?: RecorderStatus | null) =>
+  h?.case_battery != null ? t("api.caseBattery", { n: h.case_battery }) : "";
 
 export interface RecorderStatus {
   at: string;
@@ -163,6 +167,8 @@ export interface RecorderStatus {
   backlog_kb?: number; // left on the card for the phone to read in the background
   backlog_eta_s?: number; // at the phone's own reading rate
   rssi?: number | null; // the link's signal, dBm
+  case_battery?: number; // a Feishu bean's charging case (caseText)
+  case_charging?: boolean; // that case on USB power
   // its phone (App 1.4.6 on): the build (1.4.6+21), system, model identifier; its battery, power saving and heat
   // (the system slows or ends apps then), the app's memory; this recorder's pieces waiting to go up and how uploads go
   app?: string;
@@ -283,6 +289,7 @@ export interface Status {
   commit?: string;
   devices?: DeviceStatus[]; // the devices whose pipeline runs
   recorders?: Recorder[]; // every device with audio, its newest recording first (我的)
+  imports?: Recorder[]; // the batches 导入录音 sent (import-*), apart from the recorders
   summaries_pending?: number;
   lang?: "zh" | "en"; // what the models write in (GET/PUT /api/lang)
 }
@@ -388,10 +395,12 @@ export interface LogEvent {
 export class ApiError extends Error {
   detail: string;
   code: string;
-  constructor(message: string, detail: string, code = "") {
+  status: number; // 0: no answer (the network)
+  constructor(message: string, detail: string, code = "", status = 0) {
     super(message);
     this.detail = detail;
     this.code = code;
+    this.status = status;
   }
 }
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
@@ -420,6 +429,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
             : t("err.http", { status: r.status }),
     `${path}: HTTP ${r.status}${raw && " " + raw}`,
     code,
+    r.status,
   );
 }
 

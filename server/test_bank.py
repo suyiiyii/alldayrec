@@ -96,6 +96,22 @@ def test_learning_filtered_recorded_undone(store):
     assert ledger() == [] and "张三" not in db.people()
 
 
+def test_rename_stays_on_its_device(store):
+    """Two devices heard the same minutes, each labelling on its own: a rename of one conversation's S1 and its undo
+    change that device's rows only, not the other device's S1 (another person); only its rows teach the bank."""
+    c = conv(1, "S1", [A, A, A], device="mic")
+    with db.tx() as t:
+        db.insert_sentences(t, [dict(r, id=f"p{k}", source="LR-P3") for k, r in enumerate(db.sentences("2026-10-01", "2026-10-02"))])
+
+    def labels(device):
+        return [r["speaker"] for r in db.sentences("2026-10-01", "2026-10-02", source=device)]
+    r = anyio.run(rename, c, {"from": "S1", "to": "张三"})
+    assert r["renamed"] == 3 and labels("mic") == ["张三"] * 3 and labels("LR-P3") == ["S1"] * 3
+    assert db.people()["张三"][0] == 3
+    anyio.run(speaker_undo, {"undo": r["undo"]})
+    assert labels("mic") == ["S1"] * 3 and labels("LR-P3") == ["S1"] * 3 and "张三" not in db.people()
+
+
 def test_rename_away_forgets_and_undo_restores(store):
     """不是 (a named label back to S<n>) takes what its sentences taught out; the undo of a rename away puts it back."""
     c1, c2 = conv(1, "S1", [A, A, A]), conv(2, "S1", [A, A, A])

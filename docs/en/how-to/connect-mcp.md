@@ -13,7 +13,7 @@ The server offers a remote MCP endpoint at `/mcp`. AI agents such as Claude Code
 - In sessions that use this connection, don't auto-approve web or shell tools: words in a recording can be taken as instructions and use those tools to send content out.
 - The token reads and writes all your data on this server. Keep it on your own computer only.
 
-The **接入 AI** (Connect AI) section of the web page **连接手机** (Connect a phone, `/connect`) lists the settings below with the address and token filled in. Click **复制** (Copy).
+The folded **高级：接入 AI** (Advanced: Connect AI) section of the web page **连接手机** (Connect a phone, `/connect`) lists the settings below with the address and token filled in. Click **复制** (Copy).
 
 ## Claude Code
 

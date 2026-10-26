@@ -2,11 +2,10 @@
 <!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <!-- the logo in the middle, a 96 dp disc; Android 10 and 11 only: from 12 the system splash shows the app icon -->
+    <item
+        android:width="185dp"
+        android:height="185dp"
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center" />
 </layer-list>

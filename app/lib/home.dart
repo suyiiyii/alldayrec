@@ -180,7 +180,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         });
     c.setBackgroundColor(Colors.transparent);  // the scaffold shows through until the page paints (no white flash in dark mode)
     final p = c.platform;
-    if (p is AndroidWebViewController) p.setMediaPlaybackRequiresUserGesture(false);
+    if (p is AndroidWebViewController) {
+      p.setMediaPlaybackRequiresUserGesture(false);
+      // a page's <input type=file> (导入录音): Android's WebView opens no picker by itself (iOS's does)
+      p.setOnShowFileSelector((s) => Recorder.pickFiles(s.mode == FileSelectorMode.openMultiple, s.acceptTypes));
+    }
     if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
     if (p is WebKitWebViewController) p.setAllowsBackForwardNavigationGestures(true);  // iOS: swipe from the left edge = back
     return c
@@ -215,11 +219,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       Navigator.push(context, MaterialPageRoute(builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: body)));
 
   /// A web page (设备状态与更多: /me) in a WebView of its own, there while open;
-  /// back (the key or the app bar's arrow) goes through its history first, as in the tabs' WebViews.
+  /// back (the key or the app bar's arrow) closes a dialog on the page, then goes through its history, as in the tabs' WebViews.
   void _openWeb(String title, String path) {
     final c = _web()..loadRequest(_url(path));
     _open(title, PopScope(canPop: false, onPopInvokedWithResult: (didPop, _) async {
       if (didPop) return;
+      if (await _closeDialog(c)) return;
       if (await c.canGoBack()) return c.goBack();
       if (mounted) Navigator.pop(context);
     }, child: WebViewWidget(controller: c)));
@@ -257,8 +262,24 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     setState(() => page = to);
   }
 
-  Future<void> _back() async {  // back key: history inside the page's WebView first, then to 时间线, then leave
+  /// Back with a sheet or dialog open on the page (a `<dialog>`: 问 AI, a sentence's menu, /record's 离开吗) closes it, as
+  /// back does in Chrome: its cancel event, then close; also one in an embedded page (/record's captions). True if one
+  /// was open; a page that cannot answer within a second has none.
+  Future<bool> _closeDialog(WebViewController c) async {
+    try {
+      final r = await c
+          .runJavaScriptReturningResult("(d=>d?(d.dispatchEvent(new Event('cancel')),d.open&&d.close(),1):0)"
+              "(document.querySelector('dialog[open]')||document.querySelector('iframe')?.contentDocument?.querySelector('dialog[open]'))")
+          .timeout(const Duration(seconds: 1));  // a hung page must not swallow back: the arrow is the only way out
+      return r == 1 || r == '1' || r == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _back() async {  // back key: a dialog on the page, then history inside its WebView, then 时间线, then leave
     final w = page < webs.length ? webs[page] : null;
+    if (w != null && await _closeDialog(w)) return;
     if (w != null && await w.canGoBack()) return w.goBack();
     if (page != 0) return _show(0);
     SystemNavigator.pop();
@@ -422,7 +443,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         statTile(context,
             icon: hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(battery),
             color: connected ? batteryColor(cs, battery) : cs.outline, label: l.battery, value: '$battery%',
-            sub: connected ? chargeText(l, hw['charge']) : null),
+            sub: connected ? powerText(l, hw) : null),
       if (connected || syncing)
         statTile(context,
             icon: Icons.cloud_upload_rounded, color: syncing || pending > 0 ? cs.primary : Colors.green.shade600, label: l.backlog,

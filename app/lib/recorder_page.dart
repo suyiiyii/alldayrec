@@ -100,7 +100,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final recording = st['running'] == true, linked = recording && hw.isNotEmpty;
     final live = st['connected'] == true;  // the link is up (its text is for showing, not for comparing)
     final store = hw['store'] as int?, free = (hw['free_kb'] as num?) ?? 0, total = (hw['total_kb'] as num?) ?? 0;
-    final battery = hw['battery'] as int?, charge = chargeText(l, hw['charge']);
+    final battery = hw['battery'] as int?;
     final syncDone = (st['syncDone'] as num?) ?? 0, syncTotal = (st['syncTotal'] as num?) ?? 0, syncLive = (st['syncLive'] as num?) ?? 0;
     final syncing = recording && syncTotal > 0;
     final lent = store == -16;
@@ -185,7 +185,7 @@ class _RecorderPageState extends State<RecorderPage> {
         IntrinsicHeight(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             stat(icon: linked && hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(linked ? battery : null),
-                color: batteryColor(cs, battery), label: l.battery, value: linked && battery != null ? '$battery%' : '—', sub: linked ? charge : null,
+                color: batteryColor(cs, battery), label: l.battery, value: linked && battery != null ? '$battery%' : '—', sub: linked ? powerText(l, hw) : null,
                 fraction: linked && battery != null ? battery / 100 : 0),
             const SizedBox(width: 12),
             stat(icon: Icons.sd_card_rounded, color: cardColor, label: l.card, value: cardValue, sub: cardSub,

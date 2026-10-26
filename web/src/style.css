@@ -203,6 +203,11 @@ button:not(:disabled):active {
   background: var(--accent);
   color: var(--surface);
 }
+/* .badge: a status word beside a title (进行中, 已追上): one line, never squeezed; the title beside it wraps instead */
+.badge {
+  flex: none;
+  white-space: nowrap;
+}
 /* a round tick box: a todo's 完成 */
 .check {
   flex: none;

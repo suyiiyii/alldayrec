@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>alldayrec</title>
+    <!-- the logo: under src/ so the build hashes it into /assets/, the one static path the server serves;
+         the SVG last, so browsers that take the last usable icon get the one that follows the colour scheme -->
+    <link rel="icon" href="/src/brand/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/src/brand/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/src/brand/apple-touch-icon.png" />
+    <!-- the header's --surface -->
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1e2129" media="(prefers-color-scheme: dark)" />
   </head>
   <body>
     <div id="app"></div>

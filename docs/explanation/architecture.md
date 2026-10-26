@@ -26,7 +26,7 @@ alldayrec 是一个 Python 服务器加几个客户端。音频从录音设备�
 | 目录 | 内容 |
 |---|---|
 | `server/` | 服务端：上传队列、VAD 和声纹、语音识别引擎、对话、摘要、MCP（Python 3.11，uv） |
-| `web/` | 网页：今天、对话、人物、日历、实时转写、设备页（Vue，pnpm） |
+| `web/` | 网页：时间线、实时、人物、我的，以及对话、日历、待办、设备页（Vue，pnpm） |
 | `app/` | iOS 和安卓手机 App：录手机麦克风或蓝牙录音设备、上传、固件升级（Flutter） |
 | `firmware/devkit/` | nRF52840 板子的蓝牙录音设备固件（Zephyr / nRF Connect SDK），基于 Omi devkit |
 | `firmware/selftest/`、`firmware/blerelay/` | 板子自检固件；测试用的 ESP32 蓝牙中继 |

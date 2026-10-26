@@ -6,12 +6,15 @@ A conversation with less than MIN_SPEECH_S of speech gets no call: its title is 
 """
 import datetime as dt
 import json
+import logging
 import os
 import time
 
 from alldayrec import db
 from alldayrec import net
 from alldayrec.tenant import T
+
+log = logging.getLogger("live")
 
 MIN_SPEECH_S = 60
 PROMPT_VERSION = 10  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
@@ -147,8 +150,34 @@ async def summarize(conv: dict, rows: list[dict], known_tags: list[str] = ()) ->
     return result(conv, rows, *await chat(transcript(rows), list(known_tags), conv["start"]))
 
 
+def typed(res: dict) -> tuple[dict, list[str]]:
+    """The reply with each field of the type the format gives it (title and summary text, tags texts, the other lists
+    objects; a todo, decision or AI request with a text, its due, owner, to and quote text or null), and the fields that
+    held something else: that part is dropped. A tag that is not a text broke tag_counts, and with it every later summary
+    and the tags list; a todo's list as its text broke the due todos."""
+    out, bad = dict(res), []
+    for k in ("title", "summary"):
+        if not isinstance(out.get(k) or "", str):
+            out[k], bad = "", [*bad, k]
+    for k in LISTS:
+        v = out.get(k) or []
+        out[k] = [x for x in v if isinstance(x, str if k == "tags" else dict)] if isinstance(v, list) else []
+        if k in ("todos", "decisions", "ai_requests"):  # each one a text, its other words text or null (todo_ids, due_todos)
+            out[k] = [{**x, **{f: None for f in ("due", "owner", "to", "quote") if x.get(f) is not None and not isinstance(x[f], str)}}
+                      for x in out[k] if isinstance(x.get("text"), str)]
+        if out[k] != v:
+            bad.append(k)
+    return out, bad
+
+
 def result(conv: dict, rows: list[dict], res: dict, raw: dict) -> dict:
-    """A model's reply in the SYSTEM format as the stored summary."""
+    """A model's reply in the SYSTEM format as the stored summary; a reply that is not an object raises (the worker
+    tries again), a field of another type is dropped (typed)."""
+    if not isinstance(res, dict):
+        raise ValueError(f"summary reply is a {type(res).__name__}, not an object")
+    res, bad = typed(res)
+    if bad:
+        log.warning("summary %s: dropped the reply's %s (not in the format)", conv["id"], ", ".join(bad))
     res = anchor(res, rows)
     return {"conversation": conv["id"], "prompt_version": PROMPT_VERSION, "created_at": dt.datetime.now().isoformat(timespec="seconds"),
             "error": None, "status": "done", "model": raw.get("model"), "usage": raw.get("usage"),
@@ -213,6 +242,16 @@ if __name__ == "__main__":
     assert s["prompt_version"] == 10 and s["people"] == [
         {"who": "我", "points": ["先定一下", "没对上", "旧格式", "再说"], "points_at": [rows[0]["start"], None, None, None]},
         {"who": "S1", "points": ["同意"], "points_at": [rows[1]["start"]]}], s["people"]
+    # an odd reply: what is not in the format is dropped; one that is not an object raises (the worker tries again)
+    s = result({"id": "c1"}, rows, {"title": ["t"], "tags": [{"name": "工作"}, "工作"], "todos": ["买菜", {"text": "a"}], "topics": "t"}, {})
+    assert s["title"] == "" and s["tags"] == ["工作"] and [x["text"] for x in s["todos"]] == ["a"] and s["topics"] == [], s
+    s = result({"id": "c1"}, rows, {"todos": [{"text": ["买菜"]}, {"text": "b", "due": 1, "owner": "我", "to": None}], "decisions": [{"quote": "q"}]}, {})
+    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "due_date": None}] and s["decisions"] == [], s
+    try:
+        result({"id": "c1"}, rows, ["not an object"], {})
+        raise AssertionError("a reply that is not an object was taken")
+    except ValueError:
+        pass
     s = anyio.run(summarize, {"id": "c1", "speech_s": 12}, rows)
     assert s["title"] == "我们先定一下" and s["model"] is None, s
     print("ok")

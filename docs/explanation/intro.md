@@ -9,11 +9,11 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 
 ## 界面一览
 
-![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261025.gif)
+![实时字幕和实时摘要](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif)
 
 实时页：边说边出字幕，AI 实时摘要跟着更新。下面是网页在手机上的样子，数据都是示例。
 
-| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261025.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261025.png) |
+| ![时间线](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/timeline-20261026b.png) | ![一段对话](https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/conversation-20261026b.png) |
 |:--:|:--:|
 | 时间线：进行中的对话、到期待办、每天的对话 | 一段对话：摘要、待办和决定，每条都能点开听原声 |
 
@@ -32,7 +32,7 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 - **认人。** 认得出你自己，记得你给别人起的名字。
 - **记忆。** 对话摘要、待办和截止日期、每日回顾、全文搜索。
 - **开放。** 网页、远程 MCP 端点（Claude Code、Codex、Cursor）、命令行。
-- **导入已有录音。** 录音文件可以通过 HTTP 接口[导入](../how-to/import-recordings.md)。
+- **导入已有录音。** 在网页「我的」页把录音文件[导入](../how-to/import-recordings.md)。
 
 ## 和市面产品比
 
@@ -53,6 +53,8 @@ description: "全天录是什么：开源心力球，私有第二大脑。全平
 </div>
 
 截至 2026-10-25。「否」指没有公开的设计文件或源码，「未知」指没查到可靠资料。
+
+和 OPPO 心力球、飞书录音豆的逐项对比和怎么选，见[开源心力球：和心力球、录音豆对比](./vs-xinliqiu.md)。
 
 Limitless 2025-12-05 被 Meta 收购后停售[^limitless]。
 
