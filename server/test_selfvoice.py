@@ -126,6 +126,7 @@ def test_card_round_trip(tmp_path, monkeypatch):
             db.insert_sentences(t, rows)
             db.insert_conversation(t, {"id": f"c{i}", "start": T(o), "end": T(o + 40), "participants": ["S1", "S2"],
                                        "sentences": 8, "speech_s": 20.0, "device": "mic"})
+            db.put_summary({"conversation": f"c{i}", "status": "done"}, t)
             db.insert_voices(t, [{"conv": f"c{i}", "label": "S1", "device": "live", "n": 4, "speech_s": 200, "e": noisy(ME), "level": -40},
                                  {"conv": f"c{i}", "label": "S2", "device": "live", "n": 4, "speech_s": 30, "e": noisy(unit(rng.normal(size=16))), "level": -45}])
 

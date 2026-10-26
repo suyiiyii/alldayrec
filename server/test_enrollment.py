@@ -3,6 +3,7 @@
 Only synthetic PCM and fixed embeddings: exercise the real voices loop, store and naming handlers without models.
 """
 import datetime as dt
+import threading
 
 import anyio
 import numpy as np
@@ -53,6 +54,18 @@ def sample(durations, status="done", hour=10):
     return c, rows
 
 
+def test_two_real_conversations_make_an_automatic_person(audio_store, monkeypatch):
+    """Review probe: the embedding cap must not reduce the automatic-person speech total."""
+    for hour in (9, 11):
+        sample([15.0] * 8, "done", hour)
+    with db.tx() as t:
+        db.insert_voices(t, [{"conv": f"other-{i}", "label": "S1", "device": "live", "n": 5,
+                              "speech_s": 40.0, "e": np.eye(4)[i + 1]} for i in range(3)])
+    voices_round(monkeypatch)
+    cards = anyio.run(routes_speakers.speaker_list)["cards"]
+    assert [(g["count"], g["speech_s"]) for g in cards] == [(2, 240.0)]
+
+
 @pytest.mark.parametrize("hours", [(9, 11), (9, 11, 13, 15)])
 def test_recurring_media_voice_is_not_an_automatic_person(audio_store, monkeypatch, hours):
     """Review probe: recurring TV must stay in Other voices even above the automatic-person threshold."""
@@ -65,6 +78,7 @@ def test_recurring_media_voice_is_not_an_automatic_person(audio_store, monkeypat
     voices_round(monkeypatch)
     assert anyio.run(routes_speakers.speaker_list)["cards"] == [], "a media voice became an automatic person card"
     media = next(g for g in anyio.run(routes_speakers.speaker_list, True)["cards"] if g["count"] == len(hours))
+    assert media["speech_s"] == len(hours) * 120, "the media test must exceed the automatic-person speech threshold"
     assert len(media["samples"]) == len(hours)
     assert len(db.voices()) == len(hours) + 3, "media voiceprints remain available for manual confirmation"
 
@@ -122,7 +136,7 @@ def test_single_sample_can_be_confirmed_as_me(audio_store, monkeypatch, duration
     assert len(other) == 1, "a single sample must offer a voice card to confirm"
     assert anyio.run(routes_speakers.speaker_list)["cards"] == [], "no automatic person from one conversation"
     v, = db.voices()
-    assert v["n"] == len(rows) and v["speech_s"] == round(sum(min(s, 15) for s in sorted(durations, reverse=True)[:4]), 1)
+    assert v["n"] == len(rows) and v["speech_s"] == round(sum(durations), 1)
     assert audio_store and all(device == "sample-recorder" for _, _, device in audio_store)
     assert not core.owner_npz().exists() and db.people() == {}, "only a user choice may teach an identity"
     result = anyio.run(routes_speakers.speaker_name, {"group": other[0]["id"], "name": "我", "all": True})
@@ -132,12 +146,12 @@ def test_single_sample_can_be_confirmed_as_me(audio_store, monkeypatch, duration
 
 
 @pytest.mark.parametrize("durations,learned", [([4.9, 4.9], False), ([2.0] * 4, False), ([5.0, 5.0], True),
-                                             ([1.5] + [1.0] * 20, False)])
-def test_embedded_seconds_gate_learning_me(audio_store, monkeypatch, durations, learned):
+                                             ([1.5] + [1.0] * 20, True)])
+def test_total_sentence_seconds_gate_learning_me(audio_store, monkeypatch, durations, learned):
     sample(durations)
     voices_round(monkeypatch)
     v, = db.voices()
-    assert v["speech_s"] == round(sum(min(s, 15) for s in sorted(durations, reverse=True)[:4] if s >= 1.5), 1)
+    assert v["speech_s"] == round(sum(durations), 1)
     assert anyio.run(routes_speakers.speaker_list)["cards"] == []
     assert db.people() == {} and not core.owner_npz().exists()
     g, = anyio.run(routes_speakers.speaker_list, True)["cards"]
@@ -145,7 +159,7 @@ def test_embedded_seconds_gate_learning_me(audio_store, monkeypatch, durations, 
     assert result["learned"] == learned and core.owner_npz().exists() == learned
 
 
-def test_only_successfully_decoded_audio_counts(audio_store, monkeypatch):
+def test_missing_audio_does_not_reduce_total_sentence_seconds(audio_store, monkeypatch):
     from fastapi import HTTPException
 
     c, rows = sample([8.0, 7.0, 6.0, 5.0, 4.0])
@@ -159,9 +173,9 @@ def test_only_successfully_decoded_audio_counts(audio_store, monkeypatch):
     monkeypatch.setattr(routes_audio, "cut", partial)
     voices_round(monkeypatch)
     v, = db.voices()
-    assert v["k"] == 3 and v["speech_s"] == 3.0
+    assert v["k"] == 3 and v["speech_s"] == 30.0
     assert len(audio_store) == 3 and v["clip_start"] != rows[0]["start"]
-    assert not routes_speakers.learn_me("我", [routes_speakers.voice_of(c["id"], "S1")], [{"conv": c["id"]}])["learned"]
+    assert routes_speakers.learn_me("我", [routes_speakers.voice_of(c["id"], "S1")], [{"conv": c["id"]}])["learned"]
 
 
 def test_fragment_voices_keep_merge_suggestions_and_previews(audio_store, monkeypatch):
@@ -196,10 +210,10 @@ def test_music_and_unlabelled_rows_do_not_supply_enrollment_speech(audio_store, 
 
 @pytest.mark.parametrize("confirm", [False, True])
 def test_later_media_summary_keeps_enrollment(audio_store, monkeypatch, confirm):
-    c, rows = sample([12.0] * 4)
+    c, rows = sample([12.0] * 4, "pending")
     db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
     voices_round(monkeypatch)
-    assert anyio.run(routes_speakers.self_get)["card"], "the unclassified voice can already be on a pending card"
+    assert anyio.run(routes_speakers.self_get)["card"] is None, "unfinished summaries cannot supply self candidates"
     if confirm:
         g, = anyio.run(routes_speakers.speaker_list, True)["cards"]
         assert anyio.run(routes_speakers.speaker_name, {"group": g["id"], "name": "我", "all": True})["learned"]
@@ -225,10 +239,128 @@ def test_later_media_summary_keeps_enrollment(audio_store, monkeypatch, confirm)
     assert db.summary(c["id"])["media_spans"], "the media summary actually completed"
     assert [tuple(r) for r in db.conn().execute("SELECT * FROM voices")] == before
     assert (core.owner_npz().read_bytes() if confirm else None) == owner
-    assert (db.kv("selfvoice") or {}).get("card") is None, "a later media classification invalidates stale candidates"
+    assert (db.kv("selfvoice") or {}).get("card") is None
     assert all(v["media"] for v in routes_speakers.classified_voices())
     assert bool(anyio.run(routes_speakers.speaker_list)["cards"]) == confirm
     assert bool(anyio.run(routes_speakers.speaker_list, True)["cards"]) != confirm
+
+
+@pytest.mark.parametrize("status,eligible", [(None, False), ("pending", False), ("done", True), ("failed", True), ("media", False)])
+def test_self_card_waits_for_finished_summary(audio_store, monkeypatch, status, eligible):
+    c, _ = sample([6.0] * 4, status)
+    db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
+    voices_round(monkeypatch)
+    assert len(db.voices()) == 1, "voice extraction itself does not wait for summaries"
+    card = anyio.run(routes_speakers.self_get)["card"]
+    assert bool(card) == eligible
+    if card:
+        assert card["convs"] == 1 and card["candidates"][0]["speech_s"] == 24
+        assert all(clip["start"].startswith(c["start"][:13]) for clip in card["candidates"][0]["clips"])
+
+
+@pytest.mark.parametrize("initial,finished", [(None, "done"), ("pending", "failed")])
+def test_finished_summary_makes_stored_voice_eligible_without_reembedding(audio_store, monkeypatch, initial, finished):
+    c, _ = sample([12.0] * 4, initial)
+    db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
+    voices_round(monkeypatch)
+    assert anyio.run(routes_speakers.self_get)["card"] is None
+    before, cuts = [tuple(r) for r in db.conn().execute("SELECT * FROM voices")], len(audio_store)
+    db.put_summary({"conversation": c["id"], "status": finished})
+    voices_round(monkeypatch)
+    card = anyio.run(routes_speakers.self_get)["card"]
+    assert card["convs"] == 1 and card["candidates"][0]["speech_s"] == 48
+    assert [tuple(r) for r in db.conn().execute("SELECT * FROM voices")] == before
+    assert len(audio_store) == cuts, "finished summaries use the stored voiceprint; no extraction or short clips needed"
+
+
+def test_self_rule_uses_total_sentence_seconds(audio_store, monkeypatch):
+    for hour in (9, 11, 13):
+        sample([30.0] * 3, "done", hour)  # 270 s total; only 135 s embedded
+    voices_round(monkeypatch)
+    card = anyio.run(routes_speakers.self_get)["card"]
+    assert card["why"] == "rule" and card["convs"] == 3
+    assert card["candidates"][0]["speech_s"] == 270
+
+
+def test_self_none_counts_only_finished_non_media_conversations_off_loop(audio_store, monkeypatch):
+    loop_thread, calls = threading.get_ident(), []
+    classify = routes_speakers.classified_voices
+
+    def checked(convs=None):
+        calls.append(threading.get_ident())
+        assert calls[-1] != loop_thread, "classification must not block the event loop"
+        return classify(convs)
+
+    monkeypatch.setattr(routes_speakers, "classified_voices", checked)
+    for hour, status in ((9, "done"), (11, "failed"), (13, "pending"), (15, None), (17, "media")):
+        sample([6.0] * 4, status, hour)
+    db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
+    voices_round(monkeypatch)
+    assert db.kv("selfvoice")["card"]["convs"] == 2
+    before = len(calls)
+    anyio.run(routes_speakers.self_answer, {"answer": "none"})
+    assert len(calls) == before + 1
+    assert db.kv("selfvoice")["wait"] == {"convs": 2}
+
+
+def test_unrelated_media_summary_keeps_pending_self_card(audio_store, monkeypatch):
+    sample([6.0] * 4, "done", 9)
+    c, rows = sample([6.0] * 4, "pending", 11)
+    db.put_kv("selfvoice", {"first_at": (dt.datetime.now() - dt.timedelta(days=2)).isoformat()})
+    voices_round(monkeypatch)
+    before, cuts, broadcasts = db.kv("selfvoice"), len(audio_store), []
+    assert before["card"]["convs"] == 1
+
+    async def summarize(conv, tags):
+        return {"conversation": c["id"], "status": "done", "title": "Synthetic media",
+                "media_spans": [{"from": rows[0]["start"], "to": rows[-1]["start"]}]}
+
+    async def broadcast(message):
+        broadcasts.append(message["type"])
+        if message["type"] == "summary":
+            raise RoundDone
+
+    monkeypatch.setattr(summaries, "summarize", summarize)
+    monkeypatch.setattr(ws, "broadcast", broadcast)
+
+    async def run():
+        await tenant.T().summaries[0].send(c)
+        await summaries.summarize_loop()
+
+    with pytest.raises(RoundDone):
+        anyio.run(run)
+    anyio.run(routes_speakers.self_round)
+    assert db.kv("selfvoice") == before, "an unrelated summary must not clear or re-pop the pending card"
+    assert broadcasts == ["summary"] and len(audio_store) == cuts, "no duplicate notification or clip decoding"
+
+
+@pytest.mark.parametrize("media", [False, True])
+def test_summary_with_unchanged_media_labels_keeps_people_cache(audio_store, monkeypatch, media):
+    c, rows = sample([6.0] * 4, "media" if media else "done")
+    voices_round(monkeypatch)
+    anyio.run(routes_speakers.speaker_list, True)
+    cache = dict(tenant.T().speakers)
+
+    async def summarize(conv, tags):
+        # Different spans but the same media label set: eligibility did not change.
+        return {"conversation": c["id"], "status": "done", "title": "Synthetic updated summary",
+                "media_spans": [{"from": rows[0]["start"], "to": rows[-1]["end"]}] if media else []}
+
+    async def broadcast(message):
+        raise RoundDone
+
+    monkeypatch.setattr(summaries, "summarize", summarize)
+    monkeypatch.setattr(ws, "broadcast", broadcast)
+
+    async def run():
+        await tenant.T().summaries[0].send(c)
+        await summaries.summarize_loop()
+
+    with pytest.raises(RoundDone):
+        anyio.run(run)
+    assert db.summary(c["id"])["title"] == "Synthetic updated summary"
+    assert tenant.T().speakers["at"] == cache["at"]
+    assert tenant.T().speakers["groups"] is cache["groups"]
 
 
 def test_media_summary_changes_refresh_existing_voice_cards(audio_store, monkeypatch):

@@ -68,23 +68,18 @@ async def summarize_loop():
         if generation is not None and generation != T().summary_generations.get(c["id"]):
             continue
         old = db.summary(c["id"])
-        media = summary.media_labels(conversation_rows(c), res.get("media_spans") or [])
+        rows = conversation_rows(c)
+        media = summary.media_labels(rows, res.get("media_spans") or [])
         if res["status"] == "failed" and old and old["status"] == "done":
             db.put_summary({**old, "error": f"[resummarize_failed] {res['error']}"[:300]})
             ws.note(f"对话 {c['start'][11:19]} 的摘要重新生成失败，保留原来的：{res['error']}", "error")
             continue
-        reset_self = False
         with db.tx() as t:
             if res["status"] == "done":
                 res["todos"] = db.preserve_todos(c["id"], (old or {}).get("todos") or [], res.get("todos") or [], t)
             db.put_summary(res, t)
-            if media and (st := db.kv("selfvoice")) and st.get("card"):
-                # Extraction can precede its summary: do not leave a now-media candidate on an already-open card.
-                db.put_kv("selfvoice", {**st, "card": None}, t)
-                reset_self = True
-        T().speakers["at"] = 0.0  # media eligibility can change in either direction; voiceprints stay intact
-        if reset_self:
-            await ws.broadcast({"type": "self"})
+        if media != summary.media_labels(rows, (old or {}).get("media_spans") or []):
+            T().speakers["at"] = 0.0  # media eligibility changed; voiceprints and the pending self card stay intact
         ws.note(f"对话 {c['start'][11:19]} 的摘要" + (f"：{res['title']}" if res["status"] == "done" else f"生成失败：{res['error']}"),
              "state" if res["status"] == "done" else "error")
         await ws.broadcast({"type": "summary", **res})
