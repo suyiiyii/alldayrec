@@ -164,6 +164,22 @@ await new Promise((r) => setTimeout(r, 150));
 run();
 assert.equal(hidden, 40, "settled 120 ms after the finger left");
 
+// A native pan cancels the pointer stream while the touch remains down.
+const touchPointer = { pointerType: "touch" } as PointerEvent;
+to(1000);
+rest();
+on.pointerdown(touchPointer);
+on.touchstart();
+on.pointercancel(touchPointer);
+assert.equal(to(990), 30);
+await new Promise((r) => setTimeout(r, 150));
+run();
+assert.equal(hidden, 30, "native pointercancel must not settle under a held finger");
+on.touchend();
+await new Promise((r) => setTimeout(r, 150));
+run();
+assert.equal(hidden, 40, "native pan settles only after touchend");
+
 // Resizing a nested sheet changes scroll anchoring without scrolling the transcript.
 // Include queued work, cancellation, and the final layout scroll after release.
 const grip = {
@@ -172,7 +188,6 @@ const grip = {
 for (const [down, up] of [
   ["touchstart", "touchend"],
   ["pointerdown", "pointerup"],
-  ["mousedown", "mouseup"],
   ["pointerdown", "pointercancel"],
   ["touchstart", "touchcancel"],
 ]) {
@@ -192,13 +207,13 @@ for (const [down, up] of [
   on.scrollend();
   run();
   assert.equal(hidden, before, down + ": no settling under the grip");
-  on[up]();
+  on[up]({ pointerType: "mouse" } as PointerEvent);
   assert.equal(to(920), before, up + ": final layout scroll ignored");
   await new Promise((r) => setTimeout(r, 150));
   run();
-  assert.equal(hidden, before, up + ": release does not snap the picker");
+  assert.equal(hidden, 40, up + ": release settles using the pre-drag picker position");
   on.touchstart();
-  assert.equal(to(910), before - 10, "transcript resumes from the new scroll baseline");
+  assert.equal(to(910), 30, "transcript resumes from the new scroll baseline");
   on.touchend();
   rest();
 }
@@ -209,9 +224,22 @@ rest();
 to(1000);
 on.pointerdown(grip);
 to(1100);
-on.pointerup();
+on.pointerup({ pointerType: "mouse" } as PointerEvent);
 win.scrollY = 1120;
 on.touchstart();
 assert.equal(to(1110), 30, "a new transcript gesture immediately follows its own delta");
 on.touchend();
 rest();
+
+// A mostly visible picker settles open after a resize; layout scrolling must not choose its target.
+to(800);
+rest();
+to(1000);
+to(970);
+assert.equal(hidden, 10);
+on.pointerdown(grip);
+to(1100);
+on.pointerup({ pointerType: "mouse" } as PointerEvent);
+await new Promise((r) => setTimeout(r, 150));
+run();
+assert.equal(hidden, 0, "resize release settles a mostly visible picker open");

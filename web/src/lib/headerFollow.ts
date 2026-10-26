@@ -65,10 +65,9 @@ export function useHeaderFollow(
     }
     if (touching) return;
     if (resizing) {
-      // Include the final layout scroll after release, and resume from its position without snapping the picker.
+      // Include the final layout scroll after release, then settle from the picker's pre-drag position.
       y = scrolled();
       resizing = false;
-      return;
     }
     if (held) return;
     const h = size();
@@ -100,6 +99,10 @@ export function useHeaderFollow(
     touching = false;
     rest();
   };
+  const pointerEnd = (e: PointerEvent) => {
+    // Native panning cancels the pointer stream while the finger is still down; touchend/cancel ends that hold.
+    if (e.pointerType !== "touch") up();
+  };
   const on = { passive: true };
   onMounted(() => {
     y = scrolled();
@@ -110,10 +113,8 @@ export function useHeaderFollow(
     window.addEventListener("touchend", up, on);
     window.addEventListener("touchcancel", up, on);
     window.addEventListener("pointerdown", down, on);
-    window.addEventListener("pointerup", up, on);
-    window.addEventListener("pointercancel", up, on);
-    window.addEventListener("mousedown", down, on);
-    window.addEventListener("mouseup", up, on);
+    window.addEventListener("pointerup", pointerEnd, on);
+    window.addEventListener("pointercancel", pointerEnd, on);
   });
   onUnmounted(() => {
     window.removeEventListener("scroll", onScroll);
@@ -122,10 +123,8 @@ export function useHeaderFollow(
     window.removeEventListener("touchend", up);
     window.removeEventListener("touchcancel", up);
     window.removeEventListener("pointerdown", down);
-    window.removeEventListener("pointerup", up);
-    window.removeEventListener("pointercancel", up);
-    window.removeEventListener("mousedown", down);
-    window.removeEventListener("mouseup", up);
+    window.removeEventListener("pointerup", pointerEnd);
+    window.removeEventListener("pointercancel", pointerEnd);
     window.cancelAnimationFrame(frame);
     window.cancelAnimationFrame(anim);
     window.clearTimeout(timer);
