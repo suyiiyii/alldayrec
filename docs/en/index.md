@@ -8,7 +8,7 @@ hero:
   text: *tagline
   tagline: 'Works on every platform, no hardware to buy: your phone is the recorder.<br>Pronounced "all day rec".'
   image:
-    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-20261026b.gif
+    src: https://raw.githubusercontent.com/suyiiyii/alldayrec/assets/img/live-captions-en-summary-20261026.gif
     alt: "The Live page: captions as people speak, with the AI live summary keeping up (made-up data)"
   actions:
     # the online demo is pages of its own next to the docs: target keeps the docs' router from taking the link
