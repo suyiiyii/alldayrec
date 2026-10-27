@@ -1040,6 +1040,47 @@ class BeanTest {
         }
     }
 
+    /** The live page closes during a live read it began with a hole left behind (live_now): the read ends, the hole
+     *  is filled with a cut, then the tail, on live. */
+    @Test fun watchedEndFillsTheHole() {
+        val r = rec(240, listOf(0L to 7000L), watched = true, units = 6000)  // the bean at unit 12000
+        r.bean.script += { r.bean.watched = false; r.bean.more(300) }
+        assertTrue(assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message!!.startsWith("file ${r.id}: the live page closed"))
+        assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }  // the hole, cut where the live stretch begins
+        assertEquals(listOf(0L, 18003L), r.f.have.single().toList())
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 7000L, true), Triple(r.id, 7000L, false), Triple(r.id, 18003L, false)), r.bean.transfers)
+        assertEquals(listOf("live_now", "watched_end", "fill_hole", "fill_tail"), r.reasons)
+        assertEquals(5000L, r.bean.logFields.first { it["reason"] == "watched_end" }["hole_units"])
+        assertEquals(listOf(0L, 24003L), r.f.have.single().toList())
+        onlyReads(r.bean)
+    }
+
+    /** A live read not begun for the page (live_fallback, a file begun before the bean was added here) goes on when the
+     *  page closes, even with a hole behind it. */
+    @Test fun livePageClosingEndsOnlyItsOwnReads() {
+        val r = rec(100, listOf(0L to 1000L), watched = false)
+        var refused = 0
+        r.bean.onTransfer = { file, from, realtime ->
+            if (realtime) {
+                r.bean.watched = false; r.bean.answer(file, from, true); r.bean.more(30)
+                r.bean.script.clear(); r.bean.script += { throw IOException("done") }
+            } else { r.bean.header(file, 0xFFFFFFFFL, code = 2); if (++refused == 3) r.bean.watched = true }
+        }
+        repeat(300) { r.bean.script += {} }
+        for (i in 0..9) {
+            val e = assertThrows(Exception::class.java) { r.sync.session(0, "") }
+            if (e is BeanSync.Again) continue
+            assertEquals("done", e.message); break
+        }
+        assertEquals(List(3) { "fill_tail" } + "live_fallback", r.reasons)
+        val p = rec(100, emptyList(), watched = true, units = 30)
+        p.bean.script += { p.bean.watched = false; p.bean.more(30) }
+        assertThrows(IOException::class.java) { p.sync.session((p.id + 50) * 1000, "") }
+        assertEquals(listOf("live_now"), p.reasons)
+        assertEquals(listOf(5000L, 5060L), p.f.have.single().toList())
+    }
+
     /** A bean that ignored the offset of the open file (starting where it is) cuts each fill of an older hole at once:
      *  three tries, then realtime=1 for that file. */
     @Test fun unfillableOpenHoleStopsAfterTries() {

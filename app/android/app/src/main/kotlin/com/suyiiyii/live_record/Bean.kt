@@ -283,7 +283,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     class F(var anchor: Long, val have: MutableList<LongArray> = mutableListOf(), var total: Long = -1, var tries: Int = 0)
 
     /** live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
-     *  watched: the live page was open when it began. */
+     *  watched: begun for the live page (tail_short, live_now): ended when the page closes or opens (loop()). */
     private class Xfer(val file: Long, val live: Boolean, val from: Long, val realtime: Boolean = false, val watched: Boolean = false) {
         var until = -1L  // the phone has the rest of the file from here: the link goes once this unit is in (rest())
         var cut = false
@@ -437,6 +437,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                     throw Again("file ${x.file}: the live page opened $behind units behind")
                 }
             }
+            xfer?.takeIf { it.live && it.realtime && it.watched && it.first >= 0 && !io.watched() }?.let { x ->  // the page closed
+                val f = files[x.file] ?: return@let
+                val g = gap(f)?.takeIf { it < x.first } ?: return@let  // a hole live_now left: the next start fills it
+                val hole = (f.have.firstOrNull { it[0] > g }?.get(0) ?: x.first) - g
+                flush()
+                io.log("bean_xfer", "实时页关了：实时文件 ${x.file} 单元 $g 起缺 ${hole * Bean.FRAME_MS / 1000} s，断开重连去补",
+                    fields = mapOf("file" to x.file, "realtime" to true, "reason" to "watched_end", "from" to g, "hole_units" to hole,
+                        "hole_ms" to hole * Bean.FRAME_MS, "watched" to false))
+                throw Again("file ${x.file}: the live page closed, a hole from $g")
+            }
             val now = io.now()
             if (paused) liveSeen = now
             if ((recording || xfer?.live == true) && !paused && liveFile != 0L && now - liveSeen > 30_000) {
@@ -534,8 +544,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     /** The file being recorded, from where the phone lacks it (the owner, 10-27). realtime=0 reads it from the offset at
      *  about twice real time, then goes on live with no end (10-27 probe); realtime=1 starts where the bean is, whatever
-     *  the offset. While the live page is open a tail hole of up to a minute is read first, a longer one is left for
-     *  later and live starts now; else the holes go oldest first, each cut where a long stretch the phone has begins
+     *  the offset. While the live page is open a tail hole of up to a minute is read first, a longer one is left until
+     *  the page closes (watched_end) and live starts now; else the holes go oldest first, each cut where a long stretch the phone has begins
      *  (rest(); the link goes, the next hole from its own offset), then the tail, which carries on live. */
     private fun plan(open: Long): Xfer {
         val f = files[open]
@@ -546,7 +556,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's
         val fallback = (fills[open] ?: 0) >= TRIES  // realtime=0 came to nothing TRIES times: live, the holes after stop
         val x = when {
-            !mine || fallback -> Xfer(open, true, tail, realtime = true, watched = watched)
+            !mine || fallback -> Xfer(open, true, tail, realtime = true)  // not for the page: the page closing never ends it
             watched -> Xfer(open, true, tail, realtime = edge - tail > WATCHED_GAP_UNITS, watched = true)
             gap < tail -> Xfer(open, true, gap).also { it.until = rest(f!!, gap) }
             else -> Xfer(open, true, tail)
