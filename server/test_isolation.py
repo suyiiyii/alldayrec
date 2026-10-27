@@ -100,6 +100,7 @@ def snapshot(t: tenant.Tenant) -> str:
 # what a's token is sent to, route by route: (method, path, request kwargs)
 REQUESTS = {
     ("POST", "/api/late-backfill"): ("POST", "/api/late-backfill", dict(params={"days": 1, "dry_run": False})),
+    ("POST", "/api/split"): ("POST", "/api/split", dict(params={"since": TODAY, "apply": True})),  # a's 30 min one: checked
     ("POST", "/api/chunks"): ("POST", "/api/chunks", dict(params={"device": DEV, "start": MS + 60_000}, content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/api/chunks/end"): ("POST", "/api/chunks/end", dict(params={"device": DEV, "t": MS + 62_000})),
     ("POST", "/api/hold/release"): ("POST", "/api/hold/release", dict(params={"device": DEV})),

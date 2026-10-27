@@ -177,11 +177,13 @@ def record(group: dict, device: str) -> dict:
 
 
 def components(rows: list[dict], convs: list[dict]) -> list[dict]:
-    """Only new speech inside a real gap can bridge two deliberately closed conversations."""
+    """Only new speech inside a real gap can bridge two deliberately closed conversations, and never across a split's
+    wall (split.py), even after late rows in the gap grew either side toward it."""
     speech = sorted((r for r in rows if r.get("speaker") not in IGNORE), key=lambda r: r["start"])
     def bridges(left, right):
         a, b = P(left["end"]), P(right["start"])
-        if b <= a:
+        if b <= a or db.conn().execute("SELECT 1 FROM walls WHERE device = ? AND at >= ? AND at <= ?",
+                                       (right.get("device"), left["end"], right["end"])).fetchone():
             return False
         inside = [(max(a, P(r["start"])), min(b, P(r["end"]))) for r in speech
                   if P(r["start"]) < b and P(r["end"]) > a]

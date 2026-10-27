@@ -293,6 +293,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | Every correction, newest first, with the conversation's time and title for the read-back. | — |
 
+### `/api/split`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | Split the long conversations started since a day that are not checked yet, one at a time (the backfill script split.py). | `since` (query, string)<br>`apply?` (query, boolean) |
+
 ### `/api/conversation/{conv_id}/summarize`
 
 | Method | Description | Parameters |

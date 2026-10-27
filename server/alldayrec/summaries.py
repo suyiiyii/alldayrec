@@ -11,6 +11,7 @@ from alldayrec import hints
 from alldayrec import live
 from alldayrec import late_store
 from alldayrec import recap
+from alldayrec import split
 from alldayrec import speakers
 from alldayrec import summary
 from alldayrec import ws
@@ -60,6 +61,8 @@ async def summarize_loop():
                 continue
             if db.kv(f"late_summary:{c['id']}") and (not c.get("_late") or late_store.ready_work(c.get("device"))):
                 continue
+            if split.due(c) and not split.checked(c, revision) and await split.check(c, revision):
+                continue  # split where an independent conversation began: each part is queued for its own summary
             for delay in (10, 60, 300, None):
                 if generation is not None and generation != T().summary_generations.get(c["id"]):
                     break
