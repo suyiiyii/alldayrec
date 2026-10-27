@@ -88,17 +88,23 @@ def test_stopped_decoder_is_503_without_traceback(tmp_path, monkeypatch, caplog)
     assert not (t.recordings / 'rejected').exists()
 
 
-def test_client_gone_mid_upload_without_traceback(tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize('path', ['/api/chunks', '/api/ask/voice'])
+def test_client_gone_mid_body_without_traceback(tmp_path, monkeypatch, caplog, path):
     from starlette.requests import ClientDisconnect, Request
+    from starlette.testclient import TestClient
+    from alldayrec import core, server
     t = db.open_db(tmp_path / 'live.db')
+    monkeypatch.setattr(core, 'TENANTS', [t])  # one tenant without a token: the app's own middlewares, no auth
     async def gone(self):
         yield b'fixture'
         raise ClientDisconnect()
-    monkeypatch.setattr(Request, 'stream', gone)
+    monkeypatch.setattr(Request, 'stream', gone)  # body() reads it too
     monkeypatch.setattr(audio, 'save_file', lambda *a: pytest.fail('a piece cut short was decoded'))
     caplog.set_level('INFO', 'live')
-    assert client(t).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture').status_code == 499
+    r = TestClient(server.app).post(path, params={'device': 'fixture', 'start': START}, content=b'fixture')
+    assert r.status_code == 499
     assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('INFO', None)]
+    assert ('POST', path, 499) in t.requests  # perf.Requests counts it
 
 
 def test_decoder_supervises_progress_not_total_runtime(monkeypatch):
