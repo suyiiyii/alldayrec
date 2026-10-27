@@ -144,7 +144,7 @@ def init():
                         c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (found[0], conv, mark, at))
     if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
         conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")
-    if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files (pack_pieces.py)
+    if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files
         conn().execute("ALTER TABLE pieces ADD COLUMN pos INTEGER")
         conn().execute("ALTER TABLE pieces ADD COLUMN size INTEGER")
     if "n" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: iPhone pieces say how many samples they hold

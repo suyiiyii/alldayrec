@@ -25,8 +25,6 @@ Tests and tooling in `server/`: `test_live.py`, `replay_case.py` (replay a case 
 
 PR gates run the backend suite, Web type/build checks and `*.check.ts`, Flutter analysis/tests, Android JVM regressions, Swift protocol checks, and firmware host checks (including the microphone high-pass filter). Fixture changes trigger all three protocol-consumer gates. Android JVM tests bootstrap the pinned Flutter SDK's Gradle wrapper and need no signing credentials or APK release.
 
-The legacy `server/alldayrec/migrate.py` importer still refuses an existing `live.db` or pending first-layer transcripts, reads its JSON/audio inputs without changing them, and inserts audio pieces by explicit column names so added schema columns do not break the import. `test_migrate.py` exercises the real command with a temporary recording and verifies that a second invocation leaves the existing database untouched.
-
 ## GitHub Actions 构建与归档
 
 APK 和硬件固件使用独立构建流程；构建不等于生产发布，不会上传 `/app.apk`、调用固件发布 API 或刷写板子。现有 PR 检查继续保留。

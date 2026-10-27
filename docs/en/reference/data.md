@@ -45,7 +45,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 |---|---|
 | `sentences` | Final sentences: time, speaker, text, source device, engine |
 | `drafts` | Draft-layer sentences (produced only while a page is open), kept after the finals replace them |
-| `conversations` | Conversations: start and end time, participants, seconds of speech, number of sentences, type, device |
+| `conversations` | Conversations: start and end time, participants, seconds of speech, number of sentences, device |
 | `summaries` | Each conversation's summary (JSON) |
 | `timelines` | The live analysis as it stood when a conversation ended |
 | `voices` | The voiceprint and voice clips of each speaker label in each conversation |

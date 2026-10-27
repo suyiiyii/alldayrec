@@ -346,7 +346,7 @@ async def add_feedback(conv_id: str, body: dict):
 @router.get("/api/feedback")
 async def feedback():
     """Every correction, newest first, with the conversation's time and title for the read-back."""
-    return [{**f, "start": (c := find_conversation(f["conv"]) or {}).get("start"), "title": (db.summary(f["conv"]) or {}).get("title")}
+    return [{**f, "start": (find_conversation(f["conv"]) or {}).get("start"), "title": (db.summary(f["conv"]) or {}).get("title")}
             for f in db.feedback()]
 
 
