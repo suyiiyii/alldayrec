@@ -1679,7 +1679,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanRecorderHelp.
   ///
   /// In zh, this message translates to:
-  /// **'手机连上录音豆就让它开始录音，按一下按键停止，到这次连接断开为止：再连上时手机会让它重新开始录音。手机在附近时边录边传。手机不在时录的，按键停下后补传。服务端收全的录音会从豆子上删掉。'**
+  /// **'手机连上录音豆就让它开始录音，按一下按键停止，到这次连接断开为止：再连上时手机会让它重新开始录音。手机在附近时边录边传。手机不在时录的：正在录的文件边录边补，已经录完的文件按键停下后补传。服务端收全的录音会从豆子上删掉。'**
   String get beanRecorderHelp;
 
   /// No description provided for @beanFetching.

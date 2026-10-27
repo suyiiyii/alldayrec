@@ -263,7 +263,7 @@
   "linkBeanIdle": "Bean connected · not recording",
   "beanFeishuBound": "Bound to Feishu",
   "beanFeishuNotBound": "Not bound to Feishu",
-  "beanRecorderHelp": "The phone starts the bean recording when it connects. Press its button to stop it until the link drops: on the next connection the phone starts it again. With the phone nearby it uploads as it records. What it records while the phone is away is fetched after you stop it. Recordings the server has in full are deleted from the bean.",
+  "beanRecorderHelp": "The phone starts the bean recording when it connects. Press its button to stop it until the link drops: on the next connection the phone starts it again. With the phone nearby it uploads as it records. What it records while the phone is away: the file it is recording is filled in as it records, and finished files are fetched after you stop it. Recordings the server has in full are deleted from the bean.",
   "beanFetching": "Fetching the recordings on the bean",
   "beanSyncHelp": "While the bean is not recording, the phone fetches what it recorded that this phone does not have yet",
   "beanUnbindSub": "This phone stops connecting to it and uses its own microphone; nothing changes on the bean",
