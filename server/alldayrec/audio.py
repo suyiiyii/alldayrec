@@ -300,7 +300,8 @@ def decode_process(args, output):
                     raise subprocess.TimeoutExpired(args, DECODE_IDLE_S) from None
                 raise
         # a signal (a service stop): it kills ffmpeg only in its first ms; after that ffmpeg's own handler stops it
-        # with partial PCM and exit 255 (fftools/ffmpeg.c), which a file it cannot read does not give (183, 187, 0)
+        # with partial PCM and exit 255 (fftools/ffmpeg.c), which a file it cannot read never gives (it exits with an
+        # error code below 255, or 0)
         if code < 0 or code == 255:
             raise DecoderTerminated(f"audio decoder terminated by signal {-code}" if code < 0 else
                                     "audio decoder stopped by a signal (exit 255)")

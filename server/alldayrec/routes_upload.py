@@ -74,9 +74,6 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
             await body.flush()
             size = await anyio.to_thread.run_sync(lambda: os.fstat(body.wrapped.fileno()).st_size)
             seconds = await anyio.to_thread.run_sync(audio.save_file, device, start, body.wrapped, kind, n, saved, limiter=threads.MEDIA)
-    except audio.DecoderTerminated as exc:  # the decoder got a signal (a service stop): nothing kept, the client sends it again
-        log.warning("%s: piece at %s: %s; answered 503", device, dt.datetime.fromtimestamp(start / 1000), exc)
-        raise HTTPException(503, "Audio decoding was stopped; send the piece again")
     except subprocess.TimeoutExpired:
         log.exception("%s: import decoder stopped making progress", device)
         raise HTTPException(504, "Audio decoding timed out without progress; check the file and retry")
