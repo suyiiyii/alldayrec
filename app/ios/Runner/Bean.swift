@@ -212,6 +212,7 @@ enum Bean {
 
   static func listing(_ p: [UInt8]) throws -> Listing {
     if p.isEmpty { return Listing(files: [], open: 0) }
+    guard p.count >= 2 else { throw Fail("file list of \(p.count) B") }
     let n = u16(p, 0)
     guard p.count >= 2 + n * 8 + 4 else { throw Fail("file list of \(p.count) B for \(n) files") }
     return Listing(files: (0..<n).map { (id: u32(p, 2 + $0 * 8), ms: u32(p, 6 + $0 * 8)) }, open: u32(p, 2 + n * 8))
@@ -732,9 +733,10 @@ final class BeanSync {
     do {
       try Store.oggOpus(run, frameMs: Bean.frameMs, channels: 2).write(to: chunks.appendingPathComponent("\(start)@\(tag).ogg"), options: .atomic)
       writeFailed = false
-    } catch {  // the units stay in the run, not marked had: the next flush writes them
-      if !writeFailed { log("bean_piece", "录音豆的一段写不进手机（\(error)），留着再写", "warn") }
+    } catch {  // its units are dropped, not marked had: asked for again as a gap (Android: the session ends)
+      if !writeFailed { log("bean_piece", "录音豆的一段写不进手机（\(error)），这段之后再从豆子上取", "warn") }
       writeFailed = true
+      run = []
       return
     }
     add(f, runFrom, runFrom + Int64(run.count))

@@ -493,4 +493,48 @@ do {
   check(sync.deletable.isEmpty, true)
 }
 
+/// A piece that cannot be written (no room on the phone) loses its units, not the file: they are not marked had, so no
+/// later piece spans the hole they leave (here 60..89, lost on the way), the hole is asked for again, and the file stays
+/// on the bean until it is whole (PR #186 review).
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks"), fm = FileManager.default
+  let bean = FakeBean(t0)
+  let a = t0 / 1000 - 3600
+  bean.list(a, 120 * 20)
+  var pieces: [(Int64, [[UInt8]])] = []
+  let upload: () throws -> Void = { for f in queue(chunks) { pieces.append((startMs(f), packets(f))); try fm.removeItem(at: f) } }
+  bean.onTransfer = { file, from, live in
+    check(live, false)
+    bean.header(file, 120 * Int64(Bean.unit))
+    if bean.transfers.count == 1 {
+      try! fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: chunks.path)  // no room: no piece is written
+      let lossy: [Int64] = Array(0..<60) + Array(90..<120)
+      bean.units(file, lossy, last: 119)
+      bean.script.append { try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: chunks.path); bean.complete(file) }
+    } else {
+      check(bean.deleted, [], "nothing deleted before the file is whole")
+      bean.units(file, Array(from..<120), last: 119)
+      bean.complete(file)
+      bean.script.append(upload)
+      for _ in 0..<8 { bean.script.append {} }
+    }
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  bean.confirmed = { sync.deletable }
+  bean.script.append {}  // the wait after the start, which this bean only echoes
+  _ = error(BeanSync.Gone.self) { try sync.session(since: a * 1000 - 1000, steps: "") }
+  check(bean.logs.filter { $0.0 == "bean_piece" }.count, 1, "said once")
+  check(bean.transfers.count, 2)
+  check(bean.transfers[1][1] <= 60, true, "60..89 asked for again")
+  var seen: [Int64] = []
+  for (start, ps) in pieces {
+    let seqs = ps.dropFirst(2).map(seqOf)
+    check(seqs, Array(seqs[0]...seqs[seqs.count - 1]), "no piece spans a hole")
+    check(start, a * 1000 + seqs[0] * Bean.frameMs, "dated by its first unit")
+    seen += seqs
+  }
+  check(seen.sorted(), Array(0..<120), "each unit once")
+  check(bean.deleted, [a], "whole on the server: off the bean")
+}
+
 print("bean check: all passed")

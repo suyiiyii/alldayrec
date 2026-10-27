@@ -25,6 +25,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private var central: CBCentralManager?
   private var restored: [CBPeripheral] = []  // on q: what iOS kept for the app when it relaunched it
   private var advFlags = -2, advConnectable: Bool?  // on q: what the bean advertised last, logged when it changes
+  private var round: String?, bareSaid = false  // on q: this scan, and whether it said it saw the service without a name
   @Shared private var on = true
   @Shared private var radio: CBManagerState = .unknown  // as the central last said
   private var poweredOn: Bool { radio == .poweredOn }
@@ -116,6 +117,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     let reason = natural ? "natural_rollover" : "ordinary"
     natural = false
     let id = UUID().uuidString, t0 = mono(), budget: Int64 = 600_000
+    q.sync { round = id; bareSaid = false }
     linkState = lastSeen.map { ["code": "away", "lastSeen": $0] } ?? ["code": "scanning", "name": name]
     found.clear()
     q.sync { central?.scanForPeripherals(withServices: [BeanLink.service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) }
@@ -170,6 +172,12 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     guard let n else { throw Bean.Fail("no notify characteristic") }
     cmd = w
     mtu = q.sync { p.maximumWriteValueLength(for: .withoutResponse) } + 3
+    if mtu < 78 {  // iOS may still be negotiating it right after the connect: once more a second on
+      let first = mtu
+      Thread.sleep(forTimeInterval: 1)
+      mtu = q.sync { p.maximumWriteValueLength(for: .withoutResponse) } + 3
+      DeviceLog.app(name, "bean_mtu", "连上时 MTU \(first)，1 s 后 \(mtu)", level: mtu < 78 ? "warn" : nil, fields: ["first": first, "mtu": mtu])
+    }
     if mtu < 78 { throw Bean.Fail("MTU \(mtu): too small for the key exchange") }
     try step("services", "订阅通知") { if !q.sync(execute: { n.isNotifying }) { _ = try op("subscribe") { p.setNotifyValue(true, for: n) } } }
     if prefs.bool(forKey: "bindPending") || prefs.object(forKey: "beanSince:\(name)") == nil {  // added now: its files from here on are this phone's
@@ -272,8 +280,13 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData a: [String: Any], rssi dbm: NSNumber) {
     guard on, prefs.string(forKey: "bleName") == name else { return }
     let mfr = (a[CBAdvertisementDataManufacturerDataKey] as? Data).map { [UInt8]($0) }
-    let n = mfr.flatMap(Bean.name)
-    guard n == name || n == nil && prefs.string(forKey: "bleId") == p.identifier.uuidString else { return }
+    let n = mfr.flatMap(Bean.name), known = prefs.string(forKey: "bleId") == p.identifier.uuidString
+    if n == nil && !bareSaid {  // once a scan: does the name come only in the scan response (none in the background)?
+      bareSaid = true
+      DeviceLog.app(name, "bean_scan", "扫到录音豆的服务，广播里没有厂商数据（没有名字）：按上次的设备标识\(known ? "认出" : "没认出")",
+                    fields: ["phase": round ?? NSNull(), "event": "no_manufacturer_data", "bleIdMatched": known, "atElapsedMs": mono()])
+    }
+    guard n == name || n == nil && known else { return }
     let connectable = a[CBAdvertisementDataIsConnectable] as? Bool ?? true
     if dbm.intValue != 127 { rssi = dbm.intValue }
     let flags = mfr.map(Bean.flags) ?? -1
