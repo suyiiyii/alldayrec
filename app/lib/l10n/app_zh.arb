@@ -451,18 +451,6 @@
   "advCardOk": "卡正常",
   "advCardFull": "卡满",
   "advCardError": "卡出错",
-  "cardFreeGb": "卡剩 {gb} GB",
-  "@cardFreeGb": {
-    "placeholders": {
-      "gb": {}
-    }
-  },
-  "batteryPercent": "电量 {percent}%",
-  "@batteryPercent": {
-    "placeholders": {
-      "percent": {}
-    }
-  },
   "allowInstalls": "在打开的设置里允许安装未知应用，回来再点这里",
   "cannotOpenInstaller": "没法打开安装界面：{error}",
   "@cannotOpenInstaller": {

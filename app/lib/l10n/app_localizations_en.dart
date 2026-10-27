@@ -793,16 +793,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get advCardError => 'Card error';
 
   @override
-  String cardFreeGb(Object gb) {
-    return '$gb GB free on card';
-  }
-
-  @override
-  String batteryPercent(Object percent) {
-    return 'Battery $percent%';
-  }
-
-  @override
   String get allowInstalls =>
       'Allow installing unknown apps in the settings that opened, then tap here again';
 

@@ -42,14 +42,6 @@ String advText(AppLocalizations l, Map d) {
   ].join(' · ');
 }
 
-/// A BLE recorder's battery and card in a few words.
-String hwLine(AppLocalizations l, Map? hw) {
-  if (hw == null || hw.isEmpty) return '';
-  final free = hw['free_kb'], total = hw['total_kb'];
-  final card = cardState(l, hw)?.line ?? (total is num && total > 0 ? l.cardFreeGb((free / 1048576).toStringAsFixed(1)) : '');
-  return [if (hw['battery'] != null) l.batteryPercent(hw['battery']), ?chargeText(l, hw['charge']), if (card.isNotEmpty) card].join(' · ');
-}
-
 /// So many KB as KB, MB or GB.
 String sizeText(num kb) => kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '$kb KB';
 

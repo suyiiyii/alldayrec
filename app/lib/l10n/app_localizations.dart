@@ -1424,18 +1424,6 @@ abstract class AppLocalizations {
   /// **'卡出错'**
   String get advCardError;
 
-  /// No description provided for @cardFreeGb.
-  ///
-  /// In zh, this message translates to:
-  /// **'卡剩 {gb} GB'**
-  String cardFreeGb(Object gb);
-
-  /// No description provided for @batteryPercent.
-  ///
-  /// In zh, this message translates to:
-  /// **'电量 {percent}%'**
-  String batteryPercent(Object percent);
-
   /// No description provided for @allowInstalls.
   ///
   /// In zh, this message translates to:

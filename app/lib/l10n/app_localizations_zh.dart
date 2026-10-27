@@ -770,16 +770,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get advCardError => '卡出错';
 
   @override
-  String cardFreeGb(Object gb) {
-    return '卡剩 $gb GB';
-  }
-
-  @override
-  String batteryPercent(Object percent) {
-    return '电量 $percent%';
-  }
-
-  @override
   String get allowInstalls => '在打开的设置里允许安装未知应用，回来再点这里';
 
   @override

@@ -221,8 +221,6 @@
   "advCardOk": "Card OK",
   "advCardFull": "Card full",
   "advCardError": "Card error",
-  "cardFreeGb": "{gb} GB free on card",
-  "batteryPercent": "Battery {percent}%",
   "allowInstalls": "Allow installing unknown apps in the settings that opened, then tap here again",
   "cannotOpenInstaller": "Can't open the installer: {error}",
   "downloadStalled": "The download stalled; tap here to retry",
