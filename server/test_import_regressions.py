@@ -77,6 +77,76 @@ def test_decode_timeout_has_own_http_error(tmp_path, monkeypatch):
     assert not (t.recordings / 'rejected').exists()
 
 
+def app_client(t, monkeypatch):
+    from starlette.testclient import TestClient
+    from alldayrec import core, server
+    monkeypatch.setattr(core, 'TENANTS', [t])  # one tenant without a token: the app's own handlers and middlewares, no auth
+    return TestClient(server.app)
+
+
+def stop_decoder(monkeypatch, stop):
+    """The real decode_process on a stand-in ffmpeg that writes some PCM, then is stopped by `stop`."""
+    original = audio.decode_process
+    monkeypatch.setattr(audio, 'decode_process', lambda args, output: original(
+        [sys.executable, '-c', f'import os, signal, sys; os.write(1, bytes(3200)); {stop}'], output))
+
+
+# a signal in ffmpeg's first ms kills it; later its own handler exits 255, with part of the PCM written
+@pytest.mark.parametrize('stop', ['os.kill(os.getpid(), signal.SIGTERM)', 'sys.exit(255)'])
+def test_stopped_decoder_upload_is_503_without_traceback(tmp_path, monkeypatch, caplog, stop):
+    t = db.open_db(tmp_path / 'live.db')
+    stop_decoder(monkeypatch, stop)
+    r = app_client(t, monkeypatch).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture')
+    assert r.status_code == 503 and 'again' in r.json()['detail']
+    assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('WARNING', None)]
+    assert not (t.recordings / 'rejected').exists()
+    assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
+
+
+def long_piece_stopped(tmp_path, monkeypatch):
+    """A stored piece over WHOLE_S (cut() decodes only the window asked: piece_window), its decoder then exiting 255."""
+    t = db.open_db(tmp_path / 'live.db')
+    wav_file(tmp_path / 'long.wav', 301)
+    with (tmp_path / 'long.wav').open('rb') as f:
+        audio.save_file('fixture', START, f, 'audio/wav')
+    stop_decoder(monkeypatch, 'sys.exit(255)')
+    a = dt.datetime.fromtimestamp(START / 1000 + 100)
+    return t, a.isoformat(), (a + dt.timedelta(seconds=5)).isoformat()
+
+
+def test_stopped_decoder_playback_is_503_without_traceback(tmp_path, monkeypatch, caplog):
+    t, a, b = long_piece_stopped(tmp_path, monkeypatch)
+    r = app_client(t, monkeypatch).get('/api/audio', params={'start': a, 'end': b, 'device': 'fixture'})
+    assert r.status_code == 503 and 'again' in r.json()['detail']
+    assert not [x for x in caplog.records if x.exc_info]
+
+
+def test_stopped_decoder_is_skipped_by_background_readers(tmp_path, monkeypatch):
+    # enroll, voices_loop and self_card skip a piece routes_audio.cut answers with an HTTPException (as a 404)
+    from fastapi import HTTPException
+    from alldayrec import routes_audio
+    _, a, b = long_piece_stopped(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        anyio.run(routes_audio.cut, a, b, 's16le', 'fixture')
+    assert e.value.status_code == 503
+
+
+@pytest.mark.parametrize('path', ['/api/chunks', '/api/ask/voice'])
+def test_client_gone_mid_body_without_traceback(tmp_path, monkeypatch, caplog, path):
+    from starlette.requests import ClientDisconnect, Request
+    t = db.open_db(tmp_path / 'live.db')
+    async def gone(self):
+        yield b'fixture'
+        raise ClientDisconnect()
+    monkeypatch.setattr(Request, 'stream', gone)  # body() reads it too
+    monkeypatch.setattr(audio, 'save_file', lambda *a: pytest.fail('a piece cut short was decoded'))
+    caplog.set_level('INFO', 'live')
+    r = app_client(t, monkeypatch).post(path, params={'device': 'fixture', 'start': START}, content=b'fixture')
+    assert r.status_code == 499
+    assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('INFO', None)]
+    assert ('POST', path, 499) in t.requests  # perf.Requests counts it
+
+
 def test_decoder_supervises_progress_not_total_runtime(monkeypatch):
     monkeypatch.setattr(audio, 'DECODE_IDLE_S', .25)
     with tempfile.TemporaryFile() as out:
