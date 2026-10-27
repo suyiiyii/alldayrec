@@ -77,6 +77,30 @@ def test_decode_timeout_has_own_http_error(tmp_path, monkeypatch):
     assert not (t.recordings / 'rejected').exists()
 
 
+def test_stopped_decoder_is_503_without_traceback(tmp_path, monkeypatch, caplog):
+    t = db.open_db(tmp_path / 'live.db')
+    def stopped(*args):
+        raise audio.DecoderTerminated('audio decoder terminated by signal 15')
+    monkeypatch.setattr(audio, 'save_file', stopped)
+    r = client(t).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture')
+    assert r.status_code == 503 and 'again' in r.json()['detail']
+    assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('WARNING', None)]
+    assert not (t.recordings / 'rejected').exists()
+
+
+def test_client_gone_mid_upload_without_traceback(tmp_path, monkeypatch, caplog):
+    from starlette.requests import ClientDisconnect, Request
+    t = db.open_db(tmp_path / 'live.db')
+    async def gone(self):
+        yield b'fixture'
+        raise ClientDisconnect()
+    monkeypatch.setattr(Request, 'stream', gone)
+    monkeypatch.setattr(audio, 'save_file', lambda *a: pytest.fail('a piece cut short was decoded'))
+    caplog.set_level('INFO', 'live')
+    assert client(t).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture').status_code == 499
+    assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('INFO', None)]
+
+
 def test_decoder_supervises_progress_not_total_runtime(monkeypatch):
     monkeypatch.setattr(audio, 'DECODE_IDLE_S', .25)
     with tempfile.TemporaryFile() as out:
