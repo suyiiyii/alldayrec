@@ -6,7 +6,7 @@ real pause between two parts with enough speech each. Any error means no split a
     SPLIT_MIN_S   a conversation this many seconds long (end - start) is checked; 0 turns splitting off (600)
 
 The first part keeps the conversation's id; later parts get their own (late_merge.record). References that belong to a
-later part move with it: todos and their marks, name hints, voices, profile and recap citations; stars, feedback and
+later part move with it: todos and their marks, stars, name hints, voices, profile and recap citations; feedback and
 enrolled samples stay with the first part, and so does the live analysis's timeline. Each cut is stored as a wall
 (table walls) that late audio never merges across.
 
@@ -207,6 +207,9 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
                 todos[ids.index(pid)].append({**todo, "id": owner[tid][0]})
         for tid, (nid, pid) in owner.items():
             t.execute("UPDATE todo_marks SET id = ?, conv = ? WHERE id = ?", (nid, pid, tid))
+        starts = {r["id"]: r["start"] for r in rows}  # a star (its id: the sentence's) goes to its sentence's part
+        for sid, in t.execute("SELECT id FROM stars WHERE conv = ?", (cid,)).fetchall():
+            t.execute("UPDATE stars SET conv = ? WHERE id = ?", (where(starts.get(sid)), sid))
         db.put_summary({**s, "status": "pending", "error": None, "todos": todos[0]}, t)
         for pid, ts in zip(ids[1:], todos[1:]):
             db.put_summary({"conversation": pid, "status": "pending", "todos": ts}, t)

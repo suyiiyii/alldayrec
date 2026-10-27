@@ -62,7 +62,7 @@ def long_conv(store, monkeypatch):
                              {"conv": A, "label": "S2", "device": "live", "e": E2, "k": 1},
                              {"conv": A, "label": "我", "device": "live", "e": E3, "k": 1}])
         t.execute("INSERT INTO apart VALUES (?, ?)", (A + "|S2", "Named"))
-        t.execute("INSERT INTO stars VALUES (?, ?, ?)", ("r630", A, "now"))
+        t.executemany("INSERT INTO stars VALUES (?, ?, ?)", [("r30", A, "now"), ("r630", A, "now")])
         db.put_timeline(A, {"conversation": A, "messages": []}, t)
     tids = db.todo_ids(A, db.summary(A)["todos"])
     db.mark_todos(tids, "done")
@@ -108,7 +108,8 @@ def test_split_moves_every_reference(long_conv):
     assert db.profile("Named")["src"] == [{"conv": P2, "at": iso(630)}, {"conv": A}]
     recap = db.kv("recap:2026-10-20")
     assert recap["todos"] == [{"id": moved, "conv": P2}] and recap["highlights"] == [{"conv": A}] and recap["stale"]
-    assert db.conn().execute("SELECT conv FROM stars").fetchone()[0] == A and db.timeline(A)
+    assert dict(db.conn().execute("SELECT id, conv FROM stars").fetchall()) == {"r30": A, "r630": P2}, "by its sentence's time"
+    assert db.timeline(A) and not db.timeline(P2)
     assert [tuple(r) for r in db.conn().execute("SELECT device, at FROM walls")] == [(D, iso(600))]
     for cid in (A, P2):
         assert split.checked(db.conversation(cid), db.kv(f"conversation_revision:{cid}"))
