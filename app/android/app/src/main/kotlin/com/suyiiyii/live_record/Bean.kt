@@ -334,7 +334,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var marked = false
     private val unknown = mutableSetOf<Int>()
     private val run = mutableListOf<ByteArray>()
-    private val fills = mutableMapOf<Long, Int>()  // reads of the open file cut with their hole still there: at most TRIES
+    private val fills = mutableMapOf<Long, Int>()  // realtime=0 reads of the open file that came to nothing (missed())
     private var runFile = -1L
     private var runFrom = 0L
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
@@ -423,7 +423,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             next(if (xfer == null && quiet > 0) quiet else 1000)?.let(::take)
             xfer?.takeIf { it.cut }?.let { x ->
                 complete(x, 0)
-                if (x.live && files[x.file]?.let(::gap)?.let { it <= x.from } == true) fills[x.file] = (fills[x.file] ?: 0) + 1
+                if (files[x.file]?.let(::gap)?.let { it <= x.from } == true) missed(x)
                 throw Again("file ${x.file}: the rest is here already")
             }
             xfer?.takeIf { it.live && !it.realtime && !it.watched && io.watched() }?.let { x ->  // the live page opened
@@ -443,6 +443,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 flush()
                 if (!liveStalled) io.log("bean_stall", "实时文件 $liveFile 30 s 没收到单元，断开重连", "warn", mapOf("file" to liveFile))
                 liveStalled = true
+                xfer?.takeIf { it.units == 0 }?.let(::missed)
                 throw Again("file $liveFile: no audio for 30 s")
             }
             xfer?.let { x ->  // the bean did not answer, or a transfer stopped: on with the next
@@ -543,18 +544,21 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val watched = io.watched()
         val edge = edge(open)
         val mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's
+        val fallback = (fills[open] ?: 0) >= TRIES  // realtime=0 came to nothing TRIES times: live, the holes after stop
         val x = when {
-            !mine -> Xfer(open, true, tail, realtime = true, watched = watched)
+            !mine || fallback -> Xfer(open, true, tail, realtime = true, watched = watched)
             watched -> Xfer(open, true, tail, realtime = edge - tail > WATCHED_GAP_UNITS, watched = true)
-            gap < tail && (fills[open] ?: 0) < TRIES -> Xfer(open, true, gap).also { it.until = rest(f!!, gap) }
+            gap < tail -> Xfer(open, true, gap).also { it.until = rest(f!!, gap) }
             else -> Xfer(open, true, tail)
         }
         val older = x.from < tail
         val hole = if (older) f!!.have.first { it[0] > x.from }[0] - x.from else maxOf(0L, edge - tail)
-        val reason = if (x.realtime) "live_now" else if (watched) "tail_short" else if (older) "fill_hole" else "fill_tail"
+        val reason = if (mine && fallback) "live_fallback" else if (x.realtime) "live_now" else if (watched) "tail_short"
+            else if (older) "fill_hole" else "fill_tail"
         val s = hole * Bean.FRAME_MS / 1000
         io.log("bean_xfer", "实时文件 $open 从单元 ${x.from} 起" + when (reason) {
             "live_now" -> "直接实时（realtime=1）：" + if (mine) "实时页开着，尾部缺 $s s，超过 1 分钟，留到以后补" else "文件在豆子加到这台手机前就开始了"
+            "live_fallback" -> "直接实时（realtime=1）：realtime=0 已 $TRIES 次没取到，这个文件改回实时，缺的停录后补"
             "tail_short" -> "补尾部 $s s（realtime=0）：实时页开着，不超过 1 分钟，补上接着实时"
             "fill_hole" -> "补前面的洞 $s s（realtime=0）" + if (x.until > 0) "，单元 ${x.until} 起手机已有，到那里断开" else "，补完接着实时"
             else -> "补尾部 $s s（realtime=0），补上接着实时"
@@ -681,11 +685,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     private fun failed(x: Xfer, why: String) {
-        io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 没开始：$why", "warn", mapOf("file" to x.file, "from" to x.from))
-        if (x.live) liveAgain = io.now() + 30_000 else file(x.file, x.file * 1000).tries++
+        io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 没开始：$why", "warn",
+            mapOf("file" to x.file, "from" to x.from, "realtime" to x.realtime))
+        if (x.live) { liveAgain = io.now() + 30_000; missed(x) } else file(x.file, x.file * 1000).tries++
         xfer = null
         save()
     }
+
+    /** A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole
+     *  where it was (the bean did not honour the offset). After TRIES that file is read realtime=1, as before (plan()). */
+    private fun missed(x: Xfer) { if (x.live && !x.realtime) fills[x.file] = (fills[x.file] ?: 0) + 1 }
 
     private fun file(id: Long, anchor: Long) = files.getOrPut(id) { F(anchor) }
 

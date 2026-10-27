@@ -1041,15 +1041,40 @@ class BeanTest {
     }
 
     /** A bean that ignored the offset of the open file (starting where it is) cuts each fill of an older hole at once:
-     *  three tries, then the tail, on live. */
+     *  three tries, then realtime=1 for that file. */
     @Test fun unfillableOpenHoleStopsAfterTries() {
         val r = rec(80, listOf(0L to 100L, 400L to 2500L), watched = false, units = 30)
         r.bean.onTransfer = { file, _, _ -> r.bean.answer(file, 0, realtime = true); r.bean.more(30) }
         repeat(3) { assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") } }
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(100L, 100L, 100L), r.bean.transfers.take(3).map { it.second })
-        assertEquals(listOf("fill_hole", "fill_hole", "fill_hole", "fill_tail"), r.reasons)
+        assertEquals(listOf("fill_hole", "fill_hole", "fill_hole", "live_fallback"), r.reasons)
+        assertTrue(r.bean.transfers[3].third)
         onlyReads(r.bean)
+    }
+
+    /** A bean that refuses realtime=0 for the file it records (code 2, code 3, no answer, or a header and no unit in
+     *  30 s): three tries, then live as before (realtime=1); the holes stay for after the stop. */
+    @Test fun refusedFillFallsBackToLive() {
+        for (code in listOf(2, 3, null, 0)) {
+            val r = rec(100, listOf(0L to 1000L), watched = false)
+            r.bean.onTransfer = { file, from, realtime ->
+                if (realtime) {
+                    r.bean.answer(file, from, true); r.bean.more(30)
+                    r.bean.script.clear(); r.bean.script += { throw IOException("done") }
+                } else if (code != null) r.bean.header(file, 0xFFFFFFFFL, code = code)
+            }
+            repeat(300) { r.bean.script += {} }
+            for (i in 0..9) {  // the live guard may end a session meanwhile (Again): BeanLink connects again
+                val e = assertThrows(Exception::class.java) { r.sync.session(0, "") }
+                if (e is BeanSync.Again) continue
+                assertEquals("done", e.message); break
+            }
+            assertEquals("code $code", List(3) { false } + true, r.bean.transfers.map { it.third })
+            assertEquals(List(3) { "fill_tail" } + "live_fallback", r.reasons)
+            assertEquals(1000L, r.f.have.first()[1])
+            assertEquals(2, r.f.have.size)
+        }
     }
 
     /** A file the bean began before it was added here: live only (realtime=1), its start is not this phone's (10-14). */
