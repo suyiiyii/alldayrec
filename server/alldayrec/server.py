@@ -150,8 +150,7 @@ async def client_gone(request, exc):
 
 @app.exception_handler(audio.DecoderTerminated)
 async def decoder_stopped(request, exc):
-    # the decoder got a signal (a service stop): an upload kept nothing and its client sends it again; a playback can
-    # be asked again
+    # the decoder got a signal (a service stop): an upload kept nothing and its client sends it again
     device = request.query_params.get("device")
     log.warning("%s %s%s: %s; answered 503", request.method, request.url.path, f" ({device})" if device else "", exc)
     return JSONResponse({"detail": "Audio decoding was stopped; try again"}, status_code=503)

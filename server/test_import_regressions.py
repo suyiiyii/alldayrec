@@ -103,17 +103,32 @@ def test_stopped_decoder_upload_is_503_without_traceback(tmp_path, monkeypatch, 
     assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
 
 
-def test_stopped_decoder_playback_is_503_without_traceback(tmp_path, monkeypatch, caplog):
+def long_piece_stopped(tmp_path, monkeypatch):
+    """A stored piece over WHOLE_S (cut() decodes only the window asked: piece_window), its decoder then exiting 255."""
     t = db.open_db(tmp_path / 'live.db')
-    wav_file(tmp_path / 'long.wav', 301)  # over WHOLE_S: cut() decodes only the window asked (piece_window)
+    wav_file(tmp_path / 'long.wav', 301)
     with (tmp_path / 'long.wav').open('rb') as f:
         audio.save_file('fixture', START, f, 'audio/wav')
     stop_decoder(monkeypatch, 'sys.exit(255)')
     a = dt.datetime.fromtimestamp(START / 1000 + 100)
-    r = app_client(t, monkeypatch).get('/api/audio', params={'start': a.isoformat(), 'device': 'fixture',
-                                                             'end': (a + dt.timedelta(seconds=5)).isoformat()})
+    return t, a.isoformat(), (a + dt.timedelta(seconds=5)).isoformat()
+
+
+def test_stopped_decoder_playback_is_503_without_traceback(tmp_path, monkeypatch, caplog):
+    t, a, b = long_piece_stopped(tmp_path, monkeypatch)
+    r = app_client(t, monkeypatch).get('/api/audio', params={'start': a, 'end': b, 'device': 'fixture'})
     assert r.status_code == 503 and 'again' in r.json()['detail']
-    assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('WARNING', None)]
+    assert not [x for x in caplog.records if x.exc_info]
+
+
+def test_stopped_decoder_is_skipped_by_background_readers(tmp_path, monkeypatch):
+    # enroll, voices_loop and self_card skip a piece routes_audio.cut answers with an HTTPException (as a 404)
+    from fastapi import HTTPException
+    from alldayrec import routes_audio
+    _, a, b = long_piece_stopped(tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as e:
+        anyio.run(routes_audio.cut, a, b, 's16le', 'fixture')
+    assert e.value.status_code == 503
 
 
 @pytest.mark.parametrize('path', ['/api/chunks', '/api/ask/voice'])
