@@ -14,5 +14,6 @@ void main() {
     expect(parseSignInQr('https://example.com/'), isNull);
     expect(parseSignInQr('ftp://example.com/?token=t1'), isNull);
     expect(parseSignInQr('hello token=t1'), isNull);
+    expect(parseSignInQr('https://example.com/?token=%E0%A4%A'), isNull);  // broken %-escape
   });
 }

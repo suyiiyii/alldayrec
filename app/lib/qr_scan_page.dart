@@ -8,8 +8,14 @@ import 'l10n/app_localizations.dart';
 /// The token may be empty: a server without auth.
 Map<String, String>? parseSignInQr(String raw) {
   final uri = Uri.tryParse(raw);
-  final token = uri?.queryParameters['token'];
-  if (uri == null || !(uri.isScheme('http') || uri.isScheme('https')) || uri.host.isEmpty || token == null) return null;
+  if (uri == null || !(uri.isScheme('http') || uri.isScheme('https')) || uri.host.isEmpty) return null;
+  final String? token;
+  try {
+    token = uri.queryParameters['token'];
+  } on FormatException {  // a broken %-escape
+    return null;
+  }
+  if (token == null) return null;
   final path = uri.path.endsWith('/') ? uri.path.substring(0, uri.path.length - 1) : uri.path;
   return {'server': '${uri.scheme}://${uri.authority}$path', 'token': token};
 }
