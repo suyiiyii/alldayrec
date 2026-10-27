@@ -17,6 +17,7 @@ from alldayrec import live
 from alldayrec import local_asr
 from alldayrec import mcp_server
 from alldayrec import mcp_links
+from alldayrec import split
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec.core import conversation_rows, find_conversation, queue_summary, tag_counts
@@ -347,6 +348,22 @@ async def feedback():
     """Every correction, newest first, with the conversation's time and title for the read-back."""
     return [{**f, "start": (c := find_conversation(f["conv"]) or {}).get("start"), "title": (db.summary(f["conv"]) or {}).get("title")}
             for f in db.feedback()]
+
+
+@router.post("/api/split")
+async def split_backfill(since: str, apply: bool = False):
+    """Split the long conversations started since a day that are not checked yet, one at a time (the backfill script
+    split.py). Without apply it only lists the cuts: the model calls are made, nothing is written."""
+    try:
+        since = dt.date.fromisoformat(since).isoformat()
+    except ValueError:
+        raise HTTPException(400, "since: YYYY-MM-DD")
+    out = []
+    for c in db.conversations(since, "9999"):
+        revision = db.kv(f"conversation_revision:{c['id']}")
+        if split.due(c) and not split.checked(c, revision):
+            out.append({"id": c["id"], "start": c["start"], "cuts": await split.check(c, revision, dry=not apply)})
+    return out
 
 
 @router.post("/api/conversation/{conv_id}/summarize")

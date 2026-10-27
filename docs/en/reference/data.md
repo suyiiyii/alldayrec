@@ -59,6 +59,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `late_spans` | Exact late-audio intervals, processing state and retry counts (since v0.4.0) |
 | `processed_audio` | Actual processed coverage, including pauses, committed with final rows; prevents replay after restart (since v0.4.0) |
 | `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
+| `walls` | Where long conversations were split (one row per device and time): late audio never merges the two sides back (since v0.5.0) |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
 | `stars` | Starred sentences: the sentence id, its conversation, when it was starred (since v0.3.0) |

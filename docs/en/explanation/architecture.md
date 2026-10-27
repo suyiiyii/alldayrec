@@ -68,6 +68,8 @@ The voiceprint model ReDimNet2 runs on the local CPU. The server recognizes 「�
 
 Sentences are grouped into conversations by time. A conversation ends after 5 minutes with nobody speaking, when the recorder stops, or when it reaches 4 hours. A conversation with less than 10 seconds of speech is not kept as a conversation (its sentences stay in the transcript).
 
+Time alone lets voices around, in a mall or on the street, chain unrelated conversations into one. So before a longer conversation (`SPLIT_MIN_S`, 10 minutes by default) is summarized, the LLM also reads it for content: where other people and another matter take over, at a real pause, it is split into parts, each with its own summary. Late audio never merges the parts back.
+
 When a conversation ends, the server writes a summary with the LLM you configured: a title, the summary, each person's points, to-dos (with due dates), decisions and tags. A conversation with under 60 seconds of speech doesn't go to the LLM; its first sentence becomes the title. Every day at `RECAP_AT` (default 10:00), the server writes the previous day's recap.
 
 「问 AI」 (Ask AI) answers questions about your past with the same LLM: the summaries of the last few days go into the prompt, and older or more detailed content is found with tools that query the database. Every claim carries the id of the conversation it came from.

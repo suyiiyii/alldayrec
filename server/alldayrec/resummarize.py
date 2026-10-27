@@ -74,7 +74,7 @@ def calls(api, since: str) -> dict[str, dict]:
     """The model calls since then by kind: {kind: {n, failed: {code: n}}}."""
     out = {}
     for x in api("GET", "/api/calls", since=since)["calls"]:
-        if x["kind"] in ("summary", "hints", "profile", "recap", "live", "ask"):
+        if x["kind"] in ("summary", "split", "hints", "profile", "recap", "live", "ask"):
             k = out.setdefault(x["kind"], {"n": 0, "failed": {}})
             k["n"] += x["n"]
             for code, n in x["failed"].items():

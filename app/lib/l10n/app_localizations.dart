@@ -1334,12 +1334,6 @@ abstract class AppLocalizations {
   /// **'已满'**
   String get cardFullTile;
 
-  /// No description provided for @cardFull.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡已满'**
-  String get cardFull;
-
   /// No description provided for @cardFullSub.
   ///
   /// In zh, this message translates to:
@@ -1351,12 +1345,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'U 盘中'**
   String get cardUsbTile;
-
-  /// No description provided for @cardUsb.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡在 U 盘模式'**
-  String get cardUsb;
 
   /// No description provided for @cardUsbSub.
   ///
@@ -1370,12 +1358,6 @@ abstract class AppLocalizations {
   /// **'没插卡'**
   String get cardNoneTile;
 
-  /// No description provided for @cardNone.
-  ///
-  /// In zh, this message translates to:
-  /// **'没插存储卡'**
-  String get cardNone;
-
   /// No description provided for @cardNoneSub.
   ///
   /// In zh, this message translates to:
@@ -1387,12 +1369,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'出错'**
   String get cardErrorTile;
-
-  /// No description provided for @cardError.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡出错'**
-  String get cardError;
 
   /// No description provided for @cardErrorSub.
   ///
@@ -1423,18 +1399,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'卡出错'**
   String get advCardError;
-
-  /// No description provided for @cardFreeGb.
-  ///
-  /// In zh, this message translates to:
-  /// **'卡剩 {gb} GB'**
-  String cardFreeGb(Object gb);
-
-  /// No description provided for @batteryPercent.
-  ///
-  /// In zh, this message translates to:
-  /// **'电量 {percent}%'**
-  String batteryPercent(Object percent);
 
   /// No description provided for @allowInstalls.
   ///

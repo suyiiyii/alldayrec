@@ -82,7 +82,7 @@ onMounted(() => {
   tick = window.setInterval(loadCalls, 60_000);
 });
 onUnmounted(() => clearInterval(tick));
-const KINDS = ["final", "draft", "late", "summary", "hints", "profile", "recap", "live", "ask"];
+const KINDS = ["final", "draft", "late", "summary", "split", "hints", "profile", "recap", "live", "ask"];
 const kind = (k: string) => (KINDS.includes(k) ? t(`progress.kind.${k}`) : k);
 const secs = (ms: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)} s`);
 const sec = (n?: number | null) => (n == null ? "—" : t("common.sec", { n }));

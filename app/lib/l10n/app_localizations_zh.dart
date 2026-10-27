@@ -723,16 +723,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cardFullTile => '已满';
 
   @override
-  String get cardFull => '存储卡已满';
-
-  @override
   String get cardFullSub => '离线录音已停止';
 
   @override
   String get cardUsbTile => 'U 盘中';
-
-  @override
-  String get cardUsb => '存储卡在 U 盘模式';
 
   @override
   String get cardUsbSub => '离线录音暂停';
@@ -741,16 +735,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cardNoneTile => '没插卡';
 
   @override
-  String get cardNone => '没插存储卡';
-
-  @override
   String get cardNoneSub => '没插卡或没插好：只能实时上传，手机不在旁边时录不下来';
 
   @override
   String get cardErrorTile => '出错';
-
-  @override
-  String get cardError => '存储卡出错';
 
   @override
   String get cardErrorSub => '重插或换一张卡；实时上传照常';
@@ -768,16 +756,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get advCardError => '卡出错';
-
-  @override
-  String cardFreeGb(Object gb) {
-    return '卡剩 $gb GB';
-  }
-
-  @override
-  String batteryPercent(Object percent) {
-    return '电量 $percent%';
-  }
 
   @override
   String get allowInstalls => '在打开的设置里允许安装未知应用，回来再点这里';

@@ -309,7 +309,7 @@ export const engines = (s: Status) =>
 
 // GET /api/calls: the ASR and LLM calls since a time, by kind and engine, and the StepFun balance
 export interface CallSum {
-  kind: string; // final, draft (ASR); summary, hints, profile, recap, live, ask (LLM)
+  kind: string; // final, draft (ASR); summary, split, hints, profile, recap, live, ask (LLM)
   engine: string;
   n: number;
   failed: Record<string, number>; // by HTTP code, else exception class

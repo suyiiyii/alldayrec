@@ -293,6 +293,12 @@ type: reference
 |---|---|---|
 | `GET` | Every correction, newest first, with the conversation's time and title for the read-back. | — |
 
+### `/api/split`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | Split the long conversations started since a day that are not checked yet, one at a time (the backfill script split.py). | `since` (query, string)<br>`apply?` (query, boolean) |
+
 ### `/api/conversation/{conv_id}/summarize`
 
 | 方法 | 说明 | 参数 |

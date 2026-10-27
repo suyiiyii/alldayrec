@@ -23,12 +23,15 @@ PROMPT_VERSION = 13  # 2: tags, 3: people, 4: speech to AI told apart from speec
                      # 11: summary one sentence ≤ 40 字, business before chitchat; one 闲聊 topic; todos/decisions extracted independently,
                      # 12: preserve the actor (I only for the recorder); people points cite their own speaker,
                      # 13: AI speech from any speaker; retain the speaker in AI request text
-SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[时间] 说话人: 文本」。说话人标签来自声纹聚类：「我」是录音者本人，S1、S2… 是其他人，同一个人可能被拆成多个标签，S? 是太短没认出来的句子。转写有错别字和同音误识别，按意图理解。
-所有说话人（「我」、其他标签或姓名）都用同一标准区分听众，先分清再整理：
+# Who each line is said to, and media played aloud: shared with split.py, which must not take dictation to an AI for
+# a talk with someone
+AUDIENCE = """所有说话人（「我」、其他标签或姓名）都用同一标准区分听众，先分清再整理：
 - 对人：说给在场或线上的人听，有来有回，别人会接话、回应、提问
 - 对 AI：说话人在对电脑或手机做语音输入，给 AI 助手（Claude、Codex、Orca、ChatGPT 等）下指令或提问，旁边的人不会接这句话。常见特征：祈使句布置任务（帮我看一下、你去查、跑一下、改成、再确认一下），提到代码、文件、日志、仓库、命令、页面，一口气说一长段没人插话，前后没有别人回应它
 - 口吻像聊天也可能是对 AI（我理解一下、你详细讲一下、你这个指的是什么）：关键看有没有人接话。同一个说话人连续给 AI 下指令、没有人回应时可能是对 AI；不能仅凭独白或祈使语气把对人的话算成对 AI
-录音里还可能有外放的媒体：视频、电视、直播、播客、广播、音乐，是放给人听的内容，不是在场的人在交流。常见特征：播音腔或讲解腔、一个人长段独白或几个人表演式对话、内容和现场无关、在场的人不接它的话、说话人标签和其他句子对不上。线上会议和电话不算媒体（我在参与，有来有回），当面讲课、念稿也不算。
+录音里还可能有外放的媒体：视频、电视、直播、播客、广播、音乐，是放给人听的内容，不是在场的人在交流。常见特征：播音腔或讲解腔、一个人长段独白或几个人表演式对话、内容和现场无关、在场的人不接它的话、说话人标签和其他句子对不上。线上会议和电话不算媒体（我在参与，有来有回），当面讲课、念稿也不算。"""
+SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[时间] 说话人: 文本」。说话人标签来自声纹聚类：「我」是录音者本人，S1、S2… 是其他人，同一个人可能被拆成多个标签，S? 是太短没认出来的句子。转写有错别字和同音误识别，按意图理解。
+""" + AUDIENCE + """
 只输出一个 JSON 对象：
 {"title": "不超过 20 字的标题",
  "ai_spans": [{"from": "HH:MM:SS", "to": "HH:MM:SS"}],
@@ -83,7 +86,7 @@ def transcript(rows: list[dict]) -> str:
 
 async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", **extra) -> dict:
     """One chat call, extra fields as they are (tools, response_format): the raw response; raises on HTTP errors. Kept
-    in the calls table as `kind` (summary, hints, profile, recap, live, ask): time, tokens, the error, never the text;
+    in the calls table as `kind` (summary, split, hints, profile, recap, live, ask): time, tokens, the error, never the text;
     a call cut off (the task cancelled) too, as CancelledError."""
     req = {"model": os.environ["LLM_MODEL"], "messages": messages, **extra}
     t, usage, err = time.perf_counter(), {}, None
@@ -101,9 +104,10 @@ async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", 
                     prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
 
 
-async def complete(messages: list[dict], timeout: int = 300, kind: str = "summary") -> tuple[dict, dict]:
-    """One chat call answering a JSON object: (parsed reply, raw response); raises on HTTP errors and on a reply that is not JSON."""
-    raw = await call(messages, timeout, kind, response_format={"type": "json_object"})
+async def complete(messages: list[dict], timeout: int = 300, kind: str = "summary", **extra) -> tuple[dict, dict]:
+    """One chat call answering a JSON object: (parsed reply, raw response); raises on HTTP errors and on a reply that is not JSON.
+    extra: more request fields (reasoning_effort)."""
+    raw = await call(messages, timeout, kind, response_format={"type": "json_object"}, **extra)
     return json.loads(raw["choices"][0]["message"]["content"]), raw
 
 

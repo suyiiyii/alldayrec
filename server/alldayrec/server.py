@@ -26,7 +26,8 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import anyio
 import anyio.to_thread
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from starlette.requests import ClientDisconnect
 
 from alldayrec import addresses
 from alldayrec import asr
@@ -138,6 +139,21 @@ async def lasting(device: str):
 async def server_error(request, exc):
     # ServerErrorMiddleware is outside auth.Tenants, including its send wrapper.
     return PlainTextResponse("Internal Server Error", status_code=500, headers={"Cache-Control": "no-store"})
+
+
+@app.exception_handler(ClientDisconnect)
+async def client_gone(request, exc):
+    # a body cut short (/api/chunks, /api/firmware, /api/ask/voice...): nothing reaches the client, which sends it again
+    log.info("%s %s: the client went away before its request was in", request.method, request.url.path)
+    return Response(status_code=499)
+
+
+@app.exception_handler(audio.DecoderTerminated)
+async def decoder_stopped(request, exc):
+    # the decoder got a signal (a service stop): an upload kept nothing and its client sends it again
+    device = request.query_params.get("device")
+    log.warning("%s %s%s: %s; answered 503", request.method, request.url.path, f" ({device})" if device else "", exc)
+    return JSONResponse({"detail": "Audio decoding was stopped; try again"}, status_code=503)
 
 
 app.add_middleware(perf.Requests)  # inside Tenants (added after it): each request's tenant is known

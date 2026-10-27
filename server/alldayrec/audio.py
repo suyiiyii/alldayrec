@@ -299,8 +299,12 @@ def decode_process(args, output):
                 if isinstance(exc, TimeoutError):
                     raise subprocess.TimeoutExpired(args, DECODE_IDLE_S) from None
                 raise
-        if code < 0:
-            raise DecoderTerminated(f"audio decoder terminated by signal {-code}")
+        # a signal (a service stop): it kills ffmpeg only in its first ms; after that ffmpeg's own handler stops it
+        # with partial PCM and exit 255 (fftools/ffmpeg.c), which a file it cannot read never gives (it exits with an
+        # error code below 255, or 0)
+        if code < 0 or code == 255:
+            raise DecoderTerminated(f"audio decoder terminated by signal {-code}" if code < 0 else
+                                    "audio decoder stopped by a signal (exit 255)")
         return code
     # This API is synchronous (also used by offline readers); in the HTTP path
     # its caller already runs in the bounded media pool, away from the event loop.
