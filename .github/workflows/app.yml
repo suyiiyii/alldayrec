@@ -42,3 +42,15 @@ jobs:
       - name: Remove hosted ephemeral Gradle cache
         if: always()
         run: rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"
+
+  # the iPhone's Feishu recorder bean (Bean.swift: frames, crypto vectors, BeanSync against a fake bean): CryptoKit and
+  # CommonCrypto exist on macOS only
+  bean-check:
+    runs-on: macos-15
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: swiftc -o "$RUNNER_TEMP/beancheck" ios/Runner/Bean.swift ios/Runner/Store.swift "$PWD/ios/BeanCheck/main.swift" && "$RUNNER_TEMP/beancheck"

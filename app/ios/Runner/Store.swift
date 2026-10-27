@@ -49,21 +49,33 @@ enum Store {
     return out
   }
 
-  /// 16 kHz mono Opus packets of frameMs each into one Ogg Opus file (RFC 7845), as Store.kt and web/src/lib/ogg.ts do:
-  /// pre-skip 0 (the board's encoder runs on across pieces), granule counting every frame from the piece's start.
-  static func oggOpus(_ frames: [Data]) -> Data {
+  /// 16 kHz Opus packets of `ms` each into one Ogg Opus file (RFC 7845), as Store.kt and web/src/lib/ogg.ts do:
+  /// pre-skip 0 (the board's encoder runs on across pieces), granule counting every frame from the piece's start. The
+  /// bean's (Bean.swift): 20 ms frames, stereo.
+  static func oggOpus(_ frames: [Data], frameMs ms: Int64 = frameMs, channels: UInt8 = 1) -> Data {
     let serial = UInt32.random(in: 0...UInt32.max)
     var head = Data("OpusHead".utf8)
-    for part in [[1, 1], le(UInt16(0)), le(UInt32(16000)), [0, 0, 0]] { head.append(contentsOf: part) }  // version, channels, pre-skip, rate, gain, mapping
+    for part in [[1, channels], le(UInt16(0)), le(UInt32(16000)), [0, 0, 0]] { head.append(contentsOf: part) }  // version, channels, pre-skip, rate, gain, mapping
     var out = Ogg.page([head], flags: 2, granule: 0, serial: serial, seq: 0)
     out += Ogg.page([Data("OpusTags".utf8) + Data(count: 8)], flags: 0, granule: 0, serial: serial, seq: 1)
     var seq: UInt32 = 2
     for i in stride(from: 0, to: frames.count, by: 50) {
       let end = min(i + 50, frames.count)
-      out += Ogg.page(Array(frames[i..<end]), flags: end == frames.count ? 4 : 0, granule: Int64(end) * frameMs * 48, serial: serial, seq: seq)
+      out += Ogg.page(Array(frames[i..<end]), flags: end == frames.count ? 4 : 0, granule: Int64(end) * ms * 48, serial: serial, seq: seq)
       seq += 1
     }
     return out
+  }
+}
+
+/// A value several threads read and one writes (a link's state for the app's page).
+@propertyWrapper final class Shared<T> {
+  private var v: T
+  private let l = NSLock()
+  init(wrappedValue: T) { v = wrappedValue }
+  var wrappedValue: T {
+    get { l.lock(); defer { l.unlock() }; return v }
+    set { l.lock(); v = newValue; l.unlock() }
   }
 }
 
