@@ -1,4 +1,4 @@
-"""The speakers page's groups (#295): an unnamed group that sounds like a name is offered to it without the voices of
+"""The speakers page's groups: an unnamed group that sounds like a name is offered to it without the voices of
 the conversations they share, and the page lists people (named, or enough speech in enough conversations) with the
 other voices folded."""
 import anyio

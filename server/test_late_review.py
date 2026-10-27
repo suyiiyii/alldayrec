@@ -1,7 +1,6 @@
 """Regression cases from the independent late-audio review; all four must-fixes fail on 6a56f55."""
 import datetime as dt
 import json
-import time
 
 import anyio
 import numpy as np

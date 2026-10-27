@@ -19,7 +19,7 @@ JOIN = float(os.environ.get("DIAR_JOIN", "0.35"))  # ... when at least this clos
 MIN_ME = 3        # a cluster needs this many sentences before it can be 我 or a name
 PEOPLE_MIN = float(os.environ.get("PEOPLE_MIN", "0.7"))  # same evidence as OWNER_MIN: other people score <= 0.63 against one person's voiceprint
 # a name also beats the next name and 我 by this much: on one instance 25 voices of others passed PEOPLE_MIN against a
-# person's voiceprint, 5 of them the owner's own (#295)
+# person's voiceprint, 5 of them the owner's own
 PEOPLE_MARGIN = 0.05
 KEEP = 1500       # clustering is O(n^2): a four-hour conversation keeps its latest sentences
 SR = 16000

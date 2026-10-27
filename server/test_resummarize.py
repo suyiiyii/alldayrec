@@ -3,8 +3,6 @@ import datetime as dt
 import io
 import urllib.error
 
-import pytest
-
 from alldayrec import resummarize as r
 
 

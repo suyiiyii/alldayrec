@@ -1,11 +1,11 @@
 """The people bank (the voiceprint of each name the diarists name clusters by) kept as a ledger of what taught it, and
-the two-half test of a voice card (#295).
+the two-half test of a voice card.
 
 The ledger, table enrolled: one row per sentence learnt (row: its rowid in sentences, n 1, e its voiceprint), and per
 name at most one row NULL, n its sentences: the bank as it stood before the ledger (10-25). A name's voiceprint is
 the n-weighted mean of its rows. A rename away from the name (apply_rename: 不是, 拆开, the conversation page) and an
 undo drop the rows of the sentences they move, and the voiceprint is that mean again. A NULL row that drifted (taught
-by renames before the filter, #295) is learnt again from the name's voices; without --apply it only says what it would:
+by renames before the filter) is learnt again from the name's voices; without --apply it only says what it would:
 
     python -m alldayrec.bank relearn <live.db>            per name: n before and after, voices used, cosine old/new
     python -m alldayrec.bank relearn <live.db> --apply    then restart the server: the diarists load the bank at start
@@ -135,14 +135,14 @@ def sync(*names: str) -> None:
 
 
 MIXED_MIN = 20     # voices a card needs before naming it checks for two people in it
-MIXED_BELOW = 0.5  # two halves this little alike (cosine of their centroids) are two people: #295, the one mixed named
+MIXED_BELOW = 0.5  # two halves this little alike (cosine of their centroids) are two people: the one mixed named
                    # card 0.29 and 0.34 on its two recorders; 69 card x recorder splits median 0.72, p10 0.52
 CLASS_MIN = 10     # voices of one recorder (device) a split needs: the halves are compared within one recorder
 HALF_MIN = 3       # a smaller half is an odd voice or two (不是 on the card), not a second person
 
 
 def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] | None:
-    """The two-half test of a card (#295 §4): its voices of each recorder split in two (k-means, device-centred
+    """The two-half test of a card: its voices of each recorder split in two (k-means, device-centred
     voiceprints, vec by conv|label); the recorder whose halves are least alike decides. Two people: the card's voices
     in two, each with the nearer of that split's centroids, the bigger half first. None: one person, or too few voices."""
     from sklearn.cluster import KMeans
