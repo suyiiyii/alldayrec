@@ -10,6 +10,7 @@ AllDayRec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 | `firmware/devkit/src/lib/opus-1.2.1/` | [Opus](https://opus-codec.org/) 1.2.1, Copyright 2001-2011 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo | BSD-3-Clause, [`COPYING`](firmware/devkit/src/lib/opus-1.2.1/COPYING) |
 | `firmware/devkit/src/lib/battery/` | Battery driver, Copyright 2024 Marcus Alexander Tjomsaas | Apache-2.0 (below) |
 | `firmware/devkit/src/sdhc_spi.c` | Zephyr's `drivers/sdhc/sdhc_spi.c` from nRF Connect SDK v2.7.0, Copyright 2022,2024 NXP; changed, each change marked `LR:` | Apache-2.0 (below) |
+| `firmware/arcs-mini3/sdk.patch` | Changes to ListenAI's ARCS SDK `arcs_mini` (release mini-v3.1.0, `b8631d37`). Its context lines are ListenAI's application code (`apps/arcs-mini/`, `src/`, no license header) and [noPoll](https://www.aspl.es/nopoll/) (`arcs-sdk/modules/nopoll/`), Copyright (C) 2024 Advanced Software Production Line, S.L. | The patched files' own terms; noPoll: [LGPL-2.1-or-later](https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html) |
 | `server/alldayrec/vad_postprocessor.py` | [FireRedVAD](https://github.com/FireRedTeam/FireRedVAD) 0.0.2 `fireredvad/core/stream_vad_postprocessor.py`, unchanged, Copyright 2026 Xiaohongshu | Apache-2.0 (below) |
 | `app/android/app/src/main/kotlin/com/suyiiyii/live_record/Bean.kt` (the Feishu recorder bean's protocol: framing, keys, file and audio decryption, parsers) | Ported from [ws/soundcore](https://github.com/ws/soundcore) (`crates/soundcore-d3200-protocol`), Copyright (C) 2026 Will Smidlein, and [Eliqi797/open-feishu-recording-bean](https://github.com/Eliqi797/open-feishu-recording-bean) (`android/.../D3200Protocol.kt`, `DeviceCrypto.kt`), Copyright (c) 2026 Eliqi797. Not affiliated with Anker or Feishu | 0BSD and MIT (below) |
 | `fixtures/bean-crypto.json` | ws/soundcore's `crates/soundcore-d3200-protocol/tests/crypto.json` (byte vectors), unchanged, Copyright (C) 2026 Will Smidlein | 0BSD (below) |
@@ -26,6 +27,7 @@ AllDayRec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 
 - **nRF Connect SDK** v2.7.0 (`sdk-nrf`: LicenseRef-Nordic-5-Clause, for use with Nordic Semiconductor devices only; the firmware runs on the nRF52840) and **Zephyr** (Apache-2.0), for `firmware/devkit` and `firmware/selftest`.
 - **ESP-IDF** (Apache-2.0), for `firmware/blerelay`.
+- **ListenAI ARCS SDK** `arcs_mini` mini-v3.1.0 and its toolchain, for `firmware/arcs-mini3`: `arcs-sdk/` is Apache-2.0, the other modules carry their own LICENSE files.
 - The Python, npm, Flutter, Gradle and Swift packages in the lockfiles, each under its own license (MIT, BSD or Apache-2.0 for the server and web dependencies), among them Nordic's Android and iOS DFU libraries (BSD-3-Clause). On Android, `mobile_scanner` pulls in Google ML Kit, under Google's terms.
 
 Firmware binaries (UF2 or DFU zip) contain Opus and the nRF Connect SDK: distribute them with the Opus notice above and the Nordic license.
