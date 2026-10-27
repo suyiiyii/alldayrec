@@ -29,6 +29,11 @@ def test_cut_rules():
     assert split.plan(reply((0, "交谈"), (100, "交谈")), rows[:4] + rows_at(range(400, 700, 30))) == [], "under 120 s before the cut"
     short = rows_at(range(0, 300, 30)) + rows_at(range(400, 460, 30))
     assert split.plan(reply((0, "交谈"), (400, "交谈")), short) == [], "under 120 s after the cut"
+    tail = rows_at(range(0, 160, 20)) + rows_at(range(260, 360, 20)) + rows_at(range(460, 500, 20))  # speech 160|100|40 s
+    cut = [{"i": 8, "scene": ""}, {"i": 13, "scene": ""}]
+    assert [c["i"] for c in split.keep(tail, cut)] == [8], "a short tail joins the part before, the first cut stands"
+    head = rows_at(range(0, 100, 20)) + rows_at(range(200, 400, 20)) + rows_at(range(500, 700, 20))  # speech 100|200|200 s
+    assert [c["i"] for c in split.keep(head, [{"i": 5}, {"i": 15}])] == [15], "a short first part joins the next"
     no_pause = rows_at(range(0, 700, 30))
     assert split.plan(reply((0, "交谈"), (400, "交谈")), no_pause) == [], "no pause of 60 s: no cut"
     assert split.plan({"parts": "x"}, rows) == [] and split.plan({}, rows) == []
@@ -55,7 +60,7 @@ def long_conv(store, monkeypatch):
         db.insert_sentences(t, rows)
         db.insert_conversation(t, dict(id=A, start=iso(0), end=rows[-1]["end"], participants=["S1", "S2", "我"],
                                        sentences=len(rows), speech_s=640, device=D))
-        db.put_summary({"conversation": A, "status": "done", "title": "whole", "todos": [
+        db.put_summary({"conversation": A, "status": "done", "title": "whole", "prompt_version": 13, "todos": [
             {"owner": "我", "to": "S1", "text": "first", "at": iso(60)}, {"owner": "我", "to": "S2", "text": "second", "at": iso(630)}]}, t)
         db.put_name_hints({"conv": A, "names": [{"who": "S1", "name": "a", "at": iso(30)}, {"who": "S2", "name": "b", "at": iso(630)}]}, t)
         db.insert_voices(t, [{"conv": A, "label": "S1", "device": "live", "e": E1, "k": 1, "level": -30.0},
@@ -93,7 +98,7 @@ def test_split_moves_every_reference(long_conv):
     assert (b["start"], b["participants"], b["device"]) == (iso(600), ["S2", "我"], D)
     assert len(core.conversation_rows(a)) == 17 and core.conversation_rows(b)[0]["start"] == iso(600) and len(core.conversation_rows(b)) == 17
     sa, sb = db.summary(A), db.summary(P2)
-    assert sa["status"] == sb["status"] == "pending" and sa["title"] == "whole"
+    assert sa["status"] == sb["status"] == "pending" and sa["title"] == "whole" and sb["prompt_version"] == 13
     assert db.todo_ids(A, sa["todos"]) == [tids[0]] and [t["text"] for t in sb["todos"]] == ["second"]
     moved = db.todo_ids(P2, sb["todos"])[0]
     assert moved.startswith(P2 + ":split-")
@@ -113,8 +118,19 @@ def test_split_moves_every_reference(long_conv):
     assert [tuple(r) for r in db.conn().execute("SELECT device, at FROM walls")] == [(D, iso(600))]
     for cid in (A, P2):
         assert split.checked(db.conversation(cid), db.kv(f"conversation_revision:{cid}"))
-    assert anyio.run(split.check, c, None) == [] and len(long_conv["calls"]) == 2, "a stale revision applies nothing"
     assert len(db.conversations()) == 2
+
+
+def test_change_during_the_call_applies_nothing(long_conv):
+    reply = long_conv["mp"].reply
+
+    async def complete(messages, timeout=300, kind="summary", **extra):
+        db.put_kv(f"conversation_revision:{A}", 1)  # late audio merged into it meanwhile
+        return reply, {}
+    long_conv["mp"].setattr(summary, "complete", complete)
+    before = db.summary(A)
+    assert anyio.run(split.check, db.conversation(A), None) == []
+    assert len(db.conversations()) == 1 and db.kv(f"split_checked:{A}") is None and db.summary(A) == before
 
 
 def test_no_split_on_error_or_one_part(long_conv):
@@ -125,6 +141,7 @@ def test_no_split_on_error_or_one_part(long_conv):
     long_conv["mp"].reply = {"parts": [{"start": "10:00:00", "kind": "交谈", "scene": "one"}]}
     assert anyio.run(split.check, c, None) == [] and split.checked(c, None)
     assert db.summary(A)["status"] == "done" and len(db.conversations()) == 1
+    assert not split.due({**c, "speech_s": 2 * split.PART_S - 1}), "no speech for two parts: no call"
     long_conv["mp"].setattr(split, "SPLIT_MIN_S", 0)
     assert not split.due(c)
 

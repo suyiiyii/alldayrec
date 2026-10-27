@@ -86,7 +86,7 @@ def transcript(rows: list[dict]) -> str:
 
 async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", **extra) -> dict:
     """One chat call, extra fields as they are (tools, response_format): the raw response; raises on HTTP errors. Kept
-    in the calls table as `kind` (summary, hints, profile, recap, live, ask): time, tokens, the error, never the text;
+    in the calls table as `kind` (summary, split, hints, profile, recap, live, ask): time, tokens, the error, never the text;
     a call cut off (the task cancelled) too, as CancelledError."""
     req = {"model": os.environ["LLM_MODEL"], "messages": messages, **extra}
     t, usage, err = time.perf_counter(), {}, None

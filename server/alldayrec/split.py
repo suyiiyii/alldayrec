@@ -14,7 +14,8 @@ Backfill on the running server (POST /api/split), one conversation at a time:
 
     cd server && uv run python -m alldayrec.split --since 2026-10-20 [--apply]
 
-LIVE_RECORD_URL selects the server, LIVE_RECORD_TOKEN (else stdin's first line) its token. Without --apply it is a dry
+Run it on the server's host against its loopback address (LIVE_RECORD_URL=http://127.0.0.1:8770): a proxy in front
+cuts a request this long. LIVE_RECORD_TOKEN (else stdin's first line) is the token. Without --apply it is a dry
 run: it still makes the model calls (kind split in the calls table) but writes nothing. It prints each split's cut
 times and scene words, never transcript text. --apply splits each conversation in its own transaction and queues the
 parts' summaries.
@@ -64,8 +65,9 @@ kind 看这一整段主要是什么，从这五个里选一个：交谈（「我
 
 
 def due(c: dict) -> bool:
-    """Long enough to check; a conversation from before per-device pipelines (no device) never is."""
-    return SPLIT_MIN_S > 0 and bool(c.get("device")) and (P(c["end"]) - P(c["start"])).total_seconds() >= SPLIT_MIN_S
+    """Long enough to check, with speech for two parts; a conversation from before per-device pipelines (no device) never is."""
+    return (SPLIT_MIN_S > 0 and bool(c.get("device")) and (c.get("speech_s") or 0) >= 2 * PART_S
+            and (P(c["end"]) - P(c["start"])).total_seconds() >= SPLIT_MIN_S)
 
 
 def merged(parts: list[dict]) -> list[dict]:
@@ -128,12 +130,15 @@ def speech(rows: list[dict]) -> float:
 
 
 def keep(rows: list[dict], cuts: list[dict]) -> list[dict]:
-    """Only cuts that leave PART_S of speech on both sides; a short part stays with the one before it."""
-    out, edges = [], [c["i"] for c in cuts] + [len(rows)]
-    for k, c in enumerate(cuts):
-        start = out[-1]["i"] if out else 0
-        if speech(rows[c["i"]:edges[k + 1]]) >= PART_S and speech(rows[start:c["i"]]) >= PART_S:
-            out.append(c)
+    """Only cuts that leave every part PART_S of speech: from the end, a short part joins the one before it; then a short
+    first part joins the next."""
+    out, end = [], len(rows)
+    for c in reversed(cuts):
+        if speech(rows[c["i"]:end]) >= PART_S:
+            out.insert(0, c)
+            end = c["i"]
+    while out and speech(rows[:out[0]["i"]]) < PART_S:
+        out.pop(0)
     return out
 
 
@@ -212,7 +217,8 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
             t.execute("UPDATE stars SET conv = ? WHERE id = ?", (where(starts.get(sid)), sid))
         db.put_summary({**s, "status": "pending", "error": None, "todos": todos[0]}, t)
         for pid, ts in zip(ids[1:], todos[1:]):
-            db.put_summary({"conversation": pid, "status": "pending", "todos": ts}, t)
+            # its version too: a part whose summary keeps failing is kept "done" with these todos (due_todos reads them)
+            db.put_summary({"conversation": pid, "status": "pending", "prompt_version": s.get("prompt_version"), "todos": ts}, t)
         if h := db.name_hints(cid).get(cid):
             for pid in ids:
                 db.put_name_hints({**h, "conv": pid, "names": [x for x in h.get("names") or [] if where(x.get("at")) == pid]}, t)
@@ -289,7 +295,9 @@ def checked(c: dict, revision) -> bool:
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="python -m alldayrec.split", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="python -m alldayrec.split", description=__doc__.split("\n\n")[0],
+                                epilog="Run it on the server's host with LIVE_RECORD_URL=http://127.0.0.1:8770 (its loopback "
+                                       "address): a proxy in front cuts a request this long.")
     p.add_argument("--since", required=True, type=dt.date.fromisoformat, help="conversations started on or after this day (YYYY-MM-DD)")
     p.add_argument("--apply", action="store_true", help="split them; without it a dry run that writes nothing")
     a = p.parse_args(argv)

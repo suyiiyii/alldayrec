@@ -480,6 +480,7 @@
       "final": "Final",
       "draft": "Draft",
       "summary": "Summary",
+      "split": "Conversation split",
       "hints": "Name hints",
       "profile": "Profiles",
       "recap": "Daily recap",
