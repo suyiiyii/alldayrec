@@ -116,7 +116,7 @@ class UploaderTest {
     }
 
     /** The piece lengths in an upload's answer (shorter while the live page is open) go to the running slicer and to the
-     *  prefs a restart reads; an answer without them changes nothing. */
+     *  prefs a restart reads; an answer without them changes nothing. Its `watched` is what BeanSync asks (Io.watched). */
     @Test fun slices() {
         val dir = kotlin.io.path.createTempDirectory().toFile()
         val kv = java.util.concurrent.ConcurrentHashMap<String, Int>(mapOf("foreground" to 1, "background" to 20, "screenOff" to 60))
@@ -134,7 +134,9 @@ class UploaderTest {
                 val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
                     .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
                 repeat(n) { r.read() }
-                val body = if ("start=5000" in path) """{"seconds":1.0,"slice":{"foreground":1,"background":2,"screenOff":2}}""" else """{"seconds":1.0}"""
+                val body = if ("start=5000" in path) """{"seconds":1.0,"slice":{"foreground":1,"background":2,"screenOff":2,"watched":true}}"""
+                    else if ("start=9000" in path) """{"seconds":1.0,"slice":{"foreground":1,"background":20,"screenOff":60,"watched":false}}"""
+                    else """{"seconds":1.0}"""
                 c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
             } } catch (_: Exception) {}
         }.start()
@@ -153,6 +155,9 @@ class UploaderTest {
             sent(5000)
             assertEquals(listOf(1, 2, 2), listOf(slicer.fgS, slicer.bgS, slicer.offS))
             assertEquals(mapOf("foreground" to 1, "background" to 2, "screenOff" to 2), kv.toMap())
+            assertTrue("watched for a minute from the answer", Uploader.watchedUntil > 0)
+            sent(9000)
+            assertEquals(0L, Uploader.watchedUntil)
         } finally { up.running = false; up.join(2000); http.close(); RecorderService.slicer = null; dir.deleteRecursively() }
     }
 }

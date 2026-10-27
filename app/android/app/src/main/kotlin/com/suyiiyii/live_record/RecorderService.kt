@@ -313,6 +313,8 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     companion object {
         const val MAX_BATCH = 30        // pieces in one request
         const val BATCH_GAP_MS = 1500L  // starts further apart than this are not one stretch (only 1 s pieces get batched)
+        /** The latest upload's answer said the live page is open (slice.watched): until a minute after it (elapsedRealtime). */
+        @Volatile var watchedUntil = 0L
         /** The pieces waiting, oldest first: the directory is the queue. */
         fun queue(dir: File) = dir.listFiles { f -> f.name.endsWith(".ogg") }?.sortedBy { it.name } ?: emptyList()
         /** A piece's file name is its start (ms) and, for the BLE recorder, @ its name: start@LR-P1-XXXX.ogg */
@@ -452,6 +454,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
      *  that asks /api/client-config does not run in the background or with the screen off. */
     private fun slices(reply: ByteArray) {
         val s = try { org.json.JSONObject(String(reply)).optJSONObject("slice") } catch (_: Exception) { null } ?: return
+        watchedUntil = if (s.optBoolean("watched")) android.os.SystemClock.elapsedRealtime() + 60_000 else 0
         val fg = s.optInt("foreground"); val bg = s.optInt("background"); val off = s.optInt("screenOff")
         if (minOf(fg, bg, off) < 1) return
         RecorderService.slicer?.apply { fgS = fg; bgS = bg; offS = off }

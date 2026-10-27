@@ -262,6 +262,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun now() = System.currentTimeMillis()
         override fun monotonicNow() = SystemClock.elapsedRealtime()
         override fun liveUnits() = sliceS() * 50
+        override fun watched() = SystemClock.elapsedRealtime() < Uploader.watchedUntil
         override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) {
             Log.i("live-record", "bean $kind: $text")
             DeviceLog.app(name, kind, text, level,
