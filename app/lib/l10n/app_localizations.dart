@@ -1265,7 +1265,7 @@ abstract class AppLocalizations {
   /// No description provided for @keepRecordingsIos.
   ///
   /// In zh, this message translates to:
-  /// **'上传后存到「文件」App › 我的 iPhone › alldayrec › recordings › 日期'**
+  /// **'上传后存到「文件」App › 我的 iPhone › AllDayRec › recordings › 日期'**
   String get keepRecordingsIos;
 
   /// No description provided for @keepRecordingsAndroid.
@@ -1529,7 +1529,7 @@ abstract class AppLocalizations {
   /// No description provided for @linkNoPermission.
   ///
   /// In zh, this message translates to:
-  /// **'没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙'**
+  /// **'没有蓝牙权限：在 设置 › AllDayRec 里允许蓝牙'**
   String get linkNoPermission;
 
   /// No description provided for @linkUnbound.
@@ -1679,7 +1679,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanRecorderHelp.
   ///
   /// In zh, this message translates to:
-  /// **'手机连上录音豆就让它开始录音，按一下按键停止。手机在附近时边录边传。手机不在时录的，按键停下后补传。服务端收全的录音会从豆子上删掉。'**
+  /// **'手机连上录音豆就让它开始录音，按一下按键停止，到这次连接断开为止：再连上时手机会让它重新开始录音。手机在附近时边录边传。手机不在时录的，按键停下后补传。服务端收全的录音会从豆子上删掉。'**
   String get beanRecorderHelp;
 
   /// No description provided for @beanFetching.

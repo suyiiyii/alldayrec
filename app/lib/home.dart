@@ -438,6 +438,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final battery = hw['battery'] as int?, rssi = hw['rssi'] as int?, eta = hw['backlog_eta_s'] as num?;
     final left = ((s['syncTotal'] as num?) ?? 0) - ((s['syncDone'] as num?) ?? 0), pending = (s['pending'] as num?) ?? 0;
     final pausedMin = pauseLeftMin(s);
+    final bean = (hw['name'] as String?)?.startsWith('D3200-') == true;  // a Feishu recorder bean: its own button, no pause of ours
     final tiles = [
       if (battery != null)
         statTile(context,
@@ -460,7 +461,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     ];
     return [
       ..._tileRow(tiles),
-      if (connected) ...[
+      if (connected && !bean) ...[
         const SizedBox(height: 12),
         Align(alignment: AlignmentDirectional.centerStart, child: PauseButton(paused: pausedMin > 0, onDone: _pauseNote, labels: true)),
       ],
