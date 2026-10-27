@@ -131,7 +131,9 @@ def test_import_health_matches_legacy(seconds):
     with tempfile.TemporaryFile() as pcm:
         pcm.write(x.tobytes())
         pcm.seek(0)
-        assert audio.file_health(pcm, len(x)) == audio.health(x)
+        h = audio.file_health(pcm, len(x))
+        assert h == audio.health(x)
+        assert all(isinstance(v, (int, float)) for v in h), [type(v) for v in h]  # sqlite3 stores a numpy int as a BLOB
 
 
 def legacy_gain(self, x):
