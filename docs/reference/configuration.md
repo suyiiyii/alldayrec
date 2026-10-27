@@ -59,7 +59,7 @@ type: reference
 | `MODELS_DIR` | 空 | `DATA_DIR/models` | 模型文件目录，绝对路径、可写；缺的文件启动时下载到这里。Docker 里固定为 `/data/models` |
 | `PORT` | `8770` | `8770` | 监听端口。Docker Compose 里固定为 `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | 监听地址；反向代理在另一台机器上时设 `0.0.0.0`。Docker Compose 里固定为 `0.0.0.0` |
-| `HOLD_STALE_S` | `1200` | `1200` | 手机持续上报补传 hold，但 hold 之前这么多秒没有新音频到达，就继续定稿；静默手机仍等最多 12 小时，静默超过 5 分钟后回来重新获得宽限期。之后到的更早录音只保存供回放，不再转写。设得很大（如 `315360000`）可实际关闭无进展超时；`0` 会立即过期，不是关闭 |
+| `HOLD_STALE_S` | `1200` | `1200` | 手机持续上报补传 hold，但 hold 之前这么多秒没有新音频到达，就继续定稿；静默手机仍等最多 12 小时，静默超过 5 分钟后回来重新获得宽限期。之后到的更早录音按迟到音频补转写（见 `LATE_SETTLE_S`）。设得很大（如 `315360000`）可实际关闭无进展超时；`0` 会立即过期，不是关闭 |
 | `DRAFT_ENGINE` | 空 | 同 `ENGINE` | 初稿层（页面开着时）的引擎；另可设 `qwen-stream`：页面开着时把音频流式推给千问（百炼 qwen-audio-3.1-asr-flash-streaming，用 `DASHSCOPE_API_KEY`），边说边出字 |
 | `ENGINE_FALLBACK` | 空 | 无 | `ENGINE` 或 `DRAFT_ENGINE` 在某个窗口上失败（402、451、5xx、超时）时改用的引擎；空着就稍后重试 |
 | `VOLC_ASR_KEY` | 空 | — | 火山方舟 Agent Plan 的 API key，`volc` 用 |

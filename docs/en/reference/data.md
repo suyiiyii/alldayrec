@@ -56,12 +56,13 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `name_hints` | What each label was called in a conversation (used only to suggest names) |
 | `profiles` | People cards of people with recognized names, each row with its source |
 | `pieces` | The index of uploaded pieces, which is also the processing queue |
-| `late_spans` | Exact late-audio intervals, processing state and retry counts |
-| `processed_audio` | Actual processed coverage, including pauses, committed with final rows; prevents replay after restart |
-| `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation |
+| `late_spans` | Exact late-audio intervals, processing state and retry counts (since v0.4.0) |
+| `processed_audio` | Actual processed coverage, including pauses, committed with final rows; prevents replay after restart (since v0.4.0) |
+| `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
 | `stars` | Starred sentences: the sentence id, its conversation, when it was starred (since v0.3.0) |
+| `mcp_links` | AI connection links: the name, the secret's SHA-256 hash and first 8 characters, when it was created and last used; never the secret itself (since v0.4.0) |
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |
