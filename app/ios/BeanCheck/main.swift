@@ -46,7 +46,8 @@ for cmd in [0x0B87, 0x0B8B, 0x0B01, 0x01B8, 0x1882, 0x1A10, 0x1A05, 0x1A02, 0x1A
   throwsError("\(cmd)") { _ = try Bean.frame(cmd >> 8, cmd & 255) }
 }
 func made(_ type: UInt8, _ id: UInt8, _ p: [UInt8] = []) -> [UInt8] {
-  let b: [UInt8] = [0x08, 0xEE, 0, 0, 0, type, id, UInt8(10 + p.count), 0] + p
+  let head: [UInt8] = [0x08, 0xEE, 0, 0, 0, type, id, UInt8(10 + p.count), 0]
+  let b = head + p
   return b + [sum(b)]
 }
 check(Bean.allowed(made(0x0B, 0x87)), false)  // a frame made some other way: well formed, and still not sent
@@ -148,8 +149,8 @@ final class FakeBean: BeanIo {
     case 0x0101: push(0x0101, info())
     case 0x01A6: push(0x01A6, [])
     case 0x1A0E:
-      push(0x1A0E, Bean.u16(p, 0) > 0 ? Bean.u16le(0) + Bean.le32(open) + [0, 0, 0, 0]
-           : listed.reduce(Bean.u16le(listed.count)) { $0 + Bean.le32($1.0) + Bean.le32($1.1) } + Bean.le32(open) + [0, 0, 0, 0])
+      let page: [UInt8] = Bean.u16(p, 0) > 0 ? Bean.u16le(0) : listed.reduce(Bean.u16le(listed.count)) { $0 + Bean.le32($1.0) + Bean.le32($1.1) }
+      push(0x1A0E, [page, Bean.le32(open), [0, 0, 0, 0]].flatMap { $0 })
     case 0x1A10:
       let id = Bean.u32(p, 0)
       deleted.append(id)
@@ -202,7 +203,8 @@ final class FakeBean: BeanIo {
   /// A frame from the bean (status 1: done), in notifications of up to 200 B.
   func push(_ cmd: Int, _ payload: [UInt8], wait: Int64 = 0, status: UInt8 = 1) {
     let n = payload.count + 10
-    let f: [UInt8] = [0x09, 0xFF, 0, 0, status, UInt8(cmd >> 8), UInt8(cmd & 255), UInt8(n & 255), UInt8(n >> 8)] + payload
+    let head: [UInt8] = [0x09, 0xFF, 0, 0, status, UInt8(cmd >> 8), UInt8(cmd & 255), UInt8(n & 255), UInt8(n >> 8)]
+    let f = head + payload
     let whole = f + [sum(f)]
     for (i, start) in stride(from: 0, to: whole.count, by: 200).enumerated() {
       out.append((Array(whole[start..<min(start + 200, whole.count)]), i == 0 ? wait : 0))
@@ -215,7 +217,8 @@ final class FakeBean: BeanIo {
     if fileKeys[file] == nil { fileKeys[file] = (random(32), random(16)) }
     let (k, n) = fileKeys[file]!
     let sn = random(16)
-    push(0x1A07, Bean.le32(file) + Bean.le32(size) + n + (try! Bean.ctr(session, sn, Array("soundcored3200".utf8) + k)) + sn + [code])
+    let wrapped: [UInt8] = try! Bean.ctr(session, sn, Array("soundcored3200".utf8) + k)
+    push(0x1A07, [Bean.le32(file), Bean.le32(size), n, wrapped, sn, [code]].flatMap { $0 })
   }
 
   /// Units three to a frame, 20 ms each; the audio says its file and seq.
@@ -224,16 +227,18 @@ final class FakeBean: BeanIo {
     for (i, c) in stride(from: 0, to: seqs.count, by: 3).map({ Array(seqs[$0..<min($0 + 3, seqs.count)]) }).enumerated() {
       push(0x1A08, c.reduce([UInt8]()) { acc, s in
         let flags = UInt8((s == last ? 4 : s == 0 ? 2 : 0) | (marks.contains(s) ? 1 : 0))
-        return acc + Bean.le32(s) + [flags] + (try! Bean.ctr(k, Bean.iv(n, s), audio(file, s))) + [0]
+        let enc: [UInt8] = try! Bean.ctr(k, Bean.iv(n, s), audio(file, s))
+        return acc + [Bean.le32(s), [flags], enc, [0]].flatMap { $0 }
       }, wait: 20 * Int64(c.count) + (i == 0 ? wait : 0))
     }
   }
 
-  func complete(_ file: Int64) { push(0x1A0A, [0] + Bean.le32(0) + Bean.le32(file)) }
+  func complete(_ file: Int64) { push(0x1A0A, [[0], Bean.le32(0), Bean.le32(file)].flatMap { $0 }) }
   func rotation(_ file: Int64, wait: Int64 = 0) { push(0x1A06, Bean.le32(file) + [0], wait: wait) }
   private func audio(_ file: Int64, _ seq: Int64) -> [UInt8] {
     let s = UInt32(seq)
-    return [0xBC, UInt8(s >> 24), UInt8(s >> 16 & 255), UInt8(s >> 8 & 255), UInt8(s & 255), UInt8(file % 251)] + [UInt8](repeating: 0, count: 154)
+    let head: [UInt8] = [0xBC, UInt8(s >> 24), UInt8(s >> 16 & 255), UInt8(s >> 8 & 255), UInt8(s & 255), UInt8(file % 251)]
+    return head + [UInt8](repeating: 0, count: 154)
   }
 }
 
@@ -262,7 +267,7 @@ func startMs(_ f: URL) -> Int64 { Int64(f.deletingPathExtension().lastPathCompon
 func seqOf(_ p: [UInt8]) -> Int64 { Int64(p[1]) << 24 | Int64(p[2]) << 16 | Int64(p[3]) << 8 | Int64(p[4]) }
 
 // parsing
-let unit = Bean.le32(7) + [5] + (0..<160).map { UInt8($0) } + [0]
+let unit: [UInt8] = [Bean.le32(7), [5], (0..<160).map { UInt8($0) }, [0]].flatMap { $0 }
 let s0 = try Bean.slices(unit + unit)[0]
 check([s0.seq, Int64(s0.flags)], [7, 5])
 check(s0.data, (0..<160).map { UInt8($0) })
@@ -272,7 +277,7 @@ check(hw0["battery"] as? Int, 80); check(hw0["charge"] as? String, "battery"); c
 check(hw0["free_kb"] as? Int64, 20_000_000); check(hw0["case_battery"] as? Int, 60); check(hw0["recording"] as? Bool, false)
 check(Bean.serial(FakeBean(0).info()), "fake000000000001")
 check([Bean.pct(0), Bean.pct(9), Bean.pct(100)], [10, 100, 100])
-let l = try Bean.listing(Bean.u16le(2) + Bean.le32(11) + Bean.le32(2000) + Bean.le32(12) + Bean.le32(4000) + Bean.le32(13) + [0, 0, 0, 0])
+let l = try Bean.listing([Bean.u16le(2), Bean.le32(11), Bean.le32(2000), Bean.le32(12), Bean.le32(4000), Bean.le32(13), [0, 0, 0, 0]].flatMap { $0 })
 check(l.files.map { [$0.id, $0.ms] }, [[11, 2000], [12, 4000]])
 check(l.open, 13)
 // the name is from the MAC in the manufacturer data (company id first, as iOS gives it), whatever address it comes from

@@ -54,8 +54,9 @@ enum Bean {
 
   private static func build(_ type: Int, _ id: Int, _ payload: [UInt8]) -> [UInt8] {
     let n = payload.count + 10
-    let b: [UInt8] = [0x08, 0xEE, 0, 0, 0, UInt8(truncatingIfNeeded: type), UInt8(truncatingIfNeeded: id),
-                      UInt8(truncatingIfNeeded: n), UInt8(truncatingIfNeeded: n >> 8)] + payload
+    let head: [UInt8] = [0x08, 0xEE, 0, 0, 0, UInt8(truncatingIfNeeded: type), UInt8(truncatingIfNeeded: id),
+                         UInt8(truncatingIfNeeded: n), UInt8(truncatingIfNeeded: n >> 8)]
+    let b = head + payload
     return b + [sum(b, 0, b.count)]
   }
 
@@ -163,7 +164,8 @@ enum Bean {
   static func iv(_ nonce: [UInt8], _ seq: Int64) throws -> [UInt8] {
     guard (0...maxSeq).contains(seq) else { throw Fail("unit \(seq) out of range") }
     let c = UInt32(truncatingIfNeeded: seq * 10)
-    return Array((nonce + [UInt8](repeating: 0, count: 12)).prefix(12)) + [UInt8(c >> 24), UInt8(c >> 16 & 255), UInt8(c >> 8 & 255), UInt8(c & 255)]
+    let counter: [UInt8] = [UInt8(c >> 24), UInt8(c >> 16 & 255), UInt8(c >> 8 & 255), UInt8(c & 255)]
+    return Array((nonce + [UInt8](repeating: 0, count: 12)).prefix(12)) + counter
   }
 
   //
