@@ -744,16 +744,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardFullTile => 'Full';
 
   @override
-  String get cardFull => 'Card full';
-
-  @override
   String get cardFullSub => 'Offline recording stopped';
 
   @override
   String get cardUsbTile => 'USB disk';
-
-  @override
-  String get cardUsb => 'Card in USB disk mode';
 
   @override
   String get cardUsbSub => 'Offline recording paused';
@@ -762,17 +756,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardNoneTile => 'No card';
 
   @override
-  String get cardNone => 'No card in';
-
-  @override
   String get cardNoneSub =>
       'No card, or not seated: live upload only, nothing is recorded while the phone is away';
 
   @override
   String get cardErrorTile => 'Error';
-
-  @override
-  String get cardError => 'Card error';
 
   @override
   String get cardErrorSub =>

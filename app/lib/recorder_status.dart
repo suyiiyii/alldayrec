@@ -19,14 +19,14 @@ String? powerText(AppLocalizations l, Map hw) {
 /// A BLE recorder's card when it does not record to it: its status' store is an errno. An error with nothing mounted
 /// this boot (total_kb 0) is no card or one not seated (-19; a mount that timed out, -116: LR-P3-2420 without one,
 /// 10-07); -28 full; -16 lent as a USB disk; any other error a card that failed once mounted. tile: under 存储卡.
-({String tile, String line, String sub})? cardState(AppLocalizations l, Map hw) {
+({String tile, String sub})? cardState(AppLocalizations l, Map hw) {
   final store = hw['store'] as int?, total = (hw['total_kb'] as num?) ?? 0;
   if (store == null || store == 0) return null;
   return switch (store) {
-    -28 => (tile: l.cardFullTile, line: l.cardFull, sub: l.cardFullSub),
-    -16 => (tile: l.cardUsbTile, line: l.cardUsb, sub: l.cardUsbSub),
-    _ when total == 0 => (tile: l.cardNoneTile, line: l.cardNone, sub: l.cardNoneSub),
-    _ => (tile: l.cardErrorTile, line: l.cardError, sub: l.cardErrorSub),
+    -28 => (tile: l.cardFullTile, sub: l.cardFullSub),
+    -16 => (tile: l.cardUsbTile, sub: l.cardUsbSub),
+    _ when total == 0 => (tile: l.cardNoneTile, sub: l.cardNoneSub),
+    _ => (tile: l.cardErrorTile, sub: l.cardErrorSub),
   };
 }
 
