@@ -1040,6 +1040,25 @@ class BeanTest {
         }
     }
 
+    /** A read the bean honoured (its first unit the offset asked) clears the file's misses: only misses in a row switch
+     *  it to realtime=1. */
+    @Test fun honouredFillClearsMisses() {
+        val r = rec(100, listOf(0L to 1000L), watched = false)
+        var n = 0
+        r.bean.onTransfer = { file, from, realtime ->
+            when (++n) {
+                3 -> { r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script.addFirst { throw IOException("drop") } }
+                6 -> { r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script.clear(); r.bean.script += { throw IOException("done") } }
+                else -> r.bean.header(file, 0xFFFFFFFFL, code = 2)
+            }
+        }
+        repeat(300) { r.bean.script += {} }
+        for (i in 0..19) if (assertThrows(Exception::class.java) { r.sync.session(0, "") }.message == "done") break
+        assertEquals(List(6) { false }, r.bean.transfers.map { it.third })
+        assertEquals(List(6) { "fill_tail" }, r.reasons)
+        assertEquals(listOf(0L, 1060L), r.f.have.single().toList())
+    }
+
     /** The live page closes during a live read it began with a hole left behind (live_now): the read ends, the hole
      *  is filled with a cut, then the tail, on live. */
     @Test fun watchedEndFillsTheHole() {

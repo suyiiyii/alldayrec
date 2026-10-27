@@ -703,7 +703,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     /** A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole
-     *  where it was (the bean did not honour the offset). After TRIES that file is read realtime=1, as before (plan()). */
+     *  where it was (the bean did not honour the offset). After TRIES in a row (a read from its offset clears them:
+     *  first()) that file is read realtime=1, as before (plan()). */
     private fun missed(x: Xfer) { if (x.live && !x.realtime) fills[x.file] = (fills[x.file] ?: 0) + 1 }
 
     private fun file(id: Long, anchor: Long) = files.getOrPut(id) { F(anchor) }
@@ -742,6 +743,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop. */
     private fun first(x: Xfer, s: Bean.Slice, audio: ByteArray) {
         x.first = s.seq
+        if (x.live && !x.realtime && s.seq == x.from) fills.remove(x.file)  // the bean honoured the offset: misses start again
         val now = io.now()
         val byId = x.file * 1000
         val est = now - s.seq * Bean.FRAME_MS
