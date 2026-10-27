@@ -122,7 +122,7 @@
     "ios": "iPhone：App 没有上架 App Store，要用 Xcode 从源码构建，步骤见 {link}。",
     "iosLink": "说明",
     "scan": "扫码登录",
-    "scanHow": "在 App 的「设置 › 扫码登录」里扫这个二维码，服务器地址和 Token 会自动填好",
+    "scanHow": "在 App 的「设置 › 扫码登录」里扫这个二维码，服务器地址和 Token 会自动填好；用手机相机扫，会打开已登录的网页",
     "which": "手机用哪个地址",
     "unreachable": "手机连不上这个地址",
     "custom": "自己填",

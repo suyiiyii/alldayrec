@@ -122,7 +122,7 @@
     "ios": "iPhone: the app isn't on the App Store, so build it from source with Xcode. See the {link}.",
     "iosLink": "instructions",
     "scan": "Scan to sign in",
-    "scanHow": "In the app, open Settings › Scan to sign in and scan this QR code. The server address and token fill in by themselves",
+    "scanHow": "In the app, open Settings › Scan to sign in and scan this QR code. The server address and token fill in by themselves. Scan it with the phone camera to open this web app signed in",
     "which": "Address for the phone",
     "unreachable": "A phone can't reach this address",
     "custom": "Enter it yourself",
