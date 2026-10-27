@@ -26,7 +26,8 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private var restored: [CBPeripheral] = []  // on q: what iOS kept for the app when it relaunched it
   private var advFlags = -2, advConnectable: Bool?  // on q: what the bean advertised last, logged when it changes
   @Shared private var on = true
-  @Shared private var poweredOn = false
+  @Shared private var radio: CBManagerState = .unknown  // as the central last said
+  private var poweredOn: Bool { radio == .poweredOn }
   @Shared private var peripheral: CBPeripheral?
   @Shared private var cmd: CBCharacteristic?
   @Shared private var mtu = 23
@@ -82,7 +83,11 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private func loop() {
     while on {
       guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else { linkState = ["code": "unbound"]; return }
-      guard poweredOn else {
+      switch radio {
+      case .poweredOn: break
+      case .unknown, .resetting: Thread.sleep(forTimeInterval: 0.2); continue  // the central's first word still to come
+      case .unauthorized: linkState = ["code": "noPermission"]; Thread.sleep(forTimeInterval: 5); continue
+      default:
         natural = false  // a rollover allowance is used up even while Bluetooth is off (as on Android)
         linkState = ["code": "bluetoothOff"]
         Thread.sleep(forTimeInterval: 5)
@@ -244,7 +249,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   func centralManagerDidUpdateState(_ c: CBCentralManager) {
     Ble.log("bean central state \(c.state.rawValue)")
-    poweredOn = c.state == .poweredOn
+    radio = c.state
     switch c.state {
     case .poweredOn:
       for p in restored where p.state != .disconnected { c.cancelPeripheralConnection(p) }  // a session starts afresh
@@ -252,7 +257,6 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     case .poweredOff, .resetting:  // the link goes without a callback: the session ends at its next receive
       abort()
       notes.put(nil)
-    case .unauthorized: linkState = ["code": "noPermission"]
     default: break
     }
   }

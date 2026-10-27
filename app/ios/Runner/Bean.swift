@@ -319,6 +319,7 @@ final class BeanSync {
   private var unknown: Set<Int> = []
   private var run: [Data] = []
   private var runFile: Int64 = -1, runFrom: Int64 = 0
+  private var writeFailed = false  // said once until a piece is written again
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
                                  // reconnects (a cut re-pull, a stalled transfer)
@@ -726,7 +727,14 @@ final class BeanSync {
     guard let f = files[runFile] else { run = []; return }
     let start = f.anchor + runFrom * Bean.frameMs
     // one atomic write: a piece is whole or not there (Uploader takes <start>@<tag>.ogg)
-    try? Store.oggOpus(run, frameMs: Bean.frameMs, channels: 2).write(to: chunks.appendingPathComponent("\(start)@\(tag).ogg"), options: .atomic)
+    do {
+      try Store.oggOpus(run, frameMs: Bean.frameMs, channels: 2).write(to: chunks.appendingPathComponent("\(start)@\(tag).ogg"), options: .atomic)
+      writeFailed = false
+    } catch {  // the units stay in the run, not marked had: the next flush writes them
+      if !writeFailed { log("bean_piece", "录音豆的一段写不进手机（\(error)），留着再写", "warn") }
+      writeFailed = true
+      return
+    }
     add(f, runFrom, runFrom + Int64(run.count))
     run = []
     save()
