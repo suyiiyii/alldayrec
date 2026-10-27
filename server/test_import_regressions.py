@@ -77,15 +77,18 @@ def test_decode_timeout_has_own_http_error(tmp_path, monkeypatch):
     assert not (t.recordings / 'rejected').exists()
 
 
-def test_stopped_decoder_is_503_without_traceback(tmp_path, monkeypatch, caplog):
+# a signal in ffmpeg's first ms kills it; later its own handler exits 255, with part of the PCM written
+@pytest.mark.parametrize('stop', ['os.kill(os.getpid(), signal.SIGTERM)', 'sys.exit(255)'])
+def test_stopped_decoder_is_503_without_traceback(tmp_path, monkeypatch, caplog, stop):
     t = db.open_db(tmp_path / 'live.db')
-    def stopped(*args):
-        raise audio.DecoderTerminated('audio decoder terminated by signal 15')
-    monkeypatch.setattr(audio, 'save_file', stopped)
+    original = audio.decode_process
+    monkeypatch.setattr(audio, 'decode_process', lambda args, output: original(
+        [sys.executable, '-c', f'import os, signal, sys; os.write(1, bytes(3200)); {stop}'], output))
     r = client(t).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture')
     assert r.status_code == 503 and 'again' in r.json()['detail']
     assert [(x.levelname, x.exc_info) for x in caplog.records if x.name == 'live'] == [('WARNING', None)]
     assert not (t.recordings / 'rejected').exists()
+    assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
 
 
 @pytest.mark.parametrize('path', ['/api/chunks', '/api/ask/voice'])
