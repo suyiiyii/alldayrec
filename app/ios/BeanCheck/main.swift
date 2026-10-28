@@ -560,6 +560,27 @@ do {
   check(bean.logs.contains { $0.0 == "bean_stall" }, false)
 }
 
+/// A backlog read (realtime=0) as slow: behind by what it fills, not live audio running late.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = t0 / 1000 - 3600
+  bean.list(a, 6000 * 20)
+  bean.onTransfer = { file, _, live in
+    check(live, false)
+    bean.header(file, 6000 * Int64(Bean.unit))
+    bean.units(file, Array(0..<1800), ms: 60)
+    bean.units(file, Array(1800..<6000), last: 5999, ms: 5)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.script.append {}  // the wait after the start, which this bean only echoes
+  _ = error(BeanSync.Gone.self) { try sync.session(since: a * 1000 - 1000, steps: "") }
+  check(bean.transfers.first!, [a, 0, 0])
+  check(bean.reports.count > 1, true, "statuses while it read")
+  check(bean.reports.contains { $0["live_lag_s"] != nil }, false)
+  check(bean.logs.contains { $0.0 == "bean_lag" }, false)
+}
+
 /// The session's thread lives as long as the link: what Foundation autoreleases in its loop (the queue listed every 5 s,
 /// each piece and the state written) is drained every pass, so its memory stays flat. 1.5.9 had no pool there: +0.87
 /// MB a minute on the iPhone, 10-28.

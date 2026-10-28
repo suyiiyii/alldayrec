@@ -435,7 +435,7 @@ final class BeanSync {
         if now - settled >= 5000 { settled = now; settle(); if xfer == nil && !recording { try prune() } }
         if now - reported >= 60_000 {
           reported = now
-          io.report(xfer.flatMap { $0.live ? $0.lag : nil }.map { hw.merging(["live_lag_s": $0 / 1000]) { $1 } } ?? hw)
+          io.report(xfer?.lag.map { hw.merging(["live_lag_s": $0 / 1000]) { $1 } } ?? hw)
         }
       }
     }
@@ -675,7 +675,8 @@ final class BeanSync {
     x.units += 1; x.last = s.seq; x.seen = now
     if x.live {
       liveSeen = now; liveStalled = false; busy = 0
-      // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind
+      // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind. A live
+      // transfer here is always realtime=1 (Bean.kt also reads the open file with realtime=0, which is not lag)
       let lag = now - f.anchor - (s.seq + 1) * Bean.frameMs
       x.lag = lag
       if lagging ? lag <= 10_000 : lag > 60_000 {
