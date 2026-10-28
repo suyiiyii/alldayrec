@@ -74,8 +74,7 @@ def main():
         flash = json.loads((build / "flasher_args.json").read_text())
         description = json.loads((build / "project_description.json").read_text())
         version = description["project_version"]
-        is_release = os.environ.get("GITHUB_EVENT_NAME") == "push" and os.environ.get("GITHUB_REF", "").startswith("refs/tags/firmware-")
-        model = "LR-blerelay-ESP32S3" if is_release else "LR-blerelay-ESP32S3-CI-TEST-KEY"
+        model = "LR-blerelay-ESP32S3-CI-TEST-KEY"
         # flash_files covers bootloader, partition table, application and any other required images.
         for relative in flash["flash_files"].values():
             source = (build / relative).resolve()
@@ -87,13 +86,12 @@ def main():
             shutil.copy2(build / name, stage / name)
         shutil.copy2(ROOT / "firmware/blerelay/sdkconfig", stage / "sdkconfig")
         metadata.update(model=model, firmware_version=version, board="Seeed XIAO ESP32-S3", target="esp32s3",
-                        relay_key_mode="release-secret-embedded" if is_release else "public-ci-test-key-embedded")
+                        relay_key_mode="public-ci-test-key-embedded")
         (stage / "FLASHING.txt").write_text(
             "From this extracted directory with ESP-IDF v5.5.5 exported:\n"
             "python -m esptool --chip esp32s3 --port PORT --before default_reset --after hard_reset write_flash @flash_args\n"
             "flasher_args.json preserves the exact offsets, settings and filenames from this build.\n"
-            + ("This binary embeds the release relay authentication secret. Restrict artifact access.\n" if is_release else
-               "TEST ONLY: this relay embeds the PUBLIC CI authentication key (64 zero hex digits). Never use on production devices.\n"))
+            "TEST ONLY: this relay embeds the PUBLIC CI authentication key (64 zero hex digits). Never use on production devices.\n")
     (stage / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     files = sorted(p for p in stage.rglob("*") if p.is_file())
     (stage / "SHA256SUMS").write_text("".join(f"{sha(p)}  {p.relative_to(stage).as_posix()}\n" for p in files))

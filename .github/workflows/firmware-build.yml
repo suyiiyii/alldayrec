@@ -79,15 +79,6 @@ jobs:
           persist-credentials: false
       - name: Install pinned uv
         run: pipx install uv==0.13.0
-      - name: Require formal relay authentication material
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/firmware-') && matrix.family == 'blerelay'
-        env:
-          RELAY_KEY_HEX: ${{ secrets.RELAY_KEY_HEX }}
-        run: |
-          if [[ ! "$RELAY_KEY_HEX" =~ ^[0-9a-f]{64}$ ]]; then
-            echo 'Formal relay build requires RELAY_KEY_HEX (64 lowercase hex digits); refusing a test key.' >&2
-            exit 1
-          fi
       - name: Set up official native toolchain and full SDK
         id: setup
         env:
@@ -98,7 +89,6 @@ jobs:
           FIRMWARE_ENV_FILE: ${{ steps.setup.outputs.env_file }}
           FIRMWARE_FAMILY: ${{ matrix.family }}
           FIRMWARE_VARIANT: ${{ matrix.variant }}
-          RELAY_KEY_HEX: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/firmware-') && matrix.family == 'blerelay' && secrets.RELAY_KEY_HEX || '' }}
         run: bash .github/scripts/firmware-build.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

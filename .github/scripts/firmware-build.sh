@@ -33,15 +33,7 @@ case "$FAMILY" in
     export RELAY_KEY_FILE="$RUNNER_TEMP/firmware-relay.key"
     # the build tree holds the key as a plain header: gone at exit, after packaging (or a failure)
     trap 'rm -rf "$RELAY_KEY_FILE" "$ROOT/firmware/blerelay/build"' EXIT
-    if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/tags/firmware-* ]]; then
-      [[ "${RELAY_KEY_HEX:-}" =~ ^[0-9a-f]{64}$ ]] && [[ "$RELAY_KEY_HEX" != 0000000000000000000000000000000000000000000000000000000000000000 ]] || {
-        echo 'Formal relay requires a non-test RELAY_KEY_HEX authentication secret' >&2; exit 1;
-      }
-      (umask 077; printf '%s\n' "$RELAY_KEY_HEX" > "$RELAY_KEY_FILE")
-    else
-      (umask 077; printf '%064d\n' 0 > "$RELAY_KEY_FILE")
-    fi
-    unset RELAY_KEY_HEX
+    (umask 077; printf '%064d\n' 0 > "$RELAY_KEY_FILE")  # the public test key: the formal relay is built locally, never here
     idf.py -C firmware/blerelay -DIDF_TARGET=esp32s3 "-DPROJECT_VER=$VERSION" build
     ;;
   *) echo 'Invalid firmware family' >&2; exit 1 ;;

@@ -7,8 +7,8 @@ set -euo pipefail
 git merge-base --is-ancestor HEAD origin/main
 shopt -s nullglob
 archives=(firmware-artifacts/*.tar.gz)
-# Four formal recorder variants, the separate selftest and ESP32-S3 relay.
-[ "${#archives[@]}" -eq 6 ] || { echo 'Release requires all six formal firmware archives' >&2; exit 1; }
+# Four formal recorder variants and the separate selftest; the relay is built locally with its key.
+[ "${#archives[@]}" -eq 5 ] || { echo 'Release requires all five formal firmware archives' >&2; exit 1; }
 for archive in "${archives[@]}"; do
   (cd firmware-artifacts && sha256sum --check "$(basename "$archive").sha256")
 done
@@ -23,7 +23,7 @@ while target["type"] == "tag":
     target = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/tags/{target['sha']}"]))["object"]
 if target["type"] != "commit" or target["sha"] != commit:
     raise SystemExit("Release tag moved or differs from the built source")
-expected = {"LR-X1", "LR-P1", "LR-P2", "LR-P3", "LR-selftest-ProMicro", "LR-blerelay-ESP32S3"}
+expected = {"LR-X1", "LR-P1", "LR-P2", "LR-P3", "LR-selftest-ProMicro"}
 models = set()
 for path in pathlib.Path("firmware-artifacts").glob("*.tar.gz"):
     with tarfile.open(path) as archive:
@@ -33,8 +33,6 @@ for path in pathlib.Path("firmware-artifacts").glob("*.tar.gz"):
         data = json.load(archive.extractfile(metadata[0]))
     if data["source_commit"] != commit or data["model"] in models:
         raise SystemExit("Firmware source mismatch or duplicate model")
-    if data["family"] == "blerelay" and data["relay_key_mode"] != "release-secret-embedded":
-        raise SystemExit("Test relay cannot be released as formal firmware")
     models.add(data["model"])
 if models != expected:
     raise SystemExit("Release is missing or includes unexpected firmware models")
@@ -43,4 +41,4 @@ assets=(firmware-artifacts/*.tar.gz firmware-artifacts/*.sha256)
 # Existing releases deliberately fail instead of mutating a published release on rerun.
 gh release create "$GITHUB_REF_NAME" "${assets[@]}" --verify-tag --draft \
   --target "$(git rev-parse HEAD)" --title "$GITHUB_REF_NAME" \
-  --notes 'Owner review required before publication. These are the exact CI-built firmware bits; see the per-model metadata and SHA256SUMS inside each archive. Relay firmware embeds its release authentication key: restrict artifact access and review distribution before publishing. No devices were flashed and no production endpoint was contacted.'
+  --notes 'Owner review required before publication. These are the exact CI-built firmware bits; see the per-model metadata and SHA256SUMS inside each archive. No devices were flashed and no production endpoint was contacted.'

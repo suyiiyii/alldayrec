@@ -34,7 +34,7 @@ APK 和硬件固件使用独立构建流程；构建不等于生产发布，不�
 | `main` 上相关路径变更 | APK，或自上次成功构建以来有改动的固件系列（被新推送取消、失败的那次改动会补建；查不到上次成功就全部构建）的测试产物 | Actions Artifacts，保留 3 天 |
 | Actions → Run workflow | 手动选择构建目标及录音器型号 | Actions Artifacts，保留 3 天 |
 | `apk-v<versionName>` tag | 使用原签名的正式 APK，tag 版本须匹配 `app/pubspec.yaml` | Artifacts + Draft GitHub Release |
-| `firmware-*` tag | 正式录音器型号、自检和 ESP32 中继固件 | Artifacts + Draft GitHub Release |
+| `firmware-*` tag | 正式录音器型号和自检固件 | Artifacts + Draft GitHub Release |
 | `v<version>` tag | 服务器：Docker 镜像（`docker.yml`），以及含网页的 PyPI 包 `alldayrec`（`pypi.yml`，PyPI 可信发布，没有 token），tag 版本须匹配 `server/pyproject.toml` | ghcr.io + PyPI |
 
 成功的分支构建会清理同一 workflow、同一分支的旧成功构建产物，仅保留最新一批；固件手动选型也会替换该分支之前的成功产物批次。失败或取消的构建不会触发清理。标签构建不参与清理；正式 Release 附件长期保留，上传中转 Artifacts 保留 3 天。清理任务单独授予 `actions: write`，构建任务仍为只读权限。
@@ -43,7 +43,7 @@ APK 和硬件固件使用独立构建流程；构建不等于生产发布，不�
 
 正式 tag 必须指向 `main` 历史上的提交。APK 和固件分别版本化；固件内部版本继续使用 `lr.sh` 的提交时间和 hash，不改为 APK 版本号。Release 使用构建 job 上传的同一批文件，不重新编译；审阅 Draft Release 后再决定是否发布。手机和录音器继续使用现有服务端更新入口，不直接读取 GitHub。
 
-手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit），其中 `sdmod` 是 LR-X1、`promicro-p3` 是 LR-P3，其余变体是维护者的测试板。即使手动选择 tag，仍构建测试包，不获得正式签名或中继密钥、不创建 Release。
+手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit），其中 `sdmod` 是 LR-X1、`promicro-p3` 是 LR-P3，其余变体是维护者的测试板。即使手动选择 tag，仍构建测试包，不获得正式签名、不创建 Release；中继（blerelay）在 CI 里只构建测试 key 的版本。
 
 ```bash
 gh workflow run apk-build.yml --ref main
@@ -75,7 +75,6 @@ CI runs on GitHub-hosted runners (`runs-on: ubuntu-24.04`). The workflows instal
 | `ANDROID_KEY_ALIAS` | 原签名密钥 alias |
 | `ANDROID_KEY_PASSWORD` | 原签名密钥密码 |
 | `ANDROID_SIGNING_CERT_SHA256` | 原签名证书 SHA256 指纹，防止错用另一把密钥 |
-| `RELAY_KEY_HEX` | 现有 ESP32 中继的 64 位十六进制认证 key |
 
 在持有原 keystore 的机器上，可以通过 stdin 设置文件 Secret，避免把内容打印或放进命令参数：
 
@@ -83,11 +82,11 @@ CI runs on GitHub-hosted runners (`runs-on: ubuntu-24.04`). The workflows instal
 base64 < ~/.android/live-record-debug.keystore | gh secret set ANDROID_KEYSTORE_BASE64 --repo suyiiyii/alldayrec
 ```
 
-密码、alias 和 relay key 使用 GitHub 的 Secret 输入框或 `gh secret set` 的交互输入，不写入 shell 历史。证书指纹应从原 keystore 或已安装正式 APK 的签名证书核实，不从新生成的测试包复制。
+密码和 alias 使用 GitHub 的 Secret 输入框或 `gh secret set` 的交互输入，不写入 shell 历史。证书指纹应从原 keystore 或已安装正式 APK 的签名证书核实，不从新生成的测试包复制。
 
-正式 APK 缺签名凭据或证书不匹配时失败；正式 ESP32 构建缺 relay key 时失败。测试 APK 由 CI 每次随机生成的测试密钥签名，包名与正式版相同，不能覆盖原签名安装：要装测试包必须先卸载正式 App，卸载会丢掉手机上还没上传的录音分片；测试 ESP32 中继使用公开测试 key，不能当作生产认证配置。产物名称和元数据区分测试与正式用途。
+正式 APK 缺签名凭据或证书不匹配时失败。测试 APK 由 CI 每次随机生成的测试密钥签名，包名与正式版相同，不能覆盖原签名安装：要装测试包必须先卸载正式 App，卸载会丢掉手机上还没上传的录音分片；测试 ESP32 中继使用公开测试 key，不能当作生产认证配置。产物名称和元数据区分测试与正式用途。
 
-ESP32 二进制包含认证 key，正式固件只能在受信任的私有仓库访问范围内分享。不要把签名文件、认证 key 或密码放入产物、缓存日志和 Git。普通构建权限为 `contents: read`，只有创建 Draft Release 的 job 使用 `contents: write`。
+正式 ESP32 中继固件只在维护者本机构建，认证 key 不进 CI、仓库和产物，所以 tag 构建不含中继；CI 的中继产物（文件名带 `CI-TEST-KEY`）嵌入公开测试 key，只能用于测试。不要把签名文件、认证 key 或密码放入产物、缓存日志和 Git。普通构建权限为 `contents: read`，只有创建 Draft Release 的 job 使用 `contents: write`。
 
 ### 下载与安装
 

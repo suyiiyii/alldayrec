@@ -20,7 +20,7 @@ def main():
     variants = FORMAL_VARIANTS
     if tag:
         subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"], check=True)
-        families = FAMILIES
+        families = [f for f in FAMILIES if f != "blerelay"]  # the formal relay is built on the maintainer's machine: its key stays out of CI
     elif os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
         target = event.get("inputs", {}).get("target", "all")
         variant = event.get("inputs", {}).get("variant", "all")

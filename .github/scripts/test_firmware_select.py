@@ -59,12 +59,12 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(jobs, [{"family": "devkit", "variant": "expansion", "sdk": "ncs"}])
 
-    def test_formal_tag_builds_exact_six_targets(self):
+    def test_formal_tag_builds_exact_five_targets(self):
         result, jobs = self.select("push", "refs/tags/firmware-test", {})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {
             ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"),
-            ("devkit", "promicro-p3"), ("selftest", "selftest"), ("blerelay", "blerelay")})
+            ("devkit", "promicro-p3"), ("selftest", "selftest")})
 
     def test_formal_tag_outside_main_is_rejected(self):
         (self.root / "README").write_text("unmerged\n")
