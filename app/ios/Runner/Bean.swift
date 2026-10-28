@@ -282,7 +282,7 @@ final class BeanSync {
     var units = 0, dupes = 0
     var lost: Int64 = 0, at: Int64 = 0
     var seen: Int64 = 0  // when its last unit came
-    var lag: Int64?  // live: how long after its end its last unit came (report(), bean_lag)
+    var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     init(_ file: Int64, _ live: Bool, _ from: Int64) { self.file = file; self.live = live; self.from = from }
   }
 
@@ -675,14 +675,16 @@ final class BeanSync {
     x.units += 1; x.last = s.seq; x.seen = now
     if x.live {
       liveSeen = now; liveStalled = false; busy = 0
-      // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind. A live
-      // transfer here is always realtime=1 (Bean.kt also reads the open file with realtime=0, which is not lag)
+      // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
+      // the transfer has caught up (a read from a unit behind starts behind by the hole it fills)
       let lag = now - f.anchor - (s.seq + 1) * Bean.frameMs
-      x.lag = lag
-      if lagging ? lag <= 10_000 : lag > 60_000 {
-        lagging.toggle()
-        log("bean_lag", "实时文件 \(x.file) " + (lagging ? "落后 \(lag / 1000) s" : "追上了，落后 \(lag / 1000) s"), lagging ? "warn" : nil,
-            ["file": x.file, "seq": s.seq, "lag_s": lag / 1000])
+      if x.lag != nil || lag <= 10_000 {
+        x.lag = lag
+        if lagging ? lag <= 10_000 : lag > 60_000 {
+          lagging.toggle()
+          log("bean_lag", "实时文件 \(x.file) " + (lagging ? "落后 \(lag / 1000) s" : "追上了，落后 \(lag / 1000) s"), lagging ? "warn" : nil,
+              ["file": x.file, "seq": s.seq, "lag_s": lag / 1000])
+        }
       }
     }
     if s.flags & 4 != 0 { f.total = s.seq + 1 }

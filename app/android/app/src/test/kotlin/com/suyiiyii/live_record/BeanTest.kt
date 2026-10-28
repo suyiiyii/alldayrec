@@ -235,10 +235,10 @@ class BeanTest {
         assertEquals("the button alone restarts recording", 0, bean.starts)
     }
 
-    /** A link that stays up but slows (the iPhone in the background, 10-28): the status says how far live audio is
-     *  behind (live_lag_s), and bean_lag is logged once past a minute and once back within 10 s, not for every unit.
-     *  Only realtime=1: a realtime=0 read starts behind by the hole it fills, and is not live audio running late. */
-    private fun slowLive(since: Long): FakeBean {
+    /** A link that stays up but slows (the iPhone in the background, 10-28): once a live transfer has caught up (within
+     *  10 s), the status says how far behind it is (live_lag_s), and bean_lag is logged once past a minute and once back
+     *  within 10 s, not for every unit. Before that it is filling a tail: not live audio running late. */
+    @Test fun slowLiveLinkReportsLag() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
@@ -249,14 +249,7 @@ class BeanTest {
             bean.units(file, (1800L until 6000L).toList(), ms = 5)  // then four times: 9 s behind at the end
         }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
-        assertThrows(IOException::class.java) { sync.session(since, "") }
-        assertEquals(0, bean.logs.count { it.first == "bean_stall" })
-        return bean
-    }
-
-    @Test fun slowLiveLinkReportsLag() {
-        val t0 = 1_793_000_000_000L
-        val bean = slowLive(t0 + 1000)  // a file begun before the bean was added here: realtime=1
+        assertThrows(IOException::class.java) { sync.session(t0 + 1000, "") }  // begun before the bean was added: realtime=1
         assertEquals(listOf(Triple(t0 / 1000, 0L, true)), bean.transfers)
         assertFalse("not live yet when connected", "live_lag_s" in bean.reports.first())
         val lags = bean.reports.mapNotNull { it["live_lag_s"] as Long? }
@@ -264,13 +257,25 @@ class BeanTest {
         assertTrue("two thirds of the first minute behind: ${lags[0]}", lags[0] in 38L..42L)
         assertTrue("catching up, 12 s in: ${lags[1]}", lags[1] in 33L..39L)
         assertEquals(listOf(false, true), bean.logs.filter { it.first == "bean_lag" }.map { "追上了" in it.second })
+        assertEquals(0, bean.logs.count { it.first == "bean_stall" })
     }
 
-    @Test fun slowTailReadIsNotLag() {
+    @Test fun tailFillIsNotLag() {
+        val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
-        val bean = slowLive(t0 - 3_600_000)  // this phone's file: its tail read with realtime=0
+        val bean = FakeBean(t0 + 120_000)  // recording for 2 min: its tail read from unit 0 with realtime=0
+        bean.recording = true; bean.open = t0 / 1000; bean.listed[t0 / 1000] = 0
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (0L until 1800L).toList(), ms = 60)  // slow at first: 192 s behind after 108 s
+            bean.units(file, (1800L until 14000L).toList(), ms = 5)  // caught up (9 s) 61 s on
+            bean.units(file, (14000L until 18000L).toList())  // then live for 80 s
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertEquals(listOf(Triple(t0 / 1000, 0L, false)), bean.transfers)
-        assertTrue(bean.reports.none { "live_lag_s" in it })
+        val lags = bean.reports.drop(1).map { it["live_lag_s"] }
+        assertEquals("filling the tail at the first two, caught up at the next two", listOf(null, null, 9L, 9L), lags)
         assertEquals(0, bean.logs.count { it.first == "bean_lag" })
     }
 

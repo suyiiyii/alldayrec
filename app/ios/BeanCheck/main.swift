@@ -560,24 +560,23 @@ do {
   check(bean.logs.contains { $0.0 == "bean_stall" }, false)
 }
 
-/// A backlog read (realtime=0) as slow: behind by what it fills, not live audio running late.
+/// A live transfer from a unit behind (recording for 2 min, nothing of it here yet) starts behind by what it fills:
+/// no live_lag_s nor bean_lag until it has caught up, then as above.
 do {
   let dir = tmp()
-  let bean = FakeBean(t0)
-  let a = t0 / 1000 - 3600
-  bean.list(a, 6000 * 20)
-  bean.onTransfer = { file, _, live in
-    check(live, false)
-    bean.header(file, 6000 * Int64(Bean.unit))
-    bean.units(file, Array(0..<1800), ms: 60)
-    bean.units(file, Array(1800..<6000), last: 5999, ms: 5)
+  let bean = FakeBean(t0 + 120_000)
+  let a = t0 / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0)
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 0xFFFF_FFFF)
+    bean.units(file, Array(0..<1800), ms: 60)  // slow at first: 192 s behind after 108 s
+    bean.units(file, Array(1800..<14000), ms: 5)  // caught up (9 s) 61 s on
+    bean.units(file, Array(14000..<18000))  // then live for 80 s
   }
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
-  bean.script.append {}  // the wait after the start, which this bean only echoes
-  _ = error(BeanSync.Gone.self) { try sync.session(since: a * 1000 - 1000, steps: "") }
-  check(bean.transfers.first!, [a, 0, 0])
-  check(bean.reports.count > 1, true, "statuses while it read")
-  check(bean.reports.contains { $0["live_lag_s"] != nil }, false)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, 0, 1]])
+  check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 9, 9], "filling the tail at the first two, caught up at the next two")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 

@@ -296,7 +296,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var lost = 0L
         var at = 0L
         var seen = 0L  // when its last unit came
-        var lag: Long? = null  // realtime: how long after its end its last unit came (report(), bean_lag)
+        var lag: Long? = null  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     }
 
     @Volatile var state: Map<String, Any?> = say("encrypting")
@@ -730,16 +730,18 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             io.log("bean_gap_time", "文件 ${x.file} 实时单元 ${x.last}→${s.seq} 之间过了 ${(now - x.seen) / 1000} s：豆子若暂停过，" +
                 "之后的单元按序号排会早 ${late / 1000} s", "warn", mapOf("file" to x.file, "seq" to s.seq, "late_ms" to late))
         x.units++; x.last = s.seq; x.seen = now
-        if (x.live) { liveSeen = now; liveStalled = false; busy = 0 }
-        // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind. Not a
-        // realtime=0 read: it starts behind by the hole it fills
-        if (x.realtime) {
+        if (x.live) {
+            liveSeen = now; liveStalled = false; busy = 0
+            // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
+            // the transfer has caught up (a realtime=0 read starts behind by the hole it fills)
             val lag = now - f.anchor - (s.seq + 1) * Bean.FRAME_MS
-            x.lag = lag
-            if (if (lagging) lag <= 10_000 else lag > 60_000) {
-                lagging = !lagging
-                io.log("bean_lag", "实时文件 ${x.file} " + if (lagging) "落后 ${lag / 1000} s" else "追上了，落后 ${lag / 1000} s",
-                    if (lagging) "warn" else null, mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000))
+            if (x.lag != null || lag <= 10_000) {
+                x.lag = lag
+                if (if (lagging) lag <= 10_000 else lag > 60_000) {
+                    lagging = !lagging
+                    io.log("bean_lag", "实时文件 ${x.file} " + if (lagging) "落后 ${lag / 1000} s" else "追上了，落后 ${lag / 1000} s",
+                        if (lagging) "warn" else null, mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000))
+                }
             }
         }
         if (s.flags and 4 != 0) f.total = s.seq + 1
