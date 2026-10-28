@@ -59,7 +59,7 @@ def speakers(voices: list[dict], link: float, suggest: float, apart: set[tuple[s
     """Named groups (with anonymous groups that sound like them as suggestions), then anonymous groups. A suggestion
     leaves out the group's voices in conversations the name is in already (two labels of one conversation: the
     conversation page offers those as a merge); they stay an anonymous group, under the leader's key, which pins are
-    against. Before 10-25 one shared conversation kept the whole group from the name (#295: all 18 twins of a name)."""
+    against. Before 10-25 one shared conversation kept the whole group from the name (all 18 twins of a name)."""
     vec = centered(voices)
     named, anon = {}, []
     for v in voices:
