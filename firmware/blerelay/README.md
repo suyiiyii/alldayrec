@@ -23,4 +23,4 @@ uv run firmware/blerelay/relay.py info <测试板的蓝牙名>   # 连上板子�
 
 协议在 `main/main.c` 开头：Mac 写 CMD 特征发命令，中继用 EVT 特征的通知回事件，每帧第一个字节是操作码，后面是小端序字段。
 
-ESP-IDF 的构建暂时不进 CI（要多装一套工具链，这个中继只在测试台上用）。改了固件就在本机编译、刷入，再用 `relay.py scan` 确认。
+CI 只用公开测试 key 构建中继固件，正式固件在维护者本机编译。改了固件就在本机编译、刷入，再用 `relay.py scan` 确认。
