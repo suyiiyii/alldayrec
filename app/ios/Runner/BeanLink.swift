@@ -1,10 +1,11 @@
 // The Feishu recorder bean the person added (prefs bleName, D3200-XXXX) over CoreBluetooth: port of the Android app's
 // BeanLink.kt. Found by scanning for its service and its name from the MAC in its manufacturer data (its address
 // changes; when iOS gives no manufacturer data, by the peripheral identifier it last had), connected without pairing
-// (the bean asks for none), its notifications into BeanSync (Bean.swift), which does the rest. One thread: scan,
-// connect, session, then scan again as soon as the link goes. Where iOS differs from Android:
-//  - no scan modes (Android's fast discovery after a rollover, #185): a scan for the service, which iOS also runs in the
-//    background and relaunches the app for (state restoration, its own identifier); the same timing logs (bean_scan)
+// (the bean asks for none), its notifications into BeanSync (Bean.swift), which does the rest. One thread: find,
+// connect, session, then find again as soon as the link goes. Where iOS differs from Android:
+//  - no scan modes (Android's fast discovery after a rollover, #185): a connect request for the identifier the bean last
+//    had and a scan for its service, both of which iOS keeps while the app is suspended or ended and relaunches it for
+//    (state restoration, its own identifier); the same timing logs (bean_scan)
 //  - no MTU request: iOS negotiates it; the connect line says what it got
 //  - no debug capture of sessions (Android's bean-capture over adb)
 import CoreBluetooth
@@ -24,6 +25,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private let q = DispatchQueue(label: "bean")  // CoreBluetooth's: its callbacks, and every call into it
   private var central: CBCentralManager?
   private var restored: [CBPeripheral] = []  // on q: what iOS kept for the app when it relaunched it
+  private var waitFor: CBPeripheral?  // on q: find()'s connect request
   private var advFlags = -2, advConnectable: Bool?  // on q: what the bean advertised last, logged when it changes
   private var round: String?, bareSaid = false  // on q: this scan, and whether it said it saw the service without a name
   @Shared private var on = true
@@ -39,7 +41,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   @Shared private var natural = false  // the last session ended at the bean's natural file rollover (the scan log's reason)
   @Shared private var phase: String?   // the scan that found the bean, for the connect steps' log
   private let notes = Inbox<[UInt8]?>()  // nil: the link is gone
-  private let found = Inbox<CBPeripheral>()
+  private let found = Inbox<(CBPeripheral, String)>()  // and how: scan, request
   private var sync: BeanSync!
 
   /// What the link does, as a code the app words (recorder_status.dart): the session's while one runs.
@@ -70,7 +72,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       abort()
       if central?.state == .poweredOn {
         central?.stopScan()
-        if let p = peripheral { central?.cancelPeripheralConnection(p) }
+        if let p = peripheral ?? waitFor { central?.cancelPeripheralConnection(p) }
       }
       central?.delegate = nil
       central = nil
@@ -102,7 +104,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     }
     established = false
     do {
-      if let p = find() { try connect(p) }
+      if case let (p, path)? = find() { try connect(p, path) }
     } catch let e as BeanSync.Again {  // straight back
       natural = e.naturalRollover
       scanTiming(["event": "session_again", "reason": natural ? "natural_rollover" : "other_again"])
@@ -117,23 +119,43 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   private func mono() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
 
-  /// The bean, advertising and connectable: a scan for its service (iOS runs it in the background too) for up to 10
-  /// minutes, then a new one. nil: none (time up, Bluetooth off, stopped).
-  private func find() -> CBPeripheral? {
+  /// The bean, by a connect request for the identifier it last had or a scan for its service (its address, so the
+  /// identifier, may have changed), whichever comes first. The request has no timeout: iOS keeps it while the app is
+  /// suspended or ended and wakes the app when it completes (a scan alone left a suspended app 90 minutes without the
+  /// bean after a rollover), at once when another app on this phone holds the bean, which then does not advertise
+  /// (`held`). The scan runs up to 10 minutes, then a new round; the request stays. nil: none (time up, Bluetooth off,
+  /// stopped).
+  private func find() -> (CBPeripheral, String)? {
     let reason = natural ? "natural_rollover" : "ordinary"
     natural = false
     let id = UUID().uuidString, t0 = mono(), budget: Int64 = 600_000
     q.sync { round = id; bareSaid = false }
     linkState = lastSeen.map { ["code": "away", "lastSeen": $0] } ?? ["code": "scanning", "name": name]
     found.clear()
-    q.sync { central?.scanForPeripherals(withServices: [BeanLink.service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) }
-    scanTiming(["phase": id, "event": "registration_returned", "reason": reason])
-    var p: CBPeripheral?
+    let known = prefs.string(forKey: "bleId").flatMap(UUID.init(uuidString:))
+    let held = q.sync { () -> Bool in
+      guard let c = central else { return false }
+      let held = known.map { id in c.retrieveConnectedPeripherals(withServices: [BeanLink.service]).contains { $0.identifier == id } } ?? false
+      if let known, let p = c.retrievePeripherals(withIdentifiers: [known]).first {
+        waitFor = p
+        if p.state == .connected { found.put((p, "request")) } else { c.connect(p) }  // completed since the last round
+      }
+      c.scanForPeripherals(withServices: [BeanLink.service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+      return held
+    }
+    scanTiming(["phase": id, "event": "registration_returned", "reason": reason, "request": known != nil, "held": held])
+    var p: (CBPeripheral, String)?
     while p == nil && on && poweredOn && mono() - t0 < budget { p = found.poll(1) }
-    q.sync { if central?.state == .poweredOn { central?.stopScan() } }
+    q.sync {
+      if central?.state == .poweredOn {
+        central?.stopScan()
+        if let w = waitFor, let p, p.0 !== w { central?.cancelPeripheralConnection(w) }  // found under another identifier
+      }
+      waitFor = nil
+    }
     let outcome = p != nil ? "found" : !on ? "cancelled" : !poweredOn ? "unavailable" : "timeout"
     if p != nil { phase = id }
-    scanTiming(["phase": id, "reason": reason, "budgetMs": budget, "elapsedMs": mono() - t0, "outcome": outcome])
+    scanTiming(["phase": id, "reason": reason, "budgetMs": budget, "elapsedMs": mono() - t0, "outcome": outcome, "path": p?.1 ?? NSNull()])
     return on && poweredOn ? p : nil
   }
 
@@ -143,7 +165,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     DeviceLog.app(name, "bean_scan", "扫描阶段计时", fields: timed)
   }
 
-  private func connect(_ p: CBPeripheral) throws {
+  private func connect(_ p: CBPeripheral, _ path: String) throws {
     var steps = ""
     func step<T>(_ code: String, _ what: String, _ block: () throws -> T) rethrows -> T {
       linkState = ["code": code]
@@ -163,8 +185,13 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       peripheral = nil; cmd = nil
       if established { lastSeen = Recorder.now(); DeviceLog.disconnected(name, downWhy) }
     }
-    DeviceLog.app(name, "connect", "扫描发现豆子，开始连接", fields: ["path": "scan"])
-    _ = try step("connecting", "连接") { try op("connect", 30) { p.delegate = self; self.central?.connect(p) } }
+    DeviceLog.app(name, "connect", (path == "request" ? "连接请求等到了豆子" : "扫描发现豆子") + "，开始连接", fields: ["path": path])
+    _ = try step("connecting", "连接") {
+      try op("connect", 30) {
+        p.delegate = self
+        if p.state == .connected { self.done(nil) } else { self.central?.connect(p) }  // find()'s request completed already
+      }
+    }
     established = true
     prefs.set(p.identifier.uuidString, forKey: "bleId")  // when a scan has no manufacturer data, this finds it
     let s = try step("services", "读取设备服务") { () throws -> CBService in
@@ -266,7 +293,8 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     radio = c.state
     switch c.state {
     case .poweredOn:
-      for p in restored where p.state != .disconnected { c.cancelPeripheralConnection(p) }  // a session starts afresh
+      // a session starts afresh; a connect request still waiting stays (find() takes it up again, as BleLink does)
+      for p in restored where p.state != .disconnected && p.state != .connecting { c.cancelPeripheralConnection(p) }
       restored = []
     case .poweredOff, .resetting:  // the link goes without a callback: the session ends at its next receive
       abort()
@@ -302,10 +330,12 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
                                              flags >= 0 && flags & 0x80 != 0 ? "已绑定飞书" : "未绑定飞书", connectable ? "可连接" : "不可连接", dbm.intValue),
                     fields: ["flags": flags, "connectable": connectable, "rssi": dbm.intValue])
     }
-    if connectable { found.put(p) }
+    if connectable { found.put((p, "scan")) }
   }
 
-  func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) { if p === peripheral { done(nil) } }
+  func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
+    if p === peripheral { done(nil) } else if p === waitFor { found.put((p, "request")) }
+  }
 
   func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
     if p === peripheral { done(error ?? Bean.Fail("connect failed")) }
