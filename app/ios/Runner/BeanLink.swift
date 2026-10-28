@@ -91,10 +91,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   /// A scan and a session, or a wait for Bluetooth. false: unbound, the thread ends.
   private func pass() -> Bool {
-    guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else {
-      q.sync { if let w = waitFor, central?.state == .poweredOn { central?.cancelPeripheralConnection(w) }; waitFor = nil }  // backoff()'s
-      linkState = ["code": "unbound"]; return false
-    }
+    guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else { linkState = ["code": "unbound"]; return false }
     switch radio {
     case .poweredOn: break
     case .unknown, .resetting: Thread.sleep(forTimeInterval: 0.2); return true  // the central's first word still to come
@@ -112,22 +109,12 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       natural = e.naturalRollover
       scanTiming(["event": "session_again", "reason": natural ? "natural_rollover" : "other_again"])
     } catch is BeanSync.Gone {
-      if !established && on { backoff() }  // it never came up: results wait out 5 s
+      if !established && on { Thread.sleep(forTimeInterval: 5) }  // it never came up: results wait out 5 s
     } catch {
       Ble.log("bean: \(error)")
-      if on { linkState = ["code": "linkError", "detail": "\(error)"]; backoff() }
+      if on { linkState = ["code": "linkError", "detail": "\(error)"]; Thread.sleep(forTimeInterval: 5) }
     }
     return true
-  }
-
-  /// 5 s before the next round, with a connect request out (find() takes it up): iOS may suspend the app meanwhile.
-  private func backoff() {
-    q.sync {
-      guard let c = central, c.state == .poweredOn, let id = prefs.string(forKey: "bleId").flatMap(UUID.init(uuidString:)),
-            let p = c.retrievePeripherals(withIdentifiers: [id]).first else { return }
-      waitFor = p; c.connect(p)
-    }
-    Thread.sleep(forTimeInterval: 5)
   }
 
   private func mono() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
@@ -159,6 +146,8 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     scanTiming(["phase": id, "event": "registration_returned", "reason": reason, "request": known != nil, "held": held])
     var p: (CBPeripheral, String)?
     while p == nil && on && poweredOn && prefs.string(forKey: "bleName") == name && mono() - t0 < budget { p = found.poll(1) }
+    // time up, or an app suspended past it woken by the request completing: what woke it comes in now
+    if p == nil && on && poweredOn && prefs.string(forKey: "bleName") == name { p = found.poll(1) }
     q.sync {
       if central?.state == .poweredOn {
         central?.stopScan()
