@@ -221,15 +221,15 @@ final class FakeBean: BeanIo {
     push(0x1A07, [Bean.le32(file), Bean.le32(size), n, wrapped, sn, [code]].flatMap { $0 })
   }
 
-  /// Units three to a frame, 20 ms each; the audio says its file and seq.
-  func units(_ file: Int64, _ seqs: [Int64], last: Int64 = -1, marks: Set<Int64> = [], wait: Int64 = 0) {
+  /// Units three to a frame, `ms` each (20: real time); the audio says its file and seq.
+  func units(_ file: Int64, _ seqs: [Int64], last: Int64 = -1, marks: Set<Int64> = [], wait: Int64 = 0, ms: Int64 = 20) {
     let (k, n) = fileKeys[file]!
     for (i, c) in stride(from: 0, to: seqs.count, by: 3).map({ Array(seqs[$0..<min($0 + 3, seqs.count)]) }).enumerated() {
       push(0x1A08, c.reduce([UInt8]()) { acc, s in
         let flags = UInt8((s == last ? 4 : s == 0 ? 2 : 0) | (marks.contains(s) ? 1 : 0))
         let enc: [UInt8] = try! Bean.ctr(k, Bean.iv(n, s), audio(file, s))
         return acc + [Bean.le32(s), [flags], enc, [0]].flatMap { $0 }
-      }, wait: 20 * Int64(c.count) + (i == 0 ? wait : 0))
+      }, wait: ms * Int64(c.count) + (i == 0 ? wait : 0))
     }
   }
 
@@ -535,6 +535,29 @@ do {
   }
   check(seen.sorted(), Array(0..<120), "each unit once")
   check(bean.deleted, [a], "whole on the server: off the bean")
+}
+
+/// A link that stays up but slows (the iPhone in the background, 10-28): the status says how far live audio is behind
+/// (live_lag_s), and bean_lag is logged once past a minute and once back within 10 s, not for every unit.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = t0 / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0)
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 0xFFFF_FFFF)
+    bean.units(file, Array(0..<1800), ms: 60)  // a third of real time: 36 s of audio in 108 s, 72 s behind
+    bean.units(file, Array(1800..<6000), ms: 5)  // then four times: 9 s behind at the end
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.reports.first!["live_lag_s"] == nil, true, "not live yet when connected")
+  let lags = bean.reports.compactMap { $0["live_lag_s"] as? Int64 }
+  check(lags.count, 2, "a status a minute")
+  check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
+  check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
+  check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
+  check(bean.logs.contains { $0.0 == "bean_stall" }, false)
 }
 
 /// The session's thread lives as long as the link: what Foundation autoreleases in its loop (the queue listed every 5 s,

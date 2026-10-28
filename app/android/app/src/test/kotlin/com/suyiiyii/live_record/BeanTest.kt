@@ -235,6 +235,30 @@ class BeanTest {
         assertEquals("the button alone restarts recording", 0, bean.starts)
     }
 
+    /** A link that stays up but slows (the iPhone in the background, 10-28): the status says how far live audio is
+     *  behind (live_lag_s), and bean_lag is logged once past a minute and once back within 10 s, not for every unit. */
+    @Test fun slowLiveLinkReportsLag() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val id = t0 / 1000
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = id; bean.listed[id] = 0
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (0L until 1800L).toList(), ms = 60)  // a third of real time: 36 s of audio in 108 s, 72 s behind
+            bean.units(file, (1800L until 6000L).toList(), ms = 5)  // then four times: 9 s behind at the end
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertFalse("not live yet when connected", "live_lag_s" in bean.reports.first())
+        val lags = bean.reports.mapNotNull { it["live_lag_s"] as Long? }
+        assertEquals("a status a minute", 2, lags.size)
+        assertTrue("two thirds of the first minute behind: ${lags[0]}", lags[0] in 38L..42L)
+        assertTrue("catching up, 12 s in: ${lags[1]}", lags[1] in 33L..39L)
+        assertEquals(listOf(false, true), bean.logs.filter { it.first == "bean_lag" }.map { "追上了" in it.second })
+        assertEquals(0, bean.logs.count { it.first == "bean_stall" })
+    }
+
     @Test fun reconnectAfterMissedResumeRestoresLiveGuard() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L

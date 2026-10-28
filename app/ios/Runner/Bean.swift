@@ -282,6 +282,7 @@ final class BeanSync {
     var units = 0, dupes = 0
     var lost: Int64 = 0, at: Int64 = 0
     var seen: Int64 = 0  // when its last unit came
+    var lag: Int64?  // live: how long after its end its last unit came (report(), bean_lag)
     init(_ file: Int64, _ live: Bool, _ from: Int64) { self.file = file; self.live = live; self.from = from }
   }
 
@@ -313,6 +314,7 @@ final class BeanSync {
   private var liveFile: Int64 = 0
   private var liveSeen: Int64 = 0   // includes waiting for a header and gaps between code-4 retries
   private var liveStalled = false  // one warning until audio resumes, across reconnects
+  private var lagging = false  // live audio over a minute behind: one warning until it is back within 10 s
   private var xfer: Xfer?
   private var since: Int64 = 0
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
@@ -431,7 +433,10 @@ final class BeanSync {
           hw = info
         }
         if now - settled >= 5000 { settled = now; settle(); if xfer == nil && !recording { try prune() } }
-        if now - reported >= 60_000 { reported = now; io.report(hw) }
+        if now - reported >= 60_000 {
+          reported = now
+          io.report(xfer.flatMap { $0.live ? $0.lag : nil }.map { hw.merging(["live_lag_s": $0 / 1000]) { $1 } } ?? hw)
+        }
       }
     }
   }
@@ -668,7 +673,17 @@ final class BeanSync {
           "之后的单元按序号排会早 \(late / 1000) s", "warn", ["file": x.file, "seq": s.seq, "late_ms": late])
     }
     x.units += 1; x.last = s.seq; x.seen = now
-    if x.live { liveSeen = now; liveStalled = false; busy = 0 }
+    if x.live {
+      liveSeen = now; liveStalled = false; busy = 0
+      // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind
+      let lag = now - f.anchor - (s.seq + 1) * Bean.frameMs
+      x.lag = lag
+      if lagging ? lag <= 10_000 : lag > 60_000 {
+        lagging.toggle()
+        log("bean_lag", "实时文件 \(x.file) " + (lagging ? "落后 \(lag / 1000) s" : "追上了，落后 \(lag / 1000) s"), lagging ? "warn" : nil,
+            ["file": x.file, "seq": s.seq, "lag_s": lag / 1000])
+      }
+    }
     if s.flags & 4 != 0 { f.total = s.seq + 1 }
     let dupe = has(f, s.seq) || runFile == x.file && s.seq >= runFrom && s.seq < runFrom + Int64(run.count)
     let mark = s.flags & 1 != 0
