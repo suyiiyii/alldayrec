@@ -82,31 +82,37 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   //
 
   private func loop() {
-    while on {
-      guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else { linkState = ["code": "unbound"]; return }
-      switch radio {
-      case .poweredOn: break
-      case .unknown, .resetting: Thread.sleep(forTimeInterval: 0.2); continue  // the central's first word still to come
-      case .unauthorized: linkState = ["code": "noPermission"]; Thread.sleep(forTimeInterval: 5); continue
-      default:
-        natural = false  // a rollover allowance is used up even while Bluetooth is off (as on Android)
-        linkState = ["code": "bluetoothOff"]
-        Thread.sleep(forTimeInterval: 5)
-        continue
-      }
-      established = false
-      do {
-        if let p = find() { try connect(p) }
-      } catch let e as BeanSync.Again {  // straight back
-        natural = e.naturalRollover
-        scanTiming(["event": "session_again", "reason": natural ? "natural_rollover" : "other_again"])
-      } catch is BeanSync.Gone {
-        if !established && on { Thread.sleep(forTimeInterval: 5) }  // it never came up: results wait out 5 s
-      } catch {
-        Ble.log("bean: \(error)")
-        if on { linkState = ["code": "linkError", "detail": "\(error)"]; Thread.sleep(forTimeInterval: 5) }
-      }
+    // a pool per pass, as BeanSync.loop: this thread lives as long as the app, and what Foundation autoreleases here
+    // (the bound name read every 5 s with Bluetooth off, each scan and connection) would stay until it ends
+    while on && autoreleasepool(invoking: pass) {}
+  }
+
+  /// A scan and a session, or a wait for Bluetooth. false: unbound, the thread ends.
+  private func pass() -> Bool {
+    guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else { linkState = ["code": "unbound"]; return false }
+    switch radio {
+    case .poweredOn: break
+    case .unknown, .resetting: Thread.sleep(forTimeInterval: 0.2); return true  // the central's first word still to come
+    case .unauthorized: linkState = ["code": "noPermission"]; Thread.sleep(forTimeInterval: 5); return true
+    default:
+      natural = false  // a rollover allowance is used up even while Bluetooth is off (as on Android)
+      linkState = ["code": "bluetoothOff"]
+      Thread.sleep(forTimeInterval: 5)
+      return true
     }
+    established = false
+    do {
+      if let p = find() { try connect(p) }
+    } catch let e as BeanSync.Again {  // straight back
+      natural = e.naturalRollover
+      scanTiming(["event": "session_again", "reason": natural ? "natural_rollover" : "other_again"])
+    } catch is BeanSync.Gone {
+      if !established && on { Thread.sleep(forTimeInterval: 5) }  // it never came up: results wait out 5 s
+    } catch {
+      Ble.log("bean: \(error)")
+      if on { linkState = ["code": "linkError", "detail": "\(error)"]; Thread.sleep(forTimeInterval: 5) }
+    }
+    return true
   }
 
   private func mono() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }

@@ -537,4 +537,43 @@ do {
   check(bean.deleted, [a], "whole on the server: off the bean")
 }
 
+/// The session's thread lives as long as the link: what Foundation autoreleases in its loop (the queue listed every 5 s,
+/// each piece and the state written) is drained every pass, so its memory stays flat. 1.5.9 had no pool there: +0.87
+/// MB a minute on the iPhone, 10-28.
+do {
+  func footprintMB() -> Double {
+    var info = task_vm_info_data_t()
+    var n = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+    _ = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(n)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &n) } }
+    return Double(info.phys_footprint) / 1_048_576
+  }
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = t0 / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0)
+  let minutes = 60
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 0xFFFF_FFFF)
+    for s in 0..<(minutes * 60) {  // a second of audio a step; the uploader takes what is queued now and then
+      bean.script.append {
+        bean.units(file, Array(Int64(s) * 50..<Int64(s + 1) * 50))
+        if s % 20 == 0 { for f in queue(chunks) { try FileManager.default.removeItem(at: f) } }
+      }
+    }
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  var mb = 0.0
+  let done = DispatchSemaphore(value: 0)
+  Thread.detachNewThread {  // as BeanLink's: no pool of its own
+    let before = footprintMB()
+    _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    mb = footprintMB() - before
+    done.signal()
+  }
+  done.wait()
+  print(String(format: "bean session, %d min of live audio: %.1f MB kept", minutes, mb))
+  check(bean.t - t0 >= Int64(minutes) * 60_000, true, "the hour went through")
+  check(mb < 5, true, "a pool per pass keeps the session's memory flat")
+}
+
 print("bean check: all passed")

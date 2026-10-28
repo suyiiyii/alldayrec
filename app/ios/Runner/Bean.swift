@@ -394,41 +394,45 @@ final class BeanSync {
   private func loop() throws {
     var reported = io.now(), settled: Int64 = 0
     while true {
-      if xfer == nil && io.now() >= quietUntil {
-        if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
-        let open = listing.open
-        let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? Xfer(open, true, files[open].flatMap(gap) ?? 0)
-          : recording ? nil : backlog()
-        if let x { try begin(x) } else { state = ["code": "beanIdle"] }
-      }
-      let quiet = quietUntil - io.now()
-      if let f = try next(xfer == nil && quiet > 0 ? quiet : 1000) { try take(f) }
-      if let x = xfer, x.cut { complete(x, 0); throw Again(description: "file \(x.file): the rest is here already") }
-      let now = io.now()
-      if paused { liveSeen = now }
-      if (recording || xfer?.live == true) && !paused && liveFile != 0 && now - liveSeen > 30_000 {
-        flush()
-        if !liveStalled { log("bean_stall", "实时文件 \(liveFile) 30 s 没收到单元，断开重连", "warn", ["file": liveFile]) }
-        liveStalled = true
-        throw Again(description: "file \(liveFile): no audio for 30 s")
-      }
-      if let x = xfer {  // the bean did not answer, or a transfer stopped: on with the next
-        if x.key == nil && now - x.at > 15_000 { failed(x, "no answer") }
-        // the bean cannot be stopped mid-file: a new connection starts it afresh, no stray units of this file then go
-        // to the next one's
-        else if !x.live && now - x.seen > 30_000 {
-          complete(x, -1, "；30 s 没收到单元，断开重连")
-          throw Again(description: "file \(x.file): no audio for 30 s")
+      // a pool per pass: this thread lives as long as the link, and what Foundation autoreleases here (the queue listed
+      // every 5 s, each piece and the state written) would stay until it ends (Ble.swift's session loop, 10-06)
+      try autoreleasepool {
+        if xfer == nil && io.now() >= quietUntil {
+          if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
+          let open = listing.open
+          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? Xfer(open, true, files[open].flatMap(gap) ?? 0)
+            : recording ? nil : backlog()
+          if let x { try begin(x) } else { state = ["code": "beanIdle"] }
         }
+        let quiet = quietUntil - io.now()
+        if let f = try next(xfer == nil && quiet > 0 ? quiet : 1000) { try take(f) }
+        if let x = xfer, x.cut { complete(x, 0); throw Again(description: "file \(x.file): the rest is here already") }
+        let now = io.now()
+        if paused { liveSeen = now }
+        if (recording || xfer?.live == true) && !paused && liveFile != 0 && now - liveSeen > 30_000 {
+          flush()
+          if !liveStalled { log("bean_stall", "实时文件 \(liveFile) 30 s 没收到单元，断开重连", "warn", ["file": liveFile]) }
+          liveStalled = true
+          throw Again(description: "file \(liveFile): no audio for 30 s")
+        }
+        if let x = xfer {  // the bean did not answer, or a transfer stopped: on with the next
+          if x.key == nil && now - x.at > 15_000 { failed(x, "no answer") }
+          // the bean cannot be stopped mid-file: a new connection starts it afresh, no stray units of this file then go
+          // to the next one's
+          else if !x.live && now - x.seen > 30_000 {
+            complete(x, -1, "；30 s 没收到单元，断开重连")
+            throw Again(description: "file \(x.file): no audio for 30 s")
+          }
+        }
+        if xfer == nil && now - askedAt > 60_000 {  // not during a transfer: its pushes say battery and charging
+          askedAt = now
+          let info = try Bean.info(try ask(Bean.info(), 0x0101).payload)
+          if info["recording"] as? Bool == true && !recording { needList = true }
+          hw = info
+        }
+        if now - settled >= 5000 { settled = now; settle(); if xfer == nil && !recording { try prune() } }
+        if now - reported >= 60_000 { reported = now; io.report(hw) }
       }
-      if xfer == nil && now - askedAt > 60_000 {  // not during a transfer: its pushes say battery and charging
-        askedAt = now
-        let info = try Bean.info(try ask(Bean.info(), 0x0101).payload)
-        if info["recording"] as? Bool == true && !recording { needList = true }
-        hw = info
-      }
-      if now - settled >= 5000 { settled = now; settle(); if xfer == nil && !recording { try prune() } }
-      if now - reported >= 60_000 { reported = now; io.report(hw) }
     }
   }
 
