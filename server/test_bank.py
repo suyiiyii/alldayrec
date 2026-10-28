@@ -1,4 +1,4 @@
-"""The people bank as a ledger (bank.py, #295): what a rename teaches is filtered, recorded per sentence and taken back
+"""The people bank as a ledger (bank.py): what a rename teaches is filtered, recorded per sentence and taken back
 by the undo either way round; a card that sounds like two people is not named whole without asking, and 拆开 moves a
 half out in one transaction with an undo; a NULL row that drifted is learnt again (relearn)."""
 import subprocess

@@ -268,7 +268,7 @@ SPEAKER_SUGGEST = float(os.environ.get("SPEAKER_SUGGEST", "0.6"))  # cosine to o
 # two people's pairs reach 0.45, and 36 % of one person's (10-05)
 MERGE_SUGGEST = float(os.environ.get("MERGE_SUGGEST", "0.45"))
 # an unnamed group with less speech or in fewer conversations than these is folded into 其他声音 on the speakers page
-# (#295, one instance: 679 cards -> 99, 85 % of the unnamed speech still on cards; the folded are passers-by in
+# (one instance: 679 cards -> 99, 85 % of the unnamed speech still on cards; the folded are passers-by in
 # crowded talks and media played aloud)
 OTHERS_MIN_S, OTHERS_MIN_CONVS = 180, 2
 

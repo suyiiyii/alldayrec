@@ -36,7 +36,6 @@ REFINE_EVERY_S = int(os.environ.get("REFINE_EVERY_S", "30"))  # draft layer: a p
 REFINE_WINDOW_S = int(os.environ.get("REFINE_WINDOW_S", "240"))    # draft layer: most audio one pass takes
 REFINE_MARGIN_S = 1.0                      # audio re-read before the last drafted time: the engine's sentence starts come a little late
 DRAFT_BACK_S = 300                         # a page that opens gets drafts this far back at most (the minutes not final yet)
-RELABEL_GROUPS = True                      # relabel at a close: the engine's speaker ids in a piece as units, split when their voices disagree
 LIVE_AUDIO_S = 120                         # a device whose audio came this recently is recording now: drafts and live analysis
 LIVE_EVERY_S = int(os.environ.get("LIVE_EVERY_S", "120"))  # new speech in the open conversation before the live analysis is redone
 # qwen-stream: a session given no new audio this long is finished by us; the server fails one after 23 s without audio
@@ -156,7 +155,7 @@ async def pipeline(device: str):
         if not vs or not rows:
             return None
         labels = relabel([v["e"] for v in vs], [v["dur"] for v in vs], owner,
-                         [v["key"] or ("alone", i) for i, v in enumerate(vs)] if RELABEL_GROUPS else None, people=dia.people)
+                         [v["key"] or ("alone", i) for i, v in enumerate(vs)], people=dia.people)
         changed, missing = 0, 0
         for r in rows:
             mine = [(v["dur"], lab) for v, lab in zip(vs, labels) if r["start"] <= v["start"] <= r["end"]]

@@ -1265,7 +1265,7 @@ abstract class AppLocalizations {
   /// No description provided for @keepRecordingsIos.
   ///
   /// In zh, this message translates to:
-  /// **'上传后存到「文件」App › 我的 iPhone › alldayrec › recordings › 日期'**
+  /// **'上传后存到「文件」App › 我的 iPhone › AllDayRec › recordings › 日期'**
   String get keepRecordingsIos;
 
   /// No description provided for @keepRecordingsAndroid.
@@ -1334,12 +1334,6 @@ abstract class AppLocalizations {
   /// **'已满'**
   String get cardFullTile;
 
-  /// No description provided for @cardFull.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡已满'**
-  String get cardFull;
-
   /// No description provided for @cardFullSub.
   ///
   /// In zh, this message translates to:
@@ -1351,12 +1345,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'U 盘中'**
   String get cardUsbTile;
-
-  /// No description provided for @cardUsb.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡在 U 盘模式'**
-  String get cardUsb;
 
   /// No description provided for @cardUsbSub.
   ///
@@ -1370,12 +1358,6 @@ abstract class AppLocalizations {
   /// **'没插卡'**
   String get cardNoneTile;
 
-  /// No description provided for @cardNone.
-  ///
-  /// In zh, this message translates to:
-  /// **'没插存储卡'**
-  String get cardNone;
-
   /// No description provided for @cardNoneSub.
   ///
   /// In zh, this message translates to:
@@ -1387,12 +1369,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'出错'**
   String get cardErrorTile;
-
-  /// No description provided for @cardError.
-  ///
-  /// In zh, this message translates to:
-  /// **'存储卡出错'**
-  String get cardError;
 
   /// No description provided for @cardErrorSub.
   ///
@@ -1423,18 +1399,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'卡出错'**
   String get advCardError;
-
-  /// No description provided for @cardFreeGb.
-  ///
-  /// In zh, this message translates to:
-  /// **'卡剩 {gb} GB'**
-  String cardFreeGb(Object gb);
-
-  /// No description provided for @batteryPercent.
-  ///
-  /// In zh, this message translates to:
-  /// **'电量 {percent}%'**
-  String batteryPercent(Object percent);
 
   /// No description provided for @allowInstalls.
   ///
@@ -1529,7 +1493,7 @@ abstract class AppLocalizations {
   /// No description provided for @linkNoPermission.
   ///
   /// In zh, this message translates to:
-  /// **'没有蓝牙权限：在 设置 › alldayrec 里允许蓝牙'**
+  /// **'没有蓝牙权限：在 设置 › AllDayRec 里允许蓝牙'**
   String get linkNoPermission;
 
   /// No description provided for @linkUnbound.
@@ -1679,7 +1643,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanRecorderHelp.
   ///
   /// In zh, this message translates to:
-  /// **'手机连上录音豆就让它开始录音，按一下按键停止。手机在附近时边录边传。手机不在时录的，按键停下后补传。服务端收全的录音会从豆子上删掉。'**
+  /// **'手机连上录音豆就让它开始录音，按一下按键停止，到这次连接断开为止：再连上时手机会让它重新开始录音。手机在附近时边录边传。手机不在时录的：正在录的文件边录边补，已经录完的文件按键停下后补传。服务端收全的录音会从豆子上删掉。'**
   String get beanRecorderHelp;
 
   /// No description provided for @beanFetching.

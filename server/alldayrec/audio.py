@@ -299,8 +299,12 @@ def decode_process(args, output):
                 if isinstance(exc, TimeoutError):
                     raise subprocess.TimeoutExpired(args, DECODE_IDLE_S) from None
                 raise
-        if code < 0:
-            raise DecoderTerminated(f"audio decoder terminated by signal {-code}")
+        # a signal (a service stop): it kills ffmpeg only in its first ms; after that ffmpeg's own handler stops it
+        # with partial PCM and exit 255 (fftools/ffmpeg.c), which a file it cannot read never gives (it exits with an
+        # error code below 255, or 0)
+        if code < 0 or code == 255:
+            raise DecoderTerminated(f"audio decoder terminated by signal {-code}" if code < 0 else
+                                    "audio decoder stopped by a signal (exit 255)")
         return code
     # This API is synchronous (also used by offline readers); in the HTTP path
     # its caller already runs in the bounded media pool, away from the event loop.
@@ -369,7 +373,7 @@ def file_health(pcm, count):
                 zeros += length
     zeros += run if run >= ZERO_RUN else 0
     dbfs = lambda ms: round(10 * np.log10(max(ms, 1e-3) / 32768 ** 2), 1)
-    return dbfs(energy / max(count, 1)), dbfs(hum / max(count, 1)), zeros * 1000 // SR, full
+    return dbfs(energy / max(count, 1)), dbfs(hum / max(count, 1)), int(zeros) * 1000 // SR, full  # numpy ints go to SQLite as BLOBs
 
 
 def save_file(device, start_ms, source, content_type, n=None, report=None):

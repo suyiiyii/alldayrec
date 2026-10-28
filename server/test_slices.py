@@ -1,5 +1,6 @@
 """The piece lengths the apps get, from /api/client-config and with every upload's answer: the configured ones, and
-while the live page is open the background and screen-off ones at most SLICE_WATCHED_S (the foreground's stays).
+while the live page is open the background and screen-off ones at most SLICE_WATCHED_S (the foreground's stays) and
+`watched` true.
 今天's live card watches too (drafts, the live analysis) but leaves the lengths as they are."""
 import time
 
@@ -10,8 +11,8 @@ from alldayrec import core
 from alldayrec import db
 from alldayrec import server
 
-NORMAL = {"foreground": 1, "background": 20, "screenOff": 60}
-WATCHED = {"foreground": 1, "background": 2, "screenOff": 2}
+NORMAL = {"foreground": 1, "background": 20, "screenOff": 60, "watched": False}
+WATCHED = {"foreground": 1, "background": 2, "screenOff": 2, "watched": True}
 
 
 def test_slices(tmp_path, monkeypatch):

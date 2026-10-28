@@ -76,7 +76,8 @@ onMounted(async () => {
   else pick.value = saved || (loopback && urls[1]) || here; // not 127.0.0.1 when there is something better
 });
 
-// The app's settings page scans this: server + token, so they don't need typing in by hand (manual entry stays).
+// The QR is this web app's URL with the token: the app's settings page scans it for server + token (no typing; manual
+// entry stays), a phone camera opens it and the server signs that browser in (auth.py).
 // The token comes from the server, not from the cookie the browser holds (it's HttpOnly, page JS can't read it).
 const qr = ref(""),
   error = ref(""),
@@ -91,7 +92,7 @@ onMounted(async () => {
 });
 watch([address, token], async ([a, tok]) => {
   if (!a || error.value) return void (qr.value = "");
-  const url = `liverecord://setup?server=${encodeURIComponent(a)}&token=${encodeURIComponent(tok)}`;
+  const url = `${a}/?token=${encodeURIComponent(tok)}`;
   qr.value = await QRCode.toDataURL(url, { width: 320, margin: 2 });
 });
 const tokenCopied = ref(false);

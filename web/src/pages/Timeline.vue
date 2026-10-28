@@ -175,8 +175,8 @@ const search = (before: string) =>
     before: before || (day.value ? shiftDay(day.value, 1) + "T00:00:00" : ""),
     limit: String(PAGE),
   });
-async function restart() {
-  // the old list stays on screen until the new first page is in: no blank flash
+// the filters into the URL, which loads the list (below)
+const sync = () =>
   router.replace({
     query: {
       ...(q.value && { q: q.value }),
@@ -184,6 +184,8 @@ async function restart() {
       ...(day.value && { day: day.value }),
     },
   });
+async function restart() {
+  // the old list stays on screen until the new first page is in: no blank flash
   const my = ++seq;
   loading.value = true;
   if (top.value) selfCard.value?.load(); // after a reconnect too: it may have popped meanwhile
@@ -256,10 +258,23 @@ watch(days, (ds) => {
 let timer = 0;
 watch(q, () => {
   clearTimeout(timer);
-  timer = window.setTimeout(restart, 300);
+  timer = window.setTimeout(sync, 300);
 });
-watch([tag, day], restart);
+watch([tag, day], sync);
 watch(day, () => window.scrollTo(0, 0));
+// the URL loads the list. The logo, the 时间线 tab, back and forward change it under this same page: the filters
+// follow it, the list from the top (back and forward: where the browser puts it back, after this)
+watch(
+  () => route.query,
+  (r) => {
+    const [q2, tag2, day2] = [r.q, r.tag, r.day].map((v) => String(v ?? ""));
+    if (q2 !== q.value || tag2 !== tag.value || day2 !== day.value) window.scrollTo(0, 0);
+    q.value = q2;
+    tag.value = tag2;
+    day.value = day2;
+    void restart();
+  },
+);
 const pick = (d: string) => (day.value = d === today() ? "" : d);
 
 // The day picker follows the finger (useHeaderFollow). A wide screen: the pinned search bar goes up by --lift under
@@ -329,6 +344,7 @@ onMounted(() => {
   void init();
 });
 onUnmounted(() => {
+  clearTimeout(timer); // sync() writes the current route's query: not the next page's
   io.disconnect();
   window.removeEventListener("scroll", spy);
 });

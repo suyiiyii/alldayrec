@@ -34,7 +34,10 @@ async def listen(device: str, after: int | None = None):
 
 async def cut(start: str, end: str, fmt: str, device: str | None = None) -> bytes:
     a, b = dt.datetime.fromisoformat(start), dt.datetime.fromisoformat(end)
-    out = await anyio.to_thread.run_sync(audio.cut, a, b, fmt, device, limiter=threads.MEDIA) if 0 < (b - a).total_seconds() <= 120 else None
+    try:
+        out = await anyio.to_thread.run_sync(audio.cut, a, b, fmt, device, limiter=threads.MEDIA) if 0 < (b - a).total_seconds() <= 120 else None
+    except audio.DecoderTerminated:  # a service stop: the page asks again; the speaker loops skip it as they skip a 404
+        raise HTTPException(503, "Audio decoding was stopped; try again")
     if out is None:
         raise HTTPException(404, "no recording covers this time")
     return out

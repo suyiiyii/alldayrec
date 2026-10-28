@@ -18,8 +18,6 @@ ALLOWED = {
         'with cf.ThreadPoolExecutor(2) as ex, open(self.cache_path, "a") as f:  # the live service shares the key': "",
         "with cf.ThreadPoolExecutor(4) as ex:": "",
     },
-    "migrate.py": {"import concurrent.futures as cf": "one-off (10-02 SQLite cutover): to delete",
-                   "with cf.ThreadPoolExecutor(16) as ex:": "one-off: to delete"},
     "monitor.py": {  # loop_stalls' watcher runs beside the loop it watches for the process's life, not a job under a limiter
         'threading.Thread(target=watch, args=(beat, LOOP_STALL_MS / 1000), daemon=True, name="loop-stalls").start()': "",
     },

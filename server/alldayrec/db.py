@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS processed_audio (
     PRIMARY KEY(device, start_ms, end_ms, layer));
 CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
 CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_ids), at: when; a row dropped is the undo
@@ -85,7 +86,7 @@ CREATE TABLE IF NOT EXISTS device_status (    -- every status a client read from
     device TEXT NOT NULL, at TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS device_status_at ON device_status(device, at);
 CREATE TABLE IF NOT EXISTS calls (            -- every ASR and LLM call: how it went and what it took, never what it said.
-    at TEXT NOT NULL, kind TEXT NOT NULL,     -- kind: final, draft (ASR); summary, hints, profile, recap, live, ask (LLM)
+    at TEXT NOT NULL, kind TEXT NOT NULL,     -- kind: final, draft (ASR); summary, split, hints, profile, recap, live, ask (LLM)
     engine TEXT NOT NULL, device TEXT,        -- engine: the provider or model; device: whose audio (ASR)
     ms INTEGER NOT NULL, error TEXT,          -- error: NULL when it answered, else its class, code and first words
     audio_s REAL, sent_s REAL,                -- ASR: the window, and what was sent of it (silences squeezed)
@@ -143,7 +144,7 @@ def init():
                         c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (found[0], conv, mark, at))
     if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
         conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")
-    if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files (pack_pieces.py)
+    if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files
         conn().execute("ALTER TABLE pieces ADD COLUMN pos INTEGER")
         conn().execute("ALTER TABLE pieces ADD COLUMN size INTEGER")
     if "n" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: iPhone pieces say how many samples they hold

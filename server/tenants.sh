@@ -127,8 +127,8 @@ case $mode in merge | unmerge | add)
       python3 - "$t/tenants.json" "$arg" << 'PY'
 import json, sys
 t = next(x for x in json.load(open(sys.argv[1])) if x["id"] == sys.argv[2])
-print(f"  {t['id']}: data {t['data']}, recordings {t['recordings']}; their link, to them only (it logs in as them; on a")
-print(f"  computer it shows the code their app scans): <the instance's public URL>/connect?token={t['token']}")
+print(f"  {t['id']}: data {t['data']}, recordings {t['recordings']}; their link, to them only (a browser opening it logs in as")
+print(f"  them; made into a QR code, the app scans it to sign in): <the instance's public URL>/?token={t['token']}")
 PY
       ;;
   esac

@@ -25,8 +25,6 @@ Tests and tooling in `server/`: `test_live.py`, `replay_case.py` (replay a case 
 
 PR gates run the backend suite, Web type/build checks and `*.check.ts`, Flutter analysis/tests, Android JVM regressions, Swift protocol checks, and firmware host checks (including the microphone high-pass filter). Fixture changes trigger all three protocol-consumer gates. Android JVM tests bootstrap the pinned Flutter SDK's Gradle wrapper and need no signing credentials or APK release.
 
-The legacy `server/alldayrec/migrate.py` importer still refuses an existing `live.db` or pending first-layer transcripts, reads its JSON/audio inputs without changing them, and inserts audio pieces by explicit column names so added schema columns do not break the import. `test_migrate.py` exercises the real command with a temporary recording and verifies that a second invocation leaves the existing database untouched.
-
 ## GitHub Actions 构建与归档
 
 APK 和硬件固件使用独立构建流程；构建不等于生产发布，不会上传 `/app.apk`、调用固件发布 API 或刷写板子。现有 PR 检查继续保留。
@@ -43,7 +41,7 @@ APK 和硬件固件使用独立构建流程；构建不等于生产发布，不�
 
 免费额度按账号共享，3 天保留不保证不超额。建议在账号 Billing 的 Budgets and alerts 中为 Actions 设置零超额预算并启用停止使用；此账号设置不由 workflow 管理。
 
-正式 tag 必须指向 `main` 历史上的提交。APK 和固件分别版本化；固件内部版本继续使用 `lr.sh` 的提交时间和 hash，不改为 APK 版本号。Release 使用构建 job 上传的同一批文件，不重新编译；审阅 Draft Release 后再决定是否发布。仓库是私有的，下载需要仓库读取权限；手机和录音器继续使用现有服务端更新入口，不直接读取 GitHub。
+正式 tag 必须指向 `main` 历史上的提交。APK 和固件分别版本化；固件内部版本继续使用 `lr.sh` 的提交时间和 hash，不改为 APK 版本号。Release 使用构建 job 上传的同一批文件，不重新编译；审阅 Draft Release 后再决定是否发布。手机和录音器继续使用现有服务端更新入口，不直接读取 GitHub。
 
 手动入口分别为 **APK build** 和 **firmware-build**。APK 无额外参数；固件 `target` 可选 `all/devkit/selftest/blerelay`，`variant` 可选 `all/sdmod/promicro/promicro-p2/promicro-p3/expansion`（仅影响 devkit），其中 `sdmod` 是 LR-X1、`promicro-p3` 是 LR-P3，其余变体是维护者的测试板。即使手动选择 tag，仍构建测试包，不获得正式签名或中继密钥、不创建 Release。
 

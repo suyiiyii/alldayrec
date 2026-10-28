@@ -45,9 +45,12 @@ SLICE_WATCHED_S = int(os.environ.get("SLICE_WATCHED_S", "2"))  # ... at most thi
 def slices() -> dict:
     """The piece lengths the apps cut now, per app state. While the tenant's live page is open (ws: its watch says
     live; 今天's live card does not), the background and screen-off ones are at most SLICE_WATCHED_S, so its captions
-    come within seconds also from a phone in a pocket; they are back to theirs within a minute of the page leaving."""
-    cap = (lambda s: min(s, SLICE_WATCHED_S)) if time.time() < T().live_until else (lambda s: s)
-    return {"foreground": SLICE_FOREGROUND_S, "background": cap(SLICE_BACKGROUND_S), "screenOff": cap(SLICE_SCREEN_OFF_S)}
+    come within seconds also from a phone in a pocket; they are back to theirs within a minute of the page leaving.
+    `watched`: the page is open (the Android app then goes live with a recorder bean before filling holes over a minute)."""
+    watched = time.time() < T().live_until
+    cap = (lambda s: min(s, SLICE_WATCHED_S)) if watched else (lambda s: s)
+    return {"foreground": SLICE_FOREGROUND_S, "background": cap(SLICE_BACKGROUND_S), "screenOff": cap(SLICE_SCREEN_OFF_S),
+            "watched": watched}
 
 
 @router.post("/api/chunks")

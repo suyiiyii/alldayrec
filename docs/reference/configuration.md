@@ -59,7 +59,7 @@ type: reference
 | `MODELS_DIR` | 空 | `DATA_DIR/models` | 模型文件目录，绝对路径、可写；缺的文件启动时下载到这里。Docker 里固定为 `/data/models` |
 | `PORT` | `8770` | `8770` | 监听端口。Docker Compose 里固定为 `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | 监听地址；反向代理在另一台机器上时设 `0.0.0.0`。Docker Compose 里固定为 `0.0.0.0` |
-| `HOLD_STALE_S` | `1200` | `1200` | 手机持续上报补传 hold，但 hold 之前这么多秒没有新音频到达，就继续定稿；静默手机仍等最多 12 小时，静默超过 5 分钟后回来重新获得宽限期。之后到的更早录音只保存供回放，不再转写。设得很大（如 `315360000`）可实际关闭无进展超时；`0` 会立即过期，不是关闭 |
+| `HOLD_STALE_S` | `1200` | `1200` | 手机持续上报补传 hold，但 hold 之前这么多秒没有新音频到达，就继续定稿；静默手机仍等最多 12 小时，静默超过 5 分钟后回来重新获得宽限期。之后到的更早录音按迟到音频补转写（见 `LATE_SETTLE_S`）。设得很大（如 `315360000`）可实际关闭无进展超时；`0` 会立即过期，不是关闭 |
 | `DRAFT_ENGINE` | 空 | 同 `ENGINE` | 初稿层（页面开着时）的引擎；另可设 `qwen-stream`：页面开着时把音频流式推给千问（百炼 qwen-audio-3.1-asr-flash-streaming，用 `DASHSCOPE_API_KEY`），边说边出字 |
 | `ENGINE_FALLBACK` | 空 | 无 | `ENGINE` 或 `DRAFT_ENGINE` 在某个窗口上失败（402、451、5xx、超时）时改用的引擎；空着就稍后重试 |
 | `VOLC_ASR_KEY` | 空 | — | 火山方舟 Agent Plan 的 API key，`volc` 用 |
@@ -68,6 +68,7 @@ type: reference
 | `LOCAL_ASR_URL` | 空 | k2-fsa/sherpa-onnx 的 GitHub Release | `local` 的模型包（约 136 MB）从哪里下载；镜像站上同一个模型包也行（按 sha256 校验） |
 | `UI_LANG` | `zh` | `zh` | 大模型写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。`tenants.json` 里的 `lang` 优先。没选过语言的浏览器打开网页时也用它；App 的界面不受影响 |
 | `RECAP_AT` | `10:00` | `10:00` | 每天这个时刻写昨天的回顾；设为空就不写 |
+| `SPLIT_MIN_S` | `600` | `600` | 一段对话从开始到结束至少这么多秒时，写摘要前多做一次大模型调用，看其中是否从某处起已是另一段互不相干的对话（只按 5 分钟静默切分，商场、路上的人声会把几段连成一段），是就从那里切开，各段分别写摘要；`0` 表示不切。迟到音频不会把切开的两段重新合并。这次调用带 `reasoning_effort`，需要接受它的接口（推理模型）；用的模型不支持时设为 `0`。已有的对话用 `python -m alldayrec.split --since YYYY-MM-DD` 回填（见该文件开头的说明） |
 | `LATE_SETTLE_S` | `180` | `180` | 迟到音频停止增长后等待的秒数；设备结束或释放补传等待时立即处理。正在进行的对话结束后再补转写 |
 | `LATE_PROCESS_TIMEOUT_S` | `1800` | `1800` | 单段补转写的最长处理秒数；每份最多 30 分钟音频，因此处理须快于实时（含说话人识别，RTF < 1）；超时退避重试，最多三次后保留失败原因 |
 | `TZ` | `Asia/Shanghai` | 系统的时区 | 对话日期和 `RECAP_AT` 用的时区。Docker 容器的系统时区是 UTC；`TZ=` 设为空也是 UTC |
@@ -93,7 +94,7 @@ type: reference
 
 | 变量 | 用在 | 说明 |
 |---|---|---|
-| `LIVE_DATA`、`RECORDINGS_DIR` | `owner.py`、`replay_case.py`、`migrate.py`（`RECORDINGS_DIR` 只有 `migrate.py` 用） | 一个租户的数据目录和录音目录 |
+| `LIVE_DATA` | `owner.py`、`replay_case.py` | 一个租户的数据目录 |
 | `OWNER_LABELS` | `owner.py` | 已知是本人声音的窗口（jsonl） |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
 | `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py`（`EMB_MODEL` 还有 `owner.py`） | 见这几个脚本 |

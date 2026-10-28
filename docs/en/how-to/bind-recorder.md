@@ -37,7 +37,8 @@ The binding is kept on this phone only. From then on:
 
 - The phone starts the bean recording when it connects. A press of its button stops it until the phone next connects.
 - With the phone nearby, it uploads as it records.
-- With the phone away, the audio stays on the bean. Once the phone is back, it is fetched when you stop the bean with its button. Only files recorded after the binding are fetched.
+- With the phone away, the audio stays on the bean. Once the phone is back, it fills in what is missing from the file the bean is recording while it records (Android app 1.5.9 and later); finished files are fetched after you stop the bean with its button. Only files recorded after the binding are fetched.
+- While the 实时 (Live) page is open, the phone keeps up with what is said now: if it missed 1 minute or less while away, that is filled first and then it goes on live; a longer gap is filled after the page closes (this also needs server v0.4.0).
 - Files the server has in full are deleted from the bean, one at a time, only while the bean is not recording.
 
 The **录音设备** (Recorder) page has no pause, live listening, USB disk mode or firmware update for a bean.

@@ -100,6 +100,7 @@ def snapshot(t: tenant.Tenant) -> str:
 # what a's token is sent to, route by route: (method, path, request kwargs)
 REQUESTS = {
     ("POST", "/api/late-backfill"): ("POST", "/api/late-backfill", dict(params={"days": 1, "dry_run": False})),
+    ("POST", "/api/split"): ("POST", "/api/split", dict(params={"since": TODAY, "apply": True})),  # a's 30 min one: split in two
     ("POST", "/api/chunks"): ("POST", "/api/chunks", dict(params={"device": DEV, "start": MS + 60_000}, content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/api/chunks/end"): ("POST", "/api/chunks/end", dict(params={"device": DEV, "t": MS + 62_000})),
     ("POST", "/api/hold/release"): ("POST", "/api/hold/release", dict(params={"device": DEV})),
@@ -217,10 +218,20 @@ def test_routes(two, monkeypatch):
     """a's token through every route: a's data, never b's (in the answer, in what the model is sent), b's store and
     files untouched; b's own token sees b's."""
     a, b = two
-    prompts = []
+    prompts, kinds = [], set()
+
+    def more():  # a's conversation as two talks around a 130 s pause, for POST /api/split
+        with db.tx() as c:
+            db.insert_sentences(c, [dict(id=f"s{m}", start=f"{TODAY}T10:{m:02}:00.000", end=f"{TODAY}T10:{m:02}:50.000", speaker="S1",
+                                         text=f"MARKa {m}", source=DEV) for m in (1, 2, 3, 6, 7, 8)])
+    tenant.call(a, more)
 
     async def llm(messages, timeout=300, kind="summary", **extra):
         prompts.append(json.dumps(messages, ensure_ascii=False))
+        kinds.add(kind)
+        if kind == "split":
+            return {"choices": [{"message": {"content": json.dumps({"parts": [
+                {"start": "10:00:05", "kind": "交谈", "scene": "a"}, {"start": "10:06:00", "kind": "交谈", "scene": "b"}]})}}]}
         if kind == "ask" and not any(m["role"] == "tool" for m in messages):
             return {"choices": [{"message": {"tool_calls": [{"id": "t1", "type": "function",
                                                               "function": {"name": "grep", "arguments": '{"q": "说的话"}'}}]}}]}
@@ -256,6 +267,7 @@ def test_routes(two, monkeypatch):
     assert prompts and not [p for p in prompts if "MARKb" in p], "the model saw nothing of b's"
     assert any("MARKa" in p for p in prompts), "ask's tools read a's store"
     assert snapshot(b) == before, "nothing of b's changed"
+    assert "split" in kinds and tenant.call(a, lambda: [c["start"][11:19] for c in db.conversations(TODAY, "9999")]) == ["10:00:00", "10:06:00"]
     timed = lambda t: tenant.call(t, lambda: {r[0] for r in db.conn().execute("SELECT route FROM perf_requests")})
     assert timed(b) == {"/api/status", "/api/conversation/{conv_id}"} and "/api/perf" in timed(a), "each request timed in its own store"
     assert b.events[-1]["text"] == "MARKb" and len(b.events) == 1 and b.devices[DEV].conversation["note"] == "MARKb"

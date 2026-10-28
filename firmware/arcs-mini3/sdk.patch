@@ -1,0 +1,155 @@
+diff --git a/apps/arcs-mini/CMakeLists.txt b/apps/arcs-mini/CMakeLists.txt
+index f3293b3e..b0dbac5c 100644
+--- a/apps/arcs-mini/CMakeLists.txt
++++ b/apps/arcs-mini/CMakeLists.txt
+@@ -41,6 +41,7 @@ endif()
+ add_subdirectory(tone)
+ add_subdirectory(services)
+ add_subdirectory(button)
++add_subdirectory(alldayrec)
+ listenai_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/miniapp)
+ if(CONFIG_MINIAPP)
+     add_subdirectory(miniapp)
+diff --git a/apps/arcs-mini/button/app_button.c b/apps/arcs-mini/button/app_button.c
+index 01dd7201..4e7f6379 100644
+--- a/apps/arcs-mini/button/app_button.c
++++ b/apps/arcs-mini/button/app_button.c
+@@ -1,5 +1,6 @@
+ #define TAG "app.button"
+ 
++#include "adr.h"
+ #include "alarm_handler.h"
+ #include "alarm_ring.h"
+ #include "apps/llm/lisa_ui_nav_scr_ids.h"
+@@ -452,6 +453,11 @@ static void app_button_on_changed(void *unused, uint32_t msg_id, void *data,
+         return;
+     }
+ 
++    /* AllDayRec: four clicks open/close its page; on it, a click is the next tab. */
++    if (adr_button(evt->action)) {
++        return;
++    }
++
+ #ifdef CONFIG_MINIAPP
+     if (miniapp_is_active()) {
+         if (evt->action == VOICE_MSG_BUTTON_ACTION_CLICK) {
+diff --git a/apps/arcs-mini/main.c b/apps/arcs-mini/main.c
+index beaf0e25..f6100cd4 100644
+--- a/apps/arcs-mini/main.c
++++ b/apps/arcs-mini/main.c
+@@ -288,6 +288,8 @@ int main(int argc, char **argv)
+         LOGE("Miniapp initialization failed");
+     }
+ #endif
++    extern int adr_init(void);
++    (void)adr_init();
+     app_show_initial_wifi_info_if_needed();
+     voice_player_network_tone_ui_ready();
+ 
+diff --git a/apps/arcs-mini/services/service_power_policy.c b/apps/arcs-mini/services/service_power_policy.c
+index 9ebb1fbe..2d4e9787 100644
+--- a/apps/arcs-mini/services/service_power_policy.c
++++ b/apps/arcs-mini/services/service_power_policy.c
+@@ -66,6 +66,7 @@ struct power_policy_context {
+     bool music_active;
+     bool alarm_active;
+     bool miniapp_active;
++    bool recording_active;
+     bool warning_waiting;
+     bool countdown_active;
+     bool runtime_suspended;
+@@ -335,6 +336,22 @@ void service_power_policy_set_miniapp_active(bool active)
+     }
+ }
+ 
++void service_power_policy_set_recording_active(bool active)
++{
++    if (s_policy.state_lock == NULL) {
++        return;
++    }
++    xSemaphoreTake(s_policy.state_lock, portMAX_DELAY);
++    s_policy.recording_active = active;
++    s_policy.last_activity_tick = xTaskGetTickCount();
++    xSemaphoreGive(s_policy.state_lock);
++    if (active) {
++        (void)power_policy_transition(VOICE_MSG_POWER_POLICY_STATE_NORMAL,
++                                      VOICE_MSG_POWER_POLICY_REASON_INTERACTION);
++    }
++    LISA_LOGI(TAG, "Recording=%u", (unsigned int)active);
++}
++
+ bool service_power_policy_handle_function_click(void)
+ {
+     service_power_policy_state_t state = service_power_policy_get_state();
+@@ -544,7 +561,7 @@ static void power_policy_task(void *arg)
+         state = s_policy.state;
+         busy = s_policy.interaction_active || s_policy.tts_active ||
+                s_policy.music_active || s_policy.alarm_active;
+-        miniapp_active = s_policy.miniapp_active;
++        miniapp_active = s_policy.miniapp_active || s_policy.recording_active; /* both hold NORMAL */
+         elapsed = now - s_policy.last_activity_tick;
+         warning_waiting = s_policy.warning_waiting;
+         warning_elapsed = now - s_policy.warning_start_tick;
+diff --git a/apps/arcs-mini/services/service_power_policy.h b/apps/arcs-mini/services/service_power_policy.h
+index 499b2128..63883228 100644
+--- a/apps/arcs-mini/services/service_power_policy.h
++++ b/apps/arcs-mini/services/service_power_policy.h
+@@ -26,6 +26,7 @@ int service_power_policy_set_runtime_suspended(bool suspended);
+ /* Keep the foreground miniapp out of idle/hibernate, preserving the existing
+  * inactive-time, external-power and battery conditions for auto shutdown. */
+ void service_power_policy_set_miniapp_active(bool active);
++void service_power_policy_set_recording_active(bool active); /* AllDayRec: stays NORMAL while recording */
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/arcs-sdk/modules/nopoll/src/nopoll_conn.c b/arcs-sdk/modules/nopoll/src/nopoll_conn.c
+index c8ece6e6..58865f75 100644
+--- a/arcs-sdk/modules/nopoll/src/nopoll_conn.c
++++ b/arcs-sdk/modules/nopoll/src/nopoll_conn.c
+@@ -1047,12 +1047,12 @@ noPollConn * __nopoll_conn_new_common (noPollCtx       * ctx,
+ 			nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "mbedtls_ssl_setup failed\n");
+ 			goto fail_ssl_connection2;
+ 		}
+-#if 0
+-		if (mbedtls_ssl_set_hostname(conn->ssl, conn->host_name ) != 0) {
++		/* SNI for host names only: a front end that serves several sites (Caddy with mTLS) answers 421 without it */
++		if (strspn(conn->host_name, "0123456789.:[]") != strlen(conn->host_name) &&
++		    mbedtls_ssl_set_hostname(conn->ssl, conn->host_name ) != 0) {
+ 			nopoll_log (ctx, NOPOLL_LEVEL_CRITICAL, "mbedtls_ssl_set_hostname failed\n");
+ 			goto fail_ssl_connection2;
+ 		}
+-#endif
+ 		conn->fd_ctx->fd = session;
+ 		mbedtls_ssl_set_bio(conn->ssl, conn->fd_ctx, mbedtls_net_send, mbedtls_net_recv, NULL );
+ 
+diff --git a/src/server/lschat_server/wakeup/app_wakeup.c b/src/server/lschat_server/wakeup/app_wakeup.c
+index 1ef5a2f9..518330f0 100755
+--- a/src/server/lschat_server/wakeup/app_wakeup.c
++++ b/src/server/lschat_server/wakeup/app_wakeup.c
+@@ -373,8 +373,13 @@ static void stream_data_fusion(mic_ref_in_t *algo_buf_in, mic_in_t *adc_data, re
+ 
+ }
+ 
++void (*app_wakeup_record_tap)(const void *event);
++
+ static void audio_stream_callback(const lisa_audio_event_t *event, void *user_data)
+ {
++    if (app_wakeup_record_tap) {
++        app_wakeup_record_tap(event);
++    }
+     int len;
+     uint8_t *buffer;
+     uint32_t buf_size;
+diff --git a/src/server/lschat_server/wakeup/app_wakeup.h b/src/server/lschat_server/wakeup/app_wakeup.h
+index 65b4a9ff..9f6e2c5b 100644
+--- a/src/server/lschat_server/wakeup/app_wakeup.h
++++ b/src/server/lschat_server/wakeup/app_wakeup.h
+@@ -22,6 +22,8 @@ typedef enum{
+ }app_wakeup_sensitivity_level_e;
+ 
+ int app_wakeup_init(struct wakeup_algo_resources *res);
++/* AllDayRec: a copy of every recorded frame (a const lisa_audio_event_t *), before wakeup/cloud see it */
++extern void (*app_wakeup_record_tap)(const void *event);
+ bool app_wakeup_is_available(void);
+ 
+ #ifdef CONFIG_BOARD_ARCS_MINI

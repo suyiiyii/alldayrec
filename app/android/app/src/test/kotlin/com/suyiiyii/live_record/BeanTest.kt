@@ -121,10 +121,10 @@ class BeanTest {
         assertTrue(Bean.isBean("D3200-0A0B")); assertFalse(Bean.isBean("LR-P3-0A0B"))
     }
 
-    /** What a fake bean records goes up as pieces, each unit once and dated by its seq: live from where the bean is
-     *  (begun 30 s before), on in the next file it rotates to, a drop mid-file resumed by its byte offset, a hole
-     *  asked for again once the recording stops, the start of the first file pulled as backlog, then the end after
-     *  everything uploads. A file from before the bean was added is never asked for. */
+    /** What a fake bean records goes up as pieces, each unit once and dated by its seq: the file being recorded from
+     *  its start (begun 30 s before) on to live, on in the next file it rotates to, a drop mid-file resumed by its byte
+     *  offset, a hole asked for again once the recording stops, then the end after everything uploads. A file from
+     *  before the bean was added is never asked for. */
     @Test fun sync() {
         val dir = Files.createTempDirectory("bean").toFile()
         val chunks = File(dir, "chunks"); val state = File(dir, "state.json")
@@ -136,27 +136,27 @@ class BeanTest {
         bean.recording = true; bean.open = a; bean.listed[old] = 60_000
         bean.onTransfer = { file, from, live ->
             when {
-                live && file == a -> {  // live from where the bean is, whatever was asked: 1500 units (30 s) in
+                file == bean.open && file == a -> {  // from the offset asked (realtime=0), on to live
                     bean.header(file, 0xFFFFFFFFL)
-                    bean.units(file, (1500L..1749L).toList(), last = 1749)
+                    bean.units(file, (from..1749L).toList(), last = 1749)
                     bean.complete(file)
                     b = (bean.now + 5000) / 1000 + 1
                     bean.rotation(b); bean.open = b; bean.listed[a] = 35_000
                 }
-                live && file == b && from == 0L -> {
+                file == bean.open && file == b && from == 0L -> {
                     bean.header(file, 0xFFFFFFFFL)
                     bean.units(file, (0L..199L).toList())
                     bean.script += { throw IOException("link dropped") }
                 }
-                live && file == b -> {  // again after the drop, from its offset; ten units lost on the way
+                file == bean.open && file == b -> {  // again after the drop, from its offset; ten units lost on the way
                     bean.header(file, 0xFFFFFFFFL)
                     bean.units(file, (200L..249L) + (260L..299L), last = 299)
                     bean.complete(file)
                     bean.push(0x1882, byteArrayOf(0))
                     bean.recording = false; bean.open = 0; bean.listed[b] = 6000
                 }
-                !live && file == a -> { bean.header(file, 1750L * Bean.UNIT); bean.units(file, (from..1749L).toList(), last = 1749); bean.complete(file) }
-                !live && file == b -> { bean.header(file, 300L * Bean.UNIT); bean.units(file, (from..299L).toList(), last = 299); bean.complete(file) }
+                file != bean.open && file == a -> { bean.header(file, 1750L * Bean.UNIT); bean.units(file, (from..1749L).toList(), last = 1749); bean.complete(file) }
+                file != bean.open && file == b -> { bean.header(file, 300L * Bean.UNIT); bean.units(file, (from..299L).toList(), last = 299); bean.complete(file) }
                 else -> fail("asked for $file from $from live $live")
             }
         }
@@ -164,7 +164,7 @@ class BeanTest {
         assertEquals("link dropped", assertThrows(IOException::class.java) { one.session(since, "") }.message)
         val anchorA = one.files[a]!!.anchor
         val anchors = one.files.mapValues { it.value.anchor }  // the files go once deleted on the bean
-        assertTrue("the phone's clock, near the bean's", anchorA - a * 1000 in 0L..3000L)
+        assertEquals("the bean's clock: a read from 0 starts behind, its first unit is not now", a * 1000, anchorA)
         assertNull("closed A is pending while B records: no hold", bean.held)
         assertTrue("live never sets a hold", bean.holds.isEmpty())
         assertTrue(Bean.u32(bean.sentOf(0x01A6), 0) in t0 / 1000 - 1..t0 / 1000 + 1)
@@ -179,7 +179,7 @@ class BeanTest {
         val two = BeanSync("D3200-0A0B", state, chunks, bean)
         bean.confirmed = { two.deletable }
         assertThrows(IOException::class.java) { two.session(since, "") }
-        assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(b, 200L, true), Triple(a, 0L, false), Triple(b, 250L, false)), bean.transfers)
+        assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false), Triple(b, 200L, false), Triple(b, 250L, false)), bean.transfers)
         assertTrue(bean.logs.any { it.first == "bean_gap" && "250..259" in it.second })
 
         val seen = mutableMapOf<Long, MutableList<Long>>()
@@ -211,8 +211,8 @@ class BeanTest {
         val a = t0 / 1000; val b = a + 60
         val bean = FakeBean(t0)
         bean.recording = true; bean.open = a; bean.listed[a] = 0
-        bean.onTransfer = { file, _, live ->
-            if (live) {
+        bean.onTransfer = { file, _, _ ->
+            if (file == bean.open) {
                 bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..24L).toList())
             } else {
                 bean.header(file, 25L * Bean.UNIT, code = 3)
@@ -231,7 +231,7 @@ class BeanTest {
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
         assertEquals(0, bean.logs.count { it.first == "bean_stall" })
-        assertEquals(listOf(Triple(a, 0L, true), Triple(a, 25L, false), Triple(b, 0L, true)), bean.transfers)
+        assertEquals(listOf(Triple(a, 0L, false), Triple(a, 25L, false), Triple(b, 0L, false)), bean.transfers)
         assertEquals("the button alone restarts recording", 0, bean.starts)
     }
 
@@ -258,7 +258,7 @@ class BeanTest {
         assertFalse(stalled.naturalRollover)
         assertTrue(bean.now - before in 30_000L..36_000L)
         assertEquals(1, bean.logs.count { it.first == "bean_stall" })
-        assertEquals(listOf(Triple(id, 0L, true), Triple(id, 25L, true)), bean.transfers)
+        assertEquals(listOf(Triple(id, 0L, false), Triple(id, 25L, false)), bean.transfers)
         assertEquals(0, bean.starts)
     }
 
@@ -302,8 +302,8 @@ class BeanTest {
         val bean = FakeBean(t0 + 5000)
         bean.recording = true; bean.open = b; bean.listed[b] = 0
         val sync = BeanSync("D3200-0A0B", state, chunks, bean)
-        bean.onTransfer = { file, from, live ->
-            if (live) {
+        bean.onTransfer = { file, from, _ ->
+            if (file == bean.open) {
                 assertEquals(b, file)
                 assertEquals("listing must keep closed files with received ranges", setOf(a, c), sync.files.keys)
                 assertEquals(25L, sync.gap(sync.files[a]!!))
@@ -321,7 +321,7 @@ class BeanTest {
             }
         }
         assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
-        assertEquals(listOf(Triple(b, 0L, true), Triple(a, 25L, false)), bean.transfers)
+        assertEquals(listOf(Triple(b, 0L, false), Triple(a, 25L, false)), bean.transfers)
         assertNull(sync.gap(sync.files[a]!!))
     }
 
@@ -340,7 +340,7 @@ class BeanTest {
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
         bean.onTransfer = { file, from, live ->
             when {
-                live && file == a -> {
+                file == bean.open && file == a -> {
                     bean.header(file, 0xFFFFFFFFL)
                     bean.units(file, (0L..24L).toList())
                     if (manual) {
@@ -351,7 +351,7 @@ class BeanTest {
                     bean.rotation(b, wait = 500)
                     bean.open = b; bean.listed[a] = 600; bean.listed[b] = 0
                 }
-                live && file == b -> {
+                file == bean.open && file == b -> {
                     assertEquals("rollover flushed the old partial piece", 25, packets(Uploader.queue(chunks).single()).size - 2)
                     assertEquals("old tail remains pending", 25L, sync.gap(sync.files[a]!!))
                     assertEquals(-1L, sync.files[a]!!.total)
@@ -365,7 +365,7 @@ class BeanTest {
                         bean.recording = false; bean.open = 0; bean.listed[b] = 500
                     }
                 }
-                !live && file == a -> {
+                file != bean.open && file == a -> {
                     assertEquals(25L, from)
                     bean.header(file, 30L * Bean.UNIT)
                     bean.units(file, (from..29L).toList(), last = 29); bean.complete(file)
@@ -376,10 +376,10 @@ class BeanTest {
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }
         assertEquals("file $a: rolled over to $b", again.message)
         assertEquals(!manual && !paused, again.naturalRollover)
-        assertEquals("no rejoin on the old connection", listOf(Triple(a, 0L, true)), bean.transfers)
+        assertEquals("no rejoin on the old connection", listOf(Triple(a, 0L, false)), bean.transfers)
         assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(Triple(a, 0L, true), Triple(b, 0L, true), Triple(a, 25L, false)), bean.transfers)
+        assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false), Triple(a, 25L, false)), bean.transfers)
         val seen = mutableMapOf<Long, MutableList<Long>>()
         for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
             val file = if (p[5] == (a % 251).toByte()) a else b
@@ -418,11 +418,11 @@ class BeanTest {
         // A fresh handshake discards any old stream still in flight before joining at the saved offset.
         bean.units(id, listOf(25L))
         bean.onTransfer = { file, from, live ->
-            assertTrue(live); assertEquals(25L, from)
+            assertFalse("realtime=0, from the offset", live); assertEquals(25L, from)
             bean.header(file, 0xFFFFFFFFL); bean.units(file, (30L..54L).toList())
         }
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(Triple(id, 0L, true), Triple(id, 25L, true)), bean.transfers)
+        assertEquals(listOf(Triple(id, 0L, false), Triple(id, 25L, false)), bean.transfers)
         val seqs = Uploader.queue(chunks).flatMap { packets(it).drop(2).map { p -> ByteBuffer.wrap(p, 1, 4).int.toLong() } }
         assertEquals((0L..24L).toList() + (30L..54L).toList(), seqs.sorted())
         for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
@@ -514,9 +514,8 @@ class BeanTest {
             bean.listed[open - 600] = 60_000; bean.listed[open] = 0
             if (persisted) bean.held = t0 - 60_000
             val queued = if (persisted) File(chunks, "${t0 - 1000}@D3200-0A0B.ogg").also { it.writeBytes(ByteArray(0)) } else null
-            bean.onTransfer = { file, _, live ->
-                assertTrue("only live is read while recording", live)
-                assertEquals(open, file)
+            bean.onTransfer = { file, _, _ ->
+                assertEquals("only the open file is read while recording", open, file)
                 bean.header(file, 0xFFFFFFFFL)
                 bean.units(file, (24L..123L).toList())
             }
@@ -533,8 +532,8 @@ class BeanTest {
         }
     }
 
-    /** Live starts half a second into a file, then resumes past holes on reconnect. These holes can only be read
-     *  after the file closes, so none of them should block finals while it records. */
+    /** Live starts half a second into a file, then resumes past holes on reconnect. None of these holes should block
+     *  finals while it records. */
     @Test fun openFileHolesDoNotHold() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
@@ -542,8 +541,7 @@ class BeanTest {
         val id = t0 / 1000
         bean.recording = true; bean.open = id; bean.listed[id] = 0
         var seq = 24L
-        bean.onTransfer = { file, _, live ->
-            assertTrue(live)
+        bean.onTransfer = { file, _, _ ->
             bean.header(file, 0xFFFFFFFFL)
             bean.units(file, (seq..seq + 99).toList())
             bean.script += { throw IOException("link dropped") }
@@ -575,7 +573,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertNull(bean.held)
         assertTrue(bean.logs.any { it.first == "hold" && "不再压住定稿" in it.second })
-        assertEquals("the hole remains until close", 0L, sync.gap(sync.files[bean.open]!!))
+        assertEquals("the head the bean did not send is still missing", 0L, sync.gap(sync.files[bean.open]!!))
     }
 
     /** A transfer asked for right after the one before ended got code 4 (10-25): the next waits 200 ms as the SDK does,
@@ -603,38 +601,32 @@ class BeanTest {
         assertEquals(1, bean.logs.count { "code 4" in it.second })
     }
 
-    /** Live began 36 units into the file (the bean starts realtime where it is, 10-25) and missed its last 7 (10-25: a
-     *  pause). The re-pull from 0 is cut once unit 35 is in (the link goes: the bean cannot be stopped otherwise), not
-     *  7287 more units; the next connection asks from the tail's offset. */
+    /** A closed file the phone has units 36..7322 of (a live read that began late and missed the end, 10-25): the
+     *  re-pull from 0 is cut once unit 35 is in (the link goes: the bean cannot be stopped otherwise), not 7287 more
+     *  units; the next connection asks from the tail's offset. */
     @Test fun headAndTail() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
-        val c = t0 / 1000
-        bean.recording = true; bean.open = c
-        bean.onTransfer = { file, from, live ->
-            if (live) {
-                bean.header(file, 0xFFFFFFFFL)
-                bean.units(file, (36L..7322L).toList())
-                bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
-                bean.recording = false; bean.open = 0; bean.listed[c] = 7330L * 20
-            } else { bean.header(file, 7330L * Bean.UNIT); bean.units(file, (from..7329L).toList(), last = 7329); bean.complete(file) }
-        }
-        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        val c = t0 / 1000 - 600
+        val state = File(dir, "state.json").apply { writeText("""{"$c":{"a":${c * 1000},"t":-1,"r":0,"h":[[36,7323]]}}""") }
+        bean.listed[c] = 7330L * 20
+        bean.onTransfer = { file, from, _ -> bean.header(file, 7330L * Bean.UNIT); bean.units(file, (from..7329L).toList(), last = 7329); bean.complete(file) }
+        bean.script += {}  // the auto-start's wait: the bean only echoes
+        val sync = BeanSync("D3200-0A0B", state, File(dir, "chunks"), bean)
         assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }
         assertTrue("the rest not taken", bean.queued > 2000)
         assertEquals(7323L, sync.gap(sync.files[c]!!))
         assertTrue(bean.logs.any { "断开连接" in it.second })
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }  // connected again
-        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false), Triple(c, 7323L, false)), bean.transfers)
+        assertEquals(listOf(Triple(c, 0L, false), Triple(c, 7323L, false)), bean.transfers)
         assertNull("all of it on the phone", sync.gap(sync.files[c]!!))
         assertEquals("the cut is not a try", 0, sync.files[c]!!.tries)
-        assertEquals("recording at connect: no start", 0, bean.starts)
     }
 
-    /** 10-25 T2: live, the link drops (the phone's Bluetooth off 30 s), live again from where the bean is, the bean
-     *  stops; the head and the middle in one re-pull (cut), the tail on the next connection; then the app is killed
-     *  before the pieces are up. The recording's end still goes to the server, once, after all of it is up. */
+    /** 10-25 T2: live, the link drops (the phone's Bluetooth off 30 s), back: the file from where the phone lacks it
+     *  on to live, the bean stops; the tail on the same connection; then the app is killed before the pieces are up.
+     *  The recording's end still goes to the server, once, after all of it is up. */
     @Test fun endAfterDropFillsAndKill() {
         val dir = Files.createTempDirectory("bean").toFile()
         val chunks = File(dir, "chunks")
@@ -642,14 +634,14 @@ class BeanTest {
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
         val c = t0 / 1000
-        bean.recording = true; bean.open = c; bean.listed[c] = 0
+        bean.recording = true; bean.open = c; bean.openAt = t0; bean.listed[c] = 0
         var live = 0
-        bean.onTransfer = { file, from, isLive ->
-            if (isLive && live++ == 0) {
-                bean.header(file, 0xFFFFFFFFL); bean.units(file, (36L..1092L).toList())
+        bean.onTransfer = { file, from, realtime ->
+            if (file == bean.open && live++ == 0) {
+                bean.answer(file, from, realtime); bean.more(1092)
                 bean.script += { throw IOException("link gone") }
-            } else if (isLive) {
-                bean.header(file, 0xFFFFFFFFL); bean.units(file, (3120L..5687L).toList())
+            } else if (file == bean.open) {
+                bean.answer(file, from, realtime); bean.more(5688 - from.toInt())
                 bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
                 bean.recording = false; bean.open = 0; bean.listed[c] = 5699L * 20
             } else {
@@ -661,11 +653,12 @@ class BeanTest {
         val sync = BeanSync("D3200-0A0B", state, chunks, bean)
         bean.confirmed = { sync.deletable }
         assertEquals("link gone", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
-        assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }
+        bean.now += 30_000
         assertEquals("app killed", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
-        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, true), Triple(c, 0L, false), Triple(c, 5688L, false)), bean.transfers)
+        assertEquals(listOf(Triple(c, 0L, false), Triple(c, 1092L, false), Triple(c, 5688L, false)), bean.transfers)
         val anchor = sync.files[c]!!.anchor
         assertEquals("not yet: its pieces are not up", emptyList<Long>(), bean.ends)
+        assertTrue("nothing off the bean before the server has it", bean.deleted.isEmpty())
 
         val again = BeanSync("D3200-0A0B", state, chunks, bean)  // the app back
         bean.confirmed = { again.deletable }
@@ -673,7 +666,7 @@ class BeanTest {
         repeat(12) { bean.script += {} }
         assertThrows(IOException::class.java) { again.session(since, "") }
         assertEquals("the end, once", listOf(anchor + 5699L * 20), bean.ends)
-        assertEquals(4, bean.transfers.size)
+        assertEquals(3, bean.transfers.size)
         assertEquals(listOf(c), bean.deleted)
     }
 
@@ -685,8 +678,8 @@ class BeanTest {
         val bean = FakeBean(t0)
         val d = t0 / 1000
         bean.recording = true; bean.open = d
-        bean.onTransfer = { file, from, live ->
-            if (live) {
+        bean.onTransfer = { file, from, _ ->
+            if (file == bean.open) {
                 bean.header(file, 0xFFFFFFFFL)
                 bean.units(file, (10L..60L).toList(), marks = setOf(40, 41, 42))
                 bean.units(file, (61L..99L).toList(), last = 99, wait = 10_000)
@@ -696,7 +689,7 @@ class BeanTest {
         }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(Triple(d, 0L, true), Triple(d, 0L, false)), bean.transfers)
+        assertEquals(listOf(Triple(d, 0L, false), Triple(d, 0L, false)), bean.transfers)
         assertNull(sync.gap(sync.files[d]!!))
         assertEquals(1, bean.logs.count { it.first == "mark" })
         assertEquals(1, bean.logs.count { it.first == "bean_gap_time" })
@@ -712,8 +705,8 @@ class BeanTest {
         val since = t0 - 3_600_000
         val bean = FakeBean(t0)
         bean.startable = true
-        bean.onTransfer = { file, from, live ->
-            if (live) {  // where the bean is (36 units in, 10-25), until the button stops it
+        bean.onTransfer = { file, from, _ ->
+            if (file == bean.open) {  // units 0..35 lost on the way, until the button stops it
                 bean.header(file, 0xFFFFFFFFL)
                 bean.units(file, (36L..1999L).toList())
                 bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
@@ -723,7 +716,7 @@ class BeanTest {
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }
         val c = t0 / 1000  // the file the start began
-        assertEquals(listOf(Triple(c, 0L, true), Triple(c, 0L, false)), bean.transfers)
+        assertEquals(listOf(Triple(c, 0L, false), Triple(c, 0L, false)), bean.transfers)
         assertEquals(1, bean.starts)
         assertEquals(listOf("自动开始录音"), bean.logs.filter { it.first == "bean_start" }.map { it.second })
         assertThrows(IOException::class.java) { sync.session(since, "") }  // the app's own reconnect: the stop holds
@@ -743,8 +736,8 @@ class BeanTest {
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
         bean.startable = true
-        bean.onTransfer = { file, _, live ->
-            assertTrue(live)
+        bean.onTransfer = { file, _, _ ->
+            assertEquals(bean.open, file)
             bean.header(file, 0xFFFFFFFFL)
         }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
@@ -866,8 +859,8 @@ class BeanTest {
         val bean = FakeBean(t0)
         bean.startable = true
         var pulls = 0
-        bean.onTransfer = { file, from, live ->
-            if (live) {
+        bean.onTransfer = { file, from, _ ->
+            if (file == bean.open) {  // units 0..35 lost on the way
                 bean.header(file, 0xFFFFFFFFL)
                 bean.units(file, (36L..1999L).toList())
                 bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
@@ -947,10 +940,219 @@ class BeanTest {
                 assertTrue(bean.transfers.isEmpty())
             } else {
                 assertEquals("out of script", error.message)
-                assertEquals(listOf(Triple(id, 0L, true)), bean.transfers)
+                assertEquals(listOf(Triple(id, 0L, false)), bean.transfers)
                 assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
             }
         }
+    }
+
+    /** The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found
+     *  it (FakeBean.answer): `units` of it a 1A/07, then the link goes. */
+    private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long) {
+        val f get() = sync.files[id]!!
+        val reasons get() = bean.logFields.mapNotNull { it["reason"] }
+    }
+    private fun rec(s: Long, have: List<Pair<Long, Long>>, watched: Boolean, units: Int = 600): Rec {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.listed[bean.open] = 0
+        bean.watched = watched
+        val state = File(dir, "state.json")
+        if (have.isNotEmpty()) state.writeText("""{"${bean.open}":{"a":${bean.openAt},"t":-1,"r":0,"h":[${have.joinToString(",") { "[${it.first},${it.second}]" }}]}}""")
+        bean.onTransfer = { file, from, realtime -> bean.answer(file, from, realtime); bean.more(units) }
+        return Rec(bean, BeanSync("D3200-0A0B", state, File(dir, "chunks"), bean), bean.open)
+    }
+    /** Only the five reads went out: no start (recording), no delete (the file is open). */
+    private fun onlyReads(bean: FakeBean) {
+        assertTrue(bean.sent.all { ((it[5].toInt() and 255) shl 8 or (it[6].toInt() and 255)) in Bean.SENDS })
+        assertTrue(bean.deleted.isEmpty())
+    }
+
+    /** The live page open, the tail hole 50 s: read with realtime=0 from its start, caught up faster than real time,
+     *  then on live in the same transfer; no hole left. */
+    @Test fun watchedShortTailIsFilled() {
+        val r = rec(190, listOf(0L to 7000L), watched = true, units = 6000)  // the bean at unit 9500
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 7000L, false)), r.bean.transfers)
+        assertEquals(listOf("tail_short"), r.reasons)
+        assertEquals(2500L, r.bean.logFields.first { it["reason"] != null }["hole_units"])
+        assertTrue(r.bean.logs.any { "首单元 7000（请求从 7000 起）" in it.second })
+        assertEquals(listOf(0L, 13000L), r.f.have.single().toList())
+        assertTrue("caught up: the last units came as recorded", r.bean.now - r.bean.openAt in 13000L * 20..13000L * 20 + 100)
+        onlyReads(r.bean)
+    }
+
+    /** The live page open, the tail hole 100 s: live now (realtime=1, from where the bean is), the hole kept. */
+    @Test fun watchedLongTailGoesLive() {
+        val r = rec(240, listOf(0L to 7000L), watched = true, units = 300)  // the bean at unit 12000
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 7000L, true)), r.bean.transfers)
+        assertEquals(listOf("live_now"), r.reasons)
+        assertEquals(listOf(listOf(0L, 7000L), listOf(12000L, 12300L)), r.f.have.map { it.toList() })
+        onlyReads(r.bean)
+    }
+
+    /** Nobody watching: the older hole first (realtime=0), cut where the long stretch the phone has begins, then the
+     *  tail from its own offset, on into live. */
+    @Test fun unwatchedFillsOldestFirst() {
+        val r = rec(80, listOf(0L to 100L, 400L to 2500L), watched = false, units = 3000)  // the bean at unit 4000
+        assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(listOf(0L, 2500L)), r.f.have.map { it.toList() })
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 100L, false), Triple(r.id, 2500L, false)), r.bean.transfers)
+        assertEquals(listOf("fill_hole", "fill_tail"), r.reasons)
+        assertEquals(listOf(0L, 5500L), r.f.have.single().toList())
+        onlyReads(r.bean)
+    }
+
+    /** The live page opens while a fill is over a minute behind: it ends (the link goes), the next start is live now
+     *  and what was not read stays on the bean. */
+    @Test fun watchedMidFillAborts() {
+        val r = rec(202, listOf(0L to 100L), watched = false)  // the bean at unit 10100
+        r.bean.script += { r.bean.watched = true; r.bean.more(300) }
+        assertTrue(assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message!!.startsWith("file ${r.id}: the live page opened"))
+        val read = r.f.have.single()[1]
+        assertTrue(read in 700L..1000L)
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 100L, false), Triple(r.id, read, true)), r.bean.transfers)
+        assertEquals(listOf("fill_tail", "watched_abort", "live_now"), r.reasons)
+        assertEquals("the hole stays", 2, r.f.have.size)
+        onlyReads(r.bean)
+    }
+
+    /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by
+     *  the bean's clock (its first unit came late, not as recorded). */
+    @Test fun newFileHeadIsFilled() {
+        for (watched in listOf(false, true)) {
+            val r = rec(10, emptyList(), watched)
+            val a = r.id; val b = a + 11
+            r.bean.script += { r.bean.now = b * 1000; r.bean.open = b; r.bean.openAt = b * 1000; r.bean.listed[b] = 0; r.bean.rotation(b) }
+            assertTrue(assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.naturalRollover)
+            r.bean.now += 1500
+            assertThrows(IOException::class.java) { r.sync.session(0, "") }
+            assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false)), r.bean.transfers)
+            assertEquals(List(2) { if (watched) "tail_short" else "fill_tail" }, r.reasons)
+            assertTrue(r.bean.logs.any { "文件 $b 开始：首单元 0（请求从 0 起）" in it.second })
+            assertEquals(0L, r.sync.files[b]!!.have.first()[0])
+            assertEquals(b * 1000, r.sync.files[b]!!.anchor)
+            onlyReads(r.bean)
+        }
+    }
+
+    /** A read the bean honoured (its first unit the offset asked) clears the file's misses: only misses in a row switch
+     *  it to realtime=1. */
+    @Test fun honouredFillClearsMisses() {
+        val r = rec(100, listOf(0L to 1000L), watched = false)
+        var n = 0
+        r.bean.onTransfer = { file, from, realtime ->
+            when (++n) {
+                3 -> { r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script.addFirst { throw IOException("drop") } }
+                6 -> { r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script.clear(); r.bean.script += { throw IOException("done") } }
+                else -> r.bean.header(file, 0xFFFFFFFFL, code = 2)
+            }
+        }
+        repeat(300) { r.bean.script += {} }
+        for (i in 0..19) if (assertThrows(Exception::class.java) { r.sync.session(0, "") }.message == "done") break
+        assertEquals(List(6) { false }, r.bean.transfers.map { it.third })
+        assertEquals(List(6) { "fill_tail" }, r.reasons)
+        assertEquals(listOf(0L, 1060L), r.f.have.single().toList())
+    }
+
+    /** The live page closes during a live read it began with a hole left behind (live_now): the read ends, the hole
+     *  is filled with a cut, then the tail, on live. */
+    @Test fun watchedEndFillsTheHole() {
+        val r = rec(240, listOf(0L to 7000L), watched = true, units = 6000)  // the bean at unit 12000
+        r.bean.script += { r.bean.watched = false; r.bean.more(300) }
+        assertTrue(assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message!!.startsWith("file ${r.id}: the live page closed"))
+        assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }  // the hole, cut where the live stretch begins
+        assertEquals(listOf(0L, 18003L), r.f.have.single().toList())
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 7000L, true), Triple(r.id, 7000L, false), Triple(r.id, 18003L, false)), r.bean.transfers)
+        assertEquals(listOf("live_now", "watched_end", "fill_hole", "fill_tail"), r.reasons)
+        assertEquals(5000L, r.bean.logFields.first { it["reason"] == "watched_end" }["hole_units"])
+        assertEquals(listOf(0L, 24003L), r.f.have.single().toList())
+        onlyReads(r.bean)
+    }
+
+    /** A live read not begun for the page (live_fallback, a file begun before the bean was added here) goes on when the
+     *  page closes, even with a hole behind it. */
+    @Test fun livePageClosingEndsOnlyItsOwnReads() {
+        val r = rec(100, listOf(0L to 1000L), watched = false)
+        var refused = 0
+        r.bean.onTransfer = { file, from, realtime ->
+            if (realtime) {
+                r.bean.watched = false; r.bean.answer(file, from, true); r.bean.more(30)
+                r.bean.script.clear(); r.bean.script += { throw IOException("done") }
+            } else { r.bean.header(file, 0xFFFFFFFFL, code = 2); if (++refused == 3) r.bean.watched = true }
+        }
+        repeat(300) { r.bean.script += {} }
+        for (i in 0..9) {
+            val e = assertThrows(Exception::class.java) { r.sync.session(0, "") }
+            if (e is BeanSync.Again) continue
+            assertEquals("done", e.message); break
+        }
+        assertEquals(List(3) { "fill_tail" } + "live_fallback", r.reasons)
+        val p = rec(100, emptyList(), watched = true, units = 30)
+        p.bean.script += { p.bean.watched = false; p.bean.more(30) }
+        assertThrows(IOException::class.java) { p.sync.session((p.id + 50) * 1000, "") }
+        assertEquals(listOf("live_now"), p.reasons)
+        assertEquals(listOf(5000L, 5060L), p.f.have.single().toList())
+    }
+
+    /** A bean that ignored the offset of the open file (starting where it is) cuts each fill of an older hole at once:
+     *  three tries, then realtime=1 for that file. */
+    @Test fun unfillableOpenHoleStopsAfterTries() {
+        val r = rec(80, listOf(0L to 100L, 400L to 2500L), watched = false, units = 30)
+        r.bean.onTransfer = { file, _, _ -> r.bean.answer(file, 0, realtime = true); r.bean.more(30) }
+        repeat(3) { assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") } }
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(100L, 100L, 100L), r.bean.transfers.take(3).map { it.second })
+        assertEquals(listOf("fill_hole", "fill_hole", "fill_hole", "live_fallback"), r.reasons)
+        assertTrue(r.bean.transfers[3].third)
+        onlyReads(r.bean)
+    }
+
+    /** A bean that refuses realtime=0 for the file it records (code 2, code 3, no answer, or a header and no unit in
+     *  30 s): three tries, then live as before (realtime=1); the holes stay for after the stop. */
+    @Test fun refusedFillFallsBackToLive() {
+        for (code in listOf(2, 3, null, 0)) {
+            val r = rec(100, listOf(0L to 1000L), watched = false)
+            r.bean.onTransfer = { file, from, realtime ->
+                if (realtime) {
+                    r.bean.answer(file, from, true); r.bean.more(30)
+                    r.bean.script.clear(); r.bean.script += { throw IOException("done") }
+                } else if (code != null) r.bean.header(file, 0xFFFFFFFFL, code = code)
+            }
+            repeat(300) { r.bean.script += {} }
+            for (i in 0..9) {  // the live guard may end a session meanwhile (Again): BeanLink connects again
+                val e = assertThrows(Exception::class.java) { r.sync.session(0, "") }
+                if (e is BeanSync.Again) continue
+                assertEquals("done", e.message); break
+            }
+            assertEquals("code $code", List(3) { false } + true, r.bean.transfers.map { it.third })
+            assertEquals(List(3) { "fill_tail" } + "live_fallback", r.reasons)
+            assertEquals(1000L, r.f.have.first()[1])
+            assertEquals(2, r.f.have.size)
+        }
+    }
+
+    /** A file the bean began before it was added here: live only (realtime=1), its start is not this phone's (10-14). */
+    @Test fun openFileBeforeSinceGoesLive() {
+        val r = rec(100, emptyList(), watched = false, units = 30)  // the bean at unit 5000
+        assertThrows(IOException::class.java) { r.sync.session((r.id + 50) * 1000, "") }
+        assertEquals(listOf(Triple(r.id, 0L, true)), r.bean.transfers)
+        assertEquals(listOf("live_now"), r.reasons)
+        assertEquals(listOf(5000L, 5030L), r.f.have.single().toList())
+    }
+
+    /** Code 3 (nothing from that offset) for the file being recorded is not its end: no length, the rest still due. */
+    @Test fun openFileCode3IsNoEnd() {
+        val r = rec(10, listOf(0L to 400L), watched = false)
+        r.bean.onTransfer = { file, _, _ -> r.bean.header(file, 0xFFFFFFFFL, code = 3) }
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(-1L, r.f.total)
+        assertEquals(400L, r.sync.gap(r.f))
     }
 
     private fun packets(f: File): List<ByteArray> {
@@ -991,6 +1193,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var onTransfer: (Long, Long, Boolean) -> Unit = { _, _, _ -> }
     val script = ArrayDeque<() -> Unit>()
     val logs = mutableListOf<Pair<String, String>>()
+    val logFields = mutableListOf<Map<String, Any?>>()  // each log's fields, as `logs`
+    var watched = false  // the live page is open (Io.watched)
     var held: Long? = null
     val holds = mutableListOf<Long?>()
     val ends = mutableListOf<Long>()
@@ -1044,7 +1248,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
 
     override fun now() = now
     override fun liveUnits() = 50
-    override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text }
+    override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text; logFields += fields }
+    override fun watched() = watched
     val reports = mutableListOf<Map<String, Any?>>()
     override fun report(hw: Map<String, Any?>) { reports += hw.toMap() }
     override fun hold(at: Long?) { holds += at; held = at }
@@ -1075,13 +1280,35 @@ class FakeBean(var now: Long) : BeanSync.Io {
         push(0x1A07, Bean.le32(file) + Bean.le32(size) + n + Bean.ctr(session, sn, "soundcored3200".toByteArray() + k) + sn + byteArrayOf(code.toByte()))
     }
 
-    /** Units three to a frame, 20 ms each; the audio says its file and seq. */
-    fun units(file: Long, seqs: List<Long>, last: Long = -1, marks: Set<Long> = emptySet(), wait: Long = 0) {
+    /** Units three to a frame, `ms` each; the audio says its file and seq. */
+    fun units(file: Long, seqs: List<Long>, last: Long = -1, marks: Set<Long> = emptySet(), wait: Long = 0, ms: Long = 20) {
         val (k, n) = fileKeys[file]!!
         for ((i, c) in seqs.chunked(3).withIndex()) push(0x1A08, c.fold(ByteArray(0)) { acc, s ->
             val flags = (if (s == last) 4 else if (s == 0L) 2 else 0) or (if (s in marks) 1 else 0)
             acc + Bean.le32(s) + byteArrayOf(flags.toByte()) + Bean.ctr(k, Bean.iv(n, s), audio(file, s)) + byteArrayOf(0)
-        }, 20L * c.size + if (i == 0) wait else 0)
+        }, ms * c.size + if (i == 0) wait else 0)
+    }
+
+    /** The file being recorded as the bean answers a 1A/07 for it (the 10-27 probe): realtime=1 from the
+     *  unit it is at, whatever the offset; realtime=0 from the offset, at 2.5× real time while behind, then on as it
+     *  records; never an end. A closed file asked for meanwhile: the open file from 0 (10-26). `openAt`: its unit 0. */
+    var openAt = 0L
+    private var next = 0L    // its next unit on the way
+    private var nextAt = 0L  // when the last went
+    fun answer(file: Long, from: Long, realtime: Boolean) {
+        header(open, 0xFFFFFFFFL)
+        next = if (file != open) 0 else if (realtime) (now - openAt) / Bean.FRAME_MS else from
+        nextAt = now
+    }
+    /** `n` more of those units, three to a frame. */
+    fun more(n: Int) {
+        nextAt = maxOf(nextAt, now)
+        for (c in (next until next + n).chunked(3)) {
+            val at = maxOf(nextAt + 8L * c.size, openAt + (c.last() + 1) * Bean.FRAME_MS)
+            units(open, c, wait = at - nextAt, ms = 0)
+            nextAt = at
+        }
+        next += n
     }
 
     fun complete(file: Long) = push(0x1A0A, byteArrayOf(0) + Bean.le32(0) + Bean.le32(file))

@@ -3,7 +3,6 @@
     uv run python -m alldayrec.late_backfill --days 30 --dry-run
 
 LIVE_RECORD_URL selects the server. LIVE_RECORD_TOKEN, else stdin's first line, supplies its token.
-The manager runs the dry run first and obtains the owner's approval before running without --dry-run.
 """
 import argparse
 import datetime as dt

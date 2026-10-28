@@ -744,16 +744,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardFullTile => 'Full';
 
   @override
-  String get cardFull => 'Card full';
-
-  @override
   String get cardFullSub => 'Offline recording stopped';
 
   @override
   String get cardUsbTile => 'USB disk';
-
-  @override
-  String get cardUsb => 'Card in USB disk mode';
 
   @override
   String get cardUsbSub => 'Offline recording paused';
@@ -762,17 +756,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get cardNoneTile => 'No card';
 
   @override
-  String get cardNone => 'No card in';
-
-  @override
   String get cardNoneSub =>
       'No card, or not seated: live upload only, nothing is recorded while the phone is away';
 
   @override
   String get cardErrorTile => 'Error';
-
-  @override
-  String get cardError => 'Card error';
 
   @override
   String get cardErrorSub =>
@@ -791,16 +779,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get advCardError => 'Card error';
-
-  @override
-  String cardFreeGb(Object gb) {
-    return '$gb GB free on card';
-  }
-
-  @override
-  String batteryPercent(Object percent) {
-    return 'Battery $percent%';
-  }
 
   @override
   String get allowInstalls =>
@@ -952,7 +930,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanRecorderHelp =>
-      'The phone starts the bean recording when it connects. Press its button to stop it. With the phone nearby it uploads as it records. What it records while the phone is away is fetched after you stop it. Recordings the server has in full are deleted from the bean.';
+      'The phone starts the bean recording when it connects. Press its button to stop it until the link drops: on the next connection the phone starts it again. With the phone nearby it uploads as it records. What it records while the phone is away: the file it is recording is filled in as it records, and finished files are fetched after you stop it. Recordings the server has in full are deleted from the bean.';
 
   @override
   String get beanFetching => 'Fetching the recordings on the bean';

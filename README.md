@@ -129,7 +129,7 @@ App 的安装和连接见[安装并连接手机 App](https://suyiiyii.github.io/
 
 ## 参与贡献
 
-欢迎提 [issue](https://github.com/suyiiyii/alldayrec/issues) 和 PR。本地检查和提交说明见[如何参与开发](https://suyiiyii.github.io/alldayrec/how-to/contribute.html)，代码边界、CI 和发布构建见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
+欢迎提 [issue](https://github.com/suyiiyii/alldayrec/issues) 和 PR。本地检查和提交说明见[如何参与开发](https://suyiiyii.github.io/alldayrec/how-to/contribute.html)，代码边界、CI 和发布构建见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 隐私与法律
 

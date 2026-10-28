@@ -59,7 +59,7 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `MODELS_DIR` | empty | `DATA_DIR/models` | The model files directory, an absolute, writable path; missing files are downloaded here at startup. Fixed at `/data/models` in Docker |
 | `PORT` | `8770` | `8770` | The port to listen on. Docker Compose fixes it at `8770` |
 | `HOST` | `127.0.0.1` | `127.0.0.1` | The address to listen on; set `0.0.0.0` when the reverse proxy runs on another machine. Docker Compose fixes it at `0.0.0.0` |
-| `HOLD_STALE_S` | `1200` | `1200` | While the phone keeps reporting its backfill hold, resume finals after this many seconds without new audio before it. A silent phone is still waited for up to 12 hours; returning after more than 5 minutes gives fresh grace for its backlog. Later older audio is saved for playback without transcription. Set very high (e.g. `315360000`) to effectively disable the no-progress timeout; `0` expires immediately, it does not disable it |
+| `HOLD_STALE_S` | `1200` | `1200` | While the phone keeps reporting its backfill hold, resume finals after this many seconds without new audio before it. A silent phone is still waited for up to 12 hours; returning after more than 5 minutes gives fresh grace for its backlog. Older audio that arrives later is transcribed as late audio (see `LATE_SETTLE_S`). Set very high (e.g. `315360000`) to effectively disable the no-progress timeout; `0` expires immediately, it does not disable it |
 | `DRAFT_ENGINE` | empty | same as `ENGINE` | The engine of the draft layer (while a page is open); it can also be `qwen-stream`: while a page is open, the audio streams to Qwen (Bailian qwen-audio-3.1-asr-flash-streaming, with `DASHSCOPE_API_KEY`), so words show as they are said |
 | `ENGINE_FALLBACK` | empty | none | The engine used when `ENGINE` or `DRAFT_ENGINE` fails on a window (402, 451, 5xx, timeout); empty means a retry later |
 | `VOLC_ASR_KEY` | empty | — | The API key of a Volcengine Ark Agent Plan, used by `volc` |
@@ -68,6 +68,7 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `LOCAL_ASR_URL` | empty | the k2-fsa/sherpa-onnx GitHub Release | Where `local` downloads its model tarball (about 136 MB) from; the same tarball on a mirror works too (sha256-checked) |
 | `UI_LANG` | `zh` | `zh` | The language of what the LLM writes (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. A `lang` in `tenants.json` wins. The web pages use it too in a browser that hasn't picked a language; the app's UI doesn't change |
 | `RECAP_AT` | `10:00` | `10:00` | The time of day the server writes yesterday's recap; set it empty for no recap |
+| `SPLIT_MIN_S` | `600` | `600` | Before a conversation at least this many seconds long (start to end) is summarized, one more LLM call checks whether an unrelated conversation began inside it (splitting only on 5 quiet minutes lets voices around, in a mall or on the street, chain several into one) and splits it there, each part with its own summary; `0` never splits. Late audio never merges the parts back. The call sends `reasoning_effort`, so it needs an endpoint that accepts it (a reasoning model); set `0` when yours does not. Existing conversations: `python -m alldayrec.split --since YYYY-MM-DD` (see the top of that file) |
 | `LATE_SETTLE_S` | `180` | `180` | Seconds after the last extension before late audio is processed; end/hold release settles it immediately. Spans near an open conversation wait for it to close |
 | `LATE_PROCESS_TIMEOUT_S` | `1800` | `1800` | Maximum seconds for one late-audio job; each job contains at most 30 minutes of audio, so processing must be faster than real time (including diarization, RTF < 1); timeouts back off and stop after three attempts, retaining the failure reason |
 | `TZ` | `Asia/Shanghai` | the system time zone | The time zone for conversation dates and `RECAP_AT`. A Docker container's system time zone is UTC; an empty `TZ=` means UTC too |
@@ -93,7 +94,7 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 
 | Variable | Used in | Description |
 |---|---|---|
-| `LIVE_DATA`, `RECORDINGS_DIR` | `owner.py`, `replay_case.py`, `migrate.py` (`RECORDINGS_DIR`: `migrate.py` only) | A tenant's data directory and recordings directory |
+| `LIVE_DATA` | `owner.py`, `replay_case.py` | A tenant's data directory |
 | `OWNER_LABELS` | `owner.py` | Windows known to be your own voice (jsonl) |
 | `CASES_DIR` | `eval_all.sh` | The directory of labeled evaluation cases |
 | `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` (`EMB_MODEL` also `owner.py`) | See those scripts |

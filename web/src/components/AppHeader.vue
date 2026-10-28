@@ -34,7 +34,11 @@ const DEMO = import.meta.env.MODE === "demo";
 <template>
   <header :class="{ bare: !inApp }">
     <div class="bar">
-      <h1><img src="../brand/mark.svg" alt="" width="24" height="24" />AllDayRec</h1>
+      <h1>
+        <RouterLink to="/"
+          ><img src="../brand/mark.svg" alt="" width="24" height="24" />AllDayRec</RouterLink
+        >
+      </h1>
       <a v-if="DEMO" class="demo-tag" :href="lang() === 'en' ? '../en/' : '../'">{{
         t("common.demo")
       }}</a>
@@ -118,13 +122,15 @@ header {
   column-gap: var(--space-4);
 }
 h1 {
+  font-size: var(--fs-lg);
+  margin: 0;
+  white-space: nowrap;
+}
+/* the mark and the name: one link to 时间线 */
+h1 a {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--fs-lg);
-  margin: 0;
-  color: var(--accent);
-  white-space: nowrap;
 }
 nav {
   display: flex;
