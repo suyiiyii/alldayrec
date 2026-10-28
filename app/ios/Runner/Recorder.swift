@@ -660,6 +660,14 @@ final class Uploader: Thread {
     } catch { note = ["code": "archiveFailed", "detail": error.localizedDescription]; try? fm.removeItem(at: f) }
   }
 
+  /// No URL cache: the shared session's kept ~25 KB for every new URL, and each upload's has its piece's start in it
+  /// (memory grew with the audio sent, 10-28).
+  private static let session: URLSession = {
+    let c = URLSessionConfiguration.default
+    c.urlCache = nil
+    return URLSession(configuration: c)
+  }()
+
   /// `reply` gets the body of a 2xx answer.
   private func post(_ url: String, _ body: Data, _ type: String?, reply: (Data) -> Void = { _ in }) throws -> Int {
     guard let u = URL(string: url) else { throw URLError(.badURL) }
@@ -675,7 +683,7 @@ final class Uploader: Thread {
     defer { release() }
     var code = 0, err: Error?, got: Data?
     let done = DispatchSemaphore(value: 0)
-    URLSession.shared.uploadTask(with: r, from: body) { data, resp, e in
+    Uploader.session.uploadTask(with: r, from: body) { data, resp, e in
       code = (resp as? HTTPURLResponse)?.statusCode ?? 0; got = data; err = e; done.signal()
     }.resume()
     done.wait()
