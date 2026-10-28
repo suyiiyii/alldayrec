@@ -299,6 +299,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `POST` | Split the long conversations started since a day that are not checked yet, one at a time (the backfill script split.py). | `since` (query, string)<br>`apply?` (query, boolean) |
 
+### `/api/split/recheck`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | Ask again for the conversations split since a day and merge back the parts whose cut no longer stands (split.py --recheck); apply asks the model anew, so the cuts it undoes can differ from a dry run's, but it only ever undoes cuts, never adds one. | `since` (query, string)<br>`apply?` (query, boolean) |
+
 ### `/api/conversation/{conv_id}/summarize`
 
 | Method | Description | Parameters |
