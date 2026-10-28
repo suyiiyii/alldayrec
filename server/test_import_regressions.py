@@ -103,6 +103,15 @@ def test_stopped_decoder_upload_is_503_without_traceback(tmp_path, monkeypatch, 
     assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
 
 
+def test_crashed_decoder_upload_is_400_and_kept(tmp_path, monkeypatch):
+    # a crash (SIGSEGV, SIGABRT) is the file's doing and would recur on every resend: a bad upload, not a stop
+    t = db.open_db(tmp_path / 'live.db')
+    stop_decoder(monkeypatch, 'os.kill(os.getpid(), signal.SIGSEGV)')
+    r = app_client(t, monkeypatch).post(f'/api/chunks?device=fixture&start={START}', content=b'fixture')
+    assert r.status_code == 400
+    assert (t.recordings / f'rejected/fixture/{START}.bin').read_bytes() == b'fixture'
+
+
 def long_piece_stopped(tmp_path, monkeypatch):
     """A stored piece over WHOLE_S (cut() decodes only the window asked: piece_window), its decoder then exiting 255."""
     t = db.open_db(tmp_path / 'live.db')

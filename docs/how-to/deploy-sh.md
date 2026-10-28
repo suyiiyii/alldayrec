@@ -10,7 +10,7 @@ type: how-to
 
 - 本机：仓库的干净检出，`HEAD` 等于 `origin/main`；pnpm（脚本会构建网页）。
 - 目标主机：能用 ssh 登录，远程 shell 能以 root 运行（脚本要操作 systemd 和实例目录）。
-- 每个实例是一个目录，里面有它的 `.env` 和 `tenants.json`。`.env` 里设 `DATA_DIR=<这个目录>`（模型文件放在别处时再设 `MODELS_DIR`）；对应的 systemd 单元以 `<目录>/server` 为工作目录、`EnvironmentFile=<目录>/.env`，运行 `<目录>/server/.venv/bin/python -m alldayrec`。部署前脚本会检查新的服务器能按 `.env` 找到并读懂每个实例的 `tenants.json`，不能就什么都不装。
+- 每个实例是一个目录，里面有它的 `.env` 和 `tenants.json`。`.env` 里设 `DATA_DIR=<这个目录>`（模型文件放在别处时再设 `MODELS_DIR`）；对应的 systemd 单元以 `<目录>/server` 为工作目录、`EnvironmentFile=<目录>/.env`，运行 `<目录>/server/.venv/bin/python -m alldayrec`，并设 `KillMode=mixed`：停服时只有服务器进程收到 SIGTERM，它退出前（最多 5 秒）正在解码的上传可以做完。部署前脚本会检查新的服务器能按 `.env` 找到并读懂每个实例的 `tenants.json`，不能就什么都不装。
 
 ## 设置环境变量
 

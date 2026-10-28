@@ -10,7 +10,7 @@ Besides Docker, the server can run as systemd units on a Linux host, deployed ov
 
 - Your machine: a clean checkout of the repository with `HEAD` equal to `origin/main`; pnpm (the script builds the web app).
 - The target host: you can log in over ssh, and the remote shell can run as root (the script works on systemd and the instance directories).
-- Each instance is a directory with its `.env` and `tenants.json`. Its `.env` sets `DATA_DIR=<that directory>` (and `MODELS_DIR` when the model files are elsewhere); its systemd unit runs `<dir>/server/.venv/bin/python -m alldayrec` with the working directory `<dir>/server` and `EnvironmentFile=<dir>/.env`. Before installing anything, the script checks that the new server finds and reads every instance's `tenants.json` the way its `.env` says, and installs nothing when one fails.
+- Each instance is a directory with its `.env` and `tenants.json`. Its `.env` sets `DATA_DIR=<that directory>` (and `MODELS_DIR` when the model files are elsewhere); its systemd unit runs `<dir>/server/.venv/bin/python -m alldayrec` with the working directory `<dir>/server` and `EnvironmentFile=<dir>/.env`, and sets `KillMode=mixed`: a stop then signals only the server process, and an upload being decoded finishes before it exits (5 s at most). Before installing anything, the script checks that the new server finds and reads every instance's `tenants.json` the way its `.env` says, and installs nothing when one fails.
 
 ## Set the environment variables
 
