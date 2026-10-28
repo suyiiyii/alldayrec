@@ -142,16 +142,6 @@ def init():
                 for mark, prefix in zip(("done", "wrong"), TODO_MARKS):
                     if text.startswith(prefix) and (found := todo_by_text(conv, text[len(prefix):])):
                         c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (found[0], conv, mark, at))
-    if "device" not in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:  # 10-02: one pipeline per device
-        conn().execute("ALTER TABLE conversations ADD COLUMN device TEXT")
-    if "pos" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: pieces in hour files
-        conn().execute("ALTER TABLE pieces ADD COLUMN pos INTEGER")
-        conn().execute("ALTER TABLE pieces ADD COLUMN size INTEGER")
-    if "n" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-04: iPhone pieces say how many samples they hold
-        conn().execute("ALTER TABLE pieces ADD COLUMN n INTEGER")
-    if "received_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 10-07: when each came, how it sounds
-        for col in ("received_ms INTEGER", "rms REAL", "hum REAL", "zero_ms INTEGER", "full INTEGER"):
-            conn().execute(f"ALTER TABLE pieces ADD COLUMN {col}")
     if "music" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:  # 10-25: songs kept out of voiceprints
         conn().execute("ALTER TABLE sentences ADD COLUMN music INTEGER")
     if "late" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:
@@ -160,8 +150,6 @@ def init():
         conn().execute("ALTER TABLE sentences ADD COLUMN late_job INTEGER")
     if "seam_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
         conn().execute("ALTER TABLE late_spans ADD COLUMN seam_ms INTEGER")
-    if "level" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 10-14: how loud each voice is
-        conn().execute("ALTER TABLE voices ADD COLUMN level REAL")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")

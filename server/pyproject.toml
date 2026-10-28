@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# ENGINE=local (local_asr.py; 1.13.8 garbled some models' output), owner.py, replay_case.py: pip install 'alldayrec[local]'
+# ENGINE=local (local_asr.py; 1.13.8 garbled some models' output), replay_case.py: pip install 'alldayrec[local]'
 local = ["sherpa-onnx>=2.0.0", "sherpa-onnx-core>=2.0.0"]
 
 [project.scripts]

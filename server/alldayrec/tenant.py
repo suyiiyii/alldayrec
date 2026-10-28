@@ -6,7 +6,7 @@ running outside any tenant gets a LookupError instead of someone else's data. Ev
 Tenant; nothing per person stays in a module.
 
 The tenants are in DATA_DIR/tenants.json, mode 600: it holds every token, and nothing else does (a first start makes one
-tenant, create(); server/tenants.sh made each deploy instance's from its .env, and adds tenants):
+tenant, create(); server/tenants.sh adds tenants):
     [{"id": "main", "token": "...", "data": "/opt/alldayrec/data", "recordings": "/opt/alldayrec/recordings"}, ...]
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or

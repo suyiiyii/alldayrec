@@ -58,7 +58,7 @@ OWNER_MIN = 0.25                           # best cluster must also score this a
 OWNER_SURE = float(os.environ.get("OWNER_SURE", "0.5"))  # any cluster this close to the owner is me too (clustering often splits me in 2-5)
 MIN_SPEAKER_S = 2.0                        # a sentence shorter than this opens no new speaker id (noise, "嗯")
 LINK_MIN = float(os.environ.get("LINK_MIN", "0.55"))   # cosine to link a window's cluster to a known speaker
-OWNER_DEFAULT_DEVICE = os.environ.get("OWNER_DEFAULT_DEVICE", "")  # voiceprint used for devices owner.py has not seen (a new phone)
+OWNER_DEFAULT_DEVICE = os.environ.get("OWNER_DEFAULT_DEVICE", "")  # voiceprint used for devices owner.npz has not seen (a new phone)
 SEG_MODEL = Path(os.environ.get("SEG_MODEL", ""))  # sherpa-onnx pyannote segmentation model (the local candidates)
 EMB_MODEL = Path(os.environ.get("EMB_MODEL", ""))                # sherpa-onnx speaker embedding model (CAM++ by default)
 # Per input device: lapel one-on-one wants coarse clusters and easy linking (0.65 split the same person
@@ -155,7 +155,7 @@ class Speakers:
                 self.warned.add(device)
                 log.warning("no owner voiceprint for %r, scoring against %r", device, OWNER_DEFAULT_DEVICE)
         if owner is None:
-            raise RuntimeError(f"no owner voiceprint for {device!r}; run owner.py")
+            raise RuntimeError(f"no owner voiceprint for {device!r} in {DATA / 'owner.npz'}")
         return owner
 
     def label(self, segs: list[dict], x: np.ndarray, device: str) -> tuple[dict, dict, dict, dict]:

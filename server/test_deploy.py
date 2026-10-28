@@ -40,14 +40,14 @@ def test_stops_before_installing(tmp_path):
                      (instance(tmp_path, "broken", "["), "invalid JSON at line 1, column 2"),
                      (instance(tmp_path, "nodir", GOOD, data_dir=False), "no tenants file")):
         r = deploy(tmp_path, good, bad)  # the good one first: not installed either
-        assert r.returncode == 1 and why in r.stderr and "tenants.sh migrate first" in r.stdout and "nothing installed" in r.stdout, r.stdout + r.stderr
+        assert r.returncode == 1 and why in r.stderr and "cannot read" in r.stdout and "nothing installed" in r.stdout, r.stdout + r.stderr
         assert not list(tmp_path.glob("*/backup-*"))
     r = deploy(tmp_path, good)  # passes the check, then fails installing: this fake instance has no server
-    assert "migrate first" not in r.stdout and list(tmp_path.glob("good/backup-deploy-*")), r.stdout + r.stderr
+    assert "cannot read" not in r.stdout and list(tmp_path.glob("good/backup-deploy-*")), r.stdout + r.stderr
 
 
 def test_leaves_disabled_alone(tmp_path):
     good, merged = instance(tmp_path, "good", GOOD), instance(tmp_path, "merged")  # merged: its tenants in good's tenants.json
     r = deploy(tmp_path, merged, good, disabled="lr-merged")
-    assert "skip" in r.stderr and "migrate first" not in r.stdout and list(tmp_path.glob("good/backup-deploy-*")), r.stdout + r.stderr
+    assert "skip" in r.stderr and "cannot read" not in r.stdout and list(tmp_path.glob("good/backup-deploy-*")), r.stdout + r.stderr
     assert not list(tmp_path.glob("merged/backup-*"))

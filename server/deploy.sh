@@ -10,8 +10,8 @@
 # whose $HOME is another one is told where: LR_TGZ (`wsl -u root -e env LR_TGZ=/mnt/c/Users/me/lr-deploy.tgz bash -s`).
 # An instance: <dir>/server/alldayrec (the package), <dir>/server/.venv, <dir>/.env with DATA_DIR=<dir> (and MODELS_DIR
 # when the model files are elsewhere), its unit running <dir>/server/.venv/bin/python -m alldayrec in <dir>/server with
-# EnvironmentFile=<dir>/.env. It serves the tenants in <dir>/tenants.json (server/alldayrec/tenant.py; made from its .env
-# once by server/tenants.sh), asked as them; a deploy installs nothing anywhere unless the new server reads every
+# EnvironmentFile=<dir>/.env. It serves the tenants in <dir>/tenants.json (server/alldayrec/tenant.py; server/tenants.sh
+# changes them), asked as them; a deploy installs nothing anywhere unless the new server reads every
 # instance's tenants.json where its .env points (a server without one would start a new one, with a new token).
 # Each deploy keeps a backup with a copy of every tenant's live.db in <dir>/backup-deploy-<time>, <dir>/backup-last points
 # at it; a deploy that passes its check keeps only its own and the one before. An instance whose unit is disabled is
@@ -174,7 +174,7 @@ trap 'stopped $?' EXIT
 if [ "$mode" = deploy ]; then  # every instance's tenants.json as its new server finds and reads it: the release's tenant.py, then load()
   for i in "$@"; do
     { tar -xOzf "$TGZ" alldayrec/tenant.py; echo 'load()'; } | DATA_DIR="$(env_of "${i%%:*}" DATA_DIR)" "${i%%:*}/server/.venv/bin/python" - ||
-      { echo "  stop: the new server cannot read ${i%%:*}/tenants.json (DATA_DIR=${i%%:*} in its .env; server/tenants.sh migrate first)"; exit 1; }
+      { echo "  stop: the new server cannot read ${i%%:*}/tenants.json (DATA_DIR=${i%%:*} in its .env)"; exit 1; }
   done
 fi
 NEWEST=$(for i in "$@"; do readlink "${i%%:*}/backup-last" || true; done | sed 's|.*/||' | sort | tail -1)

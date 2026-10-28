@@ -94,10 +94,9 @@ type: reference
 
 | 变量 | 用在 | 说明 |
 |---|---|---|
-| `LIVE_DATA` | `owner.py`、`replay_case.py` | 一个租户的数据目录 |
-| `OWNER_LABELS` | `owner.py` | 已知是本人声音的窗口（jsonl） |
+| `LIVE_DATA` | `replay_case.py` | 一个租户的数据目录 |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
-| `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py`（`EMB_MODEL` 还有 `owner.py`） | 见这几个脚本 |
+| `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这几个脚本 |
 
 ## 其他环境变量
 

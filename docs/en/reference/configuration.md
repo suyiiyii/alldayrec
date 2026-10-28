@@ -94,10 +94,9 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 
 | Variable | Used in | Description |
 |---|---|---|
-| `LIVE_DATA` | `owner.py`, `replay_case.py` | A tenant's data directory |
-| `OWNER_LABELS` | `owner.py` | Windows known to be your own voice (jsonl) |
+| `LIVE_DATA` | `replay_case.py` | A tenant's data directory |
 | `CASES_DIR` | `eval_all.sh` | The directory of labeled evaluation cases |
-| `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` (`EMB_MODEL` also `owner.py`) | See those scripts |
+| `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` | See those scripts |
 
 ## Other environment variables
 
