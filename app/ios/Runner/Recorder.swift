@@ -12,6 +12,7 @@ import UIKit
 enum Recorder {
   static var slicer: Slicer?
   static var link: BleLink?  // the BLE recorder, when it is the source instead of the microphone
+  static var bean: BeanLink?  // or a Feishu recorder bean (Bean.swift)
   static var nearby: Nearby?  // the add-recorder page's scan, while it is open
   static var probe: CBCentralManager?  // whether Bluetooth is on, for that page
   static var uploader: Uploader?
@@ -83,8 +84,11 @@ enum Recorder {
           // first: the link must not reconnect when the recorder drops it
           for k in ["bleName", "bleId", "bleModel", "bleFw", "bindPending", "bindForce", "bleKicked"] { defaults.removeObject(forKey: k) }
           if let name { defaults.removeObject(forKey: "hold:\(Ble.tag(name))") }  // its backlog no longer comes from here
-          let forgot = link?.forgetAll() ?? false
-          if let name { DeviceLog.app(Ble.tag(name), "unbind", forgot ? "解除绑定：录音设备忘掉了所有手机" : "解除绑定：录音设备没连上，只有这台手机忘掉了它") }
+          let forgot = link?.forgetAll() ?? false  // a bean is told nothing: only this phone forgets it
+          if let name {
+            DeviceLog.app(Ble.tag(name), "unbind", forgot ? "解除绑定：录音设备忘掉了所有手机"
+              : Bean.isBean(name) ? "解除绑定：这台手机不再连这颗录音豆（豆子那边什么也不改）" : "解除绑定：录音设备没连上，只有这台手机忘掉了它")
+          }
           DispatchQueue.main.async { result(forgot) }
         }
       case "listen":  // the recorder's sound played on this phone as it comes (Listen.swift), or not; off when the app leaves the front
@@ -100,7 +104,7 @@ enum Recorder {
       case "dfu":  // a package from the server for `model`: only onto a recorder that said it is that model (DfuRun.swift)
         let zip = (a["zip"] as? FlutterStandardTypedData)?.data ?? Data(), id = defaults.string(forKey: "bleId")
         if let no = Dfu.refusal(want: a["model"] as? String, model: defaults.string(forKey: "bleModel"), id: id,
-                                linked: slicer != nil || link != nil, sha256: Dfu.sha256(zip), expected: a["sha256"] as? String,
+                                linked: slicer != nil || link != nil || bean != nil, sha256: Dfu.sha256(zip), expected: a["sha256"] as? String,
                                 version: a["version"] as? String, running: defaults.string(forKey: "bleFw")) {
           return result(FlutterError(code: no["code"] as! String, message: nil, details: no))
         }
@@ -119,15 +123,15 @@ enum Recorder {
   static func status() -> [String: Any] {
     let q = Uploader.files(dir)
     let bytes = q.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-    let l = link
-    return ["running": slicer != nil || l != nil, "uploading": uploader != nil && !q.isEmpty, "files": slicer?.files ?? l?.files ?? NSNull(),
-            "slice": slicer?.sliceS() ?? (l != nil ? sliceS() : nil) ?? NSNull(), "error": slicer?.error ?? NSNull(), "sent": uploader?.sent ?? NSNull(),
+    let l = link, b = bean
+    return ["running": slicer != nil || l != nil || b != nil, "uploading": uploader != nil && !q.isEmpty, "files": slicer?.files ?? l?.files ?? b?.files ?? NSNull(),
+            "slice": slicer?.sliceS() ?? (l != nil || b != nil ? sliceS() : nil) ?? NSNull(), "error": slicer?.error ?? NSNull(), "sent": uploader?.sent ?? NSNull(),
             "pending": q.count, "pendingBytes": bytes, "oldest": q.first.flatMap { Uploader.piece($0)?.start } ?? NSNull(),
             "note": uploader?.note ?? NSNull(), "interruptedAt": interruptedAt ?? NSNull(),
-            "source": (slicer != nil ? "mic" : l != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? NSNull(),
-            "connected": l?.state["code"] as? String == "connected", "tag": l?.tag ?? NSNull(),
-            "hw": l?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
-            "syncDone": l?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
+            "source": (slicer != nil ? "mic" : l != nil || b != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? b?.state ?? NSNull(),
+            "connected": l?.state["code"] as? String == "connected" || b?.connected == true, "tag": l?.tag ?? b?.name ?? NSNull(),
+            "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
+            "syncDone": l?.syncDoneKb ?? b?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? b?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
             "dfu": Dfu.state ?? NSNull(), "dfuBusy": Dfu.busy, "listen": l?.listening?.lines ?? NSNull()]
   }
 
@@ -136,7 +140,7 @@ enum Recorder {
   /// link down: after an update in the background, 18 min without LIVE until iOS relaunched the app. Started
   /// here, the link's connect request waits for the recorder's reboot and wakes the app for it.
   static func relink() {
-    guard slicer == nil, link == nil, defaults.string(forKey: "source") == "ble" else { return }
+    guard slicer == nil, link == nil, bean == nil, defaults.string(forKey: "source") == "ble" else { return }
     _ = start(Dictionary(uniqueKeysWithValues: ["server", "token", "device", "source", "archive", "foreground", "background"]
       .compactMap { k in defaults.object(forKey: k).map { (k, $0) } }))
   }
@@ -152,7 +156,7 @@ enum Recorder {
   static func sliceS() -> Int { max(1, defaults.integer(forKey: foregroundApp ? "foreground" : "background")) }
 
   private static func start(_ a: [String: Any]) -> String? {
-    if slicer != nil || link != nil { return nil }
+    if slicer != nil || link != nil || bean != nil { return nil }
     for k in ["server", "token", "device", "source"] { defaults.set(a[k] as? String ?? "", forKey: k) }
     defaults.set(a["archive"] as? Bool ?? true, forKey: "archive")
     defaults.set(a["foreground"] as? Int ?? 1, forKey: "foreground")
@@ -177,6 +181,11 @@ enum Recorder {
   private static func startLink() {
     let fm = FileManager.default
     let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    if Bean.isBean(defaults.string(forKey: "bleName")) {  // one recorder at a time: a bean has its own link
+      bean = BeanLink(chunks: dir, state: support.appendingPathComponent("bean"), sliceS: sliceS, report: { name, hw in uploader?.report(name, hw) })
+      bean!.start()
+      return
+    }
     let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]  // undated audio: in the Files app, as on Android
     link = BleLink(chunks: dir, undated: docs.appendingPathComponent("undated"), mirrors: support.appendingPathComponent("recorder"),
                    sliceS: sliceS, report: { name, hw in uploader?.report(name, hw) })
@@ -191,6 +200,7 @@ enum Recorder {
     UIApplication.shared.isIdleTimerDisabled = false
     slicer?.stop(); slicer = nil
     if let l = link { defaults.set(l.tag, forKey: "endDevice"); l.stop(); link = nil }  // the end goes under the recorder's name
+    if let b = bean { defaults.set(b.name, forKey: "endDevice"); b.stop(); bean = nil }
     // iOS gives about 30 s after the app leaves the screen; what is not sent by then goes on the next launch
     var task = UIBackgroundTaskIdentifier.invalid
     let release = {
@@ -541,6 +551,7 @@ final class Uploader: Thread {
       Uploader.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
     }
     let q = all.filter(ahead) + all.filter { !ahead($0) }
+    ends(q)
     guard let f = q.first, let p = Uploader.piece(f) else { Thread.sleep(forTimeInterval: 1); return }
     let b = batch(q)
     // the hold with every upload while there is one: the server lets go when an upload comes without it
@@ -563,6 +574,11 @@ final class Uploader: Thread {
         let bytes = b.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
         DeviceLog.app(p.device ?? device, "upload_rejected", "服务端无法解码 \(b.count) 块（起于 \(Recorder.clock(p.start))，\(bytes / 1024) KB），已丢弃",
                       level: "error", fields: ["start": p.start, "pieces": b.count, "bytes": bytes])
+        // a bean's file with these in it stays on the bean (BeanSync.confirmed): said before they leave the queue
+        if let d = p.device {
+          let k = "refused:\(d)", u = Recorder.defaults
+          u.set(Array(Set((u.stringArray(forKey: k) ?? []) + b.compactMap { Uploader.piece($0).map { "\($0.start)" } })), forKey: k)
+        }
         b.forEach { try? FileManager.default.removeItem(at: $0) }; note = ["code": "rejected"]
       default: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
       }
@@ -589,9 +605,29 @@ final class Uploader: Thread {
     DispatchQueue.main.async { Recorder.slices(s) }
   }
 
-  func end(_ atMs: Int64, device ble: String? = nil) {
-    do { _ = try post("\(server)/api/chunks/end?device=\(enc(ble ?? device))&t=\(atMs)", Data(), nil) } catch { note = ["code": "endFailed", "detail": error.localizedDescription] }
+  /// True: the server took it.
+  @discardableResult func end(_ atMs: Int64, device ble: String? = nil) -> Bool {
+    do {
+      let code = try post("\(server)/api/chunks/end?device=\(enc(ble ?? device))&t=\(atMs)", Data(), nil)
+      if code != 200 { note = ["code": "endFailed", "detail": "HTTP \(code)"] }
+      return code == 200
+    } catch { note = ["code": "endFailed", "detail": error.localizedDescription]; return false }
   }
+
+  /// A bean's recording end (`end:<device>`, BeanLink: the bean stopped and all of it is up): told once none of its
+  /// pieces is left, again until the server takes it, as on Android (10-25: a bean's end never reached the server).
+  private func ends(_ q: [URL]) {
+    let d = Recorder.defaults
+    for k in d.dictionaryRepresentation().keys where k.hasPrefix("end:") {
+      let device = String(k.dropFirst(4)), at = (d.object(forKey: k) as? NSNumber)?.int64Value ?? 0
+      let left = q.compactMap { Uploader.piece($0) }.filter { $0.device == device }.map(\.start)
+      if left.contains(where: { $0 >= at }) { d.removeObject(forKey: k); continue }  // recording again: no end
+      if !left.isEmpty || Recorder.now() < endDue[k] ?? 0 { continue }
+      if end(at, device: device) { endDue[k] = nil; if (d.object(forKey: k) as? NSNumber)?.int64Value == at { d.removeObject(forKey: k) } }
+      else { endDue[k] = Recorder.now() + 5000 }  // the pieces meanwhile go on
+    }
+  }
+  private var endDue: [String: Int64] = [:]  // an end that failed: not tried again before (this thread only)
 
   /// What the phone last read from its BLE recorder, for the server's progress page, with the phone's own state and this
   /// recorder's upload queue; best effort, off this thread.

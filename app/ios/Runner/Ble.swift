@@ -70,17 +70,6 @@ enum Ble {
   static func log(_ s: String) { NSLog("live-record ble %@", s) }
 }
 
-/// A value several threads read and one writes (the link's state for the app's page).
-@propertyWrapper final class Shared<T> {
-  private var v: T
-  private let l = NSLock()
-  init(wrappedValue: T) { v = wrappedValue }
-  var wrappedValue: T {
-    get { l.lock(); defer { l.unlock() }; return v }
-    set { l.lock(); v = newValue; l.unlock() }
-  }
-}
-
 /// A queue one thread waits on: notifications in, the session takes them.
 final class Inbox<T> {
   private var items: [T] = []
@@ -98,9 +87,10 @@ final class Inbox<T> {
   var isEmpty: Bool { c.lock(); defer { c.unlock() }; return items.isEmpty }
 }
 
-/// The add-recorder page's list: the recorders around and the state each advertises.
+/// The add-recorder page's list: the recorders around and the state each advertises; Feishu recorder beans too
+/// (BeanLink.swift), with the flags byte they advertise (a bean has no binding of ours to say: state 0).
 final class Nearby: NSObject, CBCentralManagerDelegate {
-  private struct Seen { let name: String, rssi: Int, state: Int, mv: Int, card: Int, busy: Bool, at: Date }
+  private struct Seen { let name: String, rssi: Int, state: Int, mv: Int, card: Int, busy: Bool, at: Date; var flags = -1 }
   private var seen: [UUID: Seen] = [:]  // on q
   private let q = DispatchQueue(label: "nearby")
   private var central: CBCentralManager?
@@ -111,11 +101,17 @@ final class Nearby: NSObject, CBCentralManagerDelegate {
   }
 
   func centralManagerDidUpdateState(_ c: CBCentralManager) {
-    if c.state == .poweredOn { c.scanForPeripherals(withServices: [Ble.store], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) }
+    if c.state == .poweredOn { c.scanForPeripherals(withServices: [Ble.store, BeanLink.service], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]) }
   }
 
   func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData a: [String: Any], rssi: NSNumber) {
     let old = seen[p.identifier]
+    if (a[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.contains(BeanLink.service) == true {
+      guard let m = (a[CBAdvertisementDataManufacturerDataKey] as? Data).map({ [UInt8]($0) }), let name = Bean.name(m) else { return }
+      seen[p.identifier] = Seen(name: name, rssi: rssi.intValue == 127 ? old?.rssi ?? -100 : rssi.intValue, state: 0, mv: -1, card: -1,
+                                busy: a[CBAdvertisementDataIsConnectable] as? Bool == false, at: Date(), flags: Bean.flags(m))
+      return
+    }
     // the full name once seen is kept: a recorder busy with another phone seldom gets its scan response across
     guard let name = Ble.name([a[CBAdvertisementDataLocalNameKey] as? String, p.name, old?.name]) else { return }
     let st = Ble.state(a)
@@ -132,9 +128,10 @@ final class Nearby: NSObject, CBCentralManagerDelegate {
   /// full name is known (its scan response; pieces go up under it): within a second for one not busy with a phone.
   func list() -> [[String: Any]] {
     q.sync {
-      seen.filter { -$0.value.at.timeIntervalSinceNow < 5 && (Ble.isFull($0.value.name) || $0.value.busy) }.sorted { $0.value.rssi > $1.value.rssi }
+      seen.filter { -$0.value.at.timeIntervalSinceNow < 5 && (Ble.isFull($0.value.name) || Bean.isBean($0.value.name) || $0.value.busy) }
+        .sorted { $0.value.rssi > $1.value.rssi }
         .map { ["name": $0.value.name, "address": $0.key.uuidString, "rssi": $0.value.rssi, "state": $0.value.state, "mv": $0.value.mv,
-                "card": $0.value.card, "busy": $0.value.busy] }
+                "card": $0.value.card, "busy": $0.value.busy, "flags": $0.value.flags] }
     }
   }
 }
