@@ -15,7 +15,7 @@ INSTANCES=${LR_INSTANCES:-/opt/alldayrec:alldayrec}
 if [ "${1:-}" != remote ]; then  # on this machine
   mode=${1:-} arg=${2:--}
   case $mode in merge | unmerge) ;; add) [[ $arg =~ ^[a-z][a-z0-9-]{0,31}$ ]] || mode= ;; *) mode= ;; esac
-  [ -n "$mode" ] || { sed -n 2,13p "$0" >&2; exit 2; }
+  [ -n "$mode" ] || { sed -n 2,11p "$0" >&2; exit 2; }
   HOST=${LR_DEPLOY_HOST:?set LR_DEPLOY_HOST=user@host (the comment at the top of deploy.sh)}
   ssh "$HOST" "${LR_DEPLOY_SHELL:-bash -s} -- remote $mode $arg $INSTANCES" < "$0"
   exit
