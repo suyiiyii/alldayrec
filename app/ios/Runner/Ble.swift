@@ -92,7 +92,7 @@ final class Inbox<T> {
 final class Nearby: NSObject, CBCentralManagerDelegate {
   private struct Seen { let name: String, rssi: Int, state: Int, mv: Int, card: Int, busy: Bool, at: Date; var flags = -1 }
   private var seen: [UUID: Seen] = [:]  // on q
-  private let q = DispatchQueue(label: "nearby")
+  private let q = DispatchQueue(label: "nearby", autoreleaseFrequency: .workItem)
   private var central: CBCentralManager?
 
   override init() {
@@ -166,7 +166,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   private let chunks: URL, undated: URL, mirrors: URL
   private let sliceS: () -> Int
   private let report: (String, [String: Any]) -> Void
-  private let q = DispatchQueue(label: "ble")  // CoreBluetooth's: its callbacks, and every call into it
+  private let q = DispatchQueue(label: "ble", autoreleaseFrequency: .workItem)  // CoreBluetooth's: its callbacks, and every call into it
   private var central: CBCentralManager?
   @Shared private var on = true
   @Shared private var peripheral: CBPeripheral?

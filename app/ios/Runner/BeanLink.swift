@@ -21,7 +21,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private let prefs = Recorder.defaults
   private let sliceS: () -> Int
   private let onReport: (String, [String: Any]) -> Void
-  private let q = DispatchQueue(label: "bean")  // CoreBluetooth's: its callbacks, and every call into it
+  private let q = DispatchQueue(label: "bean", autoreleaseFrequency: .workItem)  // CoreBluetooth's: its callbacks, and every call into it
   private var central: CBCentralManager?
   private var restored: [CBPeripheral] = []  // on q: what iOS kept for the app when it relaunched it
   private var advFlags = -2, advConnectable: Bool?  // on q: what the bean advertised last, logged when it changes
