@@ -366,6 +366,17 @@ async def split_backfill(since: str, apply: bool = False):
     return out
 
 
+@router.post("/api/split/recheck")
+async def split_recheck(since: str, apply: bool = False):
+    """Ask again for the conversations split since a day and merge back the parts whose cut no longer stands (split.py
+    --recheck). Without apply it only lists them: the model calls are made, nothing is written."""
+    try:
+        since = dt.date.fromisoformat(since).isoformat()
+    except ValueError:
+        raise HTTPException(400, "since: YYYY-MM-DD")
+    return await split.recheck(since, apply)
+
+
 @router.post("/api/conversation/{conv_id}/summarize")
 async def resummarize(conv_id: str):
     """Write a conversation's summary again with the current prompt (重新生成, the backfill script resummarize.py). The

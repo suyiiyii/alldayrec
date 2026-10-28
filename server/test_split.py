@@ -1,6 +1,7 @@
 """Splitting a long conversation: the pure cut rules, the transaction with every moved reference, the walls late audio
 never merges across, and the summary worker's hook; the model is faked."""
 import json
+import os
 
 import anyio
 import pytest
@@ -26,6 +27,10 @@ def test_cut_rules():
     assert split.plan(reply((0, "独自做事"), (400, "独自做事")), rows) == [], "two solo stretches are one"
     assert [c["i"] for c in split.plan(reply((0, "媒体或背景"), (30, "交谈"), (400, "通话")), rows)] == [i], "a first media part joins the next"
     assert [c["i"] for c in split.plan(reply((0, "交谈"), (400, "什么")), rows)] == [i], "an unknown kind is a talk"
+    assert split.plan(reply((0, "独自做事"), (400, "通话")), rows) == [], "a call after solo work is part of it"
+    assert split.plan(reply((0, "独自做事"), (200, "通话"), (400, "独自做事")), rows) == [], "solo / call / solo is one"
+    assert [c["i"] for c in split.plan(reply((0, "通话"), (400, "独自做事")), rows)] == [i], "a call before solo work stands"
+    assert [c["i"] for c in split.plan(reply((0, "独自做事"), (200, "通话"), (400, "交谈")), rows)] == [i], "a talk after it stands"
     assert split.plan(reply((0, "交谈"), (100, "交谈")), rows[:4] + rows_at(range(400, 700, 30))) == [], "under 120 s before the cut"
     short = rows_at(range(0, 300, 30)) + rows_at(range(400, 460, 30))
     assert split.plan(reply((0, "交谈"), (400, "交谈")), short) == [], "under 120 s after the cut"
@@ -92,7 +97,7 @@ def test_split_moves_every_reference(long_conv):
     c = db.conversation(A)
     assert split.due(c) and not split.checked(c, None)
     assert anyio.run(split.check, c, None) == [{"at": iso(600), "scene": "two"}]
-    assert long_conv["calls"] == [{"kind": "split", "reasoning_effort": "high"}]
+    assert long_conv["calls"] == [{"kind": "split", "reasoning_effort": "high"}] * 3
     a, b = db.conversation(A), db.conversation(P2)
     assert (a["start"], a["end"], a["participants"]) == (iso(0), iso(500), ["S1", "我"])
     assert (b["start"], b["participants"], b["device"]) == (iso(600), ["S2", "我"], D)
@@ -165,7 +170,7 @@ def test_summary_worker_splits_then_summarizes_each_part(long_conv):
                     await anyio.sleep(0.01)
                 tg.cancel_scope.cancel()
     anyio.run(run)
-    assert len(texts) == 2 and [x["kind"] for x in long_conv["calls"]] == ["split"]
+    assert len(texts) == 2 and [x["kind"] for x in long_conv["calls"]] == ["split"] * 3
     assert "line 0" in texts[0] + texts[1] and not any("line 0" in x and "line 600" in x for x in texts)
 
 
@@ -181,3 +186,49 @@ def test_wall_keeps_split_parts_apart(store):
     changed, removed = late_merge.attach(span(605, 620), [row(605, 620)], {"S1": E1}, vectors)
     assert not removed and [c["id"] for c in changed] == [A], "the wall holds after a part grew toward it"
     assert {c["id"] for c in db.conversations()} == {A, B}
+
+
+def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
+    tids = long_conv["tids"]
+    anyio.run(split.check, db.conversation(A), None)
+    moved = db.todo_ids(P2, db.summary(P2)["todos"])[0]
+    with db.tx() as t:  # a third part, its wall kept
+        db.insert_sentences(t, rows_at(range(1200, 1500, 30), "S3"))
+        db.insert_conversation(t, dict(id="c20261020102000", start=iso(1200), end=iso(1500), participants=["S3"], sentences=10,
+                                       speech_s=200, device=D))
+        t.execute("INSERT INTO walls VALUES (?, ?)", (D, iso(1200)))
+    two = {"start": "10:20:00", "kind": "交谈", "scene": "three"}
+    long_conv["mp"].reply = {"parts": [{"start": "10:00:00", "kind": "独自做事", "scene": "solo"},
+                                       {"start": "10:10:00", "kind": "通话", "scene": "call"}, two]}
+    res = anyio.run(split.recheck, "2026-10-20")
+    assert res == {"backup": None, "conversations": [{"id": A, "start": iso(0), "walls": [iso(600), iso(1200)], "undone": [iso(600)]}]}
+    assert db.conversation(P2) and len(db.conversations()) == 3, "a dry run writes nothing"
+
+    res = anyio.run(split.recheck, "2026-10-20", True)
+    assert res["conversations"][0]["undone"] == [iso(600)] and list(tmp_path.glob("live.db.before-recheck-*")) == [tmp_path / res["backup"].split("/")[-1]]
+    assert os.stat(res["backup"]).st_mode & 0o777 == 0o600
+    a = db.conversation(A)
+    assert (a["start"], a["end"], a["participants"], a["sentences"]) == (iso(0), iso(1100), ["S1", "S2", "我"], 34)
+    assert db.resolve_conversation(P2) == A and db.conversation(P2)["id"] == A, "the later part's id is an alias"
+    assert [tuple(r) for r in db.conn().execute("SELECT at FROM walls")] == [(iso(1200),)], "the third part's wall stays"
+    s = db.summary(A)
+    assert s["status"] == "pending" and db.todo_ids(A, s["todos"])[0] == tids[0] and len(s["todos"]) == 2
+    assert {r["conv"] for r in db.conn().execute("SELECT conv FROM todo_marks")} == {A} and moved not in {
+        r["id"] for r in db.conn().execute("SELECT id FROM todo_marks")}
+    assert dict(db.conn().execute("SELECT id, conv FROM stars").fetchall()) == {"r30": A, "r630": A}
+    assert {(r["conv"], r["label"]) for r in db.conn().execute("SELECT conv, label FROM voices WHERE conv = ?", (A,))} == {
+        (A, "S1"), (A, "S2"), (A, "我")}
+    assert not split.checked(a, db.kv(f"conversation_revision:{A}")), "the summary worker checks it again, as a new one"
+    assert anyio.run(split.recheck, "2026-10-20", True)["conversations"][0]["undone"] == [], "the remaining cut stands"
+
+
+def test_a_cut_stands_only_when_every_call_names_it(long_conv):
+    cut, whole = ({"parts": [{"start": "10:00:00", "kind": "交谈", "scene": "one"}] + extra} for extra in
+                  ([{"start": "10:10:00", "kind": "交谈", "scene": "two"}], []))
+    replies = iter([cut, cut, whole])
+
+    async def complete(messages, timeout=300, kind="summary", **extra):
+        return next(replies), {}
+    long_conv["mp"].setattr(summary, "complete", complete)
+    c = db.conversation(A)
+    assert anyio.run(split.check, c, None) == [] and split.checked(c, None) and len(db.conversations()) == 1

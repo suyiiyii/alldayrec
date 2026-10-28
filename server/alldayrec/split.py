@@ -1,7 +1,8 @@
 """Split a long conversation where an independent one begins. The Grouper closes a conversation only after 5 quiet
 minutes, so voices around (a mall, a bus) can chain two unrelated talks into one. Before a conversation of at least
-SPLIT_MIN_S is summarized, one chat call (reasoning_effort high) names where new ones begin; a cut stands only at a
-real pause between two parts with enough speech each. Any error means no split and the usual summary.
+SPLIT_MIN_S is summarized, three chat calls side by side (reasoning_effort high) name where new ones begin; a cut
+stands only where all three name it, at a real pause between two parts with enough speech each. Any error means no
+split and the usual summary.
 
     SPLIT_MIN_S   a conversation this many seconds long (end - start) is checked; 0 turns splitting off (600)
 
@@ -15,10 +16,16 @@ Backfill on the running server (POST /api/split), one conversation at a time:
     cd server && uv run python -m alldayrec.split --since 2026-10-20 [--apply]
 
 Run it on the server's host against its loopback address (LIVE_RECORD_URL=http://127.0.0.1:8770): a proxy in front
-cuts a request this long. LIVE_RECORD_TOKEN (else stdin's first line) is the token. Without --apply it is a dry
-run: it still makes the model calls (kind split in the calls table) but writes nothing. It prints each split's cut
-times and scene words, never transcript text. --apply splits each conversation in its own transaction and queues the
-parts' summaries.
+cuts a request this long. LIVE_RECORD_TOKEN (else stdin's first line) is the token. Without --apply it is a dry run:
+it still makes the model calls (three per conversation, kind split in the calls table) but writes nothing. It prints
+each split's cut times and scene words, never transcript text. --apply splits each conversation in its own transaction
+and queues the parts' summaries.
+
+With --recheck it asks again, with today's rules, about each conversation split since the day (POST
+/api/split/recheck): a cut that no longer stands is undone, the later part merged back into the one before it (its id
+an alias of that part, its references moved along, the wall dropped) and that part summarized again (and so checked
+again, three more calls, like any new conversation). Without --apply a dry run lists the cuts it would undo; --apply
+first copies the store beside it (live.db.before-recheck-<time>).
 """
 import argparse
 import datetime as dt
@@ -27,9 +34,12 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 import urllib.parse
 import urllib.request
+
+import anyio
 
 from alldayrec import db, late_merge, late_store, summary, ws
 from alldayrec.conversations import IGNORE
@@ -43,7 +53,11 @@ SPLIT_MIN_S = int(os.environ.get("SPLIT_MIN_S", "600"))
 # On 31 hand-labelled conversations (10-27) the model alone cut 16-41 times where it should not; reasoning effort high,
 # moving each cut to the nearest pause of >= 60 s within 5 min (none: no cut) and >= 120 s of speech in every part
 # took that to 0-1 at a recall of 0.8.
-PAUSE_S, REACH_S, PART_S = 60, 300, 120
+# Precision comes first: a conversation that is one must never be cut, missing a real cut is fine. On the same 31 plus 4
+# solo sessions cut by mistake (10-28), with a call after solo work merged into it and the model told that words to an
+# AI often carry other labels, 9 runs cut none of the 19 that are one (recall 3/5); the 4 got 1.00 wrong cuts per run
+# with one call, 0.28 when two calls must agree and 0.06 when three must (CALLS).
+PAUSE_S, REACH_S, PART_S, CALLS = 60, 300, 120, 3
 KINDS = ("交谈", "通话", "会议", "独自做事", "媒体或背景")
 
 SYSTEM = """你在检查一段现场录音转写。它是按静默时间自动切出来的一段「对话」：只要中间没有连续 5 分钟安静就不会切开，所以在商场、路上、公交上，周围的人声会把几段本来互不相干的对话连成一段。
@@ -57,7 +71,7 @@ SYSTEM = """你在检查一段现场录音转写。它是按静默时间自动�
 - 同一件事跨了地方或换了人：为买同一样东西逛了几家店、和同一个朋友边走边聊、和同伴一路游览；
 - 短暂的打断：服务员、路人、一通短电话、对 AI 说了一两句、外放的媒体或广播；
 - 只有路人、广播、背景声的过渡段；
-- 一个人对着 AI 连续布置工作，中间换了任务。
+- 一个人对着 AI 连续布置工作，中间换了任务、外放了视频、接了一通电话：「我」对 AI 说的话常被标成 S1、S2 这些别的标签，看着像几个人在交谈，其实还是同一个人在对 AI 说话。
 拿不准就不切，大多数对话不需要切。
 只输出一个 JSON 对象：{"parts": [{"start": "HH:MM:SS", "kind": "这一段主要是什么", "scene": "不超过 15 字：在哪、和谁、做什么"}]}
 parts 按时间顺序列出每段独立的对话，第一段从第一行开始；start 是这一段第一行的时间，照抄转写里的时间。不需要切就只给一段。
@@ -72,10 +86,11 @@ def due(c: dict) -> bool:
 
 def merged(parts: list[dict]) -> list[dict]:
     """Media or background is not a part of its own: it joins the part before it (a first one joins the next); two solo
-    stretches side by side are one solo session. An unknown kind counts as a talk."""
+    stretches side by side are one solo session, and so is a call that follows solo work (solo / call / solo is one
+    session too). An unknown kind counts as a talk."""
     out = []
     for x in ({**x, "kind": x.get("kind") if x.get("kind") in KINDS else "交谈"} for x in parts if isinstance(x, dict)):
-        if out and (x["kind"] == "媒体或背景" or x["kind"] == out[-1]["kind"] == "独自做事"):
+        if out and (x["kind"] == "媒体或背景" or out[-1]["kind"] == "独自做事" and x["kind"] in ("独自做事", "通话")):
             continue
         if len(out) == 1 and out[0]["kind"] == "媒体或背景":
             out[0] = {**x, "start": out[0].get("start")}
@@ -147,10 +162,18 @@ def plan(reply: dict, rows: list[dict]) -> list[dict]:
 
 
 async def ask(rows: list[dict]) -> list[dict]:
-    """The cuts the model asks for that stand, [{i, scene}]; raises on any call error."""
-    reply, _ = await summary.complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": summary.transcript(rows)}],
-                                      kind="split", reasoning_effort="high")
-    return plan(reply, rows)
+    """The cuts that stand in every one of CALLS calls made side by side (the model is not the same twice; a wrong cut
+    seldom comes every time), [{i, scene}]; raises on any call error."""
+    plans = []
+
+    async def one():
+        reply, _ = await summary.complete([{"role": "system", "content": SYSTEM}, {"role": "user", "content": summary.transcript(rows)}],
+                                          kind="split", reasoning_effort="high")
+        plans.append(plan(reply, rows))
+    async with anyio.create_task_group() as tg:
+        for _ in range(CALLS):
+            tg.start_soon(one)
+    return [c for c in plans[0] if all(c["i"] in {x["i"] for x in p} for p in plans[1:])]
 
 
 def part(rows: list[dict]) -> dict:
@@ -290,6 +313,96 @@ async def check(c: dict, revision, dry: bool = False) -> list[dict]:
     return cuts if parts else []
 
 
+def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: list) -> tuple[list[dict], list[str]]:
+    """In one transaction, each part after an undone wall merged into the part before it (late_merge.merge: its id
+    becomes an alias, its references move along) and the wall dropped; a merged part is summarized again, split first
+    as any new conversation is (a cut the rules now put at another pause comes back there). (the merged parts, the ids
+    gone); nothing when a part changed since revisions."""
+    device, kept, gone, grown = parts[0]["device"], [parts[0]], [], set()
+    with db.tx() as t:
+        if any(db.resolve_conversation(p["id"]) != p["id"] or db.kv(f"conversation_revision:{p['id']}") != r
+               for p, r in zip(parts, revisions)):
+            return [], []
+        for p, at in zip(parts[1:], walls):
+            if at not in undone:
+                kept.append(p)
+                continue
+            late_merge.merge(t, kept[-1], p, {x: x for x in p["participants"]})
+            t.execute("DELETE FROM walls WHERE device = ? AND at = ?", (device, at))
+            kept[-1] = {**kept[-1], "end": max(kept[-1]["end"], p["end"])}
+            gone.append(p["id"])
+            grown.add(kept[-1]["id"])
+        merged = [{**c, **part(db.sentences(c["start"], c["end"], True, device)), "start": c["start"], "end": c["end"]}
+                  for c in kept if c["id"] in grown]
+        for c in merged:
+            db.insert_conversation(t, {**c, "sentences": len(c["sentences"])})
+            db.put_summary({**(db.summary(c["id"]) or {"conversation": c["id"]}), "status": "pending", "error": None}, t)
+            rev = (db.kv(f"conversation_revision:{c['id']}") or 0) + 1
+            db.put_kv(f"conversation_revision:{c['id']}", rev, t)
+            for day in {c["start"][:10], c["end"][:10]}:
+                if recap := db.kv(f"recap:{day}"):
+                    db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
+                    db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
+    for key, bs in list(T().undo.items()):
+        if any(b.get("conv") in gone for b in bs):
+            del T().undo[key]
+    T().speakers["at"] = 0.0
+    T().tags["at"] = 0.0
+    log.info("unsplit %s: %s merged back", parts[0]["id"], ", ".join(gone))
+    return [db.conversation(c["id"]) for c in merged], gone
+
+
+async def recheck(since: str, apply: bool = False) -> dict:
+    """Each conversation split since a day (its parts and the walls between them) asked again as a whole: a wall no cut
+    stands at now is undone (unsplit). It adds no cut itself. {backup, conversations: [{id, start, walls, undone}]}; with
+    apply, the store is copied to backup before the first write."""
+    chains = []
+    for device, at in db.conn().execute("SELECT device, at FROM walls WHERE at >= ? ORDER BY device, at", (since,)).fetchall():
+        # the part a wall starts (late rows may have moved its start before the wall) and the one before it
+        later = db.conn().execute("SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ? ORDER BY start LIMIT 1",
+                                  (device, at, at)).fetchone()
+        earlier = later and db.conn().execute("SELECT * FROM conversations WHERE device = ? AND start < ? ORDER BY start DESC "
+                                              "LIMIT 1", (device, later["start"])).fetchone()
+        if not earlier:
+            continue
+        if chains and chains[-1]["parts"][-1]["id"] == earlier["id"]:
+            chains[-1]["parts"].append(db._conversation(later))
+            chains[-1]["walls"].append(at)
+        else:
+            chains.append({"parts": [db._conversation(earlier), db._conversation(later)], "walls": [at]})
+    out, backup = [], None
+    for ch in chains:
+        parts = ch["parts"]
+        revisions = [db.kv(f"conversation_revision:{p['id']}") for p in parts]
+        rows = conversation_rows({"start": parts[0]["start"], "end": max(p["end"] for p in parts), "device": parts[0]["device"]})
+        try:
+            cuts = [rows[x["i"]]["start"] for x in await ask(rows)]
+        except Exception as e:
+            log.warning("split recheck %s failed: %r", parts[0]["id"], e)
+            out.append({"id": parts[0]["id"], "start": parts[0]["start"], "walls": ch["walls"], "undone": [], "error": repr(e)})
+            continue
+        # a cut at the same pause: after the end of the part before the wall, at the wall at the latest
+        undone = [w for p, w in zip(parts, ch["walls"]) if not any(p["end"] < x <= w for x in cuts)]
+        out.append({"id": parts[0]["id"], "start": parts[0]["start"], "walls": ch["walls"], "undone": undone})
+        if not (apply and undone):
+            continue
+        if backup is None:
+            backup = f"{T().db}.before-recheck-{dt.datetime.now():%Y%m%d-%H%M%S}"
+            with sqlite3.connect(backup) as b:
+                db.conn().backup(b)
+            b.close()
+            os.chmod(backup, 0o600)  # as private as the store
+        merged, gone = unsplit(parts, ch["walls"], undone, revisions)
+        if not merged:
+            out[-1]["undone"] = []  # changed during the call
+        for c in merged:
+            enqueue_summary(c)
+            await ws.broadcast({"type": "conversation", **c})
+        for old in gone:
+            await ws.broadcast({"type": "conversation_removed", "id": old, "new": db.resolve_conversation(old)})
+    return {"backup": backup, "conversations": out}
+
+
 def checked(c: dict, revision) -> bool:
     return db.kv(f"split_checked:{c['id']}") == (revision or 0)
 
@@ -300,17 +413,27 @@ def main(argv=None):
                                        "address): a proxy in front cuts a request this long.")
     p.add_argument("--since", required=True, type=dt.date.fromisoformat, help="conversations started on or after this day (YYYY-MM-DD)")
     p.add_argument("--apply", action="store_true", help="split them; without it a dry run that writes nothing")
+    p.add_argument("--recheck", action="store_true", help="instead ask again for the conversations already split and merge "
+                                                          "back the parts whose cut no longer stands (--apply: after a backup)")
     a = p.parse_args(argv)
     url = os.environ.get("LIVE_RECORD_URL") or sys.exit("LIVE_RECORD_URL is not set")
     token = os.environ.get("LIVE_RECORD_TOKEN") or ("" if sys.stdin.isatty() else sys.stdin.readline().strip())
     q = urllib.parse.urlencode({"since": a.since.isoformat(), "apply": str(a.apply).lower()})
-    req = urllib.request.Request(url.rstrip("/") + "/api/split?" + q, method="POST",
+    req = urllib.request.Request(url.rstrip("/") + ("/api/split/recheck?" if a.recheck else "/api/split?") + q, method="POST",
                                  headers={"Authorization": "Bearer " + token} if token else {})
-    with urllib.request.urlopen(req, timeout=6 * 3600) as r:  # one model call per conversation, one after another
+    with urllib.request.urlopen(req, timeout=6 * 3600) as r:  # CALLS model calls per conversation, one conversation after another
         res = json.load(r)
+    dry = "" if a.apply else " (dry run: nothing written)"
+    if a.recheck:
+        for x in res["conversations"]:
+            print(x["start"][:16].replace("T", " "), x["id"], " ".join(w[11:19] + (" undone" if w in x["undone"] else " stands")
+                                                                       for w in x["walls"]), x.get("error", ""))
+        print(f"{len(res['conversations'])} rechecked, {sum(len(x['undone']) for x in res['conversations'])} cuts undone" + dry
+              + (f", backup {res['backup']}" if res["backup"] else ""))
+        return res
     for x in res:
         print(x["start"][:16].replace("T", " "), x["id"], " | ".join(f'{c["at"][11:19]} {c["scene"]}' for c in x["cuts"]) or "-")
-    print(f"{len(res)} checked, {sum(bool(x['cuts']) for x in res)} split" + ("" if a.apply else " (dry run: nothing written)"))
+    print(f"{len(res)} checked, {sum(bool(x['cuts']) for x in res)} split" + dry)
     return res
 
 

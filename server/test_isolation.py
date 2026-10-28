@@ -101,6 +101,7 @@ def snapshot(t: tenant.Tenant) -> str:
 REQUESTS = {
     ("POST", "/api/late-backfill"): ("POST", "/api/late-backfill", dict(params={"days": 1, "dry_run": False})),
     ("POST", "/api/split"): ("POST", "/api/split", dict(params={"since": TODAY, "apply": True})),  # a's 30 min one: split in two
+    ("POST", "/api/split/recheck"): ("POST", "/api/split/recheck", dict(params={"since": TODAY, "apply": True})),
     ("POST", "/api/chunks"): ("POST", "/api/chunks", dict(params={"device": DEV, "start": MS + 60_000}, content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/api/chunks/end"): ("POST", "/api/chunks/end", dict(params={"device": DEV, "t": MS + 62_000})),
     ("POST", "/api/hold/release"): ("POST", "/api/hold/release", dict(params={"device": DEV})),
