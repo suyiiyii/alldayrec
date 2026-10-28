@@ -1,7 +1,9 @@
 """Splitting a long conversation: the pure cut rules, the transaction with every moved reference, the walls late audio
 never merges across, and the summary worker's hook; the model is faked."""
+import contextlib
 import json
 import os
+import sqlite3
 
 import anyio
 import pytest
@@ -11,6 +13,8 @@ from alldayrec.tenant import T
 from test_late_audio import A, B, D, E1, E2, E3, conv, iso, row, span, store  # noqa: F401
 
 P2 = "c20261020101000"  # the later part: its first row is at 10:10:00
+TABLES = ("conversations", "sentences", "summaries", "voices", "walls", "todo_marks", "stars", "apart", "conversation_aliases")
+WHOLE = {"parts": [{"start": "10:00:00", "kind": "交谈", "scene": "one"}]}
 
 
 def rows_at(times, speaker="S1", length=20):
@@ -204,9 +208,20 @@ def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
     assert res == {"backup": None, "conversations": [{"id": A, "start": iso(0), "walls": [iso(600), iso(1200)], "undone": [iso(600)]}]}
     assert db.conversation(P2) and len(db.conversations()) == 3, "a dry run writes nothing"
 
+    counts = {x: db.conn().execute(f"SELECT count(*) FROM {x}").fetchone()[0] for x in TABLES}
+    with db.tx() as t:  # its summary and the day's recap were done again since the split
+        db.put_summary({**db.summary(A), "status": "done"}, t)
+        db.put_kv("recap:2026-10-20", {**db.kv("recap:2026-10-20"), "stale": False}, t)
+    recap_rev = db.kv("recap_revision:2026-10-20")
+    T().undo.update(a=[{"conv": A}], b=[{"conv": P2}], c=[{"conv": "c20261020102000"}])
     res = anyio.run(split.recheck, "2026-10-20", True)
     assert res["conversations"][0]["undone"] == [iso(600)] and list(tmp_path.glob("live.db.before-recheck-*")) == [tmp_path / res["backup"].split("/")[-1]]
     assert os.stat(res["backup"]).st_mode & 0o777 == 0o600
+    with contextlib.closing(sqlite3.connect(res["backup"])) as b:
+        assert b.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert {x: b.execute(f"SELECT count(*) FROM {x}").fetchone()[0] for x in TABLES} == counts, "the store before the merge"
+    assert set(T().undo) == {"c"}, "an undo on either side of the merge would restore voices from before it"
+    assert db.kv("recap:2026-10-20")["stale"] and db.kv("recap_revision:2026-10-20") == recap_rev + 1
     a = db.conversation(A)
     assert (a["start"], a["end"], a["participants"], a["sentences"]) == (iso(0), iso(1100), ["S1", "S2", "我"], 34)
     assert db.resolve_conversation(P2) == A and db.conversation(P2)["id"] == A, "the later part's id is an alias"
@@ -232,3 +247,62 @@ def test_a_cut_stands_only_when_every_call_names_it(long_conv):
     long_conv["mp"].setattr(summary, "complete", complete)
     c = db.conversation(A)
     assert anyio.run(split.check, c, None) == [] and split.checked(c, None) and len(db.conversations()) == 1
+
+
+def replies(long_conv, *rs):
+    """The model's replies in turn (an exception: that call fails); each call can run a side effect first (call)."""
+    rs, n = list(rs), []
+
+    async def complete(messages, timeout=300, kind="summary", **extra):
+        r = rs[len(n) % len(rs)]
+        n.append(1)
+        if callable(r):
+            r = r()
+        if isinstance(r, Exception):
+            raise r
+        return r, {}
+    long_conv["mp"].setattr(summary, "complete", complete)
+
+
+def dump():
+    return {x: sorted(map(tuple, db.conn().execute(f"SELECT * FROM {x}")), key=repr) for x in TABLES}
+
+
+def test_one_failed_call_means_no_split(long_conv):
+    replies(long_conv, long_conv["mp"].reply, RuntimeError("synthetic"), long_conv["mp"].reply)
+    c = db.conversation(A)
+    assert anyio.run(split.check, c, None) == []
+    assert len(db.conversations()) == 1 and not split.checked(c, None), "checked again next time"
+
+
+def test_recheck_keeps_a_chain_when_a_call_fails(long_conv):
+    anyio.run(split.check, db.conversation(A), None)
+    before = dump()
+    replies(long_conv, WHOLE, RuntimeError("502 Bad Gateway"), WHOLE)
+    res = anyio.run(split.recheck, "2026-10-20", True)
+    assert res["backup"] is None and res["conversations"][0]["undone"] == [] and "502" in res["conversations"][0]["error"]
+    assert dump() == before and db.resolve_conversation(P2) == P2
+
+
+def test_recheck_undoes_nothing_when_a_part_changed_during_the_call(long_conv):
+    anyio.run(split.check, db.conversation(A), None)
+    before = dump()
+    replies(long_conv, lambda: db.put_kv(f"conversation_revision:{P2}", 99) or WHOLE)  # late audio merged into it meanwhile
+    res = anyio.run(split.recheck, "2026-10-20", True)
+    assert res["conversations"][0]["undone"] == [] and dump() == before
+
+
+def test_recheck_keeps_two_people_with_one_label_apart(long_conv):
+    """Late audio gave the first part an S2 of its own, another voice than the later part's S2: merged, they stay two."""
+    anyio.run(split.check, db.conversation(A), None)
+    with db.tx() as t:
+        db.insert_sentences(t, [{"id": "late", "start": iso(21), "end": iso(29), "speaker": "S2", "text": "late", "source": D}])
+        db.insert_voices(t, [{"conv": A, "label": "S2", "device": "live", "e": E1, "k": 1}])
+    long_conv["mp"].reply = WHOLE
+    anyio.run(split.recheck, "2026-10-20", True)
+    speakers = {r["id"]: r["speaker"] for r in db.sentences(iso(0), iso(1100), True, D)}
+    assert speakers["late"] == "S2" and speakers["r630"] == "S3" and speakers["r600"] == "我"
+    voices = {r["label"]: db.vec(r["e"]).tolist() for r in db.conn().execute("SELECT label, e FROM voices WHERE conv = ?", (A,))}
+    assert voices["S2"] == E1.tolist() and voices["S3"] == E2.tolist(), "neither voiceprint averaged with the other"
+    assert db.conversation(A)["participants"] == ["S1", "S2", "S3", "我"]
+    assert json.loads(db.conn().execute("SELECT labels FROM conversation_aliases WHERE old = ?", (P2,)).fetchone()[0])["S2"] == "S3"

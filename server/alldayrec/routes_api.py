@@ -369,7 +369,8 @@ async def split_backfill(since: str, apply: bool = False):
 @router.post("/api/split/recheck")
 async def split_recheck(since: str, apply: bool = False):
     """Ask again for the conversations split since a day and merge back the parts whose cut no longer stands (split.py
-    --recheck). Without apply it only lists them: the model calls are made, nothing is written."""
+    --recheck); apply asks the model anew, so the cuts it undoes can differ from a dry run's, but it only ever undoes
+    cuts, never adds one. Without apply it only lists them: the model calls are made, nothing is written."""
     try:
         since = dt.date.fromisoformat(since).isoformat()
     except ValueError:

@@ -25,9 +25,13 @@ With --recheck it asks again, with today's rules, about each conversation split 
 /api/split/recheck): a cut that no longer stands is undone, the later part merged back into the one before it (its id
 an alias of that part, its references moved along, the wall dropped) and that part summarized again (and so checked
 again, three more calls, like any new conversation). Without --apply a dry run lists the cuts it would undo; --apply
-first copies the store beside it (live.db.before-recheck-<time>).
+first copies the store beside it (live.db.before-recheck-<time>). --apply asks the model anew, so the cuts it undoes can
+differ from the dry run's, but it only undoes cuts, never adds one; a failed call leaves that conversation's cuts as they
+are. A merged part's anonymous labels are matched by voiceprint (late_merge.label_map): an S2 with no close voiceprint
+in the part before gets a new number.
 """
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -41,7 +45,7 @@ import urllib.request
 
 import anyio
 
-from alldayrec import db, late_merge, late_store, summary, ws
+from alldayrec import db, late_merge, late_store, summary, threads, ws
 from alldayrec.conversations import IGNORE
 from alldayrec.core import conversation_rows, enqueue_summary
 from alldayrec.tenant import T
@@ -320,6 +324,8 @@ def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: l
     gone); nothing when a part changed since revisions."""
     device, kept, gone, grown = parts[0]["device"], [parts[0]], [], set()
     with db.tx() as t:
+        voices = lambda cid: {r["label"]: db.vec(r["e"]) for r in t.execute("SELECT label, e FROM voices WHERE conv = ? AND e IS NOT NULL",
+                                                                            (cid,)) if late_merge.ANON.fullmatch(r["label"] or "")}
         if any(db.resolve_conversation(p["id"]) != p["id"] or db.kv(f"conversation_revision:{p['id']}") != r
                for p, r in zip(parts, revisions)):
             return [], []
@@ -327,7 +333,15 @@ def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: l
             if at not in undone:
                 kept.append(p)
                 continue
-            late_merge.merge(t, kept[-1], p, {x: x for x in p["participants"]})
+            # p's anonymous labels by voiceprint, as late audio's (late_merge.attach): late rows may have given the part
+            # before a new S2 that is not p's S2. A label with no close voiceprint gets a new number: one person under
+            # two labels can be merged later, two people under one cannot be told apart again.
+            early = kept[-1]
+            target = voices(early["id"])
+            used = {r["speaker"] for r in db.sentences(early["start"], early["end"], True, device) if r.get("speaker")} | set(target)
+            mapping = late_merge.label_map(p["participants"], voices(p["id"]), target, used)
+            late_merge.remap_rows(t, p, mapping)
+            late_merge.merge(t, early, p, mapping)
             t.execute("DELETE FROM walls WHERE device = ? AND at = ?", (device, at))
             kept[-1] = {**kept[-1], "end": max(kept[-1]["end"], p["end"])}
             gone.append(p["id"])
@@ -343,13 +357,20 @@ def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: l
                 if recap := db.kv(f"recap:{day}"):
                     db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
                     db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
-    for key, bs in list(T().undo.items()):
-        if any(b.get("conv") in gone for b in bs):
+    for key, bs in list(T().undo.items()):  # an undo on either side would restore voices from before the merge
+        if any(b.get("conv") in gone or b.get("conv") in grown for b in bs):
             del T().undo[key]
     T().speakers["at"] = 0.0
     T().tags["at"] = 0.0
     log.info("unsplit %s: %s merged back", parts[0]["id"], ", ".join(gone))
     return [db.conversation(c["id"]) for c in merged], gone
+
+
+def copy(path: str):
+    """The store copied to a new file, private (0600) from its creation like the store."""
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    with contextlib.closing(sqlite3.connect(path)) as b:
+        db.conn().backup(b)
 
 
 async def recheck(since: str, apply: bool = False) -> dict:
@@ -388,10 +409,7 @@ async def recheck(since: str, apply: bool = False) -> dict:
             continue
         if backup is None:
             backup = f"{T().db}.before-recheck-{dt.datetime.now():%Y%m%d-%H%M%S}"
-            with sqlite3.connect(backup) as b:
-                db.conn().backup(b)
-            b.close()
-            os.chmod(backup, 0o600)  # as private as the store
+            await anyio.to_thread.run_sync(copy, backup, limiter=threads.DB)
         merged, gone = unsplit(parts, ch["walls"], undone, revisions)
         if not merged:
             out[-1]["undone"] = []  # changed during the call
