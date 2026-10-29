@@ -502,6 +502,14 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       state = ["code": "joining"]
       var live0 = false  // LIVE taken since the file it goes on in was caught up
       var lastStatus = Date(), lastPieces = Date.distantPast, lastCharge = Date(), lastAck = Date.distantPast
+      // caught up with the live file (and the one before it): the mirror has it all up to its end. No endRead: the board
+      // takes an ACK alongside a READ. Every 5 s, and before what may hold this loop up past the board's 8 s (an endRead,
+      // the minute's status, LOG and DELETEs, a job)
+      func ack() throws {
+        guard acks && !liveRead && open >= 0 else { return }
+        try write(p, Ble.ctrl, Store.ack(open, m.have(open)))
+        lastAck = Date()
+      }
       // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror lacks
       // (nextRead). LIVE waits only while the file it goes on in is READ (at connect, after a hole, at a new file):
       // a backlog of days no longer holds back what is said now
@@ -533,14 +541,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             state = ["code": "connected"]
           }
           if reading == nil { try nextRead(p, m) }
-          // caught up with the live file (and the one before it): the mirror has it all up to its end. No endRead: the
-          // board takes an ACK alongside a READ
-          if acks && !liveRead && open >= 0 && -lastAck.timeIntervalSinceNow >= Store.ackEvery {
-            try write(p, Ble.ctrl, Store.ack(open, m.have(open)))
-            lastAck = Date()
-          }
+          if -lastAck.timeIntervalSinceNow >= Store.ackEvery { try ack() }
           if -lastPieces.timeIntervalSinceNow >= 0.5 { try pieces(m); lastPieces = Date() }
-          if Recorder.now() - synced > Ble.timeEveryMs { try endRead(p, m); synced = try sync(p) }
+          if Recorder.now() - synced > Ble.timeEveryMs { try ack(); try endRead(p, m); synced = try sync(p) }
           var changed = false  // plugged or unplugged, the card lent or back (the USB disk switch follows the board)
           // not while a READ is in flight: the backlog's DATA keeps the link; the minute's status reads it then
           if reading == nil && -lastCharge.timeIntervalSinceNow >= Ble.chargeEvery {
@@ -549,17 +552,21 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             changed = Ble.charge(t) != hw["charge"] as? String || Ble.store(t) != hw["store"] as? Int
           }
           if changed || -lastStatus.timeIntervalSinceNow > 60 {
+            try ack()
             _ = try status(p, name)
             if live0 {
+              try ack()
               try endRead(p, m)
+              try ack()
               readLog(p)
+              try ack()
               try clean(p, m)
             }
             try unhold(m)
             lastStatus = Date()
             Ble.log("status: battery \(hw["battery"] ?? "-")% card \(hw["store"] ?? "-") free \(hw["free_kb"] ?? "-") KB")
           }
-          if let job = jobs.poll() { try endRead(p, m); try job(p) }
+          if let job = jobs.poll() { try ack(); try endRead(p, m); try job(p) }
           if !took && reading != nil { Thread.sleep(forTimeInterval: 0.01) }  // a READ's DATA on its way
         }
       }

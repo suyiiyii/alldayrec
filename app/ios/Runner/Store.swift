@@ -27,7 +27,7 @@ enum Store {
   /// firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it.
   static func acks(_ status: [UInt8]) -> Bool { status.count > 48 && status[48] & 1 != 0 }
 
-  /// CTRL 0x08 ACK: the mirror has `f` up to `have`, all of it, and every file before it.
+  /// CTRL 0x08 ACK: the mirror has `f` up to `have`, all of it (of other files it says nothing).
   static func ack(_ f: Int64, _ have: Int64) -> [UInt8] {
     [8] + le(UInt32(truncatingIfNeeded: f)) + le(UInt32(truncatingIfNeeded: have))
   }

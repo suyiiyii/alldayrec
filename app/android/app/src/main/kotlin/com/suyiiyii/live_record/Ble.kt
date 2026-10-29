@@ -99,7 +99,7 @@ object Ble {
      *  Older firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it. */
     fun acks(status: ByteArray): Boolean = (status.getOrNull(48)?.toInt() ?: 0) and 1 != 0
 
-    /** CTRL 0x08 ACK: the mirror has [f] up to [have], all of it, and every file before it. */
+    /** CTRL 0x08 ACK: the mirror has [f] up to [have], all of it (of other files it says nothing). */
     fun ack(f: Long, have: Long): ByteArray =
         ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN).put(8).putInt(f.toInt()).putInt(have.toInt()).array()
     const val ACK_EVERY_MS = 5_000L  // the board writes its RAM to the card after 8 s without one
@@ -382,6 +382,14 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             var lastCharge = lastStatus
             var lastPieces = 0L
             var lastAck = -Ble.ACK_EVERY_MS
+            // caught up with the live file (and the one before it): the mirror has it all up to its end. No endRead:
+            // the board takes an ACK alongside a READ. Every 5 s, and before what may hold this loop up past the board's
+            // 8 s (an endRead, the minute's status, LOG and DELETEs, a job)
+            fun ack() {
+                if (!acks || liveRead || open < 0) return
+                write(g, Ble.STORE, Ble.CTRL, Ble.ack(open, m.have(open)))
+                lastAck = android.os.SystemClock.elapsedRealtime()
+            }
             // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror
             // lacks (nextRead). LIVE waits only while the file it goes on in is READ (at connect, after a hole, at a new
             // file): a backlog of days no longer holds back what is said now
@@ -410,30 +418,29 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                 }
                 if (reading == null) nextRead(g, m)
                 val now = android.os.SystemClock.elapsedRealtime()
-                // caught up with the live file (and the one before it): the mirror has it all up to its end. No
-                // endRead: the board takes an ACK alongside a READ
-                if (acks && !liveRead && open >= 0 && now - lastAck >= Ble.ACK_EVERY_MS) {
-                    write(g, Ble.STORE, Ble.CTRL, Ble.ack(open, m.have(open)))
-                    lastAck = now
-                }
+                if (now - lastAck >= Ble.ACK_EVERY_MS) ack()
                 if (now - lastPieces >= 500) { pieces(m); lastPieces = now }
-                if (System.currentTimeMillis() - synced > Ble.TIME_EVERY_MS) { endRead(g, m); synced = sync(g) }
+                if (System.currentTimeMillis() - synced > Ble.TIME_EVERY_MS) { ack(); endRead(g, m); synced = sync(g) }
                 // not while a READ is in flight: the backlog's DATA keeps the link; the minute's status reads it then
                 // plugged or unplugged, the card lent or back (the USB disk switch follows the board)
                 val changed = reading == null && now - lastCharge >= Ble.CHARGE_EVERY_MS &&
                     run { lastCharge = now; read(g, Ble.STORE, Ble.TIME).let { Ble.charge(it) != hw["charge"] || Ble.store(it) != hw["store"] } }
                 if (changed || now - lastStatus > 60_000) {
+                    ack()
                     status(g, name)
                     if (live0) {
+                        ack()
                         endRead(g, m)
+                        ack()
                         DeviceLog.read(mirrorName, { write(g, Ble.STORE, Ble.CTRL, it) }, ctrl, data)
+                        ack()
                         clean(g, m)
                     }
                     unhold(m)
                     lastStatus = now
                     Log.i("live-record", "ble status: battery ${hw["battery"]}% card ${hw["store"]} free ${hw["free_kb"]} KB")
                 }
-                jobs.poll()?.let { endRead(g, m); it(g) }
+                jobs.poll()?.let { ack(); endRead(g, m); it(g) }
                 if (!took && reading != null) Thread.sleep(10)  // a READ's DATA on its way
             }
         } catch (e: Gone) {
