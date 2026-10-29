@@ -35,7 +35,7 @@ class MainActivity : FlutterActivity() {
     private val updates get() = getSharedPreferences("update", MODE_PRIVATE)
     private val downloads get() = getSystemService(DownloadManager::class.java)
 
-    /** The update download of versionCode [code]: status (running/done/failed), bytes so far, size, a failure's reason;
+    /** The update download of versionCode [code]: status (running/waiting/done/failed), bytes so far, size, a failure's reason;
      *  null when there is none (another version's is dropped, one cleared in the system's settings forgotten). */
     private fun updateState(code: Int): Map<String, Any>? {
         val id = updates.getLong("id", -1)
@@ -47,7 +47,8 @@ class MainActivity : FlutterActivity() {
             val status = when (col(DownloadManager.COLUMN_STATUS).toInt()) {
                 DownloadManager.STATUS_SUCCESSFUL -> "done"
                 DownloadManager.STATUS_FAILED -> "failed"
-                else -> "running"  // also pending and paused: waiting for the network or a retry
+                DownloadManager.STATUS_RUNNING -> "running"
+                else -> "waiting"  // pending (offline from the start it stays so) or paused: the network, Wi-Fi or a retry
             }
             return mapOf("status" to status, "done" to col(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR),
                          "total" to col(DownloadManager.COLUMN_TOTAL_SIZE_BYTES), "reason" to col(DownloadManager.COLUMN_REASON))
@@ -57,6 +58,7 @@ class MainActivity : FlutterActivity() {
     private fun dropUpdate() {  // the download and its file
         updates.getLong("id", -1).let { if (it >= 0) downloads.remove(it) }
         updates.edit().clear().apply()
+        File(getExternalFilesDir(null), "update.apk").delete()  // one left by a download forgotten: the next would be update-1.apk
     }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -200,13 +202,14 @@ class MainActivity : FlutterActivity() {
                     if (!ok) startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                     result.success(ok)
                 }
-                "download" -> {  // the update of versionCode "code" from "url": the one already going or done, else a new one
+                "download" -> {  // the update of versionCode "code" from "url" with "token": the one already going or done, else a new one
                     val code = call.argument<Int>("code")!!
                     if (updateState(code)?.get("status").let { it == null || it == "failed" }) {
                         dropUpdate()
                         val r = DownloadManager.Request(Uri.parse(call.argument<String>("url")))
                             .setTitle("${applicationInfo.loadLabel(packageManager)} ${call.argument<String>("version")}")
                             .setMimeType("application/vnd.android.package-archive")
+                            .addRequestHeader("Authorization", "Bearer ${call.argument<String>("token")}")  // not ?token=: its 303 sets a cookie
                             .setDestinationInExternalFilesDir(this, null, "update.apk")  // the app's own: not purged like the download cache
                         updates.edit().putLong("id", downloads.enqueue(r)).putInt("code", code).apply()
                     }

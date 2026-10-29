@@ -221,6 +221,7 @@
   "cannotOpenInstaller": "Can't open the installer: {error}",
   "downloadFailedRetry": "Download failed: {error}; tap here to retry",
   "downloadingApp": "Downloading version {version} · {done} / {total} MB",
+  "waitingForNetwork": "Waiting for the network; it carries on once connected",
   "appUpdate": "Version {version} is out{size}; tap here to update",
   "appUpdateSize": " ({mb} MB)",
   "dontRemindVersion": "Don't remind me of this version",

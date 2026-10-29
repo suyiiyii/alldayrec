@@ -776,6 +776,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get waitingForNetwork => '等待网络，连上后自动继续';
+
+  @override
   String appUpdate(Object version, Object size) {
     return '有新版本 $version$size，点这里更新';
   }

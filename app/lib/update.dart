@@ -32,6 +32,7 @@ class UpdateBanner extends StatefulWidget {
 class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver {
   Map? offer;
   double? progress;  // downloading: the share so far
+  bool waiting = false;  // the download not going: no network yet, or a retry
   String? error;  // the last download's failure
   DateTime checked = DateTime(2000);  // the server's last answer
   Timer? watch;  // in front with the offer's download going: its progress, and the installer once it is done
@@ -80,17 +81,18 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   Future<void> _dismiss() async {
     (await SharedPreferences.getInstance()).setInt('apkDismissed', offer!['versionCode'] as int);
     _ch.invokeMethod('dropDownload').ignore();
-    setState(() => offer = null);
+    watch?.cancel();
+    setState(() { offer = null; progress = null; });
   }
 
   /// /app.apk by the system's DownloadManager, the one already going or done when there is one.
   Future<void> _download() async {
     final o = offer!, l = AppLocalizations.of(context);
-    setState(() { progress = 0; error = null; });
+    setState(() { progress = 0; waiting = false; error = null; });
     try {
       if (await _ch.invokeMethod('allowInstalls') != true) return setState(() { progress = null; error = l.allowInstalls; });
       final s = await Settings.load();
-      await _ch.invokeMethod('download', {'code': o['versionCode'], 'version': '${o['versionName']}', 'url': '${s.server}/app.apk'});
+      await _ch.invokeMethod('download', {'code': o['versionCode'], 'version': '${o['versionName']}', 'url': '${s.server}/app.apk', 'token': s.token});
       _watch();
     } catch (e) {
       if (mounted) setState(() { progress = null; error = l.downloadFailedRetry('$e'); });
@@ -108,21 +110,27 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   Future<void> _poll() async {
     final o = offer, l = AppLocalizations.of(context);
     if (o == null) return watch?.cancel();
+    Map? d;
     try {
-      final d = await _ch.invokeMethod('downloaded', {'code': o['versionCode']}) as Map?;
-      if (!mounted) return;
-      if (d == null || d['status'] != 'running') {
-        watch?.cancel();
-        final shown = progress != null;
-        setState(() {
-          progress = null;
-          if (d?['status'] == 'failed') error = l.downloadFailedRetry('${d!['reason']}');
-        });
-        if (shown && d?['status'] == 'done') await _ch.invokeMethod('install');
-      } else {
-        final t = d['total'] as int, total = t > 0 ? t : o['size'] as num? ?? 0;  // -1 until the server answers
-        setState(() => progress = total > 0 ? d['done'] / total : 0);
-      }
+      d = await _ch.invokeMethod('downloaded', {'code': o['versionCode']}) as Map?;
+    } on PlatformException catch (e) {
+      d = {'status': 'failed', 'reason': e.message};
+    }
+    if (!mounted) return;
+    final st = d?['status'];
+    if (st == 'running' || st == 'waiting') {
+      final t = d!['total'] as int, total = t > 0 ? t : o['size'] as num? ?? 0;  // -1 until the server answers
+      return setState(() { progress = total > 0 ? d!['done'] / total : 0; waiting = st == 'waiting'; });
+    }
+    watch?.cancel();  // done, failed or gone (null): the banner can be tapped again and shows the error
+    final shown = progress != null;
+    setState(() {
+      progress = null;
+      if (st == 'failed') error = l.downloadFailedRetry('${d!['reason']}');
+    });
+    if (!shown || st != 'done') return;
+    try {
+      await _ch.invokeMethod('install');
     } on PlatformException catch (e) {
       if (mounted) setState(() => error = l.cannotOpenInstaller('${e.message}'));
     }
@@ -154,15 +162,13 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
                   if (p != null) ...[
                     const SizedBox(height: 6),
                     LinearProgressIndicator(value: p, borderRadius: BorderRadius.circular(2)),
+                    if (waiting) Text(l.waitingForNetwork, style: t.textTheme.bodySmall?.copyWith(color: cs.onSecondaryContainer)),
                   ],
                   if (error != null && p == null) Text(error!, style: t.textTheme.bodySmall?.copyWith(color: cs.error)),
                 ]),
               ),
             ),
-            if (p == null)
-              IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss)
-            else
-              const SizedBox(width: 12),
+            IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss),
           ]),
         ),
       ),

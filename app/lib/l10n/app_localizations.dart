@@ -1424,6 +1424,12 @@ abstract class AppLocalizations {
   /// **'正在下载新版本 {version} · {done} / {total} MB'**
   String downloadingApp(Object version, Object done, Object total);
 
+  /// No description provided for @waitingForNetwork.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待网络，连上后自动继续'**
+  String get waitingForNetwork;
+
   /// No description provided for @appUpdate.
   ///
   /// In zh, this message translates to:

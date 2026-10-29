@@ -800,6 +800,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get waitingForNetwork =>
+      'Waiting for the network; it carries on once connected';
+
+  @override
   String appUpdate(Object version, Object size) {
     return 'Version $version is out$size; tap here to update';
   }
