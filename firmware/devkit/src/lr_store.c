@@ -272,14 +272,17 @@ static int append(uint32_t len)
 
 /* The queued batches onto the card (SD mutex held): the card writer's work, and done first by whatever reads the card
  * (READ of the open segment, LIST, a lend, a reset). A card that fails does not stop the stream: the segment ends there
- * on the card, what is queued after it leaves the queue unwritten once the card is back, and TIME's store reads the
- * error. Meanwhile the queue waits: phone mode's batches not acked, put in a file of their own (to_card) by a card that
- * did not power up, are written once it does (retry_card). */
+ * on the card, the file's batches queued after it leave the queue unwritten (the card's copy stays the file's start),
+ * and TIME's store reads the error. A file the card has none of yet waits in the queue: phone mode's batches not
+ * acked, put in a file of their own (to_card) by a card that did not power up, are written once it does (retry_card). */
 static void card_drain(void)
 {
     struct card_rec h;
-    while (!phone_mode && !store_err && ring_used() >= sizeof(h)) {
+    while (!phone_mode && ring_used() >= sizeof(h)) {
         ring_copy(q.tail, &h, sizeof(h), false);
+        if (store_err && h.file != card_file) {  // a file the card has none of yet: kept for when it is back
+            break;
+        }
         if (h.file != card_file) {  // a new segment: a new file on the card
             close_segment();
             card_file = h.file;

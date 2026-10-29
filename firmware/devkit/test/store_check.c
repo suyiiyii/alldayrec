@@ -840,6 +840,21 @@ int main(void)
         flush();
         assert(store_err == 0 && made == 7 && card_len[seg] == phone_len[seg]);
     }
+    // the card stuck in a write with batches queued behind it, then the write fails (BDAE 10-09): the file's batches
+    // after it leave the queue with it, the card's copy stays the file's start. Back, the card goes on in a new segment
+    uint16_t sf = seg;
+    card_stuck = true;
+    frames(rec_next, 300);  // 3 s: several batches queued
+    card_stuck = false, card_fail = -EIO;
+    card_drain();
+    card_fail = 0;
+    assert(store_err == -EIO);
+    retry_card();
+    frames(rec_next, 300);
+    flush();
+    assert(store_err == 0 && seg == sf + 1 && card_len[sf] < phone_len[sf]);
+    assert(memcmp(card[sf], phone[sf], card_len[sf]) == 0);  // a prefix
+    assert(card_len[seg] == phone_len[seg] && memcmp(card[seg], phone[seg], card_len[seg]) == 0);
     // phone mode (LR-P3): a phone that acks what it has stored takes the stream, the card is left alone and, idle,
     // turned off; what the phone has not acked stays in RAM, and goes to the card in a new file when the phone goes,
     // stops acking, or falls too far behind. Every frame is in the phone's acked copy or on the card. An app that never
