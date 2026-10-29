@@ -218,12 +218,14 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   23: [
     "STACKS",
     (r) =>
-      t("rec.stacks", {
-        codec: stack(r.a >>> 16),
-        pusher: stack(r.a & 0xffff),
-        store: stack(r.b >>> 16),
-        rx: stack(r.b & 0xffff),
-      }),
+      r.x === 1
+        ? t("rec.stacksCard", { card: stack(r.a >>> 16), wq: stack(r.a & 0xffff) })
+        : t("rec.stacks", {
+            codec: stack(r.a >>> 16),
+            pusher: stack(r.a & 0xffff),
+            store: stack(r.b >>> 16),
+            rx: stack(r.b & 0xffff),
+          }),
   ],
   24: [
     "SD_RESET",

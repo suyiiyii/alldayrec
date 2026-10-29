@@ -738,6 +738,7 @@
     "dropped": "{n} frames, {total} this boot",
     "heartbeat": "battery {mv} mV, {mb} MB free, {n} frames dropped this boot",
     "stacks": "codec {codec}, pusher {pusher}, store {store}, BT RX {rx} B",
+    "stacksCard": "card writer {card}, system workqueue {wq} B",
     "sdIdle": "CMD12 r1 0x{a}, CMD0 r1 0x{b} (idle)",
     "sdDead": "CMD12 r1 0x{a}, CMD0 r1 0x{b} (card not responding)",
     "readTime": "card read {read} ms, Bluetooth send {send} ms",

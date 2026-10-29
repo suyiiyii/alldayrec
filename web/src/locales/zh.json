@@ -738,6 +738,7 @@
     "dropped": "{n} 帧，本次开机共 {total}",
     "heartbeat": "电池 {mv} mV，剩 {mb} MB，本次开机丢 {n} 帧",
     "stacks": "codec {codec}，pusher {pusher}，store {store}，BT RX {rx} B",
+    "stacksCard": "写卡线程 {card}，系统工作队列 {wq} B",
     "sdIdle": "CMD12 r1 0x{a}，CMD0 r1 0x{b}（空闲）",
     "sdDead": "CMD12 r1 0x{a}，CMD0 r1 0x{b}（卡没响应）",
     "readTime": "读卡 {read} ms，蓝牙发送 {send} ms",

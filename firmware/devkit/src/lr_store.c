@@ -148,6 +148,7 @@ static bool card_off;          // phone mode turned the card's supply off: card_
 static int64_t card_used;      // the card last read, written or turned on (k_uptime_get)
 static uint32_t ack_file, ack_off;  // the last ACK: the phone has the file up to there (BT RX thread; irq_lock)
 static int64_t ack_at = INT64_MIN / 2;
+static int64_t followed_at;  // LIVE last subscribed (a new link; BT RX thread, irq_lock): an ACK before is the last link's
 static uint32_t unacked_max;   // the most bytes not acked in the ring this time in phone mode
 static int card_up(void);
 static void to_card(uint8_t why);
@@ -270,12 +271,14 @@ static int append(uint32_t len)
 }
 
 /* The queued batches onto the card (SD mutex held): the card writer's work, and done first by whatever reads the card
- * (READ of the open segment, LIST, a lend, a reset). A card that fails does not stop the stream: what is queued after
- * leaves the queue unwritten, the segment ends there on the card, and TIME's store reads the error. */
+ * (READ of the open segment, LIST, a lend, a reset). A card that fails does not stop the stream: the segment ends there
+ * on the card, what is queued after it leaves the queue unwritten once the card is back, and TIME's store reads the
+ * error. Meanwhile the queue waits: phone mode's batches not acked, put in a file of their own (to_card) by a card that
+ * did not power up, are written once it does (retry_card). */
 static void card_drain(void)
 {
     struct card_rec h;
-    while (!phone_mode && ring_used() >= sizeof(h)) {
+    while (!phone_mode && !store_err && ring_used() >= sizeof(h)) {
         ring_copy(q.tail, &h, sizeof(h), false);
         if (h.file != card_file) {  // a new segment: a new file on the card
             close_segment();
@@ -283,7 +286,7 @@ static void card_drain(void)
             card_at = 0;
             file_path(card_path, h.file);
         }
-        bool skip = store_err || h.offset != card_at;  // no card, or a batch that would leave a hole in its file
+        bool skip = store_err || h.offset != card_at;  // the old file's close failed, or a hole in its file
         int err = skip ? 0 : append(h.len);
         ring_drop(sizeof(h) + h.len);  // taken whether or not it made it
         if (skip) {
@@ -311,9 +314,10 @@ static void card_thread(void)
         k_mutex_unlock(&write_sdcard_mutex);
     }
 }
-// started by lr_store_init, once the ring is the last boot's no more (ring_recover)
-K_THREAD_STACK_DEFINE(card_stack, 2048);
-static struct k_thread card_thread_data;
+// started by lr_store_init, once the ring is the last boot's no more (ring_recover). Phone mode: it mounts the card too
+// (to_card, card_up), 1.88 KB at the most (-fcallgraph-info, a blank card's f_mkfs included) plus an FPU frame
+K_THREAD_STACK_DEFINE(card_stack, IS_ENABLED(CONFIG_LR_STORE_PHONE) ? 2560 : 2048);
+struct k_thread card_thread_data;  // lr_log.c watches its stack
 
 /* The finished records, one batch, to the card writer (stream mutex held). The card's trouble never holds the stream:
  * a batch the queue cannot take goes to LIVE only (APPEND_ERR x 1, -EAGAIN), and so does the rest of the segment; once
@@ -441,6 +445,9 @@ K_MSGQ_DEFINE(cmds, sizeof(struct cmd), 8, 4);
 static void live_ccc(const struct bt_gatt_attr *attr, uint16_t value)
 {
     if (value == BT_GATT_CCC_NOTIFY) {
+        unsigned int key = irq_lock();
+        followed_at = k_uptime_get();
+        irq_unlock(key);
         struct cmd c = {.op = FOLLOW};
         k_msgq_put(&cmds, &c, K_NO_WAIT);
     }
@@ -801,6 +808,7 @@ static void send_file(struct bt_conn *conn, uint32_t file, uint32_t off)
             }
             got = n ?: fs_read(&f, chunk, MIN(CHUNK, end - off));
             at += MAX(got, 0);
+            card_used = k_uptime_get();  // a READ of the card longer than CARD_IDLE_MS: on until it ends
         }
         card_ms += k_uptime_get() - t;
         k_mutex_unlock(&write_sdcard_mutex);
@@ -1009,9 +1017,8 @@ static int card_up(void)
 static void to_card(uint8_t why)
 {
     phone_mode = false;
-    card_up();
     k_mutex_lock(&stream_mtx, K_FOREVER);
-    write_out();  // the finished records too (LIVE sent them as the old file's)
+    write_out();  // the finished records too (LIVE sent them as the old file's), before card_up can fail
     struct card_rec h;
     uint32_t n = 0, used = ring_used();
     for (uint32_t at = 0; at < used; at += sizeof(h) + h.len) {
@@ -1026,6 +1033,7 @@ static void to_card(uint8_t why)
     card_behind = false;
     lr_log(LR_SEGMENT, 0, cur_file(), 0);
     k_mutex_unlock(&stream_mtx);
+    card_up();  // a card that does not come on keeps them in the ring (card_drain) until it does (retry_card)
     unsigned int key = irq_lock();
     int64_t since = k_uptime_get() - ack_at;
     irq_unlock(key);
@@ -1046,6 +1054,7 @@ static void phone_step(void)
     unsigned int key = irq_lock();
     uint32_t af = ack_file, ao = ack_off;
     int64_t since = k_uptime_get() - ack_at;
+    following = following && ack_at > followed_at;  // a quick reconnect: the link went (and its ACKs with it)
     irq_unlock(key);
     if (!phone_mode) {
         if (following && since < ACK_TIMEOUT_MS && !store_err && !ring_used()) {
@@ -1063,11 +1072,13 @@ static void phone_step(void)
         }
         return;
     }
-    // what the phone has: out of the ring (an ACK of a later file: it has taken the earlier ones)
+    // what the phone has: out of the ring. An ACK says nothing of the files before it: LIVE may have lost a file's
+    // last seconds just before a new one (SEG_MAX, a quick reconnect's FOLLOW), and its LIST shows the card's start of
+    // it only, so the phone takes it for whole. Those batches stay, and go to the card (3/4 of the ring at the latest)
     struct card_rec h;
     while (ring_used() >= sizeof(h)) {
         ring_copy(q.tail, &h, sizeof(h), false);
-        if (h.file > af || (h.file == af && h.offset + h.len > ao)) {
+        if (h.file != af || h.offset + h.len > ao) {
             break;
         }
         ring_drop(sizeof(h) + h.len);
@@ -1199,8 +1210,12 @@ void lr_store_lend(bool on)
 }
 
 /* What a crash or a watchdog reset left in the ring (__noinit; a cold start's RAM fails the checks): the batches no
- * phone acked or the card had not taken yet, back to back into a file of their own, the last boot's next segment
- * (none of its batches came after these). Without a card they are lost; the ring is this boot's from here. */
+ * phone acked or the card had not taken yet, back to back into a file of their own, the last boot's segment FFFF. Not
+ * its next one: the stream may have gone on in that (SEG_MAX, a FOLLOW) with none of it in the ring yet, and LIVE sent
+ * its start; the phone would put the two together. A boot gets to FFFF only after 65535 files (one per SEG_MAX,
+ * reconnect or card trouble). Without a card they are lost; the ring is this boot's from here.
+ * No CRC: the magic, the bounds and the batches' headers are the checks. The ring's place is the linker's (.noinit, by
+ * lr_log's): a firmware that puts it elsewhere reads another's bytes there, and those checks turn them down. */
 static void ring_recover(void)
 {
     struct card_rec h;
@@ -1224,15 +1239,15 @@ static void ring_recover(void)
     }
     for (uint32_t at = 0; at < end; at += sizeof(h) + h.len) {
         ring_copy(q.tail + at, &h, sizeof(h), false);
-        h.file = file + 1;
+        h.file = file | 0xFFFF;
         h.offset = n;
         ring_copy(q.tail + at, &h, sizeof(h), true);
         n += h.len;
     }
     card_drain();
     close_segment();
-    LOG_INF("%u B the last boot left in RAM: %08X", n, file + 1);
-    lr_log(LR_PHONE, 5, n, file + 1);
+    LOG_INF("%u B the last boot left in RAM: %08X", n, file | 0xFFFF);
+    lr_log(LR_PHONE, 5, n, file | 0xFFFF);
 }
 
 /* Mount the SD card, count this boot, pick its first segment, write what the last boot left in RAM; start the card

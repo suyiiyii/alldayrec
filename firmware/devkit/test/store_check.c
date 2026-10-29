@@ -2,9 +2,10 @@
 // same bytes at the same file and offset, through batches, 'T' records, frame gaps and a card that stops taking writes;
 // the timing events (SD_WRITES, READ, READ_TIME) on a fake clock; LIVE behind a stalled link, a notify with no TX
 // buffer and a link lost with records queued; phone mode (a phone that acks takes the stream instead of the card: in,
-// a LIVE gap READ from RAM, the card off and on, out by ACK timeout, a full ring, the link, LIVE unsubscribed and a
-// restart, a reset's RAM written at the next boot), no frame lost. -DPHONE=0: the other boards' store (no phone mode);
-// -DCARD_OFF=0: phone mode with the card's supply left on.
+// a LIVE gap READ from RAM, the card off and on, a card READ longer than the card's idle time, out by ACK timeout, a
+// full ring, the link, LIVE unsubscribed, a quick reconnect and a restart, a new file just after LIVE lost the old
+// one's end, a card that does not power up, a reset's RAM written at the next boot), no frame lost. -DPHONE=0: the
+// other boards' store (no phone mode); -DCARD_OFF=0: phone mode with the card's supply left on.
 //   d=$(mktemp -d) && mkdir -p $d/zephyr/{bluetooth,fs,sys,logging,drivers,random} && for h in bluetooth/conn \
 //   bluetooth/gatt bluetooth/uuid fs/fs kernel logging/log sys/byteorder sys/ring_buffer drivers/sensor random/random; do
 //   touch $d/zephyr/$h.h; done && for o in "" -DPHONE=0 -DCARD_OFF=0; do cc -O1 -w $o -I$d -o $d/store_check \
@@ -196,9 +197,10 @@ bool usb_charge;
 int mount_sd_card(void) { return 0; }
 static int mounts, resets, mount_fails;  // tries of the card again (retry_card), from scratch; how many of the next fail
 int mount_sd_card_once(void) { mounts++; return mount_fails ? mount_fails--, -EIO : 0; }
-int mount_sd_card_reset(void) { resets++; return mount_fails ? mount_fails--, -EIO : 0; }
+static bool sd_unpowered;  // the card's supply off: a read of it fails
+int mount_sd_card_reset(void) { resets++; sd_unpowered = false; return mount_fails ? mount_fails--, -EIO : 0; }
 static int power_offs;  // the card's supply turned off (phone mode)
-void sd_power_off(void) { power_offs++; }
+void sd_power_off(void) { power_offs++; sd_unpowered = true; }
 static struct { uint8_t code, x; uint32_t a, b; } logged[16];
 static int n_logged;
 void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
@@ -219,6 +221,9 @@ static uint32_t data_next;                                // the offset the next
 static int data_into = -1;                                // READ's DATA into the phone's copy of this segment too
 static int live_nomem;     // LIVE notifies refused for want of a TX buffer (-ENOMEM) before one goes
 static int live_gone = -1; // LIVE notifies that go before the link is lost (-ENOTCONN from then on); -1: never
+static int data_ack_ms;    // while a READ goes, the phone acks this often (its loop goes on alongside); 0: it does not
+static int64_t data_acked;
+static void phone_acks(void);
 static int bt_gatt_notify(struct bt_conn *c, const struct bt_gatt_attr *a, const void *data, uint16_t len)
 {
     const uint8_t *p = data;
@@ -234,6 +239,10 @@ static int bt_gatt_notify(struct bt_conn *c, const struct bt_gatt_attr *a, const
         }
         data_next += len - 4;
         now_ms += notify_ms;
+        if (data_ack_ms && now_ms - data_acked >= data_ack_ms) {
+            data_acked = now_ms;
+            phone_acks();
+        }
         return 0;
     }
     if (live_nomem) {
@@ -256,7 +265,12 @@ static int bt_gatt_notify(struct bt_conn *c, const struct bt_gatt_attr *a, const
 static uint8_t card[FILES][1 << 18];
 static uint32_t card_len[FILES];
 static int card_fail;  // writes fail with this
-static int seg_of(const char *path) { return strstr(path, ".BIN") ? (int) (strtoul(strstr(path, ".BIN") - 4, 0, 16)) : -1; }
+#define RECOVERED (FILES - 2)  // segment FFFF, a reset's RAM written at the next boot (ring_recover)
+static int seg_of(const char *path)
+{
+    int s = strstr(path, ".BIN") ? (int) (strtoul(strstr(path, ".BIN") - 4, 0, 16)) : -1;
+    return s == 0xFFFF ? RECOVERED : s;
+}
 #define BOOT_F (-2)  // /SD:/LR/BOOT, the card's boot count
 static uint8_t boot_file[2];
 static uint32_t boot_len;
@@ -296,6 +310,9 @@ static ssize_t fs_write(struct fs_file_t *f, const void *d, size_t n)
 }
 static ssize_t fs_read(struct fs_file_t *f, void *d, size_t n)
 {
+    if (sd_unpowered) {
+        return -EIO;
+    }
     n = MIN(n, (f->f == BOOT_F ? boot_len : card_len[f->f]) - f->pos);
     memcpy(d, (f->f == BOOT_F ? boot_file : card[f->f]) + f->pos, n);
     f->pos += n;
@@ -372,6 +389,11 @@ static void ack(uint32_t file, uint32_t off)
     sys_put_le32(file, b + 1);
     sys_put_le32(off, b + 5);
     assert(ctrl_write(&the_conn, CTRL_ATTR, b, sizeof(b), 0, 0) == sizeof(b));
+}
+
+static void phone_acks(void)
+{
+    ack(cur_file(), phone_len[seg]);
 }
 
 /* n seconds of audio, the card writer's tick each; the phone acks what it has every 5th (acks: 1) */
@@ -911,6 +933,112 @@ int main(void)
             next_segment();  // the phone subscribes again: a new file
         }
 
+        // a new file in phone mode (SEG_MAX, or a FOLLOW before the 1 s look saw the link go) just after LIVE lost the
+        // old one's last seconds: its LIST shows the card's start of it, the phone takes it for whole and acks the new
+        // file. That ACK is the new file's only: the old one's batches stay in RAM and go to the card, none lost
+        catch_up(0);
+        uint16_t sn = seg;
+        uint32_t f1 = rec_next;
+        seconds(3, false);
+        ack(cur_file(), phone_len[sn]);
+        live_gone = 0;  // LIVE's next 2 s do not reach the phone
+        frames(rec_next, 200);
+        now_ms += 2000;
+        tick();
+        live_gone = -1;
+        uint32_t got = phone_len[sn];
+        next_segment();
+        seconds(3, false);
+        uint32_t acked1 = phone_len[seg];
+        ack(cur_file(), acked1);
+        struct card_rec h;
+        ring_copy(q.tail, &h, sizeof(h), false);
+        assert(phone_mode && h.file == (2 << 16 | sn));  // the old file's tail still in RAM
+        linked = false;
+        tick();
+        linked = true;
+        flush();
+        memset(seen, 0, sizeof(seen));
+        mark(phone[sn], got, f1), mark(phone[sn + 1], acked1, f1);
+        for (int s = sn; s <= seg; s++) {
+            mark(card[s], card_len[s], f1);
+        }
+        for (uint32_t f = f1; f < rec_next; f++) {
+            assert(seen[f - f1]);  // no frame lost
+        }
+
+        // a READ of the card that takes longer than its idle time, the phone acking alongside: the card on to its end
+        uint16_t big = seg;
+        next_segment();
+        catch_up(0);
+        seconds(10, true);
+        assert(phone_mode && card_off == CARD_OFF);
+        int offs = power_offs;
+        read_ms = 2500, data_ack_ms = 5000, data_acked = now_ms, data_next = 0;
+        send_file(&the_conn, 2 << 16 | big, 0);
+        read_ms = data_ack_ms = 0;
+        assert(phone_mode && card_len[big] > 4 * CHUNK && data_next == card_len[big] && power_offs == offs);
+        seconds(10, true);
+        assert(phone_mode && card_off == CARD_OFF && power_offs == offs + CARD_OFF);  // off again after it
+        linked = false;
+        tick();
+        linked = true;
+        next_segment();
+
+        // phone mode over and the card does not power up: what was not acked waits in RAM, onto the card once it is back
+        if (CARD_OFF) {
+            catch_up(0);
+            uint16_t s2 = seg;
+            uint32_t f2 = rec_next - rec_count;
+            seconds(10, true);
+            uint32_t acked2 = phone_len[s2];
+            ack(cur_file(), acked2);
+            seconds(2, false);
+            assert(phone_mode && card_off);
+            uint32_t upto2 = rec_next - rec_count;  // the open record goes on: to LIVE only while the card is down
+            mount_fails = 1, linked = false;
+            tick();
+            linked = true;
+            assert(!phone_mode && store_err == -EIO && ring_used() > 3500);
+            retry_card();
+            tick();
+            assert(store_err == 0 && ring_used() == 0);
+            flush();
+            memset(seen, 0, sizeof(seen));
+            mark(phone[s2], acked2, f2);
+            for (int s = s2; s <= seg; s++) {
+                mark(card[s], card_len[s], f2);
+            }
+            for (uint32_t f = f2; f < upto2; f++) {
+                assert(seen[f - f2]);  // no frame lost
+            }
+            next_segment();
+        }
+
+        // the phone back before the card writer's look saw it go: the last link's ACKs say nothing of this one. Phone
+        // mode ends as the link went, and starts again only with an ACK on the new link
+        catch_up(0);
+        seconds(2, false);
+        n_logged = 0;
+        live_ccc(LIVE_ATTR, BT_GATT_CCC_NOTIFY);
+        tick();
+        e = last_code(LR_PHONE);
+        assert(!phone_mode && e >= 0 && logged[e].x == 1 && (logged[e].b & 0xFFFF) < ACK_TIMEOUT_MS);
+        next_segment();  // its FOLLOW
+        subscribed = false;
+        ack(cur_file(), phone_len[seg]);  // the last link's, just before it went
+        subscribed = true;
+        live_ccc(LIVE_ATTR, BT_GATT_CCC_NOTIFY);
+        tick();
+        assert(!phone_mode);
+        now_ms += 100;
+        ack(cur_file(), phone_len[seg]);
+        assert(phone_mode);
+        linked = false;
+        tick();
+        linked = true;
+        next_segment();
+
         // a restart (switch, low battery, update): what the phone has not acked onto the card first
         catch_up(0);
         seconds(3, false);
@@ -923,20 +1051,24 @@ int main(void)
         next_segment();
 
         // a crash or a watchdog reset in phone mode: the RAM ring survives it, the next boot writes it to the card as
-        // the last boot's next segment
+        // the last boot's segment FFFF. Not the next one: the stream may have gone on in that, LIVE sent its start
         catch_up(0);
         seconds(3, false);
         uint32_t last = cur_file();
+        next_segment();  // SEG_MAX or a FOLLOW: the new file's first records to LIVE, none in RAM yet
+        uint32_t upto0 = rec_next;
+        frames(rec_next, 50);
+        assert(phone_len[seg] > 0);
         uint32_t left = ring_used();
         assert(left > 2 * 3500);
         phone_mode = card_off = false, card_file = UINT32_MAX, seg_open = false, n_logged = 0;  // the next boot's RAM
         ring_recover();
         e = last_code(LR_PHONE);
-        assert(ring_used() == 0 && e >= 0 && logged[e].x == 5 && logged[e].b == last + 1);
-        assert(logged[e].a > 2 * 3500 && logged[e].a < left && card_len[(last + 1) & 0xFFFF] == logged[e].a);
+        assert(ring_used() == 0 && e >= 0 && logged[e].x == 5 && logged[e].b == (last | 0xFFFF));
+        assert(logged[e].a > 2 * 3500 && logged[e].a < left && card_len[RECOVERED] == logged[e].a);
         memset(seen, 0, sizeof(seen));
-        uint32_t from = rec_next - 300;
-        mark(card[(last + 1) & 0xFFFF], card_len[(last + 1) & 0xFFFF], from);
+        uint32_t from = upto0 - 300;
+        mark(card[RECOVERED], card_len[RECOVERED], from);
         uint32_t upto = from;
         while (seen[upto - from]) {
             upto++;
@@ -944,7 +1076,7 @@ int main(void)
         for (uint32_t f = upto; f < rec_next; f++) {
             assert(!seen[f - from]);
         }
-        assert(upto >= rec_next - 110);  // all the ring held; lost, the batch still gathering (~1 s) and the open record
+        assert(upto == upto0);  // all the ring held: the old file to its end; lost, the new file's records in RAM
         // a cold start: whatever RAM holds is no ring
         q.magic ^= 1, q.head = 12345;
         ring_recover();

@@ -15,7 +15,7 @@
 
 extern uint32_t transport_frame_no;  // transport.c: the codec's frames since boot, the audio's clock
 extern uint32_t free_kb, dropped;    // lr_store.c
-extern struct k_thread codec_thread, pusher_thread, store_thread_data;
+extern struct k_thread codec_thread, pusher_thread, store_thread_data, card_thread_data;
 extern struct mic_health mic_health;  // codec.c
 extern uint32_t pdm_errors;           // mic.c
 
@@ -146,6 +146,7 @@ static void tick(struct k_work *w)
         lr_log(LR_HEARTBEAT, battery_20mv(), free_kb, dropped);
         lr_log(LR_STACKS, 0, (uint32_t) unused_stack(&codec_thread) << 16 | unused_stack(&pusher_thread),
                (uint32_t) unused_stack(&store_thread_data) << 16 | unused_stack(bt_rx));
+        lr_log(LR_STACKS, 1, (uint32_t) unused_stack(&card_thread_data) << 16 | unused_stack(&k_sys_work_q.thread), 0);
         // the die temperature, in quarter degrees (MPSL owns the TEMP peripheral)
         lr_log(LR_HEALTH, (int8_t) (mpsl_temperature_get() / 4), mic_health_a(&mic_health, pdm_errors),
                mic_health_b(&mic_health));

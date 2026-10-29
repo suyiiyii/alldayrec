@@ -52,9 +52,9 @@
  *               0x07 LOG from:u32        -> DATA notifications seq:u32 + records (seq, seq+1, ...; 16 B each, lr_log.h)
  *                                           for every logged event from seq `from` on, then 0x87 next:u32, the seq
  *                                           the next event will get: ask from there next time
- *               0x08 ACK file:u32 offset:u32  the phone has stored `file` up to `offset`, all of it, and every file
- *                                           before it (every ~5 s while it follows; features bit 0 only). Taken at
- *                                           once, a READ going on goes on. No reply: the write's response
+ *               0x08 ACK file:u32 offset:u32  the phone has stored `file` up to `offset`, all of it; of other files
+ *                                           it says nothing (every ~5 s while it follows; features bit 0 only). Taken
+ *                                           at once, a READ going on goes on. No reply: the write's response
  *               0x20 PAUSE s:u32         nothing kept for s seconds (frames still counted), then recording again by
  *                                           itself; 0 resumes now; a reset resumes too. No reply: the write's response
  *   ...03 DATA  notify offset:u32 bytes...                 (READ)

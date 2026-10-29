@@ -42,7 +42,8 @@
  *    20 SEGMENT     a the new open file (boot << 16 | segment)
  *    21 DFU         x GPREGRET: 0x57 UF2 bootloader, 0xA8 OTA bootloader
  *    22 HEARTBEAT   x battery mV / 20, a free card KB, b frames dropped this boot (every 10 min)
- *    23 STACKS      a codec << 16 | pusher, b store << 16 | BT RX: bytes of stack never used (0xFFFF: no thread)
+ *    23 STACKS      a codec << 16 | pusher, b store << 16 | BT RX: bytes of stack never used (0xFFFF: no thread);
+ *                   x 1: a the card writer << 16 | the system workqueue (switch, low battery, 1200 bps touch)
  *    24 SD_RESET    a R1 to CMD12, b R1 to CMD0 (0x01: idle) of the SPI reset before the first mount, and before each
  *                   try from scratch of a failed card
  *    25 SD_WRITES   the card appends of the last 10 minutes, by the first append after them: x how many took over
