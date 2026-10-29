@@ -95,6 +95,15 @@ object Ble {
     /** The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk). */
     fun store(status: ByteArray): Int = ByteBuffer.wrap(status).order(ByteOrder.LITTLE_ENDIAN).getShort(6).toInt()
 
+    /** The board takes ACK (status byte 48 bit 0; firmware phone mode: it keeps what the phone acked off its card).
+     *  Older firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it. */
+    fun acks(status: ByteArray): Boolean = (status.getOrNull(48)?.toInt() ?: 0) and 1 != 0
+
+    /** CTRL 0x08 ACK: the mirror has [f] up to [have], all of it (of other files it says nothing). */
+    fun ack(f: Long, have: Long): ByteArray =
+        ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN).put(8).putInt(f.toInt()).putInt(have.toInt()).array()
+    const val ACK_EVERY_MS = 5_000L  // the board writes its RAM to the card after 8 s without one
+
     /** What the USB disk switch says after CTRL 0x06 asked for [on]: [err] its answer (null: none in 15 s), [store] the
      *  card's state the board reports since. A slow card answers late (lend() flushes, closes and unmounts before
      *  it answers; 10-13 BDAE went past 15 s and the app said it failed, a second tap took the disk back): no answer is
@@ -372,6 +381,15 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             var lastStatus = android.os.SystemClock.elapsedRealtime()
             var lastCharge = lastStatus
             var lastPieces = 0L
+            var lastAck = -Ble.ACK_EVERY_MS
+            // caught up with the live file (and the one before it): the mirror has it all up to its end. No endRead:
+            // the board takes an ACK alongside a READ. Every 5 s, and before what may hold this loop up past the board's
+            // 8 s (an endRead, the minute's status, LOG and DELETEs, a job)
+            fun ack() {
+                if (!acks || liveRead || open < 0) return
+                write(g, Ble.STORE, Ble.CTRL, Ble.ack(open, m.have(open)))
+                lastAck = android.os.SystemClock.elapsedRealtime()
+            }
             // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror
             // lacks (nextRead). LIVE waits only while the file it goes on in is READ (at connect, after a hole, at a new
             // file): a backlog of days no longer holds back what is said now
@@ -400,24 +418,28 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                 }
                 if (reading == null) nextRead(g, m)
                 val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastAck >= Ble.ACK_EVERY_MS) ack()
                 if (now - lastPieces >= 500) { pieces(m); lastPieces = now }
-                if (System.currentTimeMillis() - synced > Ble.TIME_EVERY_MS) { endRead(g, m); synced = sync(g) }
+                if (System.currentTimeMillis() - synced > Ble.TIME_EVERY_MS) { ack(); endRead(g, m); synced = sync(g) }
                 // not while a READ is in flight: the backlog's DATA keeps the link; the minute's status reads it then
                 // plugged or unplugged, the card lent or back (the USB disk switch follows the board)
                 val changed = reading == null && now - lastCharge >= Ble.CHARGE_EVERY_MS &&
                     run { lastCharge = now; read(g, Ble.STORE, Ble.TIME).let { Ble.charge(it) != hw["charge"] || Ble.store(it) != hw["store"] } }
                 if (changed || now - lastStatus > 60_000) {
+                    ack()
                     status(g, name)
                     if (live0) {
+                        ack()
                         endRead(g, m)
+                        ack()
                         DeviceLog.read(mirrorName, { write(g, Ble.STORE, Ble.CTRL, it) }, ctrl, data)
-                        clean(g, m)
+                        clean(g, m, ::ack)
                     }
                     unhold(m)
                     lastStatus = now
                     Log.i("live-record", "ble status: battery ${hw["battery"]}% card ${hw["store"]} free ${hw["free_kb"]} KB")
                 }
-                jobs.poll()?.let { endRead(g, m); it(g) }
+                jobs.poll()?.let { ack(); endRead(g, m); it(g) }
                 if (!took && reading != null) Thread.sleep(10)  // a READ's DATA on its way
             }
         } catch (e: Gone) {
@@ -521,6 +543,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val t = le(raw)
         val s = Status(t.getShort(0).toInt() and 0xffff, t.getInt(2).toLong() and 0xffffffffL, Ble.store(raw), System.currentTimeMillis())
         noCard = s.store < 0 && t.getInt(12) == 0
+        acks = Ble.acks(raw)
         val left = syncTotalKb - syncDoneKb
         val rate = if (caughtSince > 0) caught * 1000.0 / maxOf(1000L, android.os.SystemClock.elapsedRealtime() - caughtSince) else 0.0
         val h = mutableMapOf<String, Any?>("name" to name, "store" to s.store, "free_kb" to (t.getInt(8).toLong() and 0xffffffffL),
@@ -568,6 +591,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     // no card (store < 0, none mounted this boot): nothing to LIST or READ; each READ kept the link on its fast interval
     // (2420, 10-07: 15 ms for an hour). A hole in LIVE is a new file at once (follow())
     private var noCard = false
+    private var acks = false      // the board takes ACK (Ble.acks)
     private var settleUntil = 0L  // elapsedRealtime; after a subscribe LIVE still sends the file before the new one, from mid-way
     private val stalls = HashMap<Long, Int>()
     private var caught = 0L       // a catch-up under way: bytes taken since (elapsedRealtime; 0: none)
@@ -786,12 +810,14 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         if (n > 0) onPiece(n)
     }
 
-    /** Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. */
-    private fun clean(g: BluetoothGatt, m: Mirror) {
+    /** Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. An ACK before each: a DELETE
+     *  may power the card up, several in a row may hold the loop past the board's 8 s. */
+    private fun clean(g: BluetoothGatt, m: Mirror, ack: () -> Unit) {
         if (noCard) return
         val done = m.done(chunks)
         if (done.isNotEmpty() && listFull) needList = true  // room in the next LIST for files it left out
         for (f in done) {
+            ack()
             val r = reply(g, le(ByteArray(5)).put(4).putInt(f.toInt()).array(), 0x84) ?: return  // DELETE
             val err = r[5].toInt()
             Log.i("live-record", "ble DELETE %08X: $err".format(f))

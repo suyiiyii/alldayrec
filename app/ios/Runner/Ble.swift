@@ -501,7 +501,15 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       caught = 0; caughtSince = nil
       state = ["code": "joining"]
       var live0 = false  // LIVE taken since the file it goes on in was caught up
-      var lastStatus = Date(), lastPieces = Date.distantPast, lastCharge = Date()
+      var lastStatus = Date(), lastPieces = Date.distantPast, lastCharge = Date(), lastAck = Date.distantPast
+      // caught up with the live file (and the one before it): the mirror has it all up to its end. No endRead: the board
+      // takes an ACK alongside a READ. Every 5 s, and before what may hold this loop up past the board's 8 s (an endRead,
+      // the minute's status, LOG and DELETEs, a job)
+      func ack() throws {
+        guard acks && !liveRead && open >= 0 else { return }
+        try write(p, Ble.ctrl, Store.ack(open, m.have(open)))
+        lastAck = Date()
+      }
       // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror lacks
       // (nextRead). LIVE waits only while the file it goes on in is READ (at connect, after a hole, at a new file):
       // a backlog of days no longer holds back what is said now
@@ -533,8 +541,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             state = ["code": "connected"]
           }
           if reading == nil { try nextRead(p, m) }
+          if -lastAck.timeIntervalSinceNow >= Store.ackEvery { try ack() }
           if -lastPieces.timeIntervalSinceNow >= 0.5 { try pieces(m); lastPieces = Date() }
-          if Recorder.now() - synced > Ble.timeEveryMs { try endRead(p, m); synced = try sync(p) }
+          if Recorder.now() - synced > Ble.timeEveryMs { try ack(); try endRead(p, m); synced = try sync(p) }
           var changed = false  // plugged or unplugged, the card lent or back (the USB disk switch follows the board)
           // not while a READ is in flight: the backlog's DATA keeps the link; the minute's status reads it then
           if reading == nil && -lastCharge.timeIntervalSinceNow >= Ble.chargeEvery {
@@ -543,17 +552,20 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             changed = Ble.charge(t) != hw["charge"] as? String || Ble.store(t) != hw["store"] as? Int
           }
           if changed || -lastStatus.timeIntervalSinceNow > 60 {
+            try ack()
             _ = try status(p, name)
             if live0 {
+              try ack()
               try endRead(p, m)
+              try ack()
               readLog(p)
-              try clean(p, m)
+              try clean(p, m, ack)
             }
             try unhold(m)
             lastStatus = Date()
             Ble.log("status: battery \(hw["battery"] ?? "-")% card \(hw["store"] ?? "-") free \(hw["free_kb"] ?? "-") KB")
           }
-          if let job = jobs.poll() { try endRead(p, m); try job(p) }
+          if let job = jobs.poll() { try ack(); try endRead(p, m); try job(p) }
           if !took && reading != nil { Thread.sleep(forTimeInterval: 0.01) }  // a READ's DATA on its way
         }
       }
@@ -584,6 +596,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     guard t.count >= 16 else { throw Fail(description: "status of \(t.count) bytes") }
     let s = Status(boot: Int(Store.le(t, 0, 2)), frame: Ble.u32(t, 2), store: Ble.store(t), at: Recorder.now())
     noCard = s.store < 0 && Ble.u32(t, 12) == 0
+    acks = Store.acks(t)
     let left = syncTotalKb - syncDoneKb, rate = caughtSince.map { Double(caught) / max(1, -$0.timeIntervalSinceNow) } ?? 0
     let dbm = try rssi(p)
     var h: [String: Any] = ["name": name, "store": s.store, "free_kb": Ble.u32(t, 8), "total_kb": Ble.u32(t, 12),
@@ -701,6 +714,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   // no card (store < 0, none mounted this boot): nothing to LIST or READ; each READ kept the link on its fast interval
   // (2420, 10-07: 15 ms for an hour). A hole in LIVE is a new file at once (follow())
   private var noCard = false
+  private var acks = false  // the board takes ACK (Store.acks)
   private var settleUntil = Date.distantPast  // after a subscribe: LIVE still sends the file before the new one, from mid-way
   private var caught: Int64 = 0     // a catch-up under way: bytes taken since
   private var caughtSince: Date?
@@ -928,12 +942,14 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     files += try m.pieces(chunks, undated, tag: tag ?? "recorder", liveFrames: sliceS() * 100, boot: boot)
   }
 
-  /// Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror.
-  private func clean(_ p: Conn, _ m: Mirror) throws {
+  /// Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. An ACK before each: a DELETE may
+  /// power the card up, several in a row may hold the loop past the board's 8 s.
+  private func clean(_ p: Conn, _ m: Mirror, _ ack: () throws -> Void) throws {
     if noCard { return }
     let done = m.done(chunks)
     if !done.isEmpty && listFull { needList = true }  // room in the next LIST for files it left out
     for f in done {
+      try ack()
       guard let r = try reply(p, [4] + Store.le(UInt32(f)), 0x84), r.count >= 6 else { return }  // DELETE
       let err = Int8(bitPattern: r[5])
       Ble.log("DELETE \(String(f, radix: 16)): \(err)")

@@ -584,4 +584,13 @@ do {
   check([e["device"], data["kind"], data["step"], data["to"]].map { $0 as? String }, ["LR-P3-116C", "dfu", "start", new], "queued event")
 }
 
+// ACK (StoreTest.kt UsbDiskTest.ack's case): only to a board that says it takes one; the file and how much of it the
+// mirror has
+do {
+  let old = [UInt8](repeating: 0, count: 48)  // older firmware: no features byte
+  check([old, old + [0], old + [1], old + [3, 9]].map(Store.acks), [false, false, true, true], "acks")
+  check(Store.ack(0x0003_0002, 0x54_3210), [8, 0x02, 0x00, 0x03, 0x00, 0x10, 0x32, 0x54, 0x00], "ack")
+  check(Store.ack(0xFFFF_FFFF, 0xFFFF_FFFF), [8] + [UInt8](repeating: 0xFF, count: 8), "ack at the top")
+}
+
 print("storecheck ok")
