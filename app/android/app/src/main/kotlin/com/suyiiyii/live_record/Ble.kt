@@ -433,8 +433,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                         endRead(g, m)
                         ack()
                         DeviceLog.read(mirrorName, { write(g, Ble.STORE, Ble.CTRL, it) }, ctrl, data)
-                        ack()
-                        clean(g, m)
+                        clean(g, m, ::ack)
                     }
                     unhold(m)
                     lastStatus = now
@@ -811,12 +810,14 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         if (n > 0) onPiece(n)
     }
 
-    /** Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. */
-    private fun clean(g: BluetoothGatt, m: Mirror) {
+    /** Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. An ACK before each: a DELETE
+     *  may power the card up, several in a row may hold the loop past the board's 8 s. */
+    private fun clean(g: BluetoothGatt, m: Mirror, ack: () -> Unit) {
         if (noCard) return
         val done = m.done(chunks)
         if (done.isNotEmpty() && listFull) needList = true  // room in the next LIST for files it left out
         for (f in done) {
+            ack()
             val r = reply(g, le(ByteArray(5)).put(4).putInt(f.toInt()).array(), 0x84) ?: return  // DELETE
             val err = r[5].toInt()
             Log.i("live-record", "ble DELETE %08X: $err".format(f))

@@ -559,8 +559,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
               try endRead(p, m)
               try ack()
               readLog(p)
-              try ack()
-              try clean(p, m)
+              try clean(p, m, ack)
             }
             try unhold(m)
             lastStatus = Date()
@@ -943,12 +942,14 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     files += try m.pieces(chunks, undated, tag: tag ?? "recorder", liveFrames: sliceS() * 100, boot: boot)
   }
 
-  /// Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror.
-  private func clean(_ p: Conn, _ m: Mirror) throws {
+  /// Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. An ACK before each: a DELETE may
+  /// power the card up, several in a row may hold the loop past the board's 8 s.
+  private func clean(_ p: Conn, _ m: Mirror, _ ack: () throws -> Void) throws {
     if noCard { return }
     let done = m.done(chunks)
     if !done.isEmpty && listFull { needList = true }  // room in the next LIST for files it left out
     for f in done {
+      try ack()
       guard let r = try reply(p, [4] + Store.le(UInt32(f)), 0x84), r.count >= 6 else { return }  // DELETE
       let err = Int8(bitPattern: r[5])
       Ble.log("DELETE \(String(f, radix: 16)): \(err)")
