@@ -265,6 +265,16 @@ class NameTest {
 class UsbDiskTest {
     private fun status(store: Int) = ByteArray(48).also { java.nio.ByteBuffer.wrap(it).order(java.nio.ByteOrder.LITTLE_ENDIAN).putShort(6, store.toShort()) }
 
+    @Test fun ack() {
+        assertEquals(false, Ble.acks(status(0)))  // older firmware: 48 bytes, no features byte
+        assertEquals(false, Ble.acks(status(0) + byteArrayOf(0)))
+        assertEquals(true, Ble.acks(status(0) + byteArrayOf(1)))
+        assertEquals(true, Ble.acks(status(0) + byteArrayOf(3, 9)))  // more bits, more bytes later
+        assertEquals(listOf(8, 0x02, 0x00, 0x03, 0x00, 0x10, 0x32, 0x54, 0x00),  // file 0003_0002 up to 0x543210
+                     Ble.ack(0x00030002, 0x543210).map { it.toInt() and 0xff })
+        assertEquals(listOf(8) + List(8) { 0xff }, Ble.ack(0xffffffffL, 0xffffffffL).map { it.toInt() and 0xff })
+    }
+
     @Test fun note() {
         assertEquals(-16, Ble.store(status(-16)))
         assertEquals(-5, Ble.store(status(-5)))

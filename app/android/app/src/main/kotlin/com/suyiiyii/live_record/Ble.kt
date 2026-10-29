@@ -95,6 +95,15 @@ object Ble {
     /** The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk). */
     fun store(status: ByteArray): Int = ByteBuffer.wrap(status).order(ByteOrder.LITTLE_ENDIAN).getShort(6).toInt()
 
+    /** The board takes ACK (status byte 48 bit 0; firmware phone mode: it keeps what the phone acked off its card).
+     *  Older firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it. */
+    fun acks(status: ByteArray): Boolean = (status.getOrNull(48)?.toInt() ?: 0) and 1 != 0
+
+    /** CTRL 0x08 ACK: the mirror has [f] up to [have], all of it, and every file before it. */
+    fun ack(f: Long, have: Long): ByteArray =
+        ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN).put(8).putInt(f.toInt()).putInt(have.toInt()).array()
+    const val ACK_EVERY_MS = 5_000L  // the board writes its RAM to the card after 8 s without one
+
     /** What the USB disk switch says after CTRL 0x06 asked for [on]: [err] its answer (null: none in 15 s), [store] the
      *  card's state the board reports since. A slow card answers late (lend() flushes, closes and unmounts before
      *  it answers; 10-13 BDAE went past 15 s and the app said it failed, a second tap took the disk back): no answer is
@@ -372,6 +381,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             var lastStatus = android.os.SystemClock.elapsedRealtime()
             var lastCharge = lastStatus
             var lastPieces = 0L
+            var lastAck = -Ble.ACK_EVERY_MS
             // One loop for the link: LIVE as it comes, and one READ at a time alongside it for what the mirror
             // lacks (nextRead). LIVE waits only while the file it goes on in is READ (at connect, after a hole, at a new
             // file): a backlog of days no longer holds back what is said now
@@ -400,6 +410,12 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                 }
                 if (reading == null) nextRead(g, m)
                 val now = android.os.SystemClock.elapsedRealtime()
+                // caught up with the live file (and the one before it): the mirror has it all up to its end. No
+                // endRead: the board takes an ACK alongside a READ
+                if (acks && !liveRead && open >= 0 && now - lastAck >= Ble.ACK_EVERY_MS) {
+                    write(g, Ble.STORE, Ble.CTRL, Ble.ack(open, m.have(open)))
+                    lastAck = now
+                }
                 if (now - lastPieces >= 500) { pieces(m); lastPieces = now }
                 if (System.currentTimeMillis() - synced > Ble.TIME_EVERY_MS) { endRead(g, m); synced = sync(g) }
                 // not while a READ is in flight: the backlog's DATA keeps the link; the minute's status reads it then
@@ -521,6 +537,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val t = le(raw)
         val s = Status(t.getShort(0).toInt() and 0xffff, t.getInt(2).toLong() and 0xffffffffL, Ble.store(raw), System.currentTimeMillis())
         noCard = s.store < 0 && t.getInt(12) == 0
+        acks = Ble.acks(raw)
         val left = syncTotalKb - syncDoneKb
         val rate = if (caughtSince > 0) caught * 1000.0 / maxOf(1000L, android.os.SystemClock.elapsedRealtime() - caughtSince) else 0.0
         val h = mutableMapOf<String, Any?>("name" to name, "store" to s.store, "free_kb" to (t.getInt(8).toLong() and 0xffffffffL),
@@ -568,6 +585,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     // no card (store < 0, none mounted this boot): nothing to LIST or READ; each READ kept the link on its fast interval
     // (2420, 10-07: 15 ms for an hour). A hole in LIVE is a new file at once (follow())
     private var noCard = false
+    private var acks = false      // the board takes ACK (Ble.acks)
     private var settleUntil = 0L  // elapsedRealtime; after a subscribe LIVE still sends the file before the new one, from mid-way
     private val stalls = HashMap<Long, Int>()
     private var caught = 0L       // a catch-up under way: bytes taken since (elapsedRealtime; 0: none)

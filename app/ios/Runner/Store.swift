@@ -23,6 +23,16 @@ enum Store {
 
   static func le<T: FixedWidthInteger>(_ v: T) -> [UInt8] { withUnsafeBytes(of: v.littleEndian) { Array($0) } }
 
+  /// The board takes ACK (status byte 48 bit 0; firmware phone mode: it keeps what the phone acked off its card). Older
+  /// firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it.
+  static func acks(_ status: [UInt8]) -> Bool { status.count > 48 && status[48] & 1 != 0 }
+
+  /// CTRL 0x08 ACK: the mirror has `f` up to `have`, all of it, and every file before it.
+  static func ack(_ f: Int64, _ have: Int64) -> [UInt8] {
+    [8] + le(UInt32(truncatingIfNeeded: f)) + le(UInt32(truncatingIfNeeded: have))
+  }
+  static let ackEvery: TimeInterval = 5  // the board writes its RAM to the card after 8 s without one
+
   /// The whole records of `d` and the offset each ends at (relative to `base`); a record cut short ends the list.
   static func scan(_ d: Data, base: Int64 = 0) -> [(rec: Rec, end: Int64)] {
     let b = [UInt8](d)
