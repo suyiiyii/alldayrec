@@ -790,9 +790,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get downloadStalled => 'The download stalled; tap here to retry';
-
-  @override
   String downloadFailedRetry(Object error) {
     return 'Download failed: $error; tap here to retry';
   }
@@ -801,6 +798,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String downloadingApp(Object version, Object done, Object total) {
     return 'Downloading version $version · $done / $total MB';
   }
+
+  @override
+  String get waitingForNetwork =>
+      'Waiting for the network; it carries on once connected';
 
   @override
   String appUpdate(Object version, Object size) {

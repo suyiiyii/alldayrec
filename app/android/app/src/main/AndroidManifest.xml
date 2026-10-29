@@ -52,11 +52,6 @@
         <service android:name=".RecorderService" android:foregroundServiceType="microphone|dataSync|connectedDevice" android:exported="false" />
         <receiver android:name=".BeanScanReceiver" android:exported="false" />
         <service android:name=".DfuService" android:foregroundServiceType="connectedDevice" android:exported="false" />
-        <!-- the app's own update (cache/update.apk, update.dart) handed to the system installer -->
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.update"
-            android:exported="false" android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update" />
-        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

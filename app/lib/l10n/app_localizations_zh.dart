@@ -766,9 +766,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get downloadStalled => '下载卡住了，点这里重试';
-
-  @override
   String downloadFailedRetry(Object error) {
     return '下载失败：$error，点这里重试';
   }
@@ -777,6 +774,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String downloadingApp(Object version, Object done, Object total) {
     return '正在下载新版本 $version · $done / $total MB';
   }
+
+  @override
+  String get waitingForNetwork => '等待网络，连上后自动继续';
 
   @override
   String appUpdate(Object version, Object size) {

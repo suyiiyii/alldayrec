@@ -1,9 +1,10 @@
 // The Android app's own updates: the server's /app.apk (server/apk.py reads its version) offered at the top of the home
-// page when its build number is higher than this build's, downloaded here and handed to the system installer
-// (MainActivity "install"). Checked at start and, back in front, once a day; iPhone builds are installed by hand.
+// page when its build number is higher than this build's, downloaded by the system's DownloadManager (MainActivity
+// "download": it carries on with the app closed and resumes after a drop) and handed to the system installer. Checked at
+// start and, back in front, once a day; iPhone builds are installed by hand.
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -31,8 +32,10 @@ class UpdateBanner extends StatefulWidget {
 class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver {
   Map? offer;
   double? progress;  // downloading: the share so far
+  bool waiting = false;  // the download not going: no network yet, or a retry
   String? error;  // the last download's failure
   DateTime checked = DateTime(2000);  // the server's last answer
+  Timer? watch;  // in front with the offer's download going: its progress, and the installer once it is done
 
   @override
   void initState() {
@@ -44,12 +47,15 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    watch?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && DateTime.now().difference(checked).inHours >= 24) _check();
+    if (state != AppLifecycleState.resumed) return watch?.cancel();
+    if (offer != null) _watch();
+    if (DateTime.now().difference(checked).inHours >= 24) _check();
   }
 
   /// Quiet: no token, offline, a 401 or a server without the route only mean no offer (and another try next time in front).
@@ -62,55 +68,71 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
           .timeout(const Duration(seconds: 30));
       if (res.statusCode != 200 && res.statusCode != 404) return;  // 404: no APK on this server
       checked = DateTime.now();
-      final app = await _ch.invokeMethod('app') as Map;
+      final mine = await _ch.invokeMethod('app') as int;
       final dismissed = (await SharedPreferences.getInstance()).getInt('apkDismissed') ?? 0;
-      final o = apkOffer(res.statusCode == 200 ? jsonDecode(res.body) : null, app['code'] as int, dismissed);
-      if (o == null) File(app['apk'] as String).delete().ignore();  // the download this build was installed from
-      if (mounted) setState(() => offer = o);
+      final o = apkOffer(res.statusCode == 200 ? jsonDecode(res.body) : null, mine, dismissed);
+      if (o == null) _ch.invokeMethod('dropDownload').ignore();  // the download this build was installed from
+      if (!mounted) return;
+      setState(() => offer = o);
+      if (o != null) _watch();  // one left going when the app was closed
     } catch (_) {}
   }
 
   Future<void> _dismiss() async {
     (await SharedPreferences.getInstance()).setInt('apkDismissed', offer!['versionCode'] as int);
-    setState(() => offer = null);
+    _ch.invokeMethod('dropDownload').ignore();
+    watch?.cancel();
+    setState(() { offer = null; progress = null; });
   }
 
-  /// /app.apk with the token, into the file MainActivity hands to the installer.
+  /// /app.apk by the system's DownloadManager, the one already going or done when there is one.
   Future<void> _download() async {
-    final size = offer!['size'] as num? ?? 0, l = AppLocalizations.of(context);
-    setState(() { progress = 0; error = null; });
-    final c = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+    final o = offer!, l = AppLocalizations.of(context);
+    setState(() { progress = 0; waiting = false; error = null; });
     try {
-      if (await _ch.invokeMethod('allowInstalls') != true) {
-        error = l.allowInstalls;
-        return;
-      }
-      final s = await Settings.load(), app = await _ch.invokeMethod('app') as Map;
-      final req = await c.getUrl(Uri.parse('${s.server}/app.apk'));
-      req.headers.set('Authorization', 'Bearer ${s.token}');
-      final res = await req.close();
-      if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
-      final total = res.contentLength > 0 ? res.contentLength : size, out = File(app['apk'] as String).openWrite();
-      var got = 0;
-      try {
-        await for (final b in res.timeout(const Duration(seconds: 60))) {  // a stalled download fails instead of hanging
-          out.add(b);
-          got += b.length;
-          if (mounted && total > 0) setState(() => progress = got / total);
-        }
-      } finally {
-        await out.close();
-      }
+      if (await _ch.invokeMethod('allowInstalls') != true) return setState(() { progress = null; error = l.allowInstalls; });
+      final s = await Settings.load();
+      await _ch.invokeMethod('download', {'code': o['versionCode'], 'version': '${o['versionName']}', 'url': '${s.server}/app.apk', 'token': s.token});
+      _watch();
+    } catch (e) {
+      if (mounted) setState(() { progress = null; error = l.downloadFailedRetry('$e'); });
+    }
+  }
+
+  void _watch() {
+    watch?.cancel();
+    watch = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
+    _poll();
+  }
+
+  /// The installer when a download this banner showed going is done; one found done (its installer closed, or done
+  /// with the app closed) waits for a tap, which finds it done at once.
+  Future<void> _poll() async {
+    final o = offer, l = AppLocalizations.of(context);
+    if (o == null) return watch?.cancel();
+    Map? d;
+    try {
+      d = await _ch.invokeMethod('downloaded', {'code': o['versionCode']}) as Map?;
+    } on PlatformException catch (e) {
+      d = {'status': 'failed', 'reason': e.message};
+    }
+    if (!mounted) return;
+    final st = d?['status'];
+    if (st == 'running' || st == 'waiting') {
+      final t = d!['total'] as int, total = t > 0 ? t : o['size'] as num? ?? 0;  // -1 until the server answers
+      return setState(() { progress = total > 0 ? d!['done'] / total : 0; waiting = st == 'waiting'; });
+    }
+    watch?.cancel();  // done, failed or gone (null): the banner can be tapped again and shows the error
+    final shown = progress != null;
+    setState(() {
+      progress = null;
+      if (st == 'failed') error = l.downloadFailedRetry('${d!['reason']}');
+    });
+    if (!shown || st != 'done') return;
+    try {
       await _ch.invokeMethod('install');
     } on PlatformException catch (e) {
-      error = l.cannotOpenInstaller('${e.message}');
-    } on TimeoutException {
-      error = l.downloadStalled;
-    } catch (e) {
-      error = l.downloadFailedRetry('$e');
-    } finally {
-      c.close(force: true);
-      if (mounted) setState(() => progress = null);
+      if (mounted) setState(() => error = l.cannotOpenInstaller('${e.message}'));
     }
   }
 
@@ -140,15 +162,13 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
                   if (p != null) ...[
                     const SizedBox(height: 6),
                     LinearProgressIndicator(value: p, borderRadius: BorderRadius.circular(2)),
+                    if (waiting) Text(l.waitingForNetwork, style: t.textTheme.bodySmall?.copyWith(color: cs.onSecondaryContainer)),
                   ],
                   if (error != null && p == null) Text(error!, style: t.textTheme.bodySmall?.copyWith(color: cs.error)),
                 ]),
               ),
             ),
-            if (p == null)
-              IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss)
-            else
-              const SizedBox(width: 12),
+            IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss),
           ]),
         ),
       ),

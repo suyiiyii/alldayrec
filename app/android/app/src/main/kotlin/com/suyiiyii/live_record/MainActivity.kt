@@ -1,6 +1,7 @@
 package com.suyiiyii.live_record
 
 import android.Manifest
+import android.app.DownloadManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -17,7 +18,6 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
-import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -30,7 +30,36 @@ class MainActivity : FlutterActivity() {
 
     private fun granted(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
 
-    private val update get() = File(cacheDir, "update.apk")  // the app's own update, downloaded by update.dart
+    // The app's own update (update.dart), downloaded by the system's DownloadManager: it goes on with the app in the
+    // background, closed or killed, and resumes after a drop (the server's ETag). Its id and versionCode in "update".
+    private val updates get() = getSharedPreferences("update", MODE_PRIVATE)
+    private val downloads get() = getSystemService(DownloadManager::class.java)
+
+    /** The update download of versionCode [code]: status (running/waiting/done/failed), bytes so far, size, a failure's reason;
+     *  null when there is none (another version's is dropped, one cleared in the system's settings forgotten). */
+    private fun updateState(code: Int): Map<String, Any>? {
+        val id = updates.getLong("id", -1)
+        if (id < 0) return null
+        if (updates.getInt("code", 0) != code) return null.also { dropUpdate() }
+        downloads.query(DownloadManager.Query().setFilterById(id)).use { c ->
+            if (!c.moveToFirst()) return null.also { updates.edit().clear().apply() }
+            fun col(k: String) = c.getLong(c.getColumnIndexOrThrow(k))
+            val status = when (col(DownloadManager.COLUMN_STATUS).toInt()) {
+                DownloadManager.STATUS_SUCCESSFUL -> "done"
+                DownloadManager.STATUS_FAILED -> "failed"
+                DownloadManager.STATUS_RUNNING -> "running"
+                else -> "waiting"  // pending (offline from the start it stays so) or paused: the network, Wi-Fi or a retry
+            }
+            return mapOf("status" to status, "done" to col(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR),
+                         "total" to col(DownloadManager.COLUMN_TOTAL_SIZE_BYTES), "reason" to col(DownloadManager.COLUMN_REASON))
+        }
+    }
+
+    private fun dropUpdate() {  // the download and its file
+        updates.getLong("id", -1).let { if (it >= 0) downloads.remove(it) }
+        updates.edit().clear().apply()
+        File(getExternalFilesDir(null), "update.apk").delete()  // one left by a download forgotten: the next would be update-1.apk
+    }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
@@ -167,16 +196,29 @@ class MainActivity : FlutterActivity() {
                         Dfu.start(this, addr!!, p.getString("bleName", null) ?: model!!, f); result.success(null)
                     }
                 }
-                "app" -> packageManager.getPackageInfo(packageName, 0).let {  // this build, and where update.dart puts a newer one
-                    result.success(mapOf("code" to it.longVersionCode, "apk" to update.path))
-                }
+                "app" -> result.success(packageManager.getPackageInfo(packageName, 0).longVersionCode)  // this build
                 "allowInstalls" -> {  // before the download: false opens the setting (the installer's own prompt for it comes back here, not to the install)
                     val ok = packageManager.canRequestPackageInstalls()
                     if (!ok) startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
                     result.success(ok)
                 }
+                "download" -> {  // the update of versionCode "code" from "url" with "token": the one already going or done, else a new one
+                    val code = call.argument<Int>("code")!!
+                    if (updateState(code)?.get("status").let { it == null || it == "failed" }) {
+                        dropUpdate()
+                        val r = DownloadManager.Request(Uri.parse(call.argument<String>("url")))
+                            .setTitle("${applicationInfo.loadLabel(packageManager)} ${call.argument<String>("version")}")
+                            .setMimeType("application/vnd.android.package-archive")
+                            .addRequestHeader("Authorization", "Bearer ${call.argument<String>("token")}")  // not ?token=: its 303 sets a cookie
+                            .setDestinationInExternalFilesDir(this, null, "update.apk")  // the app's own: not purged like the download cache
+                        updates.edit().putLong("id", downloads.enqueue(r)).putInt("code", code).apply()
+                    }
+                    result.success(null)
+                }
+                "downloaded" -> result.success(updateState(call.argument<Int>("code")!!))  // the update's download, see updateState
+                "dropDownload" -> { dropUpdate(); result.success(null) }  // installed or no longer offered
                 "install" -> {  // the downloaded update to the system installer
-                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(FileProvider.getUriForFile(this, "$packageName.update", update),
+                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(downloads.getUriForDownloadedFile(updates.getLong("id", -1)),
                         "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                     result.success(null)
                 }

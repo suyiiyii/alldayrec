@@ -454,7 +454,6 @@
       "error": {}
     }
   },
-  "downloadStalled": "下载卡住了，点这里重试",
   "downloadFailedRetry": "下载失败：{error}，点这里重试",
   "@downloadFailedRetry": {
     "placeholders": {
@@ -469,6 +468,7 @@
       "total": {}
     }
   },
+  "waitingForNetwork": "等待网络，连上后自动继续",
   "appUpdate": "有新版本 {version}{size}，点这里更新",
   "@appUpdate": {
     "placeholders": {
