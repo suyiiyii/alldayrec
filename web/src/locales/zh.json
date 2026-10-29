@@ -619,6 +619,7 @@
       "CARD_ID": "存储卡型号",
       "CARD_SIZE": "存储卡容量",
       "SD_ERRORS": "存储卡驱动出错（10 分钟）",
+      "PHONE": "手机接管录音流",
       "unknown": "未知事件"
     },
     "reset": {
@@ -698,6 +699,16 @@
     "cardId": "厂商 0x{maker}，OEM {oem}，型号 {name}，版本 {ver}",
     "cardSize": "{kind}，{gb} GB（{sectors} 扇区），{year} 年 {month} 月生产",
     "sdErrors": "CRC 错 {crc} 次，超时 {timeout} 次（其中忙 {busy} 次），其他错 {other} 次，重试 {retry} 次",
+    "phoneIn": "手机确认已存，卡停写（手机落后 {b} B）",
+    "phoneOut": "回到写卡（{why}）：没确认的 {b} B 写上卡，距上次确认 {ms} ms，最多 {kb} KB 没确认",
+    "phoneRecovered": "上次重启时内存里的 {b} B 写上卡：{file}.BIN",
+    "phoneWhy": {
+      "1": "蓝牙断开或取消订阅",
+      "2": "8 秒没收到确认",
+      "3": "内存里没确认的超过 3/4",
+      "4": "重启或卡借给电脑",
+      "6": "卡上电失败"
+    },
     "readDone": "{kb} KB，用时 {s} s（{rate} KB/s），每包 {pkt} B，连接间隔 {ci} ms",
     "boot": "上次结束于 {reas}，电池 {mv} mV，固件 {fw}",
     "faultText": "{fault}，PC 0x{pc}（上一次运行）",

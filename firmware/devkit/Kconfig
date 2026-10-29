@@ -55,6 +55,15 @@ config LR_STORE_BATCH
     int "Record stream: finished records gather in RAM until this many bytes (4 KB is ~1 s of audio), then go to the card in one write"
     default 4096
 
+config LR_STORE_PHONE
+    bool "Phone mode: a phone that acks what it has stored (CTRL ACK) takes the stream instead of the SD card; what it has not acked waits in RAM (~11 s), and goes to the card when the link goes, the ACKs stop or that RAM is 3/4 full (lr_store.c)"
+    default n
+
+config LR_STORE_CARD_OFF
+    bool "Phone mode turns the SD card's supply off (sd-pwr-gpios) while the card is idle; off: the card stays on, only not written"
+    depends on LR_STORE_PHONE
+    default y
+
 config LR_SDHC_SPI
     bool "SD card over SPI by src/sdhc_spi.c: NCS 2.7's driver without its 10 and 30 ms sleeps per command"
     default y

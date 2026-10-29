@@ -25,9 +25,15 @@ case $V in
                     -DCONFIG_LR_ONE_LED=y  # only P0.15's LED is fitted: short flash codes
                     -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_100PPM=y)  # its 32.768 kHz crystals run +47..+81 ppm
             # only LR-P3 has the switch on P1.15, and keeps a power trail while its battery cuts out
-            [ "$V" != promicro-p3 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y) ;;
+            # and phone mode (the card idle while the phone acks what it has: lr_store.c)
+            [ "$V" != promicro-p3 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y -DCONFIG_LR_STORE_PHONE=y) ;;
   *) echo "unknown variant $V" >&2; exit 2 ;;
 esac
+# LR_CARD_ON=1 ./lr.sh build promicro-p3: phone mode with the card's supply left on (A/B of its power), in build/lr-V-cardon
+if [ "${LR_CARD_ON:-}" = 1 ]; then
+  EXTRA+=(-DCONFIG_LR_STORE_CARD_OFF=n)
+  V="$V-cardon"
+fi
 # LR_LOG=1 ./lr.sh build V: logs on the USB serial port (cat /dev/cu.usbmodem*), in build/lr-V-log
 if [ "${LR_LOG:-}" = 1 ]; then
   OVL="$OVL;$D/overlay/lr_log.overlay"

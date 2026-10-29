@@ -20,7 +20,7 @@ jobs:
       - run: |  # the Zephyr headers lr_store.c includes, empty: the check defines what it uses
           d=$(mktemp -d) && mkdir -p $d/zephyr/{bluetooth,fs,sys,logging,drivers,random}
           for h in bluetooth/conn bluetooth/gatt bluetooth/uuid fs/fs kernel logging/log sys/byteorder sys/ring_buffer drivers/sensor random/random drivers/sdhc drivers/gpio drivers/spi sys/crc; do touch $d/zephyr/$h.h; done
-          cc -O1 -w -I$d -o $d/store_check test/store_check.c && $d/store_check
+          for o in "" -DPHONE=0 -DCARD_OFF=0; do cc -O1 -w $o -I$d -o $d/store_check test/store_check.c && $d/store_check || exit 1; done  # LR-P3, the other boards, LR-P3 with the card left on
           cc -w -I$d -o $d/sdhc_check test/sdhc_check.c && $d/sdhc_check  # the SD card's SPI waits (src/sdhc_spi.c)
           cc -o $d/led_check test/led_check.c && $d/led_check  # the one-LED boards' flash codes (src/led_code.h)
           cc -o $d/power_check test/power_check.c && $d/power_check  # when a low battery turns it off (src/lr_power.h)

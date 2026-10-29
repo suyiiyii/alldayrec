@@ -324,6 +324,19 @@ def sd_errors(x, a, b):
             f"{x} transfers tried again")
 
 
+PHONE_WHY = ["", "link gone or LIVE unsubscribed", "no ACK for 8 s", "3/4 of the RAM not acked", "restart or card lent",
+             "", "the card did not come back on"]
+
+
+def phone(x, a, b):
+    if x == 0:
+        return f"a phone that acks took the stream, card left alone ({a} B behind)"
+    if x == 5:
+        return f"{a} B a reset left in RAM, to the card as {b:08X}.BIN"
+    why = PHONE_WHY[x] if x < len(PHONE_WHY) else str(x)
+    return f"back to the card ({why}): {a} B not acked, last ACK {b & 0xFFFF} ms before, at most {b >> 16} KB not acked"
+
+
 def read_done(x, a, b):
     ms = b & 0x3FFFFF
     return (f"{a / 1024:.1f} KB in {ms / 1000:.1f} s ({a / 1024 / max(ms, 1) * 1000:.1f} KB/s), "
@@ -370,6 +383,7 @@ EVENTS = {
     32: ("CARD_ID", card_id),
     33: ("CARD_SIZE", card_size),
     34: ("SD_ERRORS", sd_errors),
+    35: ("PHONE", phone),
 }
 
 
@@ -485,6 +499,10 @@ def selftest():
     assert EVENTS[33][1](1, 62333952, 23 << 4 | 7) == "SDHC/SDXC, 31.91 GB (62333952 sectors), made 2023-07"
     assert EVENTS[34][1](4, 2 | 5 << 16, 3 | 1 << 16) == \
         "2 CRC errors, 5 timeouts (3 busy), 1 other errors, 4 transfers tried again"
+    assert EVENTS[35][1](0, 120, 0) == "a phone that acks took the stream, card left alone (120 B behind)"
+    assert EVENTS[35][1](2, 31000, 8000 | 30 << 16) == \
+        "back to the card (no ACK for 8 s): 31000 B not acked, last ACK 8000 ms before, at most 30 KB not acked"
+    assert EVENTS[35][1](5, 9000, 0x10010004) == "9000 B a reset left in RAM, to the card as 10010004.BIN"
     print("selftest ok")
 
 

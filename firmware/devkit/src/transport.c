@@ -408,10 +408,12 @@ static ssize_t dfu_control_point_write_handler(struct bt_conn *conn,
         lr_store_shutdown();
         lr_log_reset(0x57);
     } else if (len == 1 && ((uint8_t *) buf)[0] == 0x06) {
+        lr_store_shutdown();  // what a phone in phone mode has not acked: onto the card first
         lr_log_reset(0xA8);
     } else if (len == 2 && ((uint8_t *) buf)[0] == 0x01) {
         uint8_t notification_value = 0x10;
         bt_gatt_notify(conn, attr, &notification_value, sizeof(notification_value));
+        lr_store_shutdown();
         lr_log_reset(0xA8);
     }
     return len;
