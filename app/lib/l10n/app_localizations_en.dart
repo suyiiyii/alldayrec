@@ -790,9 +790,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get downloadStalled => 'The download stalled; tap here to retry';
-
-  @override
   String downloadFailedRetry(Object error) {
     return 'Download failed: $error; tap here to retry';
   }

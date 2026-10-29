@@ -1412,12 +1412,6 @@ abstract class AppLocalizations {
   /// **'没法打开安装界面：{error}'**
   String cannotOpenInstaller(Object error);
 
-  /// No description provided for @downloadStalled.
-  ///
-  /// In zh, this message translates to:
-  /// **'下载卡住了，点这里重试'**
-  String get downloadStalled;
-
   /// No description provided for @downloadFailedRetry.
   ///
   /// In zh, this message translates to:

@@ -219,7 +219,6 @@
   "advCardError": "Card error",
   "allowInstalls": "Allow installing unknown apps in the settings that opened, then tap here again",
   "cannotOpenInstaller": "Can't open the installer: {error}",
-  "downloadStalled": "The download stalled; tap here to retry",
   "downloadFailedRetry": "Download failed: {error}; tap here to retry",
   "downloadingApp": "Downloading version {version} · {done} / {total} MB",
   "appUpdate": "Version {version} is out{size}; tap here to update",
