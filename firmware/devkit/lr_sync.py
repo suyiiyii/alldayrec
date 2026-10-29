@@ -324,6 +324,19 @@ def sd_errors(x, a, b):
             f"{x} transfers tried again")
 
 
+PHONE_WHY = ["", "link gone or LIVE unsubscribed", "no ACK for 8 s", "3/4 of the RAM not acked", "restart or card lent",
+             "", "the card did not come back on"]
+
+
+def phone(x, a, b):
+    if x == 0:
+        return f"a phone that acks took the stream, card left alone ({a} B behind)"
+    if x == 5:
+        return f"{a} B a reset left in RAM, to the card as {b:08X}.BIN"
+    why = PHONE_WHY[x] if x < len(PHONE_WHY) else str(x)
+    return f"back to the card ({why}): {a} B not acked, last ACK {b & 0xFFFF} ms before, at most {b >> 16} KB not acked"
+
+
 def read_done(x, a, b):
     ms = b & 0x3FFFFF
     return (f"{a / 1024:.1f} KB in {ms / 1000:.1f} s ({a / 1024 / max(ms, 1) * 1000:.1f} KB/s), "
@@ -353,8 +366,9 @@ EVENTS = {
     20: ("SEGMENT", lambda x, a, b: f"{a:08X}.BIN"),
     21: ("DFU", lambda x, a, b: {0x57: "into the UF2 bootloader", 0xA8: "into the OTA bootloader"}.get(x, f"0x{x:02x}")),
     22: ("HEARTBEAT", lambda x, a, b: f"battery {x * 20} mV, {a // 1024} MB free, {b} frames dropped"),
-    23: ("STACKS", lambda x, a, b: f"unused: codec {stack(a >> 16)}, pusher {stack(a & 0xFFFF)}, "
-                                   f"store {stack(b >> 16)}, BT RX {stack(b & 0xFFFF)} B"),
+    23: ("STACKS", lambda x, a, b: f"unused: card writer {stack(a >> 16)}, system workqueue {stack(a & 0xFFFF)} B"
+         if x == 1 else f"unused: codec {stack(a >> 16)}, pusher {stack(a & 0xFFFF)}, "
+                        f"store {stack(b >> 16)}, BT RX {stack(b & 0xFFFF)} B"),
     24: ("SD_RESET", lambda x, a, b: f"CMD12 r1 0x{a:02x}, CMD0 r1 0x{b:02x}" + (" (idle)" if b == 1 else " (no idle: card not answering)")),
     25: ("SD_WRITES", sd_writes),
     26: ("READ", read_done),
@@ -370,6 +384,7 @@ EVENTS = {
     32: ("CARD_ID", card_id),
     33: ("CARD_SIZE", card_size),
     34: ("SD_ERRORS", sd_errors),
+    35: ("PHONE", phone),
 }
 
 
@@ -485,6 +500,11 @@ def selftest():
     assert EVENTS[33][1](1, 62333952, 23 << 4 | 7) == "SDHC/SDXC, 31.91 GB (62333952 sectors), made 2023-07"
     assert EVENTS[34][1](4, 2 | 5 << 16, 3 | 1 << 16) == \
         "2 CRC errors, 5 timeouts (3 busy), 1 other errors, 4 transfers tried again"
+    assert EVENTS[23][1](1, 600 << 16 | 0xFFFF, 0) == "unused: card writer 600, system workqueue - B"
+    assert EVENTS[35][1](0, 120, 0) == "a phone that acks took the stream, card left alone (120 B behind)"
+    assert EVENTS[35][1](2, 31000, 8000 | 30 << 16) == \
+        "back to the card (no ACK for 8 s): 31000 B not acked, last ACK 8000 ms before, at most 30 KB not acked"
+    assert EVENTS[35][1](5, 9000, 0x10010004) == "9000 B a reset left in RAM, to the card as 10010004.BIN"
     print("selftest ok")
 
 

@@ -21,6 +21,9 @@ void unmount_sd_card(void);
 /* The card's four SPI lines let go (high impedance), on a board that switches the card's supply: before its supply goes
  * off for good (System OFF, lr_power.c) */
 void sd_lines_release(void);
+/* The card's supply off (unmounted first), its lines let go and kept as they were for mount_sd_card_reset, which powers
+ * it on again; nothing on a board that cannot switch it */
+void sd_power_off(void);
 
 void sd_on();
 void sd_off();

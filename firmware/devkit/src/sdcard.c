@@ -128,29 +128,58 @@ static void sd_spi_reset(void)
     lr_log(LR_SD_RESET, 0, r12, r0);
 }
 
-/* A board that switches the card's supply (LR-P3, LR-P1: the nice!nano's VCC on P0.13): off long enough
- * to drain, its SPI lines let go meanwhile (sd_lines), then on, so the card starts from reset; the lines back as the SPI
- * driver set them (pinctrl, CS). LR-X1 feeds it from 3V3: nothing to do. */
-static void sd_power_cycle(void)
+/* A board that switches the card's supply (LR-P3, LR-P1: the nice!nano's VCC on P0.13): off at least 300 ms, long
+ * enough to drain, its SPI lines let go meanwhile (sd_lines), then on, so the card starts from reset; the lines back as
+ * the SPI driver set them (pinctrl, CS). LR-X1 feeds it from 3V3: nothing to do. */
+#if DT_NODE_HAS_PROP(DT_PATH(zephyr_user), sd_pwr_gpios)
+static uint32_t lines_cnf[ARRAY_SIZE(sd_lines)], lines_out[ARRAY_SIZE(sd_lines)];
+static bool pwr_off;
+static int64_t pwr_off_at;
+#endif
+
+void sd_power_off(void)
 {
 #if DT_NODE_HAS_PROP(DT_PATH(zephyr_user), sd_pwr_gpios)
-    uint32_t cnf[ARRAY_SIZE(sd_lines)], out[ARRAY_SIZE(sd_lines)];
+    if (pwr_off) {
+        return;
+    }
     for (int i = 0; i < ARRAY_SIZE(sd_lines); i++) {
         uint32_t pin = sd_lines[i];
-        cnf[i] = nrf_gpio_pin_port_decode(&pin)->PIN_CNF[pin];
-        out[i] = nrf_gpio_pin_out_read(sd_lines[i]);
+        lines_cnf[i] = nrf_gpio_pin_port_decode(&pin)->PIN_CNF[pin];
+        lines_out[i] = nrf_gpio_pin_out_read(sd_lines[i]);
     }
     sd_lines_release();
     gpio_pin_configure_dt(&sd_pwr, GPIO_OUTPUT_INACTIVE);
-    k_msleep(300);
+    pwr_off = true;
+    pwr_off_at = k_uptime_get();
+#endif
+}
+
+static void sd_power_on(void)
+{
+#if DT_NODE_HAS_PROP(DT_PATH(zephyr_user), sd_pwr_gpios)
+    if (!pwr_off) {
+        return;
+    }
+    int64_t left = 300 - (k_uptime_get() - pwr_off_at);
+    if (left > 0) {
+        k_msleep(left);
+    }
     gpio_pin_set_dt(&sd_pwr, 1);
     k_msleep(50);
     for (int i = 0; i < ARRAY_SIZE(sd_lines); i++) {
         uint32_t pin = sd_lines[i];
-        nrf_gpio_pin_write(sd_lines[i], out[i]);  // the level first: CS comes back high (deselected)
-        nrf_gpio_pin_port_decode(&pin)->PIN_CNF[pin] = cnf[i];
+        nrf_gpio_pin_write(sd_lines[i], lines_out[i]);  // the level first: CS comes back high (deselected)
+        nrf_gpio_pin_port_decode(&pin)->PIN_CNF[pin] = lines_cnf[i];
     }
+    pwr_off = false;
 #endif
+}
+
+static void sd_power_cycle(void)
+{
+    sd_power_off();
+    sd_power_on();
 }
 
 int mount_sd_card(void)
@@ -202,7 +231,7 @@ int mount_sd_card_once(void)
  * goes on reading a card still stuck. What boot does instead: the supply off and on, the SPI reset (SD_RESET), sd_init
  * again on the disk's own card, then the mount; logged as MOUNT x 0 like the plain one, the SD_RESET before it, and
  * when it fails too (a try every minute at most). The store's retry_card, once quick mounts have failed, or for a card
- * not there at boot. */
+ * not there at boot; its card_up, for a card whose supply phone mode turned off (sd_power_off). */
 int mount_sd_card_reset(void)
 {
     if (disk_card) {

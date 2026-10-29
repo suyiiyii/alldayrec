@@ -42,7 +42,8 @@
  *    20 SEGMENT     a the new open file (boot << 16 | segment)
  *    21 DFU         x GPREGRET: 0x57 UF2 bootloader, 0xA8 OTA bootloader
  *    22 HEARTBEAT   x battery mV / 20, a free card KB, b frames dropped this boot (every 10 min)
- *    23 STACKS      a codec << 16 | pusher, b store << 16 | BT RX: bytes of stack never used (0xFFFF: no thread)
+ *    23 STACKS      a codec << 16 | pusher, b store << 16 | BT RX: bytes of stack never used (0xFFFF: no thread);
+ *                   x 1: a the card writer << 16 | the system workqueue (switch, low battery, 1200 bps touch)
  *    24 SD_RESET    a R1 to CMD12, b R1 to CMD0 (0x01: idle) of the SPI reset before the first mount, and before each
  *                   try from scratch of a failed card
  *    25 SD_WRITES   the card appends of the last 10 minutes, by the first append after them: x how many took over
@@ -77,6 +78,12 @@
  *                   transfers tried again, a CRC errors (bits 0-15) | timeouts << 16 (no answer, or busy past its
  *                   deadline), b of those timeouts the busy ones (bits 0-15) | other errors << 16 (an error token or
  *                   R1); every field saturates
+ *    35 PHONE       phone mode (lr_store.c): x 0 a phone that acks took the stream, the card left alone from here, a
+ *                   bytes the stream was past its ACK; x 1-4, 6 back to the card, a bytes not acked, written as a new
+ *                   file (the SEGMENT before it), b ms since the last ACK (bits 0-15) | the most KB not acked in that
+ *                   time << 16; why: 1 the link gone or LIVE unsubscribed, 2 no ACK for 8 s, 3 3/4 of the RAM ring not
+ *                   acked, 4 a restart or the card lent to USB, 6 the card did not come back on. x 5: at boot, a bytes
+ *                   a crash or watchdog reset left in RAM, written to the card as file b
  *
  * Each record has a sequence number, one more than the last, across boots: a reader asks for those from the last
  * it has. Records gather in RAM (__noinit: a crash or watchdog reset keeps them for the next boot) and go to flash
@@ -89,7 +96,7 @@ enum {
     LR_BOOT = 1, LR_FAULT, LR_MOUNT, LR_STORE, LR_SLOW, LR_APPEND_ERR, LR_CARD_FULL, LR_USB_DISK, LR_CONNECT,
     LR_DISCONNECT, LR_PARAM, LR_MTU, LR_PHY, LR_TIME, LR_SECURITY, LR_PAIRED, LR_PAIR_FAIL, LR_FORGET, LR_DROPPED,
     LR_SEGMENT, LR_DFU, LR_HEARTBEAT, LR_STACKS, LR_SD_RESET, LR_SD_WRITES, LR_READ, LR_READ_TIME, LR_SWITCH,
-    LR_POWER, LR_LIVE_LOST, LR_HEALTH, LR_CARD_ID, LR_CARD_SIZE, LR_SD_ERRORS,
+    LR_POWER, LR_LIVE_LOST, LR_HEALTH, LR_CARD_ID, LR_CARD_SIZE, LR_SD_ERRORS, LR_PHONE,
     LR_UPTIME = 0x80,
 };
 

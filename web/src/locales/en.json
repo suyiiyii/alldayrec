@@ -619,6 +619,7 @@
       "CARD_ID": "Card model",
       "CARD_SIZE": "Card capacity",
       "SD_ERRORS": "Card driver errors (10 min)",
+      "PHONE": "Phone takes the stream",
       "unknown": "Unknown event"
     },
     "reset": {
@@ -698,6 +699,16 @@
     "cardId": "maker 0x{maker}, OEM {oem}, model {name}, revision {ver}",
     "cardSize": "{kind}, {gb} GB ({sectors} sectors), made {month}/{year}",
     "sdErrors": "CRC errors {crc}, timeouts {timeout} ({busy} busy), other errors {other}, retries {retry}",
+    "phoneIn": "the phone acks what it stored, the card stops ({b} B behind)",
+    "phoneOut": "back to the card ({why}): {b} B not acked written to it, last ACK {ms} ms before, at most {kb} KB not acked",
+    "phoneRecovered": "{b} B left in RAM by the last reset written to the card: {file}.BIN",
+    "phoneWhy": {
+      "1": "Bluetooth gone or LIVE unsubscribed",
+      "2": "no ACK for 8 s",
+      "3": "over 3/4 of RAM not acked",
+      "4": "restart or card lent to USB",
+      "6": "the card did not power up"
+    },
     "readDone": "{kb} KB in {s} s ({rate} KB/s), {pkt} B per packet, connection interval {ci} ms",
     "boot": "last run ended by {reas}, battery {mv} mV, firmware {fw}",
     "faultText": "{fault}, PC 0x{pc} (previous run)",
@@ -727,6 +738,7 @@
     "dropped": "{n} frames, {total} this boot",
     "heartbeat": "battery {mv} mV, {mb} MB free, {n} frames dropped this boot",
     "stacks": "codec {codec}, pusher {pusher}, store {store}, BT RX {rx} B",
+    "stacksCard": "card writer {card}, system workqueue {wq} B",
     "sdIdle": "CMD12 r1 0x{a}, CMD0 r1 0x{b} (idle)",
     "sdDead": "CMD12 r1 0x{a}, CMD0 r1 0x{b} (card not responding)",
     "readTime": "card read {read} ms, Bluetooth send {send} ms",

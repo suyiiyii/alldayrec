@@ -122,6 +122,18 @@ const sdErrors = (r: Rec) =>
     other: r.b >>> 16,
     retry: r.x,
   });
+// x 0 in, 1-4 and 6 back to the card (why), 5 a reset's RAM written at boot (lr_log.h PHONE)
+const phoneMode = (r: Rec) =>
+  r.x === 0
+    ? t("rec.phoneIn", { b: r.a })
+    : r.x === 5
+      ? t("rec.phoneRecovered", { b: r.a, file: hex(r.b, 8).toUpperCase() })
+      : t("rec.phoneOut", {
+          why: [1, 2, 3, 4, 6].includes(r.x) ? t(`rec.phoneWhy.${r.x}`) : r.x,
+          b: r.a,
+          ms: r.b & 0xffff,
+          kb: r.b >>> 16,
+        });
 function readDone(r: Rec) {
   const ms = r.b & 0x3fffff;
   return t("rec.readDone", {
@@ -206,12 +218,14 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   23: [
     "STACKS",
     (r) =>
-      t("rec.stacks", {
-        codec: stack(r.a >>> 16),
-        pusher: stack(r.a & 0xffff),
-        store: stack(r.b >>> 16),
-        rx: stack(r.b & 0xffff),
-      }),
+      r.x === 1
+        ? t("rec.stacksCard", { card: stack(r.a >>> 16), wq: stack(r.a & 0xffff) })
+        : t("rec.stacks", {
+            codec: stack(r.a >>> 16),
+            pusher: stack(r.a & 0xffff),
+            store: stack(r.b >>> 16),
+            rx: stack(r.b & 0xffff),
+          }),
   ],
   24: [
     "SD_RESET",
@@ -236,6 +250,7 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   32: ["CARD_ID", cardId],
   33: ["CARD_SIZE", cardSize],
   34: ["SD_ERRORS", sdErrors],
+  35: ["PHONE", phoneMode],
 };
 // every few minutes or every connection: hidden unless asked for
 const ROUTINE = new Set([9, 11, 12, 13, 14, 15, 20, 22, 23, 25, 32, 33]);
