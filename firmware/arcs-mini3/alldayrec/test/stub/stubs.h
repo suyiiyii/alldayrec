@@ -19,6 +19,7 @@ typedef void *SemaphoreHandle_t;
 QueueHandle_t xQueueCreate(int cap, int size);
 BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait);
 BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait);
+BaseType_t xQueueSendToFront(QueueHandle_t q, const void *item, TickType_t wait);
 static inline int uxQueueMessagesWaiting(QueueHandle_t q) { return q->count; }
 static inline SemaphoreHandle_t xSemaphoreCreateMutex(void) { return (void *)1; }
 #define xSemaphoreTake(s, t) ((void)(s), 1)
@@ -56,11 +57,24 @@ typedef struct { uint8_t *name; uint32_t stack_size, priority; } lisa_thread_att
 #define LISA_OS_PRIORITY_LOW 1
 static inline void *lisa_thread_create(const lisa_thread_attr_t *a, void (*f)(void *), void *arg) { (void)a; (void)f; (void)arg; return NULL; }
 
+typedef enum { LISA_HTTP_OK = 0, LISA_HTTP_COMMON_ERR } lisa_http_err_e;
+typedef enum { LISA_HTTP_GET, LISA_HTTP_POST } lisa_http_method_e;
+typedef struct { const void *buf; int32_t len; void *user; } lisa_http_data_t;
+typedef struct lisa_http lisa_http_t;
+typedef struct { lisa_http_method_e method; uint8_t *url, *headers; void *body; int32_t body_len; uint32_t timeout; void *user;
+                 void (*on_data)(lisa_http_data_t *data); } lisa_http_request_t;
+static inline lisa_http_t *lisa_http_init(lisa_http_request_t *r) { (void)r; return NULL; }
+static inline lisa_http_err_e lisa_http_perform(lisa_http_t *h) { (void)h; return LISA_HTTP_COMMON_ERR; }
+static inline lisa_http_err_e lisa_http_cleanup(lisa_http_t *h) { (void)h; return LISA_HTTP_OK; }
+
 #define shellPrint(sh, ...) printf(__VA_ARGS__)
 #define shellGetCurrent() NULL
 #define SHELL_EXPORT_CMD(...)
 static inline bool sys_wifi_is_connected(void) { return true; }
-enum { VOICE_MSG_BUTTON_ACTION_CLICK = 1, VOICE_MSG_BUTTON_ACTION_DOUBLE_CLICK = 2, VOICE_MSG_BUTTON_ACTION_QUADRUPLE_CLICK = 4 };
+enum { VOICE_MSG_BUTTON_ACTION_PRESS_DOWN = 0, VOICE_MSG_BUTTON_ACTION_CLICK = 1, VOICE_MSG_BUTTON_ACTION_DOUBLE_CLICK = 2,
+       VOICE_MSG_BUTTON_ACTION_QUADRUPLE_CLICK = 4, VOICE_MSG_BUTTON_ACTION_SHORT_START = 9, VOICE_MSG_BUTTON_ACTION_SHORT_UP,
+       VOICE_MSG_BUTTON_ACTION_LONG_START, VOICE_MSG_BUTTON_ACTION_LONG_UP, VOICE_MSG_BUTTON_ACTION_LONG_HOLD,
+       VOICE_MSG_BUTTON_ACTION_LONG_HOLD_UP };
 extern void (*app_wakeup_record_tap)(const void *event);
 static inline void service_power_policy_set_recording_active(bool a) { (void)a; }
 #define LISA_LOGI(tag, ...) ((void)0)

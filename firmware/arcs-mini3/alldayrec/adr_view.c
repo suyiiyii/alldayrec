@@ -19,14 +19,16 @@
 #define WHITE 0xffffff
 #define GREY 0x8a8a8a
 #define SPEAKING 0xffc83d /* the sentence being said */
+#define ERROR 0xff6b6b
 
 static lv_obj_t *s_root, *s_tabs, *s_box, *s_dot, *s_lines[NLINES];
 static lv_timer_t *s_timer;
 static volatile bool s_visible;
-static adr_model_t s_snap ADR_PSRAM; /* ~2.5 KB, off the UI task's stack */
+static adr_model_t s_snap ADR_PSRAM; /* ~4 KB, off the UI task's stack */
 static uint32_t s_shown = UINT32_MAX;
 static int s_shown_tab = -1;
-static char s_status[256] ADR_PSRAM;
+static size_t s_shown_ask = SIZE_MAX; /* the 问答 view the scroll followed last */
+static char s_status[ADR_Q_BYTES + 8] ADR_PSRAM;
 
 /* One label per line, coloured by style: LVGL 8 resets "#rrggbb text#" recolouring at every wrapped line,
  * so a long sentence lost its colour and its closing '#' ate or showed the next colour code. */
@@ -44,14 +46,30 @@ static void render(void)
     char tabs[96] = "";
     int n = 0;
 
-    for (int i = 0; i < 3; i++) { /* one short line: recolouring is safe here */
+    for (int i = 0; i < 3 && s_snap.tab != 3; i++) { /* one short line: recolouring is safe here */
         size_t len = strlen(tabs);
         snprintf(tabs + len, sizeof(tabs) - len, "%s%s %s#", i ? "  " : "", i == s_snap.tab ? "#ffffff" : "#8a8a8a",
                  names[i]);
     }
-    lv_label_set_text(s_tabs, tabs);
+    lv_label_set_text(s_tabs, s_snap.tab == 3 ? "问 AI" : tabs);
 
-    if (s_snap.tab == 0) {
+    if (s_snap.tab == 3) {
+        uint8_t a = s_snap.ask;
+        if (s_snap.q[0]) {
+            snprintf(s_status, sizeof(s_status), "问：%s", s_snap.q);
+            n = line(n, s_status, SPEAKING);
+        } else {
+            n = line(n, a == ADR_ASK_LISTEN ? "在听，说完松开" : "听…", a == ADR_ASK_LISTEN ? SPEAKING : GREY);
+        }
+        if (s_snap.answer[0]) {
+            n = line(n, s_snap.answer, a == ADR_ASK_ERROR ? ERROR : WHITE);
+        }
+        if (a == ADR_ASK_SEARCH) {
+            n = line(n, "查资料中…", GREY);
+        } else if (a == ADR_ASK_SENT && s_snap.q[0]) {
+            n = line(n, "想…", GREY);
+        }
+    } else if (s_snap.tab == 0) {
         for (int i = 0; i < s_snap.nrows; i++) {
             n = line(n, s_snap.rows[i].text, s_snap.rows[i].draft ? GREY : WHITE);
         }
@@ -78,6 +96,17 @@ static void render(void)
                               LV_FLEX_ALIGN_START);
         lv_obj_scroll_to_y(s_box, 0, LV_ANIM_OFF);
         s_shown_tab = s_snap.tab;
+        s_shown_ask = SIZE_MAX;
+    }
+    size_t ask = strlen(s_snap.q) + strlen(s_snap.answer) * 4 + s_snap.ask; /* changes as the question goes on */
+    if (s_snap.tab == 3 && ask != s_shown_ask) { /* the answer grows at its end: keep it in view; other pushes
+                                                   * leave the place a double click scrolled to */
+        s_shown_ask = ask;
+        lv_obj_update_layout(s_box);
+        lv_coord_t more = lv_obj_get_scroll_bottom(s_box);
+        if (more > 0) {
+            lv_obj_scroll_to_y(s_box, lv_obj_get_scroll_y(s_box) + more, LV_ANIM_OFF);
+        }
     }
 }
 
@@ -146,7 +175,7 @@ static int page_open(const struct lisa_ui_nav_scr *scr, void **data)
 
     s_shown = UINT32_MAX;
     s_shown_tab = -1;
-    s_timer = lv_timer_create(tick, 250, NULL);
+    s_timer = lv_timer_create(tick, 100, NULL); /* the answer's first words: at most 0.1 s from /ws to the screen */
     tick(NULL);
     s_visible = true;
     *data = NULL;

@@ -30,6 +30,15 @@ BaseType_t xQueueSend(QueueHandle_t q, const void *item, TickType_t wait)
     q->items[(q->head + q->count++) % q->cap] = *(void *const *)item;
     return 1;
 }
+BaseType_t xQueueSendToFront(QueueHandle_t q, const void *item, TickType_t wait)
+{
+    (void)wait;
+    if (q->count == q->cap) return 0;
+    q->head = (q->head + q->cap - 1) % q->cap;
+    q->items[q->head] = *(void *const *)item;
+    q->count++;
+    return 1;
+}
 BaseType_t xQueueReceive(QueueHandle_t q, void *item, TickType_t wait)
 {
     (void)wait;
@@ -172,12 +181,136 @@ static void test_tap(void)
     assert(s_cur && s_cur->start_ms == t0 + 5000 - 16 && s_dropped == dropped);
 }
 
+static void test_cites(void)
+{
+    char s[128];
+    strcpy(s, "明天三点开会[c20261101103000]，在线上[c20261101103000, c20261101103500]。");
+    strip_cites(s);
+    assert(strcmp(s, "明天三点开会，在线上。") == 0);
+    strcpy(s, "明天三点[c2026110");                     /* the stream cut a source in two: hide the half */
+    strip_cites(s);
+    assert(strcmp(s, "明天三点") == 0);
+    strcpy(s, "明天[");
+    strip_cites(s);
+    assert(strcmp(s, "明天") == 0);
+    strcpy(s, "[1] 列表 a]b");                          /* not a source */
+    strip_cites(s);
+    assert(strcmp(s, "[1] 列表 a]b") == 0);
+}
+
+static void test_ask(void)
+{
+    static int16_t frame[2 * 256];
+    lisa_audio_event_t ev = {.record_buffer = frame, .record_samples = 2 * 256};
+    ask_req_t *r;
+    chunk_t *c;
+
+    strcpy(s_cfg.device, "arcs-mini3");
+    s_on = true;
+    s_m.tab = 1;
+    s_askq = xQueueCreate(2, sizeof(ask_req_t *));
+    s_cfg.chunk_samples = 32000;
+    s_free = xQueueCreate(4, sizeof(chunk_t *));
+    s_full = xQueueCreate(4, sizeof(chunk_t *));
+    for (int i = 0; i < 2; i++) {
+        c = malloc(sizeof(chunk_t) + WAV_HDR + 32000 * 2);
+        xQueueSend(s_free, &c, 0);
+    }
+    s_cur = NULL, s_next_ms = 0;
+    int64_t t0 = 1767225600000LL + 60000;
+    fake_now_ms = t0;
+    adr_tap(&ev);                                      /* the piece starts at t0-16 */
+    fake_now_ms = t0 + 23;
+    adr_tap(&ev);                                      /* 32 ms of audio by t0+23: the pieces run 7 ms behind */
+    assert(s_skew_ms == -7);
+
+    /* a click is not a question */
+    fake_now_ms = t0 + 100;
+    assert(!adr_key(VOICE_MSG_BUTTON_ACTION_PRESS_DOWN));
+    fake_now_ms = t0 + 300;
+    assert(!adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_UP));
+    assert(s_m.ask == ADR_ASK_NONE && s_m.tab == 1 && !uxQueueMessagesWaiting(s_askq));
+
+    /* hold: counts from the press once held 0.8 s; the long hold (power-off) is kept from the app */
+    fake_now_ms = t0 + 1000;
+    adr_key(VOICE_MSG_BUTTON_ACTION_PRESS_DOWN);
+    fake_now_ms = t0 + 1800;
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_START);
+    assert(s_m.ask == ADR_ASK_LISTEN && s_m.tab == 3 && s_m.ask_back == 1);
+    assert(adr_key(VOICE_MSG_BUTTON_ACTION_LONG_HOLD));
+    fake_now_ms = t0 + 4000;
+    assert(!adr_key(VOICE_MSG_BUTTON_ACTION_LONG_HOLD_UP));
+    assert(s_m.ask == ADR_ASK_SENT && s_flush);
+    assert(xQueueReceive(s_askq, &r, 0) && r->start_ms == t0 + 1000 - 7 && r->end_ms == t0 + 4000 - 7 && r->gen == 1);
+    assert(!adr_key(VOICE_MSG_BUTTON_ACTION_LONG_HOLD));   /* not asking: power-off as before */
+
+    /* the next audio callback hands the short piece over, ahead of the queue */
+    chunk_t *queued = s_cur;
+    xQueueSend(s_full, &queued, 0);                    /* stands for a backlog piece */
+    s_cur = NULL;
+    xQueueReceive(s_free, &s_cur, 0);
+    s_cur->start_ms = t0 + 32 - 16, s_cur->n = 100;
+    adr_tap(&ev);
+    assert(!s_flush && !s_cur);
+    assert(xQueueReceive(s_full, &c, 0) && c->n == 356 && c->start_ms == t0 + 16);
+    assert(s_next_ms == t0 + 16 + 356 * 1000 / 16000);
+    assert(xQueueReceive(s_full, &c, 0) && c == queued);
+
+    /* /ws: another device's and an earlier question's messages are not ours */
+    strcpy(s_ask_prev, "old");
+    fake_now_ms = t0 + 4600;
+    ws("{\"type\":\"ask\",\"device\":\"other\",\"id\":\"q2\",\"stage\":\"heard\",\"q\":\"别的\"}");
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"old\",\"delta\":\"旧的\"}");
+    assert(s_m.q[0] == 0 && s_m.answer[0] == 0 && s_lat_heard < 0);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"stage\":\"heard\",\"q\":\"明天几点开会\"}");
+    assert(strcmp(s_m.q, "明天几点开会") == 0 && s_lat_heard == 600 && strcmp(s_ask_id, "q2") == 0);
+    fake_now_ms = t0 + 4700;
+    ask_posted(1, "{\"id\":\"q2\"}");
+    assert(s_lat_post == 700 && s_m.ask == ADR_ASK_SENT);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"stage\":\"searching\"}");
+    assert(s_m.ask == ADR_ASK_SEARCH);
+    fake_now_ms = t0 + 6200;
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"delta\":\"下午三点[c2026\"}");
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"delta\":\"1101103000]，线上。\"}");
+    assert(s_m.ask == ADR_ASK_ANSWER && strcmp(s_m.answer, "下午三点，线上。") == 0 && s_lat_delta == 2200);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"stage\":\"done\",\"answer\":\"下午三点开[c20261101103000]，线上。\"}");
+    assert(s_m.ask == ADR_ASK_DONE && strcmp(s_m.answer, "下午三点开，线上。") == 0);
+
+    /* a click on 问答 goes back */
+    adr_button(VOICE_MSG_BUTTON_ACTION_CLICK);
+    assert(s_m.tab == 1);
+
+    /* the next question: q2 is now the earlier one; the server could not hear it */
+    fake_now_ms = t0 + 9000;
+    adr_key(VOICE_MSG_BUTTON_ACTION_PRESS_DOWN);
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_START);
+    assert(s_m.tab == 3 && s_m.answer[0] == 0 && strcmp(s_ask_prev, "q2") == 0);
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_UP);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q2\",\"stage\":\"done\",\"answer\":\"迟到的\"}");
+    assert(s_m.ask == ADR_ASK_SENT);
+    ask_posted(1, "{\"id\":\"q2\"}");             /* a stale POST answer */
+    assert(s_ask_id[0] == 0);
+    ask_posted(2, "{\"id\":\"q3\"}");
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q3\",\"stage\":\"error\",\"error\":\"没听清\"}");
+    assert(s_m.ask == ADR_ASK_ERROR && strcmp(s_m.answer, "没听清") == 0);
+
+    /* the POST itself failed */
+    adr_key(VOICE_MSG_BUTTON_ACTION_PRESS_DOWN);
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_START);
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_UP);
+    ask_posted(3, NULL);
+    assert(s_m.ask == ADR_ASK_ERROR && strcmp(s_m.answer, "连不上服务器") == 0);
+    s_on = false;
+}
+
 int main(void)
 {
     test_text();
     test_wav_and_body();
     test_ws();
     test_tap();
+    test_cites();
+    test_ask();
     puts("adr: all checks passed");
     return 0;
 }

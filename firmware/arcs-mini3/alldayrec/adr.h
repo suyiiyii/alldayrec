@@ -11,6 +11,8 @@
 #define ADR_ROWS 8
 #define ADR_ROW_BYTES 160
 #define ADR_LIVE_BYTES 768
+#define ADR_Q_BYTES 256
+#define ADR_ANSWER_BYTES 1024
 #ifndef ADR_PSRAM
 #define ADR_PSRAM __attribute__((section(".psram.bss"))) /* SRAM is full */
 #endif
@@ -21,9 +23,15 @@ typedef struct {
     bool draft;
 } adr_row_t;
 
+enum { ADR_ASK_NONE, ADR_ASK_LISTEN, ADR_ASK_SENT, ADR_ASK_SEARCH, ADR_ASK_ANSWER, ADR_ASK_DONE, ADR_ASK_ERROR };
+
 typedef struct {
     uint32_t seq; /* bumped on every change */
-    uint8_t tab;  /* 0 实时 1 总结 2 状态 */
+    uint8_t tab;  /* 0 实时 1 总结 2 状态 3 问答 */
+    uint8_t ask_back; /* the tab a click on 问答 goes back to */
+    uint8_t ask;      /* ADR_ASK_* */
+    char q[ADR_Q_BYTES];
+    char answer[ADR_ANSWER_BYTES]; /* sources taken out; the reason on ADR_ASK_ERROR */
     adr_row_t rows[ADR_ROWS];
     uint8_t nrows;
     char partial[ADR_ROW_BYTES];
@@ -37,6 +45,7 @@ typedef struct {
 
 int adr_init(void);
 bool adr_button(int action);                 /* true: the AllDayRec page used the action */
+bool adr_key(int action);                    /* the power key's raw events, from the button task; true: keep it from the app */
 void adr_model_get(adr_model_t *out);       /* a copy, for the UI thread */
 
 /* adr_view.c */

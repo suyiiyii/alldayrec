@@ -11,6 +11,7 @@
 #include "HTTPCUsr_api.h"
 #include "cJSON.h"
 #include "lisa_audio.h"
+#include "lisa_http.h"
 #include "lisa_kv.h"
 #include "lisa_mem.h"
 #include "lisa_thread.h"
@@ -60,6 +61,22 @@ static volatile int s_ws_state;      /* 0 down, 1 connecting, 2 up */
 static uint32_t s_ws_big;
 static uint32_t s_tap_calls, s_tap_frames, s_tap_n, s_tap_echo; /* what the audio callback really delivers */
 static int64_t s_tap_t0;
+static volatile int32_t s_skew_ms;  /* the pieces' timeline minus the clock: ask times go on the pieces' timeline */
+static volatile bool s_flush;        /* hand the piece being filled to the uploader now, however short */
+
+/* a question asked by holding the key on the AllDayRec page */
+typedef struct {
+    int64_t start_ms, end_ms; /* on the pieces' timeline */
+    uint32_t gen;
+} ask_req_t;
+static ask_req_t s_req;
+static QueueHandle_t s_askq;
+static uint32_t s_ask_gen;
+static int64_t s_down_ms, s_end_ms;  /* clock time of the press and of the release */
+static char s_ask_id[48] ADR_PSRAM, s_ask_prev[48] ADR_PSRAM;
+static char s_ask_raw[2 * ADR_ANSWER_BYTES] ADR_PSRAM; /* the answer as streamed, sources and all */
+static char s_ask_headers[160] ADR_PSRAM;
+static int32_t s_lat_post = -1, s_lat_heard = -1, s_lat_delta = -1; /* ms from the release, -1: not yet */
 
 static int64_t now_ms(void)
 {
@@ -79,7 +96,7 @@ static void adr_tap(const void *event)
     }
     const int16_t *in = ev->record_buffer; /* interleaved: mic1 (voice), mic2 (echo reference) */
     uint32_t n = ev->record_samples / 2;   /* it counts both channels: 512 for a 256-frame buffer (measured) */
-    int64_t t = now_ms();
+    int64_t now = now_ms(), t = now;
     if (t < TIME_VALID_MS) {
         return;
     }
@@ -110,6 +127,17 @@ static void adr_tap(const void *event)
         if (s_cur->n == s_cfg.chunk_samples) {
             s_next_ms = s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR;
             xQueueSend(s_full, &s_cur, 0);
+            s_cur = NULL;
+        }
+    }
+    if (s_cur) {
+        s_skew_ms = (int32_t)(s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR - now);
+    }
+    if (s_flush) { /* a question just ended: its last words go out now, ahead of any backlog */
+        s_flush = false;
+        if (s_cur && s_cur->n) {
+            s_next_ms = s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR;
+            xQueueSendToFront(s_full, &s_cur, 0);
             s_cur = NULL;
         }
     }
@@ -396,6 +424,85 @@ static void set_live(const cJSON *live)
     }
 }
 
+/* ==================== ask: hold the key, ask, the answer streams in over /ws ==================== */
+
+/* the answer's sources ([c20261101103000] and the like) out, in place; an unfinished one at the end too,
+ * since the stream may cut it in two */
+static void strip_cites(char *s)
+{
+    char *w = s;
+
+    for (const char *r = s; *r;) {
+        if (r[0] == '[' && (r[1] == 'c' || !r[1])) {
+            const char *e = strchr(r, ']');
+            if (!e) {
+                break;
+            }
+            r = e + 1;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = 0;
+}
+
+static int32_t since_end(void)
+{
+    return (int32_t)(now_ms() - s_end_ms);
+}
+
+static void ask_fail(const char *why)
+{
+    s_m.ask = ADR_ASK_ERROR;
+    put_text(s_m.answer, sizeof(s_m.answer), why);
+}
+
+/* {"type":"ask","device":D,"id":ID,"stage":"heard"|"searching"|"done"|"error",...} or {...,"delta":"..."}; under s_lock */
+static void ask_msg(const cJSON *m)
+{
+    const char *id = jstr(m, "id"), *stage = jstr(m, "stage"), *delta = jstr(m, "delta");
+
+    if (!id || s_m.ask < ADR_ASK_SENT) {
+        return;
+    }
+    if (s_ask_id[0] ? strcmp(id, s_ask_id) != 0 : strcmp(id, s_ask_prev) == 0) {
+        return; /* an earlier question's */
+    }
+    if (!s_ask_id[0]) { /* /ws beat the POST's answer */
+        put_text(s_ask_id, sizeof(s_ask_id), id);
+    }
+    if (delta) {
+        if (s_lat_delta < 0) {
+            s_lat_delta = since_end();
+        }
+        append(s_ask_raw, sizeof(s_ask_raw), delta);
+        put_text(s_m.answer, sizeof(s_m.answer), s_ask_raw);
+        strip_cites(s_m.answer);
+        s_m.ask = ADR_ASK_ANSWER;
+    } else if (!stage) {
+        return;
+    } else if (strcmp(stage, "heard") == 0) {
+        if (s_lat_heard < 0) {
+            s_lat_heard = since_end();
+        }
+        const char *q = jstr(m, "q");
+        put_text(s_m.q, sizeof(s_m.q), q ? q : "");
+    } else if (strcmp(stage, "searching") == 0) {
+        s_m.ask = ADR_ASK_SEARCH;
+    } else if (strcmp(stage, "done") == 0) {
+        const char *a = jstr(m, "answer");
+        if (a) {
+            put_text(s_ask_raw, sizeof(s_ask_raw), a);
+            put_text(s_m.answer, sizeof(s_m.answer), a);
+            strip_cites(s_m.answer);
+        }
+        s_m.ask = ADR_ASK_DONE;
+    } else if (strcmp(stage, "error") == 0) {
+        const char *e = jstr(m, "error");
+        ask_fail(e && *e ? e : "出错了");
+    }
+}
+
 static void ws_data(lisa_ws_data_t *d)
 {
     if (d->type != LISA_WS_TEXT || !d->len) {
@@ -439,6 +546,8 @@ static void ws_data(lisa_ws_data_t *d)
             cJSON_ArrayForEach(it, cJSON_GetObjectItem(m, "rows")) {
                 add_row(it, false);
             }
+        } else if (strcmp(type, "ask") == 0) {
+            ask_msg(m);
         } else if (strcmp(type, "live") == 0) {
             const cJSON *live = cJSON_GetObjectItem(m, "live");
             if (cJSON_IsObject(live)) {
@@ -538,6 +647,140 @@ static void ws_task(void *arg)
     }
 }
 
+/* ==================== ask: the key and the POST ==================== */
+
+static void ask_begin(int64_t down_ms)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_ask_id[0]) {
+        put_text(s_ask_prev, sizeof(s_ask_prev), s_ask_id);
+    }
+    s_ask_id[0] = s_ask_raw[0] = s_m.q[0] = s_m.answer[0] = 0;
+    s_m.ask = ADR_ASK_LISTEN;
+    if (s_m.tab != 3) {
+        s_m.ask_back = s_m.tab;
+        s_m.tab = 3;
+    }
+    s_req.start_ms = down_ms + s_skew_ms;
+    s_m.seq++;
+    xSemaphoreGive(s_lock);
+}
+
+static void ask_end(void)
+{
+    static ask_req_t *const req = &s_req;
+
+    s_flush = true;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_end_ms = now_ms();
+    s_lat_post = s_lat_heard = s_lat_delta = -1;
+    s_req.end_ms = s_end_ms + s_skew_ms;
+    s_req.gen = ++s_ask_gen;
+    s_m.ask = ADR_ASK_SENT;
+    s_m.seq++;
+    xSemaphoreGive(s_lock);
+    xQueueSend(s_askq, &req, 0); /* a wake-up: the task reads s_req */
+}
+
+/* POST /api/ask/live/{device} answered (body NULL: no answer at all) */
+static void ask_posted(uint32_t gen, const char *body)
+{
+    cJSON *j = body ? cJSON_Parse(body) : NULL;
+    const char *id = jstr(j, "id");
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (gen == s_ask_gen) {
+        s_lat_post = since_end();
+        if (id) {
+            put_text(s_ask_id, sizeof(s_ask_id), id);
+        } else if (s_m.ask == ADR_ASK_SENT && !s_ask_id[0]) {
+            ask_fail(body ? "服务器没接这个问题" : "连不上服务器");
+        }
+        s_m.seq++;
+    }
+    xSemaphoreGive(s_lock);
+    cJSON_Delete(j);
+}
+
+static void *ask_headers(void)
+{
+    return s_ask_headers;
+}
+
+static void ask_on_data(lisa_http_data_t *d)
+{
+    if (d && d->buf && d->user) {
+        put_text(d->user, 256, (const char *)d->buf);
+    }
+}
+
+static void ask_task(void *arg)
+{
+    static char url[256] ADR_PSRAM, body[64] ADR_PSRAM, resp[256] ADR_PSRAM;
+    ask_req_t *p, r;
+    uint32_t sent = 0;
+
+    (void)arg;
+    for (;;) {
+        xQueueReceive(s_askq, &p, portMAX_DELAY);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        r = *p;
+        xSemaphoreGive(s_lock);
+        if (r.gen == sent) { /* two wake-ups, one question */
+            continue;
+        }
+        sent = r.gen;
+        snprintf(url, sizeof(url), "%s/api/ask/live/%s", s_cfg.url, s_cfg.device);
+        snprintf(body, sizeof(body), "{\"start\":%lld,\"end\":%lld}", (long long)r.start_ms, (long long)r.end_ms);
+        resp[0] = 0;
+        lisa_http_request_t req = {
+            .method = LISA_HTTP_POST,
+            .url = (uint8_t *)url,
+            .headers = (uint8_t *)ask_headers, /* lisa_http takes the header callback here */
+            .body = body,
+            .body_len = strlen(body),
+            .timeout = 10,
+            .user = resp,
+            .on_data = ask_on_data,
+        };
+        lisa_http_t *h = lisa_http_init(&req);
+        lisa_http_err_e e = h ? lisa_http_perform(h) : LISA_HTTP_COMMON_ERR;
+        lisa_http_cleanup(h);
+        ask_posted(r.gen, e == LISA_HTTP_OK ? resp : NULL);
+        LISA_LOGI(TAG, "ask %lld..%lld posted: %s", (long long)r.start_ms, (long long)r.end_ms, resp);
+    }
+}
+
+/* Hold the key on the AllDayRec page to ask: it counts from the press once held 0.8 s (SHORT_START; shorter
+ * presses stay clicks), the release ends it. While asking the long hold is ours: no power-off. */
+bool adr_key(int action)
+{
+    if (!s_on) {
+        return false;
+    }
+    switch (action) {
+    case VOICE_MSG_BUTTON_ACTION_PRESS_DOWN:
+        s_down_ms = now_ms();
+        return false;
+    case VOICE_MSG_BUTTON_ACTION_SHORT_START:
+        if (adr_view_visible() && s_m.ask != ADR_ASK_LISTEN) {
+            ask_begin(s_down_ms);
+        }
+        return false;
+    case VOICE_MSG_BUTTON_ACTION_LONG_HOLD:
+        return s_m.ask == ADR_ASK_LISTEN;
+    case VOICE_MSG_BUTTON_ACTION_SHORT_UP:
+    case VOICE_MSG_BUTTON_ACTION_LONG_UP:
+    case VOICE_MSG_BUTTON_ACTION_LONG_HOLD_UP:
+        if (s_m.ask == ADR_ASK_LISTEN) {
+            ask_end();
+        }
+        return false;
+    default:
+        return false;
+    }
+}
+
 /* ==================== button, shell, init ==================== */
 
 bool adr_button(int action)
@@ -551,7 +794,7 @@ bool adr_button(int action)
     }
     if (action == VOICE_MSG_BUTTON_ACTION_CLICK && adr_view_visible()) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_m.tab = (s_m.tab + 1) % 3;
+        s_m.tab = s_m.tab == 3 ? s_m.ask_back : (s_m.tab + 1) % 3;
         s_m.seq++;
         xSemaphoreGive(s_lock);
         return true;
@@ -587,6 +830,9 @@ static int adr_cmd(int argc, char **argv)
                (unsigned long)s_tap_calls, (unsigned long)s_tap_frames, (unsigned long)s_tap_n,
                (unsigned long)s_tap_echo, (unsigned long)span,
                (unsigned long)(span > 0 ? (uint64_t)s_tap_frames * 1000 / (uint64_t)span : 0));
+    shellPrint(shellGetCurrent(), "ask: stage=%u release->post=%ldms heard=%ldms first-delta=%ldms q=%u answer=%u\r\n",
+               m->ask, (long)s_lat_post, (long)s_lat_heard, (long)s_lat_delta, (unsigned)strlen(m->q),
+               (unsigned)strlen(m->answer));
     lisa_mem_free(m);
     return 0;
 }
@@ -633,13 +879,15 @@ int adr_init(void)
     ms = ms < 1000 ? 1000 : ms > 10000 ? 10000 : ms;
     s_cfg.chunk_samples = ms * SR / 1000;
     snprintf(s_http_headers, sizeof(s_http_headers), "Content-Type:audio/wav&Authorization:Bearer %s", s_cfg.token);
+    snprintf(s_ask_headers, sizeof(s_ask_headers), "Content-Type:application/json&Authorization:Bearer %s", s_cfg.token);
     snprintf(s_ws_header, sizeof(s_ws_header), "\r\nAuthorization: Bearer %s", s_cfg.token); /* nopoll: leading CRLF */
 
     uint32_t count = POOL_MS / ms;
     s_lock = xSemaphoreCreateMutex();
     s_free = xQueueCreate(count, sizeof(chunk_t *));
     s_full = xQueueCreate(count, sizeof(chunk_t *));
-    if (!s_lock || !s_free || !s_full) {
+    s_askq = xQueueCreate(2, sizeof(ask_req_t *));
+    if (!s_lock || !s_free || !s_full || !s_askq) {
         return -1;
     }
     for (uint32_t i = 0; i < count; i++) {
@@ -653,7 +901,9 @@ int adr_init(void)
 
     lisa_thread_attr_t up = {.name = (uint8_t *)"adr_up", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
     lisa_thread_attr_t wsa = {.name = (uint8_t *)"adr_ws", .stack_size = 4096, .priority = LISA_OS_PRIORITY_LOW};
-    if (!lisa_thread_create(&up, upload_task, NULL) || !lisa_thread_create(&wsa, ws_task, NULL)) {
+    lisa_thread_attr_t aska = {.name = (uint8_t *)"adr_ask", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
+    if (!lisa_thread_create(&up, upload_task, NULL) || !lisa_thread_create(&wsa, ws_task, NULL) ||
+        !lisa_thread_create(&aska, ask_task, NULL)) {
         LISA_LOGE(TAG, "thread create failed");
         return -1;
     }
