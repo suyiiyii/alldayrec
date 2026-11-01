@@ -30,6 +30,7 @@ STATES = [
     ("adv", (0, 0, 0, 0), 0, None, False, "everything off, advertising as released with no phone (100-150 ms)"),
     ("mic", (1, 0, 0, 0), 0, None, False, "+ mic (PDM, its supply, HFXO)"),
     ("mic_codec", (1, 1, 0, 0), 0, None, False, "+ Opus (frames go nowhere: no card, no link)"),
+    ("card_idle", (0, 0, 1, 0), 0, None, False, "the card powered and mounted, nothing written (mic and Opus off)"),
     ("card", (1, 1, 1, 0), 0, None, False, "card mode: mic, Opus, card writes, no phone"),
     ("card_led", (1, 1, 1, 1), 0, None, False, "card mode as released: + LED flashes"),
     ("link_idle", (0, 0, 0, 0), 0, (24, 24, 0, 400), False, "connected at 30 ms, everything else off"),
