@@ -4,9 +4,10 @@ import datetime as dt
 import json
 import logging
 import time
+import uuid
 
 import anyio.to_thread
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from alldayrec import ask
@@ -133,6 +134,22 @@ async def ask_ai(body: dict):
     except Exception as e:  # HTTP errors, timeouts
         log.warning("ask failed: %r", e)
         raise HTTPException(502, f"[llm_failed] 模型调用失败：{e!r}"[:300])
+
+
+@router.post("/api/ask/live/{device}")
+async def ask_live(device: str, body: dict, tasks: BackgroundTasks):
+    """A question said to the device (its button held, then let go) between `start` and `end`, unix ms on the clock of
+    its /api/chunks pieces: {id} at once; its words are taken from the device's live transcript, the answer streamed
+    on /ws as type `ask` (ask.live)."""
+    try:
+        lo, hi = (dt.datetime.fromtimestamp(int(body[k]) / 1000) for k in ("start", "end"))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise HTTPException(400, "start and end are unix ms")
+    if not lo < hi <= lo + dt.timedelta(seconds=VOICE_MAX_S):
+        raise HTTPException(400, f"[bad_span] 问题要在 {VOICE_MAX_S} 秒以内")
+    id = uuid.uuid4().hex[:12]
+    tasks.add_task(ask.live, device, id, lo, hi)  # after the answer is sent
+    return {"id": id}
 
 
 @router.post("/api/ask/voice")

@@ -8,14 +8,19 @@ import datetime as dt
 import json
 import logging
 import re
+import time
 import urllib.error
 
 import anyio
 import anyio.to_thread
 
 from alldayrec import db
+from alldayrec import local_asr
 from alldayrec import summary
 from alldayrec import threads
+from alldayrec import ws
+from alldayrec.core import iso
+from alldayrec.tenant import T
 
 log = logging.getLogger("live")
 
@@ -200,17 +205,25 @@ async def call(msgs: list[dict], **extra) -> dict:
         return await summary.call(msgs, timeout=120, kind="ask", **extra)
 
 
+# a question said to a device: its first word is due within 3 s, and a round of tools costs 1-2 s more (11-01: DeepSeek
+# without the second line looked things up for 11 of 12 recent questions, the digest had them all)
+VOICE = ("\n这是在设备上用语音问的：回答很短，两三句话，要显示在 240×240 的小屏上。"
+         "语音问答要快：上面的摘要能回答的就直接回答，不调用工具；摘要里确实没有、或者问的是更早的事时才调用工具。")
 CITE = ("上面的回答没有用 [对话 id] 标出处。内容不变，在结论后面标上出处，id 只用前面资料和工具结果里出现过的；"
         "确实没有对应的对话（比如什么都没找到）就照原样回答。")
 
 
-async def ask(q: str, now: dt.datetime | None = None) -> dict:
+async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
     """{answer, sources, calls: the tool calls made, usage: tokens over all rounds}; raises on HTTP errors. An answer
-    citing no conversation is asked once more for its citations: the prompt alone left counts uncited (10-05)."""
-    msgs = [{"role": "system", "content": system(now or dt.datetime.now())}, {"role": "user", "content": q}]
+    citing no conversation is asked once more for its citations: the prompt alone left counts uncited (10-05).
+    on: a question said to a device, answered short (VOICE) and streamed: awaited with {"delta": text} as the answer
+    comes and {"stage": "searching"} before each round of tools; no second call for citations (it would come late)."""
+    msgs = [{"role": "system", "content": system(now or dt.datetime.now()) + (VOICE if on else "")}, {"role": "user", "content": q}]
     calls, usage = [], collections.Counter()
+    async def delta(text):
+        await on({"delta": text})
     async def reply(**extra) -> dict:
-        raw = await call(msgs, tools=SPECS, **extra)
+        raw = await call(msgs, tools=SPECS, on_delta=delta if on else None, **extra)
         u = raw.get("usage") or {}
         usage.update(prompt=u.get("prompt_tokens") or 0, completion=u.get("completion_tokens") or 0,
                      cached=(u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
@@ -219,19 +232,72 @@ async def ask(q: str, now: dt.datetime | None = None) -> dict:
         m = await reply(**({"tool_choice": "none"} if i == ROUNDS else {}))
         if not m.get("tool_calls"):
             break
-        msgs.append({"role": "assistant", "content": m.get("content"), "tool_calls": m["tool_calls"]})
+        msgs.append({"role": "assistant", "content": m.get("content"), "tool_calls": m["tool_calls"],
+                     **({"reasoning_content": m["reasoning_content"]} if m.get("reasoning_content") else {})})
+        if on:
+            await on({"stage": "searching"})
         for tc in m["tool_calls"]:
             out = await anyio.to_thread.run_sync(run_tool, tc["function"]["name"], tc["function"]["arguments"], limiter=threads.DB)  # grep scans every row
             calls.append({"tool": tc["function"]["name"], "args": tc["function"]["arguments"], "chars": len(out)})
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": out})
     answer = m.get("content") or ""
-    if not sources(answer):
+    if not on and not sources(answer):
         msgs += [{"role": "assistant", "content": answer}, {"role": "user", "content": CITE}]
         try:
             answer = (await reply(tool_choice="none")).get("content") or answer
         except Exception as e:  # HTTP errors, timeouts: the answer without citations is still the answer
             log.warning("ask: citations not added: %r", e)
     return {"answer": answer, "sources": sources(answer), "calls": calls, "usage": dict(usage)}
+
+
+HEAR_S = 1.5  # a question said to a device: the most its transcript is waited for, from when it is asked
+TAIL_S = 0.5  # ... in by when its last sentence reaches this close to the end (the button let go after the last word)
+
+
+def said(device: str, lo: dt.datetime, hi: dt.datetime) -> list[dict]:
+    """The device's sentences that overlap [lo, hi], in time order: its final rows, its drafts after them and the
+    sentence still being said (partial)."""
+    st = T().devices.get(device)
+    a, b = iso(lo), iso(hi)
+    rows = [r for r in db.sentences(iso(lo - dt.timedelta(minutes=1)), b, source=device) if r["end"] > a]
+    if st:
+        done = iso(st.done_to) if st.done_to else ""
+        rows += [r for r in st.drafts + [st.partial or {}] if r and r["start"] >= done and r["end"] > a and r["start"] < b]
+    return sorted((r for r in rows if r.get("text")), key=lambda r: r["start"])
+
+
+async def heard(device: str, lo: dt.datetime, hi: dt.datetime) -> str:
+    """The words of said() once its last sentence reaches TAIL_S before hi (qwen-stream's words come 0.5-1 s after
+    the audio), or what is in after HEAR_S."""
+    t0, tail = time.monotonic(), iso(hi - dt.timedelta(seconds=TAIL_S))
+    while not ((rows := said(device, lo, hi)) and rows[-1]["end"] >= tail) and time.monotonic() - t0 < HEAR_S:
+        await anyio.sleep(0.05)
+    return local_asr.text([" " + r["text"] for r in rows])
+
+
+async def live(device: str, id: str, lo: dt.datetime, hi: dt.datetime):
+    """A question said to the device between lo and hi, answered on /ws: {type: ask, device, id} with stage heard (q),
+    searching, the answer's deltas, then stage done (answer) or error (error). Nothing kept."""
+    t0, first = time.monotonic(), None
+    async def send(m: dict):
+        nonlocal first
+        if "delta" in m and first is None:
+            first = time.monotonic() - t0
+        await ws.broadcast({"type": "ask", "device": device, "id": id, **m})
+    try:
+        q = await heard(device, lo, hi)
+        t_heard = time.monotonic() - t0
+        if not q:
+            log.info("voice ask %s: nothing heard in %.1f s", device, t_heard)
+            return await send({"stage": "error", "error": "没听清"})
+        await send({"stage": "heard", "q": q})
+        r = await ask(q, on=send)
+        log.info("voice ask %s: heard in %.1f s, first word %.1f s, done %.1f s, %d tool calls", device, t_heard,
+                 first or 0, time.monotonic() - t0, len(r["calls"]))
+        await send({"stage": "done", "answer": r["answer"]})
+    except Exception as e:  # HTTP errors, timeouts
+        log.warning("voice ask %s failed: %r", device, e)
+        await send({"stage": "error", "error": "模型调用失败"})
 
 
 if __name__ == "__main__":

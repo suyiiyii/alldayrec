@@ -43,3 +43,13 @@ async def request(method: str, url: str, timeout: float = 60, **kw) -> httpx2.Re
     if r.status_code >= 400:
         raise http_error(r, r.content)
     return r
+
+
+async def lines(method: str, url: str, timeout: float = 60, **kw):
+    """One request's body line by line as it comes (an SSE stream); raises on an HTTP error status before the first."""
+    with errors():
+        async with client(timeout) as c, c.stream(method, url, **kw) as r:
+            if r.status_code >= 400:
+                raise http_error(r, await r.aread())
+            async for line in r.aiter_lines():
+                yield line

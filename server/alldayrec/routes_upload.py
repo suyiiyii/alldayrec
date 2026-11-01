@@ -87,6 +87,7 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
         log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, size)
         ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端收到 400 会丢弃它；原始字节留在 recordings/rejected/", "error")
         raise HTTPException(400, "could not decode")
+    audio.piece_in(device)
     if released:
         late_store.release(device)
     T().chunks = {"device": device, "at": time.time()}

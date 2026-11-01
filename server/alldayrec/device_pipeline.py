@@ -560,10 +560,11 @@ async def pipeline(device: str):
         b = max(a, base + g["end_ms"] * SR // 1000)
         at = lambda s: dseg.time_at(a + int(s * SR))
         if not g["final"]:
-            await ws.broadcast({"type": "partial", "device": device, "row": {
-                "id": "p" + device, "start": at(0).isoformat(timespec="milliseconds"), "end": at((b - a) / SR).isoformat(timespec="milliseconds"),
-                "speaker": "", "text": g["text"], "state": "draft", "source": device, "engine": "qwen-stream"}})
+            st.partial = {"id": "p" + device, "start": at(0).isoformat(timespec="milliseconds"), "end": at((b - a) / SR).isoformat(timespec="milliseconds"),
+                          "speaker": "", "text": g["text"], "state": "draft", "source": device, "engine": "qwen-stream"}
+            await ws.broadcast({"type": "partial", "device": device, "row": st.partial})
             return
+        st.partial = None
         seg = {"start_ms": 0, "end_ms": (b - a) * 1000 // SR, "text": g["text"], "speaker": None}
         x = dseg.audio[max(0, a - dseg.audio_base):max(0, b - dseg.audio_base)]
         await anyio.to_thread.run_sync(label_sentences, ddia, embed, [seg], x, limiter=threads.INFER)
@@ -620,6 +621,7 @@ async def pipeline(device: str):
                 log.warning("%s draft stream failed after %.0f s: %r", device, time.perf_counter() - t, err)
                 st.draft = {"error": str(err)[:200]}
             db.add_call("draft", "qwen-stream", device, round((time.perf_counter() - t) * 1000), err and asr.failure(err), (sent - base) / SR, (sent - base) / SR)
+            st.partial = None
             await ws.broadcast({"type": "partial", "device": device, "row": None})
 
     async def forever(part):
