@@ -15,7 +15,7 @@
 #define W 240
 #define H 240
 #define TOP 30
-#define NLINES (ADR_ROWS + 1) /* the rows + the sentence being spoken */
+#define NLINES (ADR_TODOS > ADR_ROWS + 1 ? ADR_TODOS : ADR_ROWS + 1) /* 实时: the rows + the sentence being said */
 #define WHITE 0xffffff
 #define GREY 0x8a8a8a
 #define SPEAKING 0xffc83d /* the sentence being said */
@@ -40,15 +40,33 @@ static int line(int i, const char *text, uint32_t colour)
     return i + 1;
 }
 
-static void render(void)
+/* 待办: one label a todo, past due red, today amber, the later ones white */
+static int render_todos(void)
 {
-    static const char *names[] = {"实时", "总结", "状态"};
-    char tabs[96] = "";
     int n = 0;
 
-    for (int i = 0; i < 3 && s_snap.tab != 3; i++) { /* one short line: recolouring is safe here */
+    for (int i = 0; i < s_snap.ntodos; i++) {
+        int8_t w = s_snap.todos[i].when;
+        n = line(n, s_snap.todos[i].text, w > 0 ? ERROR : w == 0 ? SPEAKING : WHITE);
+    }
+    if (!n) {
+        n = s_snap.todo_state > 0   ? line(n, "没有待办", GREY)
+            : s_snap.todo_state < 0 ? line(n, "取不到待办", ERROR)
+                                    : line(n, "取待办…", GREY);
+    }
+    return n;
+}
+
+static void render(void)
+{
+    static const char *names[] = {"实时", "总结", "状态", "待办"};
+    static const uint8_t ids[] = {0, 1, 2, ADR_TAB_TODO};
+    char tabs[128] = "";
+    int n = 0;
+
+    for (int i = 0; i < 4 && s_snap.tab != 3; i++) { /* one short line: recolouring is safe here */
         size_t len = strlen(tabs);
-        snprintf(tabs + len, sizeof(tabs) - len, "%s%s %s#", i ? "  " : "", i == s_snap.tab ? "#ffffff" : "#8a8a8a",
+        snprintf(tabs + len, sizeof(tabs) - len, "%s%s %s#", i ? "  " : "", ids[i] == s_snap.tab ? "#ffffff" : "#8a8a8a",
                  names[i]);
     }
     lv_label_set_text(s_tabs, s_snap.tab == 3 ? "问 AI" : tabs);
@@ -78,6 +96,8 @@ static void render(void)
         } else if (!s_snap.nrows) {
             n = line(n, "等待转写…", GREY);
         }
+    } else if (s_snap.tab == ADR_TAB_TODO) {
+        n = render_todos();
     } else if (s_snap.tab == 1) {
         n = line(n, s_snap.live[0] ? s_snap.live : "说满 1 分钟后出实时总结", s_snap.live[0] ? WHITE : GREY);
     } else {

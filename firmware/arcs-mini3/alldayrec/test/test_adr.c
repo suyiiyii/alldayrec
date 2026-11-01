@@ -397,6 +397,71 @@ static void test_say(void)
     assert(s_say_stop && !s_mute);
     adr_tap(&ev);
     assert(xQueueReceive(s_full, &c, 0) && ((int16_t *)(c->body + WAV_HDR))[255] == 256);
+}
+
+static void test_todos(void)
+{
+    char w[24];
+    todo_when(w, sizeof(w), 2, "2026-10-30");
+    assert(strcmp(w, "过期 2 天") == 0);
+    todo_when(w, sizeof(w), 0, "2026-11-01");
+    assert(strcmp(w, "今天") == 0);
+    todo_when(w, sizeof(w), -1, "2026-11-02");
+    assert(strcmp(w, "明天") == 0);
+    todo_when(w, sizeof(w), -2, "2026-11-03");
+    assert(strcmp(w, "11-03") == 0);
+
+    /* the list as GET /api/todos/due?ahead= has it: compact, "id" first; a todo without a date or age is skipped */
+    static char body[4096];
+    strcpy(body, "[{\"id\":\"c1:a\",\"text\":\"交周报\",\"to\":\"S1\",\"due_date\":\"2026-10-30\",\"with\":[\"老王\"],\"age_days\":2},"
+                 "{\"id\":\"c1:b\",\"text\":\"订票\",\"to\":null,\"due_date\":\"2026-11-01\",\"with\":[\"S2\",\"S3\"],\"age_days\":0},"
+                 "{\"id\":\"c1:x\",\"text\":\"坏的\",\"due_date\":null,\"age_days\":0},"
+                 "{\"id\":\"c1:c\",\"text\":\"看牙\",\"due_date\":\"2026-11-03\",\"with\":[],\"age_days\":-2}]");
+    uint32_t seq = s_m.seq;
+    todo_set(body, false);
+    assert(s_m.todo_state == 1 && s_m.ntodos == 3 && s_m.seq == seq + 1);
+    assert(strcmp(s_m.todos[0].text, "过期 2 天  交周报 · 答应老王") == 0 && s_m.todos[0].when == 1);
+    assert(strcmp(s_m.todos[1].text, "今天  订票") == 0 && s_m.todos[1].when == 0);   /* no to: not promised to anyone */
+    assert(strcmp(s_m.todos[2].text, "11-03  看牙") == 0 && s_m.todos[2].when == -1);
+
+    /* cut at the buffer: the list ends after the last whole todo */
+    strcpy(body, "[{\"id\":\"c1:a\",\"text\":\"一\",\"due_date\":\"2026-11-01\",\"age_days\":0},"
+                 "{\"id\":\"c1:b\",\"text\":\"二\",\"due_date\":\"2026-11-01\",\"age_days\":0},{\"id\":\"c1:c\",\"te");
+    todo_set(body, true);
+    assert(s_m.todo_state == 1 && s_m.ntodos == 2 && strcmp(s_m.todos[1].text, "今天  二") == 0);
+
+    /* at most ADR_TODOS; a long text whole characters only */
+    char *p = body + sprintf(body, "[");
+    for (int i = 0; i < ADR_TODOS + 3; i++) {
+        p += sprintf(p, "%s{\"id\":\"c1:%d\",\"text\":\"%s\",\"due_date\":\"2026-12-01\",\"age_days\":-30}", i ? "," : "", i,
+                     i ? "x" : "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十");
+    }
+    strcpy(p, "]");
+    todo_set(body, false);
+    assert(s_m.ntodos == ADR_TODOS && strncmp(s_m.todos[0].text, "12-01  一二三", 15) == 0);
+    assert(strlen(s_m.todos[0].text) == 7 + 3 * 61);                                     /* 191 bytes fit 7 + 61 chars */
+
+    /* a failed fetch or an error body: the list stays, marked */
+    strcpy(body, "{\"detail\":\"Unauthorized\"}");
+    todo_set(body, false);
+    assert(s_m.todo_state == -1 && s_m.ntodos == ADR_TODOS);
+    todo_set(NULL, false);
+    assert(s_m.todo_state == -1);
+    todo_set(strcpy(body, "[]"), false);
+    assert(s_m.todo_state == 1 && s_m.ntodos == 0);
+
+    /* clicks: 实时 → 总结 → 状态 → 待办 (fetches) → 实时; 问答 goes back to 待办 and fetches */
+    s_on = true;
+    s_todoq = xQueueCreate(1, sizeof(void *));
+    s_m.tab = 2;
+    adr_button(VOICE_MSG_BUTTON_ACTION_CLICK);
+    void *k;
+    assert(s_m.tab == ADR_TAB_TODO && xQueueReceive(s_todoq, &k, 0));
+    adr_button(VOICE_MSG_BUTTON_ACTION_CLICK);
+    assert(s_m.tab == 0 && !xQueueReceive(s_todoq, &k, 0));
+    s_m.tab = 3, s_m.ask_back = ADR_TAB_TODO;
+    adr_button(VOICE_MSG_BUTTON_ACTION_CLICK);
+    assert(s_m.tab == ADR_TAB_TODO && xQueueReceive(s_todoq, &k, 0));
     s_on = false;
 }
 
@@ -409,6 +474,7 @@ int main(void)
     test_cites();
     test_ask();
     test_say();
+    test_todos();
     puts("adr: all checks passed");
     return 0;
 }

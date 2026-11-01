@@ -13,6 +13,9 @@
 #define ADR_LIVE_BYTES 768
 #define ADR_Q_BYTES 256
 #define ADR_ANSWER_BYTES 1024
+#define ADR_TODOS 15
+#define ADR_TODO_BYTES 192
+#define ADR_TAB_TODO 4 /* after 状态 in the click order; 3 stays 问答 */
 #ifndef ADR_PSRAM
 #define ADR_PSRAM __attribute__((section(".psram.bss"))) /* SRAM is full */
 #endif
@@ -23,11 +26,16 @@ typedef struct {
     bool draft;
 } adr_row_t;
 
+typedef struct {
+    char text[ADR_TODO_BYTES]; /* "过期 2 天  交周报 · 答应老王" */
+    int8_t when;               /* 1 past due, 0 today, -1 later */
+} adr_todo_t;
+
 enum { ADR_ASK_NONE, ADR_ASK_LISTEN, ADR_ASK_SENT, ADR_ASK_SEARCH, ADR_ASK_ANSWER, ADR_ASK_DONE, ADR_ASK_ERROR };
 
 typedef struct {
     uint32_t seq; /* bumped on every change */
-    uint8_t tab;  /* 0 实时 1 总结 2 状态 3 问答 */
+    uint8_t tab;  /* 0 实时 1 总结 2 状态 3 问答 4 待办 */
     uint8_t ask_back; /* the tab a click on 问答 goes back to */
     uint8_t ask;      /* ADR_ASK_* */
     char q[ADR_Q_BYTES];
@@ -41,6 +49,9 @@ typedef struct {
     int last_status;
     uint32_t last_ms;
     uint32_t last_ok_tick;
+    adr_todo_t todos[ADR_TODOS]; /* GET /api/todos/due?ahead=…, due first */
+    uint8_t ntodos;
+    int8_t todo_state; /* 0 not fetched yet, 1 fetched, -1 the last fetch failed */
 } adr_model_t;
 
 int adr_init(void);

@@ -919,6 +919,125 @@ static void ask_task(void *arg)
     }
 }
 
+/* ==================== 待办: GET /api/todos/due?ahead=…, while its tab shows ==================== */
+
+#define TODO_AHEAD_DAYS 365          /* the ones not due yet too, up to a year out */
+#define TODO_EVERY_MS (5 * 60 * 1000) /* refresh while the tab stays up */
+#define TODO_BODY (16 * 1024)        /* ~0.6 KB a todo: 15 fit; past that the list ends at the last whole one */
+
+static QueueHandle_t s_todoq;
+static char s_todo_body[TODO_BODY] ADR_PSRAM;
+static bool s_todo_cut;
+
+/* "过期 2 天" "今天" "明天" "11-03": age_days counts from the server's today, so the board needs no date */
+static void todo_when(char *dst, size_t cap, int age, const char *due_date)
+{
+    if (age > 0) {
+        snprintf(dst, cap, "过期 %d 天", age);
+    } else if (age >= -1) {
+        snprintf(dst, cap, "%s", age ? "明天" : "今天");
+    } else {
+        snprintf(dst, cap, "%.5s", strlen(due_date) >= 10 ? due_date + 5 : due_date);
+    }
+}
+
+/* a body cut at TODO_BODY: the list ends after the last whole todo (FastAPI writes compact JSON, "id" first) */
+static void todo_cut(char *s)
+{
+    char *last = NULL;
+
+    for (char *p = s; (p = strstr(p, "},{\"id\":")); p++) {
+        last = p;
+    }
+    if (last) {
+        strcpy(last + 1, "]");
+    }
+}
+
+/* the list, or NULL when the fetch failed (the old list stays); under s_lock */
+static void todo_set(char *body, bool cut)
+{
+    cJSON *a, *t;
+    int n = 0;
+
+    if (body && cut) {
+        todo_cut(body);
+    }
+    a = body ? cJSON_Parse(body) : NULL;
+    if (!cJSON_IsArray(a)) {
+        s_m.todo_state = -1;
+        s_m.seq++;
+        cJSON_Delete(a);
+        return;
+    }
+    cJSON_ArrayForEach(t, a) {
+        const char *text = jstr(t, "text"), *due = jstr(t, "due_date");
+        const cJSON *age = cJSON_GetObjectItem(t, "age_days"), *who = cJSON_GetArrayItem(cJSON_GetObjectItem(t, "with"), 0);
+        char when[24], tmp[2 * ADR_TODO_BYTES];
+        if (n == ADR_TODOS) {
+            break;
+        }
+        if (!text || !due || !cJSON_IsNumber(age)) {
+            continue;
+        }
+        bool to = jstr(t, "to") && cJSON_IsString(who); /* with: the to, an alias as its person */
+        todo_when(when, sizeof(when), age->valueint, due);
+        snprintf(tmp, sizeof(tmp), "%s  %s%s%s", when, text, to ? " · 答应" : "", to ? who->valuestring : "");
+        put_text(s_m.todos[n].text, ADR_TODO_BYTES, tmp);
+        s_m.todos[n++].when = age->valueint > 0 ? 1 : age->valueint == 0 ? 0 : -1;
+    }
+    s_m.ntodos = n;
+    s_m.todo_state = 1;
+    s_m.seq++;
+    cJSON_Delete(a);
+}
+
+static void todo_kick(void)
+{
+    void *k = NULL;
+    xQueueSend(s_todoq, &k, 0);
+}
+
+static void todo_on_data(lisa_http_data_t *d)
+{
+    uint32_t n = d->len < TODO_BODY ? (uint32_t)d->len : TODO_BODY - 1;
+
+    memcpy(s_todo_body, d->buf, n);
+    s_todo_body[n] = 0;
+    s_todo_cut = n < (uint32_t)d->len;
+}
+
+static void todo_task(void *arg)
+{
+    static char url[256] ADR_PSRAM;
+    void *k;
+
+    (void)arg;
+    snprintf(url, sizeof(url), "%s/api/todos/due?ahead=%d", s_cfg.url, TODO_AHEAD_DAYS);
+    for (;;) {
+        bool kicked = xQueueReceive(s_todoq, &k, pdMS_TO_TICKS(TODO_EVERY_MS)) == pdTRUE;
+        if (s_m.tab != ADR_TAB_TODO || !(kicked || adr_view_visible())) {
+            continue;
+        }
+        s_todo_body[0] = 0;
+        s_todo_cut = false;
+        lisa_http_request_t req = {
+            .method = LISA_HTTP_GET,
+            .url = (uint8_t *)url,
+            .headers = (uint8_t *)ask_headers,
+            .timeout = 10,
+            .on_data = todo_on_data,
+        };
+        lisa_http_t *h = lisa_http_init(&req);
+        lisa_http_err_e e = h ? lisa_http_perform(h) : LISA_HTTP_COMMON_ERR;
+        lisa_http_cleanup(h);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        todo_set(e == LISA_HTTP_OK ? s_todo_body : NULL, s_todo_cut);
+        LISA_LOGI(TAG, "todos: %d, %u shown%s", e, s_m.ntodos, s_todo_cut ? ", body cut" : "");
+        xSemaphoreGive(s_lock);
+    }
+}
+
 /* Hold the key on the AllDayRec page to ask: it counts from the press once held 0.8 s (SHORT_START; shorter
  * presses stay clicks), the release ends it. While asking the long hold is ours: no power-off. */
 bool adr_key(int action)
@@ -957,14 +1076,23 @@ bool adr_button(int action)
         return false;
     }
     if (action == VOICE_MSG_BUTTON_ACTION_QUADRUPLE_CLICK) {
+        if (!adr_view_visible() && s_m.tab == ADR_TAB_TODO) { /* opening on 待办 */
+            todo_kick();
+        }
         adr_view_toggle();
         return true;
     }
     if (action == VOICE_MSG_BUTTON_ACTION_CLICK && adr_view_visible()) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_m.tab = s_m.tab == 3 ? s_m.ask_back : (s_m.tab + 1) % 3;
+        s_m.tab = s_m.tab == 3 ? s_m.ask_back
+                  : s_m.tab == 2 ? ADR_TAB_TODO
+                  : s_m.tab == ADR_TAB_TODO ? 0
+                  : s_m.tab + 1;
         s_m.seq++;
         xSemaphoreGive(s_lock);
+        if (s_m.tab == ADR_TAB_TODO) {
+            todo_kick();
+        }
         return true;
     }
     if (action == VOICE_MSG_BUTTON_ACTION_DOUBLE_CLICK && adr_view_visible()) { /* not the camera preview here */
@@ -1003,6 +1131,7 @@ static int adr_cmd(int argc, char **argv)
                (unsigned)strlen(m->answer));
     shellPrint(shellGetCurrent(), "say: state=%u mute=%u buffered=%lums dropped=%lums\r\n", s_say, s_mute,
                (unsigned long)(s_say_len / 32), (unsigned long)(s_say_drop / 32));
+    shellPrint(shellGetCurrent(), "todo: state=%d shown=%u\r\n", m->todo_state, m->ntodos);
     lisa_mem_free(m);
     return 0;
 }
@@ -1059,7 +1188,8 @@ int adr_init(void)
     s_askq = xQueueCreate(2, sizeof(ask_req_t *));
     s_sayq = xQueueCreate(1, sizeof(uint8_t *));
     s_say_buf = lisa_mem_alloc(SAY_BYTES);
-    if (!s_lock || !s_free || !s_full || !s_askq || !s_sayq || !s_say_buf) {
+    s_todoq = xQueueCreate(1, sizeof(void *));
+    if (!s_lock || !s_free || !s_full || !s_askq || !s_sayq || !s_say_buf || !s_todoq) {
         return -1;
     }
     for (uint32_t i = 0; i < count; i++) {
@@ -1075,8 +1205,10 @@ int adr_init(void)
     lisa_thread_attr_t wsa = {.name = (uint8_t *)"adr_ws", .stack_size = 4096, .priority = LISA_OS_PRIORITY_LOW};
     lisa_thread_attr_t aska = {.name = (uint8_t *)"adr_ask", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
     lisa_thread_attr_t saya = {.name = (uint8_t *)"adr_say", .stack_size = 4096, .priority = LISA_OS_PRIORITY_NORMAL};
+    lisa_thread_attr_t todoa = {.name = (uint8_t *)"adr_todo", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
     if (!lisa_thread_create(&up, upload_task, NULL) || !lisa_thread_create(&wsa, ws_task, NULL) ||
-        !lisa_thread_create(&aska, ask_task, NULL) || !lisa_thread_create(&saya, say_task, NULL)) {
+        !lisa_thread_create(&aska, ask_task, NULL) || !lisa_thread_create(&saya, say_task, NULL) ||
+        !lisa_thread_create(&todoa, todo_task, NULL)) {
         LISA_LOGE(TAG, "thread create failed");
         return -1;
     }
