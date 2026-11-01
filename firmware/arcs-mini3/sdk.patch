@@ -46,6 +46,29 @@ index beaf0e25..f6100cd4 100644
      app_show_initial_wifi_info_if_needed();
      voice_player_network_tone_ui_ready();
  
+diff --git a/apps/arcs-mini/services/service_button.c b/apps/arcs-mini/services/service_button.c
+index 05d03558..7afdd4a9 100644
+--- a/apps/arcs-mini/services/service_button.c
++++ b/apps/arcs-mini/services/service_button.c
+@@ -18,6 +18,7 @@
+ 
+ #include "voice_msg.h"
+ #include "service_button.h"
++#include "adr.h"
+ #include "miniapp.h"
+ #include "alarm_ring.h"
+ #include "service_sd_music.h"
+@@ -199,6 +200,10 @@ static void publish_button_event(uint8_t btn_id, lisa_btn_event_t action, bool f
+ static void btn_event_callback(lisa_btn_event_t event, uint8_t btn_id, void *user)
+ {
+     (void)user;
++    /* AllDayRec: on its page, hold to ask (press .. release); it keeps the long hold while asking */
++    if (btn_id == MINI_POWER_KEY_ID && adr_key(map_lisa_btn_event(event))) {
++        return;
++    }
+     publish_button_event(btn_id, event, true);
+ }
+ 
 diff --git a/apps/arcs-mini/services/service_power_policy.c b/apps/arcs-mini/services/service_power_policy.c
 index 9ebb1fbe..2d4e9787 100644
 --- a/apps/arcs-mini/services/service_power_policy.c
