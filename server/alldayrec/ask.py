@@ -208,7 +208,8 @@ async def call(msgs: list[dict], **extra) -> dict:
 # a question said to a device: its first word is due within 3 s, and a round of tools costs 1-2 s more (11-01: DeepSeek
 # without the second line looked things up for 11 of 12 recent questions, the digest had them all)
 VOICE = ("\n这是在设备上用语音问的：回答很短，两三句话，要显示在 240×240 的小屏上。"
-         "语音问答要快：上面的摘要能回答的就直接回答，不调用工具；摘要里确实没有、或者问的是更早的事时才调用工具。")
+         "语音问答要快：上面的摘要能回答的就直接回答，不调用工具；摘要里确实没有、或者问的是更早的事时才调用工具。"
+         "要调用工具时，先用一句很短的话告诉我你要查什么（比如「我查一下上个月的记录」），再调用工具。")
 CITE = ("上面的回答没有用 [对话 id] 标出处。内容不变，在结论后面标上出处，id 只用前面资料和工具结果里出现过的；"
         "确实没有对应的对话（比如什么都没找到）就照原样回答。")
 
@@ -217,12 +218,22 @@ async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
     """{answer, sources, calls: the tool calls made, usage: tokens over all rounds}; raises on HTTP errors. An answer
     citing no conversation is asked once more for its citations: the prompt alone left counts uncited (10-05).
     on: a question said to a device, answered short (VOICE) and streamed: awaited with {"delta": text} as the answer
-    comes and {"stage": "searching"} before each round of tools; no second call for citations (it would come late)."""
+    comes and {"stage": "searching"} before each round of tools; no second call for citations (it would come late). What
+    a round of tools is preceded by (what is looked up, VOICE) stays on the screen: a "\n" before the next round's text,
+    and the answer is all the text sent."""
     msgs = [{"role": "system", "content": system(now or dt.datetime.now()) + (VOICE if on else "")}, {"role": "user", "content": q}]
-    calls, usage = [], collections.Counter()
+    calls, usage, shown, fresh = [], collections.Counter(), [], False  # shown: the deltas sent; fresh: a round with none yet
     async def delta(text):
+        nonlocal fresh
+        if fresh and shown:
+            shown.append("\n")
+            await on({"delta": "\n"})
+        fresh = False
+        shown.append(text)
         await on({"delta": text})
     async def reply(**extra) -> dict:
+        nonlocal fresh
+        fresh = True
         raw = await call(msgs, tools=SPECS, on_delta=delta if on else None, **extra)
         u = raw.get("usage") or {}
         usage.update(prompt=u.get("prompt_tokens") or 0, completion=u.get("completion_tokens") or 0,
@@ -240,7 +251,7 @@ async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
             out = await anyio.to_thread.run_sync(run_tool, tc["function"]["name"], tc["function"]["arguments"], limiter=threads.DB)  # grep scans every row
             calls.append({"tool": tc["function"]["name"], "args": tc["function"]["arguments"], "chars": len(out)})
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": out})
-    answer = m.get("content") or ""
+    answer = "".join(shown) if on else m.get("content") or ""
     if not on and not sources(answer):
         msgs += [{"role": "assistant", "content": answer}, {"role": "user", "content": CITE}]
         try:

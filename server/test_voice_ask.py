@@ -52,8 +52,8 @@ def test_live(tmp_path, monkeypatch):
     async def broadcast(m):
         sent.append(m)
     monkeypatch.setattr(ws, "broadcast", broadcast)
-    replies = iter([{"content": None, "tool_calls": [{"id": "t", "type": "function", "function": {"name": "calendar", "arguments": '{"month": "2026-11"}'}}]},
-                    {"content": "聊了存储 [c20261101100000]。"}])
+    tool = lambda content: {"content": content, "tool_calls": [{"id": "t", "type": "function", "function": {"name": "calendar", "arguments": '{"month": "2026-11"}'}}]}
+    replies = iter([tool(None), tool("我查一下"), {"content": "聊了存储 [c20261101100000]。"}])  # silent tools, what it looks up, the answer
     seen = []
     async def llm(msgs, timeout=300, kind="summary", on_delta=None, **extra):
         seen.append(msgs[0]["content"])
@@ -72,9 +72,10 @@ def test_live(tmp_path, monkeypatch):
     anyio.run(asked)
     assert all(m["type"] == "ask" and m["device"] == "dev" and m["id"] == "a1" for m in sent)
     body = [{k: v for k, v in m.items() if k not in ("type", "device", "id")} for m in sent]
-    assert body == [{"stage": "heard", "q": "我今天下午聊了什么？"}, {"stage": "searching"}, {"delta": "聊了存"}, {"delta": "储 [c20261101100000]。"},
-                    {"stage": "done", "answer": "聊了存储 [c20261101100000]。"}], body
-    assert seen[0].endswith(ask.VOICE) and len(seen) == 2, "short answers; no second call for citations"
+    assert body == [{"stage": "heard", "q": "我今天下午聊了什么？"}, {"stage": "searching"}, {"delta": "我查一"}, {"delta": "下"}, {"stage": "searching"},
+                    {"delta": "\n"}, {"delta": "聊了存"}, {"delta": "储 [c20261101100000]。"},
+                    {"stage": "done", "answer": "我查一下\n聊了存储 [c20261101100000]。"}], body
+    assert seen[0].endswith(ask.VOICE) and len(seen) == 3, "short answers; no second call for citations"
 
     sent.clear()  # nothing said: an error once HEAR_S is up
     monkeypatch.setattr(ask, "HEAR_S", 0.1)
