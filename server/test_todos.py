@@ -51,6 +51,16 @@ def test_due_context_and_stale(tmp_path):
     assert db.due_todos(day) == [], "before prompt v8 a due_date is not trusted"
 
 
+def test_due_ahead(tmp_path):
+    """?ahead=N (the Arcs-Mini3's 待办 tab): the todos due in the next N days too, still oldest first, those not due yet
+    with a negative age_days; without it the list stays as the web page has it."""
+    d = lambda n: (dt.date.today() + dt.timedelta(days=n)).isoformat()
+    store(tmp_path, [mine("后天", d(2)), mine("昨天", d(-1)), mine("下个月", d(40)), mine("没日期", None)])
+    assert [t["text"] for t in anyio.run(todos_due)] == ["昨天"]
+    got = anyio.run(todos_due, 30)
+    assert [(t["text"], t["age_days"], t["stale"]) for t in got] == [("昨天", 1, False), ("后天", -2, False)]
+
+
 def test_marks_undo_and_bulk(tmp_path):
     today = dt.date.today().isoformat()
     store(tmp_path, [mine("一", today, at="2026-10-01T10:01:00.000"), mine("二", today, at="2026-10-01T10:02:00.000"), mine("三", today)])

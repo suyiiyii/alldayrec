@@ -274,9 +274,11 @@ async def recap_get(date: str = ""):
 
 
 @router.get("/api/todos/due")
-async def todos_due():
-    """My todos due today or before, not marked done or wrong, with how stale each is (db.due_todos)."""
-    return db.due_todos(dt.date.today().isoformat())
+async def todos_due(ahead: int = 0):
+    """My todos due today or before (ahead: also those due in the next that many days), not marked done or wrong, with
+    how stale each is (db.due_todos)."""
+    today = dt.date.today()
+    return db.due_todos(today.isoformat(), (today + dt.timedelta(days=ahead)).isoformat())
 
 
 MARKS = ("done", "wrong")

@@ -526,17 +526,17 @@ def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict) -> d
             "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
 
-def due_todos(day: str) -> list[dict]:
-    """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first, each with its age_days past due and
-    stale: past due over 7 days, over 3 for a due said as the same or the next day (SAME_DAY). Only summaries from prompt
-    v8 on date them."""
+def due_todos(day: str, until: str | None = None) -> list[dict]:
+    """My todos due on day (YYYY-MM-DD) or before (until: up to that day instead, age_days negative for those not due
+    yet) and not closed, oldest due first, each with its age_days past due and stale: past due over 7 days, over 3 for a
+    due said as the same or the next day (SAME_DAY). Only summaries from prompt v8 on date them."""
     closed, al, out = closed_todos(), aliases(), []
     for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
                             " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
         conv, s = _conversation(r), json.loads(r["body"])
         todos = s.get("todos") or []
         for i, t in zip(todo_ids(conv["id"], todos), todos):
-            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and i not in closed:
+            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= (until or day) and i not in closed:
                 age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
                 out.append({**todo_view(conv, s, i, t, closed, al), "age_days": age,
                             "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)})
