@@ -56,6 +56,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET", "/api/calendar", "calendar"),
     ("GET", "/api/search", "search"),
     ("POST", "/api/ask", "ask_ai"),
+    ("POST", "/api/ask/live/{device}", "ask_live"),
     ("POST", "/api/ask/voice", "ask_voice"),
     ("POST", "/mcp", "mcp"),
     ("DELETE,GET", "/mcp", "mcp_stream"),

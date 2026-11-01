@@ -697,6 +697,21 @@ def hold_until(device: str) -> float | None:
     return h.get("since", h["seen"]) + HOLD_MAX_S if h else None
 
 
+def piece_in(device: str):
+    """A piece of the device came in (chunk()): its readers waiting in wait_piece() take it now."""
+    if st := T().devices.get(device):
+        st.piece_in.set()
+        st.piece_in = anyio.Event()
+
+
+async def wait_piece(device: str):
+    """Until the device's next piece comes in, 1 s at most: an idle reader's poll (the edge reader picked up a
+    question's last piece up to 1 s late, the device's voice ask waiting for it)."""
+    st = T().devices.get(device)
+    with anyio.move_on_after(1):
+        await (st.piece_in.wait() if st else anyio.sleep(1))
+
+
 async def stream(device: str, after: dt.datetime | None, edge_s: float | None = None, spent: dict | None = None):
     """(start time, samples) of one device in time order, from the piece holding `after` (its first piece when None),
     forever, each moment once (fresh). A piece arriving older than one already handed out is kept for playback but not
@@ -727,7 +742,7 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                  "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1")
         p = db.conn().execute(query, (device, at, lo)).fetchone()
         if p is None or h is not None and p["start_ms"] >= h:
-            await anyio.sleep(1)
+            await wait_piece(device)
             continue  # idle readers never take a write lock
         # Save's late predicate and selection's cursor advance are serialized by SQLite. An upload
         # cannot slip between the SELECT and advancing the reader and disappear behind it unregistered.
@@ -739,7 +754,7 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                 db.put_kv(f"read_to:{device}", p["start_ms"], t)
                 db.put_kv(f"read_end:{device}", round(p["start_ms"] + p["seconds"] * 1000), t)
         if p is None:
-            await anyio.sleep(1)
+            await wait_piece(device)
             continue
         if p["seconds"] > WHOLE_S:
             # Keep both decode and each read off the loop. The context owns temporary files;

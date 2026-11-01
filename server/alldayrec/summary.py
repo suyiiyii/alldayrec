@@ -1,6 +1,8 @@
 """Summary of a closed conversation: one chat call returning title, summary, topics, todos and decisions.
 
     LLM_BASE_URL, LLM_API_KEY, LLM_MODEL   any OpenAI-compatible /chat/completions endpoint
+    ASK_LLM_BASE_URL, ASK_LLM_API_KEY, ASK_LLM_MODEL   the questions' (kind ask, ask.py) instead, each unset: LLM_*'s
+    ASK_LLM_EXTRA   a JSON object of more request fields for those, e.g. {"thinking": {"type": "disabled"}}
 
 A conversation with less than MIN_SPEECH_S of speech gets no call: its title is its first sentence.
 """
@@ -84,16 +86,23 @@ def transcript(rows: list[dict]) -> str:
     return "\n".join(f'[{r["start"][11:19]}] {r.get("speaker") or "S?"}: {r["text"]}' for r in rows if r.get("text"))
 
 
-async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", **extra) -> dict:
+async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", on_delta=None, **extra) -> dict:
     """One chat call, extra fields as they are (tools, response_format): the raw response; raises on HTTP errors. Kept
     in the calls table as `kind` (summary, split, hints, profile, recap, live, ask): time, tokens, the error, never the text;
-    a call cut off (the task cancelled) too, as CancelledError."""
-    req = {"model": os.environ["LLM_MODEL"], "messages": messages, **extra}
+    a call cut off (the task cancelled) too, as CancelledError. on_delta: streamed (stream: true), each piece of the
+    reply's text awaited as on_delta(text) as it comes, the response put together as a whole one (stream_reply)."""
+    env = lambda k: kind == "ask" and os.environ.get("ASK_" + k) or os.environ[k]
+    req = {"model": env("LLM_MODEL"), "messages": messages, **(json.loads(os.environ.get("ASK_LLM_EXTRA") or "{}") if kind == "ask" else {}), **extra}
+    if on_delta:
+        req |= {"stream": True, "stream_options": {"include_usage": True}}
     t, usage, err = time.perf_counter(), {}, None
+    url, body = env("LLM_BASE_URL").rstrip("/") + "/chat/completions", json.dumps(req).encode()
+    headers = {"Authorization": f'Bearer {env("LLM_API_KEY")}', "Content-Type": "application/json"}
     try:
-        r = await net.request("POST", os.environ["LLM_BASE_URL"].rstrip("/") + "/chat/completions", timeout, content=json.dumps(req).encode(),
-                              headers={"Authorization": f'Bearer {os.environ["LLM_API_KEY"]}', "Content-Type": "application/json"})
-        out = json.loads(r.content)
+        if on_delta:
+            out = await stream_reply(net.lines("POST", url, timeout, content=body, headers=headers), on_delta)
+        else:
+            out = json.loads((await net.request("POST", url, timeout, content=body, headers=headers)).content)
         usage = out.get("usage") or {}
         return out
     except BaseException as e:
@@ -102,6 +111,34 @@ async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", 
     finally:
         db.add_call(kind, req["model"], None, round((time.perf_counter() - t) * 1000), err,
                     prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
+
+
+async def stream_reply(lines, on_delta) -> dict:
+    """An SSE chat stream as one response {choices: [{message: {content, tool_calls}}], usage}: the text's pieces sent
+    to on_delta as they come, a tool call's pieces (by index: its id and name first, its arguments in parts) joined,
+    a thinking model's reasoning_content too (DeepSeek wants it back with the tool results)."""
+    text, think, tools, usage = [], [], {}, {}
+    async for line in lines:
+        if not line.startswith("data:") or (d := line[5:].strip()) == "[DONE]":
+            continue
+        m = json.loads(d)
+        usage = m.get("usage") or usage
+        for c in m.get("choices") or []:
+            dl = c.get("delta") or {}
+            think.append(dl.get("reasoning_content") or "")
+            if dl.get("content"):
+                text.append(dl["content"])
+                await on_delta(dl["content"])
+            for tc in dl.get("tool_calls") or []:
+                x = tools.setdefault(tc.get("index", 0), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                x["id"] = tc.get("id") or x["id"]
+                f = tc.get("function") or {}
+                x["function"]["name"] += f.get("name") or ""
+                x["function"]["arguments"] += f.get("arguments") or ""
+    msg = {"role": "assistant", "content": "".join(text) or None, **({"reasoning_content": "".join(think)} if any(think) else {})}
+    if tools:
+        msg["tool_calls"] = [tools[k] for k in sorted(tools)]
+    return {"choices": [{"message": msg}], "usage": usage}
 
 
 async def complete(messages: list[dict], timeout: int = 300, kind: str = "summary", **extra) -> tuple[dict, dict]:

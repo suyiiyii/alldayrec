@@ -125,6 +125,7 @@ REQUESTS = {
     ("GET", "/api/calendar"): ("GET", "/api/calendar", {}),
     ("GET", "/api/search"): ("GET", "/api/search", dict(params={"q": "说的话"})),
     ("POST", "/api/ask"): ("POST", "/api/ask", dict(json={"q": "说过什么？"})),
+    ("POST", "/api/ask/live/{device}"): ("POST", f"/api/ask/live/{DEV}", dict(json={"start": MS, "end": MS + 2000})),
     ("POST", "/api/ask/voice"): ("POST", "/api/ask/voice", dict(content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/mcp"): ("POST", "/mcp", dict(json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "grep", "arguments": {"q": "说的话"}}})),
     ("DELETE", "/mcp"): ("DELETE", "/mcp", {}),

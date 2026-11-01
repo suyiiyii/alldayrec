@@ -28,6 +28,7 @@ class PipelineState:
     voiced: list[dict] = field(default_factory=list)
     refine: dict | None = None
 
+    piece_in: anyio.Event = field(default_factory=anyio.Event)  # set when a piece comes in (audio.piece_in)
     edge_end: dt.datetime | None = None
     last_speech: dt.datetime | None = None
     draft_to: dt.datetime | None = None
@@ -35,6 +36,7 @@ class PipelineState:
     vad_to: dt.datetime | None = None
     wake: anyio.Event = field(default_factory=anyio.Event)
     drafts: list[dict] = field(default_factory=list)
+    partial: dict | None = None  # qwen-stream's sentence still being said, as the pages were sent it
     drafting: bool = False
     draft: dict | None = None
     latency: list[float] = field(default_factory=list)
