@@ -266,13 +266,24 @@ def said(device: str, lo: dt.datetime, hi: dt.datetime) -> list[dict]:
     return sorted((r for r in rows if r.get("text")), key=lambda r: r["start"])
 
 
+def trim(rows: list[dict], lo: dt.datetime) -> list[dict]:
+    """rows with the words said before lo dropped from a sentence that starts before it (by time, evenly over its text)."""
+    out = []
+    for r in rows:
+        a, b = dt.datetime.fromisoformat(r["start"]), dt.datetime.fromisoformat(r["end"])
+        if a < lo < b:
+            r = {**r, "text": r["text"][round(len(r["text"]) * (lo - a) / (b - a)):]}
+        out.append(r)
+    return out
+
+
 async def heard(device: str, lo: dt.datetime, hi: dt.datetime) -> str:
     """The words of said() once its last sentence reaches TAIL_S before hi (qwen-stream's words come 0.5-1 s after
     the audio), or what is in after HEAR_S."""
     t0, tail = time.monotonic(), iso(hi - dt.timedelta(seconds=TAIL_S))
     while not ((rows := said(device, lo, hi)) and rows[-1]["end"] >= tail) and time.monotonic() - t0 < HEAR_S:
         await anyio.sleep(0.05)
-    return local_asr.text([" " + r["text"] for r in rows])
+    return local_asr.text([" " + r["text"] for r in trim(rows, lo)])
 
 
 async def live(device: str, id: str, lo: dt.datetime, hi: dt.datetime):

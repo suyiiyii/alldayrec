@@ -80,3 +80,10 @@ def test_live(tmp_path, monkeypatch):
     monkeypatch.setattr(ask, "HEAR_S", 0.1)
     anyio.run(ask.live, "dev", "a2", lo + dt.timedelta(seconds=20), lo + dt.timedelta(seconds=25))
     assert [(m["stage"], m["error"]) for m in sent] == [("error", "没听清")]
+
+
+def test_trim():
+    lo = dt.datetime(2026, 11, 1, 10, 0, 1, tzinfo=dt.timezone.utc)
+    row = lambda s, e, text: {"start": iso(lo + dt.timedelta(seconds=s)), "end": iso(lo + dt.timedelta(seconds=e)), "text": text}
+    rows = [row(-2, -1, "前一句"), row(-2, 2, "前文前文问题问题"), row(0.5, 2, "后一句")]
+    assert [r["text"] for r in ask.trim(rows, lo)] == ["前一句", "问题问题", "后一句"]
