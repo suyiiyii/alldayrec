@@ -50,6 +50,12 @@ if [ "${LR_CARD_ON:-}" = 1 ]; then
   EXTRA+=(-DCONFIG_LR_STORE_CARD_OFF=n)
   V="$V-cardon"
 fi
+# LR_DEBUG=1 ./lr.sh build V: the power-test commands (CONFIG_LR_POWER_DEBUG, CTRL 0x30), in build/lr-V-debug; never released
+if [ "${LR_DEBUG:-}" = 1 ]; then
+  EXTRA+=(-DCONFIG_LR_POWER_DEBUG=y)
+  V="$V-debug"
+  FWS=-debug  # its revision says so
+fi
 # LR_LOG=1 ./lr.sh build V: logs on the USB serial port (cat /dev/cu.usbmodem*), in build/lr-V-log
 if [ "${LR_LOG:-}" = 1 ]; then
   OVL="$OVL;$D/overlay/lr_log.overlay"
@@ -59,7 +65,7 @@ fi
 UF2="$D/build/lr-$V/zephyr/zephyr.uf2"
 # the firmware revision clients read (DIS) and compare with the server's newest package: commit time and hash, + if
 # dirty; a later commit sorts later as text (the older date-only form sorts before a same-day one)
-FWV="$(git -C "$D" log -1 --format=%cd --date=format:%Y%m%d.%H%M%S)-$(git -C "$D" rev-parse --short HEAD)$(git -C "$D" diff --quiet HEAD -- . || echo +)"
+FWV="$(git -C "$D" log -1 --format=%cd --date=format:%Y%m%d.%H%M%S)-$(git -C "$D" rev-parse --short HEAD)$(git -C "$D" diff --quiet HEAD -- . || echo +)${FWS:-}"
 EXTRA+=("-DCONFIG_BT_DIS_FW_REV_STR=\"$FWV\"")
 
 case ${1:-} in

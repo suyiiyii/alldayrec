@@ -18,4 +18,6 @@ void set_mic_callback(mix_handler _callback);
 
 void mic_off();
 void mic_on();
+/* CONFIG_LR_POWER_DEBUG: the mic (and the crystal it holds) on and off */
+void mic_debug(bool on);
 #endif

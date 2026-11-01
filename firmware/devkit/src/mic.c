@@ -62,12 +62,11 @@ ISR_DIRECT_DECLARE(pdm_isr)
     return 1;
 }
 
-int mic_start()
+// Hold the crystal (HFXO) for as long as the mic runs. The PDM clock is divided from HFCLK; a bare HFCLKSTART
+// is undone whenever the BLE stack (MPSL) releases its own request, and HFCLK falls back to the RC oscillator:
+// on battery (no USB holding HFXO) frames came ~1% fast, 36 s an hour off the frame-clock timestamps.
+static void hfxo_hold(void)
 {
-
-    // Hold the crystal (HFXO) for as long as the mic runs. The PDM clock is divided from HFCLK; a bare HFCLKSTART
-    // is undone whenever the BLE stack (MPSL) releases its own request, and HFCLK falls back to the RC oscillator:
-    // on battery (no USB holding HFXO) frames came ~1% fast, 36 s an hour off the frame-clock timestamps.
     static struct onoff_client hfxo;
     sys_notify_init_spinwait(&hfxo.notify);
     int err = onoff_request(z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_HF), &hfxo);
@@ -78,6 +77,11 @@ int mic_start()
     if (err < 0) {
         LOG_ERR("HFXO request failed: %d", err);
     }
+}
+
+int mic_start()
+{
+    hfxo_hold();
 
     // Configure PDM
     nrfx_pdm_config_t pdm_config = NRFX_PDM_DEFAULT_CONFIG(PDM_CLK_PIN, PDM_DIN_PIN);
@@ -122,3 +126,26 @@ void mic_on()
 {
     nrfy_gpio_pin_set(PDM_PWR_PIN);
 }
+
+#ifdef CONFIG_LR_POWER_DEBUG
+bool lr_debug_mic_off;
+
+/* Power tests: the PDM stopped, the mic's supply and the crystal it holds let go, and back */
+void mic_debug(bool on)
+{
+    if (on != lr_debug_mic_off) {
+        return;
+    }
+    lr_debug_mic_off = !on;
+    if (on) {
+        hfxo_hold();
+        nrfy_gpio_pin_set(PDM_PWR_PIN);
+        nrfx_pdm_start();
+    } else {
+        nrfx_pdm_stop();
+        k_msleep(20);  // the buffer under way ends (nrfx stops at its end)
+        nrfy_gpio_pin_clear(PDM_PWR_PIN);
+        onoff_release(z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_HF));
+    }
+}
+#endif

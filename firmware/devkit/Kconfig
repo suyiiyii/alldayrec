@@ -96,6 +96,10 @@ config LR_POWER_TRACE
     depends on LR_BATTERY_VDDH || LR_BATTERY_AIN0
     default n
 
+config LR_POWER_DEBUG
+    bool "Power tests only, never in a release: CTRL 0x30 turns the mic, the codec, the card, the LED, advertising and the link's parameters on and off one by one, and drops the link for a while (lr_store.c)"
+    default n
+
 config LR_ONE_LED
     bool "One LED (the ProMicro's P0.15, led2): the status as short flashes (led_code.h) instead of the XIAO's RGB"
     default n
