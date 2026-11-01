@@ -27,6 +27,7 @@ export function useSocket(onMessage: (m: any) => void, onResync: () => void) {
     };
     ws.onmessage = (e) => {
       last = Date.now();
+      if (typeof e.data !== "string") return; // a device's answer read aloud (binary audio): not for pages
       onMessage(JSON.parse(e.data));
     };
     const current = ws;

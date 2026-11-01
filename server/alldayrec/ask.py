@@ -18,6 +18,7 @@ from alldayrec import db
 from alldayrec import local_asr
 from alldayrec import summary
 from alldayrec import threads
+from alldayrec import tts
 from alldayrec import ws
 from alldayrec.core import iso
 from alldayrec.tenant import T
@@ -301,11 +302,12 @@ async def heard(device: str, lo: dt.datetime, hi: dt.datetime) -> str:
 async def live(device: str, id: str, lo: dt.datetime, hi: dt.datetime):
     """A question said to the device between lo and hi, answered on /ws: {type: ask, device, id} with stage heard (q),
     searching, the answer's deltas, then stage done (answer) or error (error). Nothing kept."""
-    t0, first = time.monotonic(), None
+    t0, first, say = time.monotonic(), None, tts.Speech(device, id)
     async def send(m: dict):
         nonlocal first
         if "delta" in m and first is None:
             first = time.monotonic() - t0
+        say.feed(m)
         await ws.broadcast({"type": "ask", "device": device, "id": id, **m})
     try:
         q = await heard(device, lo, hi)

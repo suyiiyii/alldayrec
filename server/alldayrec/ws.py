@@ -10,10 +10,10 @@ from alldayrec.tenant import T
 router = APIRouter()
 
 
-async def broadcast(msg: dict):
+async def broadcast(msg: dict | bytes):
     for ws in list(T().clients):
         try:
-            await ws.send_json(msg)
+            await (ws.send_bytes(msg) if isinstance(msg, bytes) else ws.send_json(msg))
         except Exception:
             T().clients.discard(ws)
 
