@@ -115,8 +115,9 @@ class Speech:
                             await self.send(self.id.encode() + b"\n" + frame)
                             ahead = max(ahead, time.monotonic()) + len(frame) / (2 * SR)
                             sent_s += len(frame) / (2 * SR)
-                        if done:
-                            return
+                        if done:  # spoken now: closing the TTS's socket can take seconds
+                            started = False
+                            return await self.send({"stage": "spoken"})
 
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(play)
@@ -130,5 +131,5 @@ class Speech:
         finally:
             self.on = False
             self.rx.close()
-            if started:
+            if started:  # broke off
                 await self.send({"stage": "spoken"})
