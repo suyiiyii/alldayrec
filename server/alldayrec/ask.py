@@ -207,7 +207,7 @@ async def call(msgs: list[dict], **extra) -> dict:
 
 # a question said to a device: its first word is due within 3 s, and a round of tools costs 1-2 s more (11-01: DeepSeek
 # without the second line looked things up for 11 of 12 recent questions, the digest had them all)
-VOICE = ("\n这是在设备上用语音问的：回答很短，两三句话，要显示在 240×240 的小屏上。"
+VOICE = ("\n这是在设备上用语音问的：答案 60 字以内，要显示在 240×240 的小屏上。"
          "语音问答要快：上面的摘要能回答的就直接回答，不调用工具；摘要里确实没有、或者问的是更早的事时才调用工具。"
          "要调用工具时，先用一句很短的话告诉我你要查什么（比如「我查一下上个月的记录」），再调用工具。")
 CITE = ("上面的回答没有用 [对话 id] 标出处。内容不变，在结论后面标上出处，id 只用前面资料和工具结果里出现过的；"
