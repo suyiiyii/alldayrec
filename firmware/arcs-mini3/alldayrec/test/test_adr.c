@@ -254,7 +254,24 @@ static void test_ask(void)
     assert(!s_flush && !s_cur);
     assert(xQueueReceive(s_full, &c, 0) && c->n == 356 && c->start_ms == t0 + 16);
     assert(s_next_ms == t0 + 16 + 356 * 1000 / 16000);
+    chunk_t *flushed = c;
     assert(xQueueReceive(s_full, &c, 0) && c == queued);
+
+    /* then 1.5 s of 0.5 s pieces, back to back, so the last words reach the live ASR; then full pieces again */
+    xQueueSend(s_free, &flushed, 0);
+    xQueueSend(s_free, &queued, 0);
+    int64_t next = 0;
+    for (int k = 0; k < TAIL_PIECES + 1; k++) {
+        while (!uxQueueMessagesWaiting(s_full)) {
+            fake_now_ms += 16;
+            adr_tap(&ev);
+        }
+        assert(xQueueReceive(s_full, &c, 0) && c->n == (k < TAIL_PIECES ? TAIL_SAMPLES : 32000));
+        assert(!next || c->start_ms == next);
+        next = c->start_ms + c->n * 1000 / 16000;
+        xQueueSend(s_free, &c, 0);
+    }
+    assert(!s_tail);
 
     /* /ws: another device's and an earlier question's messages are not ours */
     strcpy(s_ask_prev, "old");
