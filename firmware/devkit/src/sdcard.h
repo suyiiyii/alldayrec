@@ -24,6 +24,8 @@ void sd_lines_release(void);
 /* The card's supply off (unmounted first), its lines let go and kept as they were for mount_sd_card_reset, which powers
  * it on again; nothing on a board that cannot switch it */
 void sd_power_off(void);
+/* Power tests (CONFIG_LR_POWER_DEBUG): CS high and 16 clocks, the card deselected the way the spec ends a transaction */
+void sd_idle_clocks(void);
 
 void sd_on();
 void sd_off();

@@ -353,6 +353,41 @@ static bool card_due(int64_t wrote_at)
     return RING - ring_used() < 3 * (BATCH + 512) || k_uptime_get() - wrote_at >= CARD_EVERY_MS;
 }
 
+#ifdef CONFIG_LR_POWER_DEBUG
+/* Power tests, CTRL 0x30 sub 8 (below): the card written every debug_write_s s, as far as the ring holds (a batch's
+ * room kept), and after each write: debug_after bit 0, CS high and 16 clocks; bit 1, the file closed; bit 2, the card
+ * unmounted and its supply off until the next write (card_up) */
+static uint16_t debug_write_s;
+static uint8_t debug_after;
+static int64_t debug_wrote_at;
+
+static void debug_drain(void)
+{
+    int64_t now = k_uptime_get();
+    if (phone_mode || !ring_used() ||
+        (now - debug_wrote_at < debug_write_s * 1000 && RING - ring_used() > sizeof(pend) + 2 * sizeof(struct card_rec))) {
+        return;
+    }
+    if (card_up()) {
+        return;
+    }
+    card_drain();
+    debug_wrote_at = now;
+    if (debug_after & 2) {
+        close_segment();
+    }
+    if (debug_after & 1) {
+        sd_idle_clocks();
+    }
+    if (debug_after & 4 && !store_err) {
+        close_segment();
+        unmount_sd_card();
+        sd_power_off();
+        card_off = true;
+    }
+}
+#endif
+
 static void card_thread(void)
 {
     int64_t wrote_at = 0;
@@ -360,10 +395,14 @@ static void card_thread(void)
         // once a second too: the 10 s; phone mode's link, ACKs and the card's idle time
         k_sem_take(&card_sem, K_SECONDS(1));
         k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+#ifdef CONFIG_LR_POWER_DEBUG
+        debug_drain();
+#else
         if (card_due(wrote_at)) {
             card_drain();
             wrote_at = k_uptime_get();
         }
+#endif
         phone_step();
         k_mutex_unlock(&write_sdcard_mutex);
     }
@@ -1152,7 +1191,9 @@ static void phone_step(void)
  *   5 advertising while connected or held every a ms (0: as released; 0xFFFF: none)
  *   6 link parameters asked of the central: interval a..b x 1.25 ms, latency c, timeout d x 10 ms
  *   7 hold a s: the link dropped, scannable only (5) for a seconds, then connectable again (the reply comes first)
+ *   8 card writes: every a s (0: each batch, as released), b after each (debug_drain); the card on (3) first
  * -> 0xB0 sub:u8 err:i8 on:u8 (bit 0 mic, 1 codec, 2 card, 3 LED; 4 phone mode, 5 the card's supply off) adv_ms:u16 interval:u16 latency:u16 timeout:u16
+ *    write_s:u16 after:u8 (8)
  *    (the link's now: an update asked for lands a few connection events later). Phone mode as a phone has it: follow
  *    LIVE and ACK it (lr_store.h). */
 extern bool lr_debug_mic_off, lr_debug_codec_off, lr_debug_led_off;
@@ -1219,16 +1260,24 @@ static void debug(struct bt_conn *conn, uint8_t sub, uint16_t a, uint16_t b, uin
     case 6:
         err = bt_conn_le_param_update(conn, BT_LE_CONN_PARAM(a, b, c, d));
         break;
+    case 8:
+        k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+        debug_write_s = a;
+        debug_after = b;
+        k_mutex_unlock(&write_sdcard_mutex);
+        break;
     }
     struct bt_conn_info info = {0};
     bt_conn_get_info(conn, &info);
-    uint8_t v[12] = {0xB0, sub, (uint8_t) err,
+    uint8_t v[15] = {0xB0, sub, (uint8_t) err,
                      (!lr_debug_mic_off) | (!lr_debug_codec_off) << 1 | (!debug_card_off) << 2 | (!lr_debug_led_off) << 3 |
                          phone_mode << 4 | (card_off || debug_card_off) << 5};
     sys_put_le16(lr_debug_adv_ms, v + 4);
     sys_put_le16(info.le.interval, v + 6);
     sys_put_le16(info.le.latency, v + 8);
     sys_put_le16(info.le.timeout, v + 10);
+    sys_put_le16(debug_write_s, v + 12);
+    v[14] = debug_after;
     notify(conn, CTRL_ATTR, v, sizeof(v));
     if (sub == 7) {
         k_msleep(200);  // the reply out before the link goes
