@@ -23,8 +23,10 @@
 #include "log_upload.h"
 #endif
 
+#include "app_player.h"
 #include "app_wakeup.h"
 #include "service_power_policy.h"
+#include "voice_player_comm.h"
 #include "adr.h"
 
 #define TAG "adr"
@@ -39,6 +41,8 @@
 #define WATCH_EVERY_MS 20000     /* the server keeps drafts and live summaries going 60 s after a watch */
 #define WS_MSG_MAX (32 * 1024)   /* a 5-minute final can be tens of KB; the next push brings the lines back */
 #define TIME_VALID_MS 1767225600000LL /* 2026-01-01: before SNTP the clock says 1970 */
+#define SAY_BYTES (3 * SR * 2)  /* the answer's audio not played yet: 3 s (the server sends at most 1 s ahead) */
+#define SAY_QUIET_MS 3000       /* no audio for this long while speaking: the server is gone, stop */
 
 typedef struct {
     int64_t start_ms;
@@ -79,7 +83,16 @@ static int64_t s_down_ms, s_end_ms;  /* clock time of the press and of the relea
 static char s_ask_id[48] ADR_PSRAM, s_ask_prev[48] ADR_PSRAM;
 static char s_ask_raw[2 * ADR_ANSWER_BYTES] ADR_PSRAM; /* the answer as streamed, sources and all */
 static char s_ask_headers[160] ADR_PSRAM;
-static int32_t s_lat_post = -1, s_lat_heard = -1, s_lat_delta = -1; /* ms from the release, -1: not yet */
+static int32_t s_lat_post = -1, s_lat_heard = -1, s_lat_delta = -1, s_lat_say = -1; /* ms from the release, -1: not yet */
+
+/* the answer read aloud: /ws brings stage "speak", binary frames "<id>\n<PCM>", stage "spoken"; say_task plays them */
+enum { SAY_IDLE, SAY_ON, SAY_END };
+static volatile uint8_t s_say;               /* set under s_lock */
+static volatile bool s_say_stop, s_say_lost; /* a new question; the vendor's audio took the speaker */
+static volatile bool s_mute;                 /* the device is speaking: mic1 goes up as zeros */
+static uint8_t *s_say_buf;                   /* SAY_BYTES, from the heap: static PSRAM is full */
+static uint32_t s_say_head, s_say_len, s_say_drop; /* under s_lock; drop: bytes */
+static QueueHandle_t s_sayq;
 
 static int64_t now_ms(void)
 {
@@ -98,6 +111,7 @@ static void adr_tap(const void *event)
         return;
     }
     const int16_t *in = ev->record_buffer; /* interleaved: mic1 (voice), mic2 (echo reference) */
+    int16_t keep = s_mute ? 0 : -1;        /* speaking: its own voice is not recorded */
     uint32_t n = ev->record_samples / 2;   /* it counts both channels: 512 for a 256-frame buffer (measured) */
     int64_t now = now_ms(), t = now;
     if (t < TIME_VALID_MS) {
@@ -126,7 +140,7 @@ static void adr_tap(const void *event)
         int16_t *pcm = (int16_t *)(s_cur->body + WAV_HDR);
         uint32_t size = s_tail ? TAIL_SAMPLES : s_cfg.chunk_samples;
         while (i < n && s_cur->n < size) {
-            pcm[s_cur->n++] = in[2 * i++];
+            pcm[s_cur->n++] = in[2 * i++] & keep;
         }
         if (s_cur->n == size) {
             s_next_ms = s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR;
@@ -454,6 +468,140 @@ static void strip_cites(char *s)
     *w = 0;
 }
 
+static int32_t since_end(void);
+
+/* stage "speak" of this question: play what follows (under s_lock) */
+static void say_start(void)
+{
+    if (s_say != SAY_IDLE) { /* ponytail: the last answer is still being stopped (a new question); this one stays silent */
+        return;
+    }
+    s_say_head = s_say_len = 0;
+    s_say_stop = false;
+    s_say = SAY_ON;
+    xQueueSend(s_sayq, &s_say_buf, 0); /* a wake-up */
+}
+
+/* a binary frame "<id>\n<PCM>": this question's audio into the ring, whole frames only (under s_lock) */
+static void say_frame(const uint8_t *p, uint32_t len)
+{
+    size_t idlen = strlen(s_ask_id);
+
+    if (s_say != SAY_ON || !idlen || len <= idlen || p[idlen] != '\n' || memcmp(p, s_ask_id, idlen) != 0) {
+        return;
+    }
+    p += idlen + 1, len -= idlen + 1;
+    if (len > SAY_BYTES - s_say_len) {
+        s_say_drop += len;
+        return;
+    }
+    if (s_lat_say < 0) {
+        s_lat_say = since_end();
+    }
+    for (uint32_t k = 0, at = (s_say_head + s_say_len) % SAY_BYTES; k < len; k++, at = at + 1 == SAY_BYTES ? 0 : at + 1) {
+        s_say_buf[at] = p[k];
+    }
+    s_say_len += len;
+}
+
+static uint32_t say_take(uint8_t *dst, uint32_t cap)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    uint32_t n = s_say_len < cap ? s_say_len : cap;
+    for (uint32_t k = 0; k < n; k++) {
+        dst[k] = s_say_buf[(s_say_head + k) % SAY_BYTES];
+    }
+    s_say_head = (s_say_head + n) % SAY_BYTES;
+    s_say_len -= n;
+    xSemaphoreGive(s_lock);
+    return n;
+}
+
+#ifdef CONFIG_APP_PLAYER_AUDIO_FOCUS
+static bool say_focus(app_player_t *player, app_player_focus_state_t state, app_player_t *by, void *data)
+{
+    (void)data;
+    if (by != player && state != APP_PLAYER_FOCUS_FOREGROUND) {
+        s_say_lost = true; /* stream mode has no stop(): say_task finishes it */
+        return true;
+    }
+    return false;
+}
+#endif
+
+static bool say_busy(void)
+{
+    app_player_state_t st = app_player_get_state(miniapp_player);
+    return st == APP_PLAYER_STATE_PREPARING || st == APP_PLAYER_STATE_PREPARED || st == APP_PLAYER_STATE_PLAYING ||
+           st == APP_PLAYER_STATE_PAUSED;
+}
+
+/* Plays the answer on the miniapp player's PCM stream (the vendor's synth does the same; it yields to the vendor's
+ * tone and TTS players), mic1 muted until the speaker is quiet again. */
+static void say_task(void *arg)
+{
+    static uint8_t pcm[1024] ADR_PSRAM;
+    uint8_t *wake;
+
+    (void)arg;
+    for (;;) {
+        xQueueReceive(s_sayq, &wake, portMAX_DELAY);
+        if (s_say == SAY_IDLE) {
+            continue;
+        }
+        s_say_lost = false;
+#ifdef CONFIG_APP_PLAYER_AUDIO_FOCUS
+        app_player_register_focus_cb(miniapp_player, say_focus, NULL);
+#endif
+        app_player_set_decode_prepared_count(miniapp_player, 1);
+        app_player_set_readstream_buf_size(miniapp_player, 4096);
+        int r = app_player_play_stream(miniapp_player, SR, 1, 16);
+        bool open = r == APP_PLAYER_OK;
+        s_mute = open;
+        TickType_t heard = xTaskGetTickCount();
+        while (r == APP_PLAYER_OK && !s_say_stop && !s_say_lost) {
+            uint32_t n = say_take(pcm, sizeof(pcm));
+            if (!n) {
+                if (s_say == SAY_END || xTaskGetTickCount() - heard > pdMS_TO_TICKS(SAY_QUIET_MS)) {
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            heard = xTaskGetTickCount();
+            for (uint32_t off = 0; off < n && !s_say_stop && !s_say_lost;) {
+                int w = app_player_write_stream(miniapp_player, pcm + off, n - off, 100);
+                if (w < 0 || (w == 0 && xTaskGetTickCount() - heard > pdMS_TO_TICKS(1000))) {
+                    r = APP_PLAYER_ERR_IO;
+                    break;
+                }
+                if (w > 0) {
+                    off += w, heard = xTaskGetTickCount();
+                } else {
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                }
+            }
+        }
+        if (open) {
+            app_player_finish_stream(miniapp_player);
+            for (TickType_t t0 = xTaskGetTickCount(); !s_say_stop && !s_say_lost && say_busy() &&
+                                                      xTaskGetTickCount() - t0 < pdMS_TO_TICKS(SAY_BYTES * 1000 / (SR * 2) + 2000);) {
+                vTaskDelay(pdMS_TO_TICKS(20)); /* the player's own buffer plays out */
+            }
+            if (say_busy()) {
+                app_player_stop(miniapp_player);
+            }
+            app_player_reset(miniapp_player);
+        }
+        s_mute = false;
+        LISA_LOGI(TAG, "said: play=%d stop=%d lost=%d dropped=%lu", r, s_say_stop, s_say_lost, (unsigned long)s_say_drop);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        s_say = SAY_IDLE;
+        s_say_len = 0;
+        xSemaphoreGive(s_lock);
+    }
+}
+
 static int32_t since_end(void)
 {
     return (int32_t)(now_ms() - s_end_ms);
@@ -508,11 +656,21 @@ static void ask_msg(const cJSON *m)
     } else if (strcmp(stage, "error") == 0) {
         const char *e = jstr(m, "error");
         ask_fail(e && *e ? e : "出错了");
+    } else if (strcmp(stage, "speak") == 0) {
+        say_start();
+    } else if (strcmp(stage, "spoken") == 0 && s_say == SAY_ON) {
+        s_say = SAY_END;
     }
 }
 
 static void ws_data(lisa_ws_data_t *d)
 {
+    if (d->type == LISA_WS_BIN) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        say_frame(d->buf, d->len);
+        xSemaphoreGive(s_lock);
+        return;
+    }
     if (d->type != LISA_WS_TEXT || !d->len) {
         return;
     }
@@ -665,6 +823,8 @@ static void ask_begin(int64_t down_ms)
     }
     s_ask_id[0] = s_ask_raw[0] = s_m.q[0] = s_m.answer[0] = 0;
     s_m.ask = ADR_ASK_LISTEN;
+    s_say_stop = true; /* the last answer stops talking: the question is recorded */
+    s_mute = false;
     if (s_m.tab != 3) {
         s_m.ask_back = s_m.tab;
         s_m.tab = 3;
@@ -681,7 +841,7 @@ static void ask_end(void)
     s_flush = true;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_end_ms = now_ms();
-    s_lat_post = s_lat_heard = s_lat_delta = -1;
+    s_lat_post = s_lat_heard = s_lat_delta = s_lat_say = -1;
     s_req.end_ms = s_end_ms + s_skew_ms;
     s_req.gen = ++s_ask_gen;
     s_m.ask = ADR_ASK_SENT;
@@ -838,9 +998,11 @@ static int adr_cmd(int argc, char **argv)
                (unsigned long)s_tap_calls, (unsigned long)s_tap_frames, (unsigned long)s_tap_n,
                (unsigned long)s_tap_echo, (unsigned long)span,
                (unsigned long)(span > 0 ? (uint64_t)s_tap_frames * 1000 / (uint64_t)span : 0));
-    shellPrint(shellGetCurrent(), "ask: stage=%u release->post=%ldms heard=%ldms first-delta=%ldms q=%u answer=%u\r\n",
-               m->ask, (long)s_lat_post, (long)s_lat_heard, (long)s_lat_delta, (unsigned)strlen(m->q),
+    shellPrint(shellGetCurrent(), "ask: stage=%u release->post=%ldms heard=%ldms first-delta=%ldms first-audio=%ldms q=%u answer=%u\r\n",
+               m->ask, (long)s_lat_post, (long)s_lat_heard, (long)s_lat_delta, (long)s_lat_say, (unsigned)strlen(m->q),
                (unsigned)strlen(m->answer));
+    shellPrint(shellGetCurrent(), "say: state=%u mute=%u buffered=%lums dropped=%lums\r\n", s_say, s_mute,
+               (unsigned long)(s_say_len / 32), (unsigned long)(s_say_drop / 32));
     lisa_mem_free(m);
     return 0;
 }
@@ -895,7 +1057,9 @@ int adr_init(void)
     s_free = xQueueCreate(count, sizeof(chunk_t *));
     s_full = xQueueCreate(count, sizeof(chunk_t *));
     s_askq = xQueueCreate(2, sizeof(ask_req_t *));
-    if (!s_lock || !s_free || !s_full || !s_askq) {
+    s_sayq = xQueueCreate(1, sizeof(uint8_t *));
+    s_say_buf = lisa_mem_alloc(SAY_BYTES);
+    if (!s_lock || !s_free || !s_full || !s_askq || !s_sayq || !s_say_buf) {
         return -1;
     }
     for (uint32_t i = 0; i < count; i++) {
@@ -910,8 +1074,9 @@ int adr_init(void)
     lisa_thread_attr_t up = {.name = (uint8_t *)"adr_up", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
     lisa_thread_attr_t wsa = {.name = (uint8_t *)"adr_ws", .stack_size = 4096, .priority = LISA_OS_PRIORITY_LOW};
     lisa_thread_attr_t aska = {.name = (uint8_t *)"adr_ask", .stack_size = 8192, .priority = LISA_OS_PRIORITY_LOW};
+    lisa_thread_attr_t saya = {.name = (uint8_t *)"adr_say", .stack_size = 4096, .priority = LISA_OS_PRIORITY_NORMAL};
     if (!lisa_thread_create(&up, upload_task, NULL) || !lisa_thread_create(&wsa, ws_task, NULL) ||
-        !lisa_thread_create(&aska, ask_task, NULL)) {
+        !lisa_thread_create(&aska, ask_task, NULL) || !lisa_thread_create(&saya, say_task, NULL)) {
         LISA_LOGE(TAG, "thread create failed");
         return -1;
     }

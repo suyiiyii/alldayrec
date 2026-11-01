@@ -7,6 +7,7 @@
 TickType_t fake_ticks;
 int64_t fake_now_ms;
 void (*app_wakeup_record_tap)(const void *event);
+app_player_t *miniapp_player;
 void adr_view_toggle(void) {}
 void adr_view_page(void) {}
 bool adr_view_visible(void) { return true; }
@@ -320,6 +321,85 @@ static void test_ask(void)
     s_on = false;
 }
 
+static void bin(const char *id, const int16_t *pcm, uint32_t n)
+{
+    static uint8_t b[64 + 4000];
+    size_t l = strlen(id);
+    memcpy(b, id, l), b[l] = '\n', memcpy(b + l + 1, pcm, n * 2);
+    lisa_ws_data_t d = {.type = LISA_WS_BIN, .buf = b, .len = l + 1 + n * 2};
+    ws_data(&d);
+}
+
+static void test_say(void)
+{
+    static int16_t pcm[1600], frame[2 * 256];
+    static uint8_t got[SAY_BYTES];
+    lisa_audio_event_t ev = {.record_buffer = frame, .record_samples = 2 * 256};
+    chunk_t *c;
+
+    for (int i = 0; i < 1600; i++) pcm[i] = (int16_t)(i * 7 + 1);
+    strcpy(s_cfg.device, "arcs-mini3");
+    s_sayq = xQueueCreate(1, sizeof(uint8_t *));
+    s_say_buf = malloc(SAY_BYTES);
+    s_m.ask = ADR_ASK_ANSWER, s_say = SAY_IDLE;
+    strcpy(s_ask_id, "q9");
+    fake_now_ms = 1767225600000LL + 100000, s_end_ms = fake_now_ms - 1500;
+
+    /* audio frames: only after this question's "speak", only this question's id */
+    bin("q9", pcm, 1600);
+    assert(s_say_len == 0);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q8\",\"stage\":\"speak\"}");
+    assert(s_say == SAY_IDLE);
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q9\",\"stage\":\"speak\"}");
+    assert(s_say == SAY_ON && uxQueueMessagesWaiting(s_sayq) == 1);
+    bin("q8", pcm, 1600);
+    bin("q99", pcm, 1600);
+    bin("", pcm, 1600);
+    assert(s_say_len == 0 && s_lat_say < 0);
+    bin("q9", pcm, 1600);
+    bin("q9", pcm + 800, 800);
+    assert(s_say_len == 4800 && s_lat_say == 1500);
+    assert(say_take(got, 3000) == 3000 && memcmp(got, pcm, 3000) == 0);
+    assert(say_take(got, sizeof(got)) == 1800 && memcmp(got, (uint8_t *)pcm + 3000, 200) == 0 &&
+           memcmp(got + 200, pcm + 800, 1600) == 0);
+
+    /* full: whole frames dropped, never half; the ring wraps */
+    for (int i = 0; i < SAY_BYTES / 3200 + 1; i++) bin("q9", pcm, 1600);
+    assert(s_say_len == SAY_BYTES && s_say_drop == 3200);
+    say_take(got, 1000);
+    bin("q9", pcm, 1600);
+    assert(s_say_len == SAY_BYTES - 1000 && s_say_drop == 6400);
+    say_take(got, 3000);
+    bin("q9", pcm, 1600);
+    assert(say_take(got, sizeof(got)) == SAY_BYTES - 800 && memcmp(got + SAY_BYTES - 800 - 3200, pcm, 3200) == 0);
+
+    ws("{\"type\":\"ask\",\"device\":\"arcs-mini3\",\"id\":\"q9\",\"stage\":\"spoken\"}");
+    assert(s_say == SAY_END);
+
+    /* speaking: mic1 goes up as zeros, the piece's timeline as ever */
+    for (int i = 0; i < 256; i++) frame[2 * i] = (int16_t)(i + 1), frame[2 * i + 1] = 5;
+    s_cfg.chunk_samples = 256;
+    s_free = xQueueCreate(2, sizeof(chunk_t *));
+    s_full = xQueueCreate(2, sizeof(chunk_t *));
+    c = malloc(sizeof(chunk_t) + WAV_HDR + 256 * 2);
+    xQueueSend(s_free, &c, 0);
+    s_cur = NULL, s_next_ms = 0, s_tail = 0, s_flush = false;
+    s_mute = true;
+    adr_tap(&ev);
+    assert(xQueueReceive(s_full, &c, 0) && c->n == 256);
+    for (int i = 0; i < 256; i++) assert(((int16_t *)(c->body + WAV_HDR))[i] == 0);
+    xQueueSend(s_free, &c, 0);
+
+    /* the next question: the answer stops, the mic is back at once */
+    s_on = true;
+    adr_key(VOICE_MSG_BUTTON_ACTION_PRESS_DOWN);
+    adr_key(VOICE_MSG_BUTTON_ACTION_SHORT_START);
+    assert(s_say_stop && !s_mute);
+    adr_tap(&ev);
+    assert(xQueueReceive(s_full, &c, 0) && ((int16_t *)(c->body + WAV_HDR))[255] == 256);
+    s_on = false;
+}
+
 int main(void)
 {
     test_text();
@@ -328,6 +408,7 @@ int main(void)
     test_tap();
     test_cites();
     test_ask();
+    test_say();
     puts("adr: all checks passed");
     return 0;
 }

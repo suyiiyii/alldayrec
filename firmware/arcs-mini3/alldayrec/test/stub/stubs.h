@@ -55,6 +55,7 @@ static inline int lisa_kv_get_int(const char *k, int *v) { (void)k; (void)v; ret
 static inline void lisa_kv_free(void *v) { free(v); }
 typedef struct { uint8_t *name; uint32_t stack_size, priority; } lisa_thread_attr_t;
 #define LISA_OS_PRIORITY_LOW 1
+#define LISA_OS_PRIORITY_NORMAL 3
 static inline void *lisa_thread_create(const lisa_thread_attr_t *a, void (*f)(void *), void *arg) { (void)a; (void)f; (void)arg; return NULL; }
 
 typedef enum { LISA_HTTP_OK = 0, LISA_HTTP_COMMON_ERR } lisa_http_err_e;
