@@ -33,6 +33,8 @@
 #define SR 16000
 #define POOL_MS 12000            /* audio kept while the server is out of reach (12 s = 384 KB of the ~1.8 MB free heap); then frames drop */
 #define WAV_HDR 44
+#define TAIL_PIECES 3            /* after a question: 1.5 s of 0.5 s pieces, so the live ASR gets the audio after the last word */
+#define TAIL_SAMPLES (SR / 2)
 #define SEND_SLICE 4096          /* <= CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN: HTTPIntrnSend resends from the start on a short TLS write */
 #define WATCH_EVERY_MS 20000     /* the server keeps drafts and live summaries going 60 s after a watch */
 #define WS_MSG_MAX (32 * 1024)   /* a 5-minute final can be tens of KB; the next push brings the lines back */
@@ -63,6 +65,7 @@ static uint32_t s_tap_calls, s_tap_frames, s_tap_n, s_tap_echo; /* what the audi
 static int64_t s_tap_t0;
 static volatile int32_t s_skew_ms;  /* the pieces' timeline minus the clock: ask times go on the pieces' timeline */
 static volatile bool s_flush;        /* hand the piece being filled to the uploader now, however short */
+static uint32_t s_tail;              /* short pieces still to go after a flush (audio callback only) */
 
 /* a question asked by holding the key on the AllDayRec page */
 typedef struct {
@@ -121,13 +124,17 @@ static void adr_tap(const void *event)
             s_cur->n = 0;
         }
         int16_t *pcm = (int16_t *)(s_cur->body + WAV_HDR);
-        while (i < n && s_cur->n < s_cfg.chunk_samples) {
+        uint32_t size = s_tail ? TAIL_SAMPLES : s_cfg.chunk_samples;
+        while (i < n && s_cur->n < size) {
             pcm[s_cur->n++] = in[2 * i++];
         }
-        if (s_cur->n == s_cfg.chunk_samples) {
+        if (s_cur->n == size) {
             s_next_ms = s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR;
             xQueueSend(s_full, &s_cur, 0);
             s_cur = NULL;
+            if (s_tail) {
+                s_tail--;
+            }
         }
     }
     if (s_cur) {
@@ -135,6 +142,7 @@ static void adr_tap(const void *event)
     }
     if (s_flush) { /* a question just ended: its last words go out now, ahead of any backlog */
         s_flush = false;
+        s_tail = TAIL_PIECES;
         if (s_cur && s_cur->n) {
             s_next_ms = s_cur->start_ms + (int64_t)s_cur->n * 1000 / SR;
             xQueueSendToFront(s_full, &s_cur, 0);
