@@ -176,3 +176,16 @@ index 65b4a9ff..9f6e2c5b 100644
  bool app_wakeup_is_available(void);
  
  #ifdef CONFIG_BOARD_ARCS_MINI
+diff --git a/arcs-sdk/soc/arcs/hal/chip/arcs/include/net/lwipopts.h b/arcs-sdk/soc/arcs/hal/chip/arcs/include/net/lwipopts.h
+index ad13cf28..1548b688 100644
+--- a/arcs-sdk/soc/arcs/hal/chip/arcs/include/net/lwipopts.h
++++ b/arcs-sdk/soc/arcs/hal/chip/arcs/include/net/lwipopts.h
+@@ -111,7 +111,7 @@ extern uint16_t net_ip_chksum(const void *dataptr, int len);
+ 
+ #define MAC_RXQ_DEPTH                 8
+ #define MAC_TXQ_DEPTH                 8
+-#define TCP_MSS                       1460
++#define TCP_MSS                       1360  /* alldayrec: paths with MTU < 1500 drop full segments, lwIP has no PMTU discovery */
+ #ifdef CFG_SHORT_TCP_WND
+ #define TCP_WND                       (12 * TCP_MSS)
+ #elif defined(CONFIG_LWIP_TCP_WND_MSS_MULTIPLIER)
