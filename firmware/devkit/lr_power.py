@@ -20,11 +20,13 @@ from datetime import datetime, timedelta
 
 U = lambda n: f"7c3e{n:04x}-1a2b-4c5d-8e9f-6c6976657265"
 TIME, CTRL, LIVE = U(1), U(2), U(4)
-MIC, CODEC, CARD, LED, ADV, PARAM, HOLD = range(1, 8)
+MIC, CODEC, CARD, LED, ADV, PARAM, HOLD, WRITES = range(1, 9)
+CLOCKS, CLOSE, CARD_OFF = 1, 2, 4  # after each card write (WRITES b)
 NO_ADV = 0xFFFF
 SLOW = (24, 36, 0, 400)  # the released firmware's slow link (prj conf BT_PERIPHERAL_PREF_*): 30-45 ms
 # name, what is on (mic codec card led), adv_ms (0 as released), link: None = held (no link) / (min max lat timeout)
-# x 1.25 ms / 10 ms, live: follow LIVE and ACK (phone mode); what it says
+# x 1.25 ms / 10 ms, live: follow LIVE and ACK (phone mode); what it says; card writes (every s, after), as released
+# when left out
 STATES = [
     ("floor", (0, 0, 0, 0), NO_ADV, None, False, "everything off, no advertising: the chip, regulators, leaks"),
     ("adv", (0, 0, 0, 0), 0, None, False, "everything off, advertising as released with no phone (100-150 ms)"),
@@ -40,16 +42,26 @@ STATES = [
     ("phone_15", (1, 1, 1, 1), 0, (12, 12, 0, 400), True, "phone mode at 15 ms (the fastest a Mac grants)"),
     ("phone_45", (1, 1, 1, 1), 0, (36, 36, 0, 400), True, "phone mode at 45 ms (Android's slow end)"),
     ("phone_7_45", (1, 1, 1, 1), 0, (6, 36, 0, 400), True, "phone mode, 7.5-45 ms asked (Android's range): the Mac picks"),
+    # what the card costs after a write: written less often, and what each write ends with (debug_drain)
+    ("w1", (1, 1, 1, 0), 0, None, False, "card mode, written each batch (~1 s) as released", (0, 0)),
+    ("w5", (1, 1, 1, 0), 0, None, False, "card mode, written every 5 s", (5, 0)),
+    ("w15", (1, 1, 1, 0), 0, None, False, "card mode, written every 15 s (as the ring holds: ~9 s)", (15, 0)),
+    ("w1_clk", (1, 1, 1, 0), 0, None, False, "each batch, then CS high + 16 clocks", (0, CLOCKS)),
+    ("w15_clk", (1, 1, 1, 0), 0, None, False, "every 15 s, then CS high + 16 clocks", (15, CLOCKS)),
+    ("w1_close", (1, 1, 1, 0), 0, None, False, "each batch, then the file closed", (0, CLOSE)),
+    ("w15_close", (1, 1, 1, 0), 0, None, False, "every 15 s, then the file closed", (15, CLOSE)),
+    ("w15_off", (1, 1, 1, 0), 0, None, False, "every 15 s, then the card unmounted and off till the next", (15, CARD_OFF)),
 ]
 FIELDS = ["state", "start", "end", "link", "asked", "got_interval_ms", "latency", "timeout_ms", "on", "note"]
 
 
 def parse_status(d: bytes):
-    """0xB0 sub err on adv_ms interval latency timeout -> dict"""
+    """0xB0 sub err on adv_ms interval latency timeout [write_s after] -> dict"""
     _, sub, err, on, adv, iv, lat, to = struct.unpack("<BBbBHHHH", d[:12])
+    ws, after = struct.unpack("<HB", d[12:15]) if len(d) >= 15 else (0, 0)
     return dict(sub=sub, err=err, mic=on & 1, codec=on >> 1 & 1, card=on >> 2 & 1, led=on >> 3 & 1,
                 phone=on >> 4 & 1, card_unpowered=on >> 5 & 1, adv_ms=adv, interval_ms=iv * 1.25, latency=lat,
-                timeout_ms=to * 10)
+                timeout_ms=to * 10, write_s=ws, after=after)
 
 
 def cmd_bytes(sub, a=0, b=0, c=0, d=0):
@@ -111,11 +123,12 @@ class Rec:
             await self.c.disconnect()
 
 
-async def set_parts(r, on, adv):
+async def set_parts(r, on, adv, writes=(0, 0)):
     for sub, v in zip((MIC, CODEC, CARD, LED), on):
         st = await r.send(sub, v)
         if st["err"]:
             print(f"  sub {sub}={v}: err {st['err']}", flush=True)
+    await r.send(WRITES, *writes)
     return await r.send(ADV, adv)
 
 
@@ -128,10 +141,10 @@ async def run(name, out, secs, only):
     w = csv.DictWriter(fh, FIELDS)
     if fh.tell() == 0:
         w.writeheader()
-    for sname, on, adv, link, live, note in states:
+    for sname, on, adv, link, live, note, *writes in states:
         if not r.c.is_connected:
             await r.connect()
-        st = await set_parts(r, on, adv)
+        st = await set_parts(r, on, adv, *writes)
         row = dict(state=sname, on="".join("-MCKL"[i + 1] if v else "." for i, v in enumerate(on)), note=note)
         if link is None:
             st = await r.send(HOLD, secs)
@@ -233,6 +246,7 @@ def main():
 
 def selftest():
     d = bytes([0xB0, 6, 0xF4, 0b110101]) + struct.pack("<HHHH", NO_ADV, 24, 0, 400)
+    assert parse_status(d + struct.pack("<HB", 15, CLOCKS))["write_s"] == 15 and parse_status(d)["after"] == 0
     st = parse_status(d)
     assert (st["sub"], st["err"], st["mic"], st["codec"], st["card"], st["led"], st["phone"]) == (6, -12, 1, 0, 1, 0, 1)
     assert (st["interval_ms"], st["timeout_ms"], st["adv_ms"], st["card_unpowered"]) == (30, 4000, NO_ADV, 1)
