@@ -18,7 +18,7 @@ uv run firmware/selftest/selftest.py run SERIAL               # 跑全部检查�
 
 | 项目 | 怎么测 | 通过标准 |
 |---|---|---|
-| 芯片、UICR | 读 FICR（型号、变体、容量、DEVICEID）和 UICR（REGOUT0、PSELRESET、APPROTECT、NFCPINS） | 只记录 |
+| 芯片、UICR | 读 FICR（型号、变体、容量、DEVICEID，以及 DEVICEADDR 的低 16 位：刷上录音固件后蓝牙名 `LR-P3-XXXX` 的 XXXX，用来给板子编号）和 UICR（REGOUT0、PSELRESET、APPROTECT、NFCPINS） | 只记录 |
 | USB | 板子以 `LR selftest` 枚举，串口能收发 | 串口连得上、能应答 |
 | 32 MHz 晶振起振 | 内核启动前，重启 HFXO 并计时 | 5 ms 内起振（规格书远小于 1 ms） |
 | 32.768 kHz 晶振起振 | 内核启动前，把低频时钟切到晶振并计时；之后内核和射频都改用 RC，晶振坏了也不会卡死 | 1 s 内起振（典型 0.25 s） |

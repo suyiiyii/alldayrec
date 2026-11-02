@@ -156,7 +156,7 @@ def run(serial, clk_secs, json_out, p3=False, flip=20):
     info = res["info"] = b.cmd("info")
     row("chip", True, f"nRF{info['part']} {info['variant']} id {info['id']} RAM {info['ram_kb']} KB flash "
         f"{info['flash_kb']} KB; UICR REGOUT0 {info['regout0']} PSELRESET {info['pselreset']} APPROTECT "
-        f"{info['approtect']} NFCPINS {info['nfcpins']}; reset reason {info['resetreas']}")
+        f"{info['approtect']} NFCPINS {info['nfcpins']}; reset reason {info['resetreas']}; BLE name suffix {info['ble']}")
     row("USB", True, f"enumerated as {PRODUCT} {serial}, serial port {b.s.port}")
     row("32 MHz crystal start", info["hfxo_ok"] and info["hfxo_us"] < 5000, f"{info['hfxo_us']} us")
     lf_ok = info["lfxo_ok"] and info["lfxo_ms"] < 1000
