@@ -1,11 +1,12 @@
 // Host check of the record stream in src/lr_store.c: what a following phone gets (LIVE) and what the card gets are the
 // same bytes at the same file and offset, through batches, 'T' records, frame gaps and a card that stops taking writes;
-// the timing events (SD_WRITES, READ, READ_TIME) on a fake clock; LIVE behind a stalled link, a notify with no TX
-// buffer and a link lost with records queued; phone mode (a phone that acks takes the stream instead of the card: in,
-// a LIVE gap READ from RAM, the card off and on, a card READ longer than the card's idle time, out by ACK timeout, a
-// full ring, the link, LIVE unsubscribed, a quick reconnect and a restart, a new file just after LIVE lost the old
-// one's end, a card that does not power up, a reset's RAM written at the next boot), no frame lost. -DPHONE=0: the
-// other boards' store (no phone mode); -DCARD_OFF=0: phone mode with the card's supply left on.
+// when the card writer writes (card_due); the timing events (SD_WRITES, READ, READ_TIME) on a fake clock; LIVE behind a
+// stalled link, a notify with no TX buffer and a link lost with records queued; phone mode (a phone that acks takes the
+// stream instead of the card: in, a LIVE gap READ from RAM, the card off and on, a card READ longer than the card's
+// idle time, out by ACK timeout, a full ring, the link, LIVE unsubscribed, a quick reconnect and a restart, a new file
+// just after LIVE lost the old one's end, a card that does not power up, a reset's RAM written at the next boot), no
+// frame lost. -DPHONE=0: the other boards' store (no phone mode); -DCARD_OFF=0: phone mode with the card's supply left
+// on.
 //   d=$(mktemp -d) && mkdir -p $d/zephyr/{bluetooth,fs,sys,logging,drivers,random} && for h in bluetooth/conn \
 //   bluetooth/gatt bluetooth/uuid fs/fs kernel logging/log sys/byteorder sys/ring_buffer drivers/sensor random/random; do
 //   touch $d/zephyr/$h.h; done && for o in "" -DPHONE=0 -DCARD_OFF=0; do cc -O1 -w $o -I$d -o $d/store_check \
@@ -343,10 +344,14 @@ uint32_t transport_frame_no;
 uint32_t lr_sd_err[5];  // sdcard.h: the SD driver's failed tries
 #include "../src/lr_store.c"
 
+static int64_t wrote_at;  // the card writer's last write (card_thread's)
 static void tick(void)  // the card writer's turn: a batch, an ACK, or its second
 {
     k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
-    card_drain();
+    if (card_due(wrote_at)) {
+        card_drain();
+        wrote_at = k_uptime_get();
+    }
     phone_step();
     k_mutex_unlock(&write_sdcard_mutex);
 }
@@ -473,6 +478,17 @@ static void parse(const uint8_t *b, uint32_t n, int *a_frames, int *syncs)
     }
 }
 
+/* What a READ of the open file, a LIST or switching off does first: every finished record onto the card now */
+static void drain(void)
+{
+    k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+    k_mutex_lock(&stream_mtx, K_FOREVER);
+    flush();
+    k_mutex_unlock(&stream_mtx);
+    card_drain();
+    k_mutex_unlock(&write_sdcard_mutex);
+}
+
 int main(void)
 {
     assert(lr_store_init() == 0 && boot == BOOT_FLOOR && store_err == 0);  // a new card, the chip's first boot
@@ -481,13 +497,14 @@ int main(void)
     put_sync(950, 123);   // a phone's TIME
     frames(950, 50);
     frames(1100, 45);     // 100 frames lost on the way (a gap): a new record
-    write_out();          // a LIST or READ mid-record: what is finished goes to the card, the open record stays
+    write_out();          // a READ mid-record: what is finished goes to the card, the open record stays
+    card_drain();
     assert(card_len[0] == phone_len[0] && rec_count == 5);
     frames(1145, 55);
     // the card trails the stream by less than a batch; READ (or a reset) writes the rest
     assert(card_len[0] < phone_len[0] && phone_len[0] - card_len[0] < BATCH + 6 + REC_FRAMES * 256);
     assert(memcmp(card[0], phone[0], card_len[0]) == 0);
-    flush();
+    drain();
     assert(card_len[0] == phone_len[0] && memcmp(card[0], phone[0], card_len[0]) == 0 && seg_size == card_len[0]);
     int a = 0, t = 0;
     parse(card[0], card_len[0], &a, &t);
@@ -496,10 +513,12 @@ int main(void)
     // the card stops taking writes: the stream goes on in the same file, the card's copy stays its start
     uint32_t before = card_len[0];
     card_fail = -EIO;
-    frames(1200, 300);
+    frames(1200, 120);  // a batch
+    card_drain();       // the card writer's turn comes while it fails
+    frames(1320, 180);
     card_fail = 0;
     frames(1500, 200);
-    flush();
+    drain();
     assert(store_err == -EIO && card_len[0] == before && phone_len[0] > before && seg == 0);
     assert(memcmp(card[0], phone[0], card_len[0]) == 0);
 
@@ -525,7 +544,7 @@ int main(void)
     assert(retries == 10 && retry_every() == 5000);  // looked at every 5 s; counted on until it takes a write
     mounts = 0;
     frames(1700, 500);
-    flush();
+    drain();
     assert(retries == 0);
     assert(seg == 1 && card_len[1] == phone_len[1] && memcmp(card[1], phone[1], card_len[1]) == 0);
     a = t = 0;
@@ -540,7 +559,7 @@ int main(void)
     assert(done > 0);
     restart_segment();  // as lend(false) does
     frames(2543, 290);
-    flush();
+    drain();
     assert(seg == 2 && card_len[2] == phone_len[2] && memcmp(card[2], phone[2], card_len[2]) == 0);
 
     // the link stalls: LIVE's queue fills and the records after it are left out of LIVE, not out of the card;
@@ -557,7 +576,7 @@ int main(void)
     holes_ok = true;
     live_send();  // the link is back: what the queue holds goes out
     frames(3233, 100);
-    flush();
+    drain();
     assert(n_logged == 1 && logged[0].code == LR_LIVE_LOST && logged[0].a == lost && logged[0].b == lost_bytes);
     assert(live_lost == 0 && card_len[2] == phone_len[2] && seg == 2);  // the card has it all, the phone up to the end
     assert(memcmp(card[2], phone[2], from) == 0);
@@ -571,7 +590,7 @@ int main(void)
     uint32_t at = seg_size;
     live_nomem = 25;
     frames(3333, 50);
-    flush();
+    drain();
     assert(live_nomem == 0 && n_logged == 0 && card_len[2] == phone_len[2]);
     assert(memcmp(card[2] + at, phone[2] + at, card_len[2] - at) == 0);
 
@@ -589,7 +608,7 @@ int main(void)
     live_gone = -1;     // the phone is back
     holes_ok = true;
     frames(3414, 19);
-    flush();
+    drain();
     assert(n_logged == 1 && card_len[2] == phone_len[2]);  // LIVE goes on past the hole, the same bytes as the card
     assert(memcmp(card[2] + at + queued, phone[2] + at + queued, card_len[2] - at - queued) == 0);
     a = t = 0;
@@ -600,7 +619,7 @@ int main(void)
     // nobody follows: the card alone, same records
     subscribed = false;
     frames(3433, 100);
-    flush();
+    drain();
     assert(card_len[2] > phone_len[2]);
 
     // the card stalls: the stream does not wait for it. LIVE gets every record; the card the batches its queue
@@ -620,13 +639,39 @@ int main(void)
     uint32_t kept = card_len[sg];
     assert(kept >= RING / 2 && kept < phone_len[sg] && memcmp(card[sg], phone[sg], kept) == 0);
     frames(5533, 500);
-    flush();
+    drain();
     assert(seg == sg + 1 && card_len[sg] == kept && !card_behind);
     assert(card_len[seg] == phone_len[seg] && memcmp(card[seg], phone[seg], card_len[seg]) == 0);
     a = t = 0;
     parse(phone[sg], phone_len[sg], &a, &t);
     parse(phone[seg], phone_len[seg], &a, &t);
     assert(a == 2500 && t == 0);  // every frame went out by LIVE
+
+    // the card stays awake ~1.9 s after each write: the card writer waits until the queue has room for less than 3 more
+    // batches, or 10 s after its last write (card_due). 44 KB: 7 s of audio and nothing on the card, at the 8th batch
+    // all of it; a 16 KB queue (-DPHONE=0) each batch as it comes, as before
+    next_segment();
+    sg = seg;
+    wrote_at = now_ms;
+    for (int i = 0; i < 7; i++) {
+        seconds(1, false);
+        assert(card_len[sg] == (PHONE ? 0 : seg_size - done));
+    }
+    seconds(2, false);
+    uint32_t at9 = card_len[sg];
+    assert(at9 > 0 && at9 == seg_size - done && ring_used() == 0 && memcmp(card[sg], phone[sg], at9) == 0);
+    // paused (no batches come): the 10 s since the last write take what is queued
+    seconds(3, false);
+    uint32_t waiting = seg_size - done;
+    assert(PHONE ? card_len[sg] == at9 && ring_used() > 2 * BATCH : card_len[sg] == waiting);
+    while (now_ms + 1000 - wrote_at < CARD_EVERY_MS) {
+        now_ms += 1000;
+        tick();
+        assert(card_len[sg] == (PHONE ? at9 : waiting));
+    }
+    now_ms += 1000;
+    tick();
+    assert(card_len[sg] == waiting && ring_used() == 0 && memcmp(card[sg], phone[sg], waiting) == 0);
 
     // card appends over 10 minutes, one SD_WRITES: x over 200 ms, a total | slowest << 20, b <20 | 20-49 << 10 | 50-200 << 20
     memset(&wr, 0, sizeof(wr));
@@ -721,20 +766,20 @@ int main(void)
         n_logged = 0, sync_fail = -EIO;
         frames(rec_next, 300);
         sync_fail = 0;
-        flush();
+        drain();
         assert(store_err == -EIO && n_logged == 1 && logged[0].code == LR_APPEND_ERR && logged[0].x == 3);
         assert((int32_t) logged[0].a == -EIO && card_len[s0] == had + logged[0].b);  // the first batch, then nothing
         retry_card();
         assert(store_err == 0 && seg == s0 + 1);
         // a close that fails at a file's end, the same: said with the file's bytes, the card tried again
         frames(rec_next, 300);
-        flush();
+        drain();
         uint32_t len = card_len[seg];
         assert(len && card_at == len);
         next_segment();
         n_logged = 0, close_fail = -EIO;
         frames(rec_next, 300);
-        flush();  // the new file's first batch closes the old one
+        drain();  // the new file's first batch closes the old one
         close_fail = 0;
         assert(store_err == -EIO && n_logged == 1 && logged[0].code == LR_APPEND_ERR && logged[0].x == 3 && logged[0].b == len);
         assert(card_len[seg] == 0);  // nothing of the new file until the card is back
@@ -748,11 +793,11 @@ int main(void)
     {
         mounts = resets = mount_fails = 0;
         frames(rec_next, 50);
-        flush();
+        drain();
         assert(store_err == 0 && retries == 0);
         card_fail = -EIO;
         frames(rec_next, 50);
-        flush();
+        drain();
         assert(store_err == -EIO);
         int64_t every[10], want[10] = {5000, 5000, 5000, 5000, 5000, 5000, 60000, 60000, 60000, 600000};
         for (int i = 0; i < 10; i++) {
@@ -760,7 +805,7 @@ int main(void)
             retry_card();
             assert(store_err == 0 && retry_every() == 5000);  // mounted: reads work
             frames(rec_next, 50);
-            flush();
+            drain();
             assert(store_err == -EIO);  // the first write fails
             assert(mounts == MIN(i + 1, 6) && resets == MAX(i - 5, 0));
         }
@@ -769,7 +814,7 @@ int main(void)
         retry_card();
         assert(store_err == 0 && resets == 5 && retries == 11);
         frames(rec_next, 50);
-        flush();
+        drain();
         assert(store_err == 0 && retries == 0 && retry_every() == 5000 && card_len[seg] == phone_len[seg]);
     }
 
@@ -830,31 +875,46 @@ int main(void)
         } else {
             card_fail = -EIO;
             frames(rec_next, 50);
-            flush();
+            drain();
             assert(store_err == -EIO);
             card_fail = 0, made = 0;
             retry_card();
         }
         assert(store_err == 0);
         frames(rec_next, 50);
-        flush();
+        drain();
         assert(store_err == 0 && made == 7 && card_len[seg] == phone_len[seg]);
     }
-    // the card stuck in a write with batches queued behind it, then the write fails (BDAE 10-09): the file's batches
-    // after it leave the queue with it, the card's copy stays the file's start. Back, the card goes on in a new segment
+    // the card stuck in a write with batches queued behind it, then the write fails (BDAE 10-09): the card's copy stays
+    // the file's start; the batches queued after it go in a new file, the stream on in it (LIVE from there, the phone
+    // READs the rest), onto the card once it is back. Lost to the card: the batch that failed, and the open record
     uint16_t sf = seg;
+    uint32_t f3 = rec_next;
     card_stuck = true;
     frames(rec_next, 300);  // 3 s: several batches queued
     card_stuck = false, card_fail = -EIO;
+    k_mutex_lock(&write_sdcard_mutex, K_FOREVER);  // the card writer, back from the write
     card_drain();
+    k_mutex_unlock(&write_sdcard_mutex);
     card_fail = 0;
-    assert(store_err == -EIO);
+    assert(store_err == -EIO && seg == sf + 1 && ring_used() > BATCH);  // kept, as the new file's
+    holes_ok = true;
     retry_card();
     frames(rec_next, 300);
-    flush();
-    assert(store_err == 0 && seg == sf + 1 && card_len[sf] < phone_len[sf]);
+    drain();
+    holes_ok = false;
+    assert(store_err == 0 && seg == sf + 2 && card_len[sf] < phone_len[sf] && card_len[sf + 1] > BATCH);
     assert(memcmp(card[sf], phone[sf], card_len[sf]) == 0);  // a prefix
     assert(card_len[seg] == phone_len[seg] && memcmp(card[seg], phone[seg], card_len[seg]) == 0);
+    memset(seen, 0, sizeof(seen));
+    for (int s = sf; s <= seg; s++) {
+        mark(card[s], card_len[s], f3);
+    }
+    uint32_t lost3 = 0;
+    for (uint32_t f = f3; f < rec_next; f++) {
+        lost3 += !seen[f - f3];
+    }
+    assert(lost3 > 0 && lost3 <= 120);  // a batch and a record at the most
     // phone mode (LR-P3): a phone that acks what it has stored takes the stream, the card is left alone and, idle,
     // turned off; what the phone has not acked stays in RAM, and goes to the card in a new file when the phone goes,
     // stops acking, or falls too far behind. Every frame is in the phone's acked copy or on the card. An app that never
@@ -866,13 +926,20 @@ int main(void)
         boot = 2, seg = 0, seg_size = 0, card_file = UINT32_MAX, seg_open = false;  // a boot's files from segment 0
         subscribed = linked = true, holes_ok = false, n_logged = 0;
         uint32_t f0 = rec_next, s0 = seg;  // every frame from here on is in the phone's acked copy or on the card
+        wrote_at = now_ms;  // the card writer's last write: just now
         seconds(3, false);
-        assert(!phone_mode && card_len[s0] > 0);
-        ack(cur_file(), phone_len[s0]);  // the first ACK
-        assert(phone_mode && n_logged == 1 && logged[0].code == LR_PHONE && logged[0].x == 0 && logged[0].a == 0);
+        assert(!phone_mode && card_len[s0] == 0);  // card mode: the batches wait for the card's next write (card_due)
+        // the first ACKs: phone mode once the card has caught up, at that write (10 s at the most)
+        for (int i = 0; !phone_mode; i++) {
+            assert(i < 10);
+            ack(cur_file(), phone_len[s0]);
+            seconds(1, false);
+        }
+        assert(card_len[s0] > 0 && n_logged == 1 && logged[0].code == LR_PHONE && logged[0].x == 0);
+        assert(logged[0].a < RING / 2);  // the phone that far behind
         uint32_t on_card = card_len[s0];
         seconds(4, false);
-        assert(card_len[s0] == on_card && ring_used() > 4 * 3500);  // in RAM, not on the card
+        assert(card_len[s0] == on_card && ring_used() > 3 * BATCH);  // in RAM, not on the card
         ack(cur_file(), phone_len[s0]);
         assert(ring_used() == 0);  // acked: out of RAM
         seconds(7, true);  // idle 10 s: the card's supply off
@@ -908,7 +975,7 @@ int main(void)
         assert(logged[e - 1].code == LR_SEGMENT && logged[e - 1].a == cur_file());
         assert(logged[e].a < 10 * 3900 && logged[e].a == card_len[seg]);  // under 10 s of audio not acked
         assert(resets == resets0 + 2 * CARD_OFF && card_len[s0] == on_card);  // the card on again
-        flush();
+        drain();
         memset(seen, 0, sizeof(seen));
         mark(phone[s0], acked, f0), mark(card[s0], card_len[s0], f0), mark(card[seg], card_len[seg], f0);
         for (uint32_t f = f0; f < rec_next; f++) {
@@ -972,7 +1039,7 @@ int main(void)
         linked = false;
         tick();
         linked = true;
-        flush();
+        drain();
         memset(seen, 0, sizeof(seen));
         mark(phone[sn], got, f1), mark(phone[sn + 1], acked1, f1);
         for (int s = sn; s <= seg; s++) {
@@ -1016,9 +1083,10 @@ int main(void)
             linked = true;
             assert(!phone_mode && store_err == -EIO && ring_used() > 3500);
             retry_card();
-            tick();
+            now_ms += CARD_EVERY_MS;
+            tick();  // the card writer's next write
             assert(store_err == 0 && ring_used() == 0);
-            flush();
+            drain();
             memset(seen, 0, sizeof(seen));
             mark(phone[s2], acked2, f2);
             for (int s = s2; s <= seg; s++) {
@@ -1047,6 +1115,7 @@ int main(void)
         tick();
         assert(!phone_mode);
         now_ms += 100;
+        card_drain();  // the card writer's next write: the card caught up
         ack(cur_file(), phone_len[seg]);
         assert(phone_mode);
         linked = false;

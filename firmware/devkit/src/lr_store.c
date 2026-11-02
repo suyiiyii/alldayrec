@@ -88,9 +88,10 @@ static uint32_t card_file = UINT32_MAX, card_at;  // the file seg_file is (or wa
 static char card_path[32];
 
 /* Finished batches on their way to the card: the stream puts each one here, its file and offset first, and
- * never waits for the card; the card writer (card_thread) appends them, SD mutex held. A card that stalls fills it
- * (~4 s of audio; ~11 s with a phone that acks) and the batches after go to LIVE only: the stream goes on in a new
- * segment once the writer has caught up, so a file on the card is still the start of the stream's file of that name.
+ * never waits for the card; the card writer (card_thread) appends them, SD mutex held, once it has room for less than
+ * 3 more or 10 s after its last write (card_due). A card that stalls fills the rest (~3 s of audio) and the batches
+ * after go to LIVE only: the stream goes on in a new segment once the writer has caught up, so a file on the card is
+ * still the start of the stream's file of that name.
  * While a phone takes the stream (phone mode, below) the batches stay here until it acks them, and the card is left
  * alone. __noinit: a crash or a watchdog reset leaves them for the next boot to write (ring_recover). One writer at a
  * time (stream mutex), one reader at a time (SD mutex): the head moves with the first, the tail with the second. */
@@ -270,10 +271,35 @@ static int append(uint32_t len)
     return err;
 }
 
+/* The queue's batches back to back into a new file the card has from its start, and the stream on in it (SD mutex
+ * held): phone mode's not acked (to_card), those behind a write that failed (card_drain). The finished records first
+ * (LIVE sent them as the old file's), while the card still takes them. Their bytes. */
+static void write_out(void);
+static uint32_t refile(void)
+{
+    k_mutex_lock(&stream_mtx, K_FOREVER);
+    write_out();
+    struct card_rec h;
+    uint32_t n = 0, used = ring_used();
+    for (uint32_t at = 0; at < used; at += sizeof(h) + h.len) {
+        ring_copy(q.tail + at, &h, sizeof(h), false);
+        h.file = cur_file() + 1;
+        h.offset = n;
+        ring_copy(q.tail + at, &h, sizeof(h), true);
+        n += h.len;
+    }
+    seg++;
+    seg_size = n;
+    card_behind = false;
+    lr_log(LR_SEGMENT, 0, cur_file(), 0);
+    k_mutex_unlock(&stream_mtx);
+    return n;
+}
+
 /* The queued batches onto the card (SD mutex held): the card writer's work, and done first by whatever reads the card
  * (READ of the open segment, LIST, a lend, a reset). A card that fails does not stop the stream: the segment ends there
- * on the card, the file's batches queued after it leave the queue unwritten (the card's copy stays the file's start),
- * and TIME's store reads the error. A file the card has none of yet waits in the queue: phone mode's batches not
+ * on the card (the card's copy stays the file's start), the batches queued after it go in a new file (refile), and
+ * TIME's store reads the error. A file the card has none of yet waits in the queue: phone mode's batches not
  * acked, put in a file of their own (to_card) by a card that did not power up, are written once it does (retry_card). */
 static void card_drain(void)
 {
@@ -298,21 +324,45 @@ static void card_drain(void)
         card_at += h.len;
         if (err) {
             LOG_ERR("SD write failed: %d", err);
-            store_err = err;
-            close_segment();  // the stream goes on in this segment; the card gets a new one once it works again
+            close_segment();
+            if (ring_used()) {
+                refile();  // the batches queued behind it (~8 s on LR-P3): written once the card is back (retry_card)
+            }
+            store_err = err;  // the stream goes on, to LIVE only; the card gets a new segment once it works again
         }
     }
 }
 
 static void phone_step(void);
 
+/* The card writes once the queue has room for less than 3 more batches, or 10 s after its last write, not at each
+ * batch: a card stays awake ~1.9 s after a write, +21 mA (BDAE's card: ~1.9 s at 27 mA after each write, 6.4 mA once
+ * asleep, CS high and 16 clocks or closing the file made no difference). A write a second kept it awake for good,
+ * 27.3 mA in all; every 5.5 s 13.4 mA, every 11 s 10.4 mA.
+ * At 32 kbit/s (config.h) a frame is ~41 B with its length, a record 416 B, a batch 10 of them: 4160 B, 4170 queued.
+ *   16 KB queue: 12214 B left after one batch, < 13824: each batch written as it comes, as before; it holds 3, so a
+ *   write has ~3 s before a batch finds no room (card_behind).
+ *   44 KB (LR-P3): due when over 31232 B, at the 8th batch (~8 s); it holds 10: ~3 s again.
+ * Before the last batch came there was room for 3, so 2 more always fit (~2 s), whatever the frames' sizes (~190 B a
+ * frame: 5758 B batches, each written on a 16 KB queue, the 6th on 44 KB). The 10 s: a pause, or a slower stream. */
+#define CARD_EVERY_MS 10000
+
+static bool card_due(int64_t wrote_at)
+{
+    return RING - ring_used() < 3 * (BATCH + 512) || k_uptime_get() - wrote_at >= CARD_EVERY_MS;
+}
+
 static void card_thread(void)
 {
+    int64_t wrote_at = 0;
     for (;;) {
-        // phone mode: once a second too, for the link, the ACKs and the card's idle time
-        k_sem_take(&card_sem, IS_ENABLED(CONFIG_LR_STORE_PHONE) ? K_SECONDS(1) : K_FOREVER);
+        // once a second too: the 10 s; phone mode's link, ACKs and the card's idle time
+        k_sem_take(&card_sem, K_SECONDS(1));
         k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
-        card_drain();
+        if (card_due(wrote_at)) {
+            card_drain();
+            wrote_at = k_uptime_get();
+        }
         phone_step();
         k_mutex_unlock(&write_sdcard_mutex);
     }
@@ -1020,22 +1070,7 @@ static int card_up(void)
 static void to_card(uint8_t why)
 {
     phone_mode = false;
-    k_mutex_lock(&stream_mtx, K_FOREVER);
-    write_out();  // the finished records too (LIVE sent them as the old file's), before card_up can fail
-    struct card_rec h;
-    uint32_t n = 0, used = ring_used();
-    for (uint32_t at = 0; at < used; at += sizeof(h) + h.len) {
-        ring_copy(q.tail + at, &h, sizeof(h), false);
-        h.file = cur_file() + 1;
-        h.offset = n;
-        ring_copy(q.tail + at, &h, sizeof(h), true);
-        n += h.len;
-    }
-    seg++;
-    seg_size = n;
-    card_behind = false;
-    lr_log(LR_SEGMENT, 0, cur_file(), 0);
-    k_mutex_unlock(&stream_mtx);
+    uint32_t n = refile();
     card_up();  // a card that does not come on keeps them in the ring (card_drain) until it does (retry_card)
     unsigned int key = irq_lock();
     int64_t since = k_uptime_get() - ack_at;
