@@ -43,13 +43,14 @@ STATES = [
     ("phone_45", (1, 1, 1, 1), 0, (36, 36, 0, 400), True, "phone mode at 45 ms (Android's slow end)"),
     ("phone_7_45", (1, 1, 1, 1), 0, (6, 36, 0, 400), True, "phone mode, 7.5-45 ms asked (Android's range): the Mac picks"),
     # what the card costs after a write: written less often, and what each write ends with (debug_drain)
-    ("w1", (1, 1, 1, 0), 0, None, False, "card mode, written each batch (~1 s) as released", (0, 0)),
+    ("w1", (1, 1, 1, 0), 0, None, False, "card mode, written each batch (~1 s) as before #221", (1, 0)),
     ("w5", (1, 1, 1, 0), 0, None, False, "card mode, written every 5 s", (5, 0)),
-    ("w15", (1, 1, 1, 0), 0, None, False, "card mode, written every 15 s (as the ring holds: ~9 s)", (15, 0)),
-    ("w1_clk", (1, 1, 1, 0), 0, None, False, "each batch, then CS high + 16 clocks", (0, CLOCKS)),
+    ("w15", (1, 1, 1, 0), 0, None, False, "card mode, written every 15 s (as the ring holds: ~11 s)", (15, 0)),
+    ("w1_clk", (1, 1, 1, 0), 0, None, False, "each batch, then CS high + 16 clocks", (1, CLOCKS)),
     ("w15_clk", (1, 1, 1, 0), 0, None, False, "every 15 s, then CS high + 16 clocks", (15, CLOCKS)),
-    ("w1_close", (1, 1, 1, 0), 0, None, False, "each batch, then the file closed", (0, CLOSE)),
+    ("w1_close", (1, 1, 1, 0), 0, None, False, "each batch, then the file closed", (1, CLOSE)),
     ("w15_close", (1, 1, 1, 0), 0, None, False, "every 15 s, then the file closed", (15, CLOSE)),
+    ("card_fixed", (1, 1, 1, 0), 0, None, False, "card mode as released since #221: written at 3/4 ring or 10 s", (0, 0)),
     ("w15_off", (1, 1, 1, 0), 0, None, False, "every 15 s, then the card unmounted and off till the next", (15, CARD_OFF)),
 ]
 FIELDS = ["state", "start", "end", "link", "asked", "got_interval_ms", "latency", "timeout_ms", "on", "note"]
