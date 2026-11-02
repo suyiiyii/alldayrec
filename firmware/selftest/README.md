@@ -6,6 +6,7 @@
 python3 firmware/selftest/selftest.py build                   # 编译，NCS v2.7.0，和 lr.sh 一样
 uv run firmware/selftest/selftest.py flash SERIAL             # 只刷这一块板
 uv run firmware/selftest/selftest.py run SERIAL               # 跑全部检查，打印 PASS/FAIL 报告；有 FAIL 时退出码为 1
+python3 firmware/selftest/selftest.py check                   # 不接板子：用录下的好、坏麦克风数据核对麦克风两项的判定
 ```
 
 - **板子用 USB 序列号指定**：就是芯片的 DEVICEID，bootloader 和自检固件里都一样，`ioreg -p IOUSB -l -w0` 能看到。
@@ -40,7 +41,7 @@ LR-P3 整机另加（`--p3`，引脚同 `lr_promicro.overlay`）：
 | 项目 | 怎么测 | 通过标准 |
 |---|---|---|
 | SD 卡 | P0.13 拉低断 VCC 300 ms 再上电；250 kHz 下 CMD0/CMD8/ACMD41/CMD58 进 SPI 模式、CMD9 读容量；切到固件用的 8 MHz：最后一个扇区写入图案、读回比对、再写回原内容（卡上文件不变）；再读前 1 MB，数失败块和 CRC 错（线上丢位） | 启动、读写校验都过，写回成功，1 MB 读 0 失败。分区类型只记录，但录音固件只认 FAT32（0x0B/0x0C）或 exFAT（0x07） |
-| 麦克风 | 按固件的配置（P0.17 供电，1.28 MHz，单声道下降沿采样，比率 80，增益 0x28）先安静采 2 s，再在 Mac 用 `say` 念数字时采 3 s | 安静时不是一条直线（直线 = DAT 卡死：没时钟、没供电，或 DAT 断/短）；念数字时最响的 100 ms 比安静时高 10 dB 以上（达不到报 LOOK：Mac 离得远或静音，对着板子说话重跑） |
+| 麦克风 | 按固件的配置（P0.17 供电，1.28 MHz，单声道下降沿采样，比率 80，增益 0x28）先安静采 2 s，再在 Mac 用 `say` 念数字时采 3 s | 安静时不是一条直线（直线 = DAT 卡死：没时钟、没供电，或 DAT 断/短）；念数字时最响的 100 ms 比安静时高 10 dB 以上（达不到报 LOOK：Mac 离得远或静音，对着板子说话重跑）。安静那项没过就不判说话、只报 LOOK：麦克风没电或 DAT 卡住时，每次上电 PDM 输出仍有一段衰减到直线的瞬态，最响一块会比直线高出 30 dB 以上 |
 | 开关（P1.15） | 只开内部上拉读电平，不驱动；合上接 GND 为开 | 等待期间读到开、关两档；只读到一档报 LOOK（断线也读成「关」） |
 
 测不到的：

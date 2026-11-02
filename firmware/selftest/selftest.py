@@ -8,6 +8,7 @@
   uv run selftest.py flash SERIAL        UF2 onto that board only: its bootloader drive, or this firmware's dfu command
   uv run selftest.py run SERIAL [--clk S] [--json FILE]   every check, a PASS/FAIL report; exit 1 on any FAIL
   uv run selftest.py run SERIAL --p3 [--flip S]           a board wired into an LR-P3: also its SD card, mic and switch
+  python3 selftest.py check              the mic verdicts on recorded runs (no board)
 """
 import argparse, json, math, os, plistlib, re, shutil, statistics, subprocess, sys, time
 
@@ -135,6 +136,29 @@ def hfxo_ppm(points):
     return (slope - 1) * 1e6, resid * 1e3
 
 
+def mic_verdict(quiet, qb, loud, lb):
+    """(quiet ok, floor, speech ok, rise) from the two mic runs (each: its result, each 100 ms block's AC RMS). Speech is
+    judged only on a mic that passed the quiet run: a mic without power or with DAT stuck still gives a start-up
+    transient that decays to a flat line (1410 -> 0 over 2 s), and its loudest block stood +32 dB above that floor"""
+    floor = statistics.median(qb)
+    quiet_ok = bool(quiet["ok"]) and floor < 300 and not (quiet["flats"] or quiet["full"])
+    rise = 20 * math.log10(max(max(lb), 1) / max(floor, 1))
+    return quiet_ok, floor, quiet_ok and bool(loud["ok"]) and rise >= 10, rise
+
+
+def check():
+    """mic_verdict on recorded runs: a dead mic (power shorted) and a good one (quiet room, the Mac's speech too far)"""
+    decay = [1410, 954, 645, 436, 295, 199, 135, 91, 61, 41, 28, 19, 12, 8, 5, 3, 2, 1, 1, 0]
+    dead = {"ok": 1, "flats": 17, "full": 0}
+    assert mic_verdict(dead, decay, dead, decay + [0] * 10)[::2] == (False, False)
+    good = {"ok": 1, "flats": 0, "full": 0}
+    qb = [48, 55, 43, 30, 32, 29, 29, 37, 35, 45, 37, 30, 31, 35, 46, 32, 37, 36, 37, 50]
+    lb = [61, 53, 50, 35, 40, 43, 43, 38, 34, 36, 61, 72, 39, 67, 68, 47, 99, 55, 69, 66]
+    assert mic_verdict(good, qb, good, lb)[::2] == (True, False)  # +8.7 dB: LOOK
+    assert mic_verdict(good, qb, good, lb + [400])[::2] == (True, True)  # someone speaks close: PASS
+    print("mic_verdict: ok")
+
+
 def dbfs(v):
     return f"{20 * math.log10(max(v, 1) / 32768):.0f} dBFS"
 
@@ -202,20 +226,18 @@ def run(serial, clk_secs, json_out, p3=False, flip=20):
                 elif line.startswith("R "):
                     return json.loads(line[2:]), blocks
         quiet, qb = res["mic_quiet"] = mic(2)
-        floor = statistics.median(qb)
-        drop = quiet["flats"] or quiet["full"]
-        row("mic (PDM, 2 s quiet)", bool(quiet["ok"]) and floor < 300 and not drop, f"noise floor {floor:.0f} "
+        say = subprocess.Popen(["say", "one two three four five six seven eight nine ten"])  # the Mac's speaker
+        loud, lb = res["mic_speech"] = mic(3)
+        say.wait()
+        quiet_ok, floor, heard, rise = mic_verdict(quiet, qb, loud, lb)
+        row("mic (PDM, 2 s quiet)", quiet_ok, f"noise floor {floor:.0f} "
             f"({dbfs(floor)}, median 100 ms RMS; pass under 300: a quiet room gives tens); DC {quiet['mean']}, min "
             f"{quiet['min']} max {quiet['max']}; dropouts: {quiet['flats']} runs of >=10 ms identical samples "
             f"({quiet['flat_ms']} ms), {quiet['full']} full-scale samples" + ("" if quiet["ok"] else ": flat, DAT stuck. Check the mic's 3V (P0.17), GND, CLK "
                                  "(P0.08), DAT (P0.06)") + ("" if floor < 300 else ": noise, not sound. Check SEL is on "
                                                             "3V (mic N r tells which clock half the mic drives), CLK"))
-        say = subprocess.Popen(["say", "one two three four five six seven eight nine ten"])  # the Mac's speaker
-        loud, lb = res["mic_speech"] = mic(3)
-        say.wait()
-        rise = 20 * math.log10(max(max(lb), 1) / max(floor, 1))
-        row("mic hears speech", "PASS" if loud["ok"] and rise >= 10 else "LOOK",
-            f"loudest 100 ms {dbfs(max(lb))} against the floor {dbfs(floor)}: {rise:+.1f} dB (pass: +10 dB; the Mac "
+        row("mic hears speech", "PASS" if heard else "LOOK", ("" if quiet_ok else "not judged: the quiet row failed; ")
+            + f"loudest 100 ms {dbfs(max(lb))} against the floor {dbfs(floor)}: {rise:+.1f} dB (pass: +10 dB; the Mac "
             "speaks numbers meanwhile; if it is far or muted, talk to the board and run again)")
         if flip:
             print(f"flip the switch both ways within {flip} s")
@@ -269,7 +291,7 @@ def run(serial, clk_secs, json_out, p3=False, flip=20):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("action", choices=["build", "flash", "run"])
+    ap.add_argument("action", choices=["build", "flash", "run", "check"])
     ap.add_argument("serial", nargs="?", help="the board's USB serial number (16 hex digits)")
     ap.add_argument("--clk", type=int, default=60, help="seconds of 32 MHz crystal timing (default 60)")
     ap.add_argument("--json", help="also write the report here")
@@ -277,6 +299,8 @@ if __name__ == "__main__":
                     "switch, and never drive their pins")
     ap.add_argument("--flip", type=int, default=20, help="--p3: seconds to wait for the switch to be flipped (default 20)")
     a = ap.parse_args()
+    if a.action == "check":
+        sys.exit(check())
     if a.action != "build" and not re.fullmatch(r"[0-9A-F]{16}", a.serial or ""):
         ap.error("SERIAL: 16 hex digits, as ioreg shows it")
     build() if a.action == "build" else flash(a.serial) if a.action == "flash" else run(a.serial, a.clk, a.json, a.p3, a.flip)
