@@ -781,12 +781,13 @@ static void cmd_info(void)
 	printk("R {\"test\":\"info\",\"ok\":%d,\"id\":\"%08X%08X\",\"part\":\"%X\",\"variant\":\"%c%c%c%c\","
 	       "\"package\":\"%X\",\"ram_kb\":%u,\"flash_kb\":%u,\"resetreas\":\"0x%X\",\"regout0\":\"0x%X\","
 	       "\"pselreset\":\"0x%X\",\"nfcpins\":\"0x%X\",\"approtect\":\"0x%X\",\"bootloader\":\"0x%X\","
-	       "\"hfxo_ok\":%d,\"hfxo_us\":%u,\"lfxo_ok\":%d,\"lfxo_ms\":%u,\"lfxo_ppb_vs_hfxo\":%d}\n",
+	       "\"hfxo_ok\":%d,\"hfxo_us\":%u,\"lfxo_ok\":%d,\"lfxo_ms\":%u,\"lfxo_ppb_vs_hfxo\":%d,\"ble\":\"%04X\"}\n",
 	       early.hfxo_ok && early.hfxo_us < 5000 && lf_ok, NRF_FICR->DEVICEID[1], NRF_FICR->DEVICEID[0],
 	       NRF_FICR->INFO.PART, (int)(var >> 24), (int)(var >> 16) & 0xFF, (int)(var >> 8) & 0xFF, (int)var & 0xFF, NRF_FICR->INFO.PACKAGE,
 	       NRF_FICR->INFO.RAM, NRF_FICR->INFO.FLASH, early.resetreas, NRF_UICR->REGOUT0, NRF_UICR->PSELRESET[0],
 	       NRF_UICR->NFCPINS, NRF_UICR->APPROTECT, NRF_UICR->NRFFW[0], early.hfxo_ok, early.hfxo_us,
-	       early.lfxo_ok, early.lfxo_ms, early.lfxo_ppb);
+	       early.lfxo_ok, early.lfxo_ms, early.lfxo_ppb,
+	       NRF_FICR->DEVICEADDR[0] & 0xFFFF);  /* the recorder's BLE name suffix (transport.c lr_set_name) */
 }
 
 static void run(char *line)
