@@ -58,7 +58,8 @@ def digest(convs: list[dict]) -> str:
         lines = [f"## [{c['id']}] {c['start'][:16].replace('T', ' ')}–{c['end'][11:16]} {s['title']}"
                  f"（参与：{'、'.join(c['participants']) or '—'}）", s.get("summary") or ""]
         if s.get("topics"):  # the summary is one sentence (prompt v11): what else was talked about
-            lines.append("- 议题：" + "；".join(str(x.get("title") or "") for x in s["topics"]))
+            lines.append("- 议题：" + "；".join(f"{x.get('title') or ''}（{'；'.join(x['points'])}）" if x.get("points") else str(x.get("title") or "")
+                                              for x in s["topics"]))  # points too: a meal or other chitchat is only there
         lines += [f"- {p['who']}：{'；'.join(p.get('points') or [])}" for p in s.get("people") or []]
         lines += [f"- 待办：{t.get('owner') or '未知'}{'→' + t['to'] if t.get('to') else ''} {t.get('text', '')}"
                   f"{'（' + t['due'] + '）' if t.get('due') else ''}" for t in s.get("todos") or []]
@@ -334,7 +335,7 @@ if __name__ == "__main__":
     sp = system(now)
     assert "最近 7 天的对话摘要（2026-09-26 起）" in sp and "星期五" in sp, sp[-300:]
     assert "## [c20260930100000] 2026-09-30 10:00–10:30 存储方案（参与：我、老王）" in sp
-    assert "定了按小时存。\n- 议题：存储格式；闲聊\n- 老王：建议按小时存" in sp and "- 待办：我→老王 改存储（周五）" in sp and "- 待办：未知 买菜" in sp and "- 标签：存储" in sp and "体检" not in sp
+    assert "定了按小时存。\n- 议题：存储格式（按小时）；闲聊（猫）\n- 老王：建议按小时存" in sp and "- 待办：我→老王 改存储（周五）" in sp and "- 待办：未知 买菜" in sp and "- 标签：存储" in sp and "体检" not in sp
     assert sorted(x["id"] for x in t_search("按小时")) == ["c20260930100000", "c20260930100000-LR_X1_567E"], "summary words, the other device's transcript"
     assert [x["id"] for x in t_search("复查", before="2026-08-01")] == [] and t_search("复查", after="2026-08-01")[0]["id"] == "c20260801090000"
     d = t_day("2026-09-30")
