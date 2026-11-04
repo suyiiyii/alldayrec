@@ -813,7 +813,10 @@
     "captions": "字幕",
     "leaveQ": "正在录音，离开会停止录音。",
     "leaveStop": "停止并离开",
-    "leaveStay": "继续录音"
+    "leaveStay": "继续录音",
+    "leaveKeptQ": "还有 {n} 块录音没传上去，只留在本页：离开就丢了。",
+    "leaveDrop": "丢掉并离开",
+    "leaveKeep": "留下"
   },
   "selfVoice": {
     "tier": {
