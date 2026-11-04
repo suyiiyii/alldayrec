@@ -348,7 +348,10 @@ const onVisible = () =>
 // leaving while recording asks first: 停止并离开 stops it as 停止 does and goes (its pieces still go up, then the end),
 // 继续录音, Escape or a tap outside stays. Not window.confirm: inside the app's WebView it can return false unseen.
 // Answered from the buttons and cancel, not the close event: Chrome can skip that one after an Escape
-const leaveDlg = useTemplateRef<HTMLDialogElement>("leaveDlg");
+// Stopped with pieces an upload refused (blocked): they are only on this page, so leaving asks too (丢掉并离开 / 留下);
+// pieces still going up go on after an in-app leave, a reload or a closed tab loses them either way
+const leaveDlg = useTemplateRef<HTMLDialogElement>("leaveDlg"),
+  leaveKept = ref(0); // what the dialog asks about: 0 the recording, else the pieces kept on the page
 let answer: ((go: boolean) => void) | null = null;
 function leave(go: boolean) {
   leaveDlg.value?.close();
@@ -357,14 +360,15 @@ function leave(go: boolean) {
   answer = null;
 }
 onBeforeRouteLeave(() => {
-  if (!recording.value) return;
+  if (!recording.value && !(blocked.value && queue.length)) return;
+  leaveKept.value = recording.value ? 0 : queue.length;
   answer?.(false); // a second leave while it asks: the first is dropped
   if (!leaveDlg.value!.open) leaveDlg.value!.showModal();
   return new Promise<boolean>((r) => (answer = r));
 });
 // a reload or a closed tab: the browser's own prompt
 const onUnload = (e: BeforeUnloadEvent) => {
-  if (recording.value) e.preventDefault();
+  if (recording.value || queue.length) e.preventDefault();
 };
 onMounted(() => {
   document.addEventListener("visibilitychange", onVisible);
@@ -413,15 +417,19 @@ onUnmounted(() => {
     <dialog
       ref="leaveDlg"
       class="leave"
-      :aria-label="t('record.leaveQ')"
+      :aria-label="leaveKept ? t('record.leaveKeptQ', { n: leaveKept }, leaveKept) : t('record.leaveQ')"
       @cancel="leave(false)"
       @click.self="leave(false)"
     >
       <div class="in">
-        <p>{{ t("record.leaveQ") }}</p>
+        <p>{{ leaveKept ? t("record.leaveKeptQ", { n: leaveKept }, leaveKept) : t("record.leaveQ") }}</p>
         <div class="acts">
-          <button class="btn-ghost" @click="leave(false)">{{ t("record.leaveStay") }}</button>
-          <button class="btn-primary" @click="leave(true)">{{ t("record.leaveStop") }}</button>
+          <button class="btn-ghost" @click="leave(false)">
+            {{ t(leaveKept ? "record.leaveKeep" : "record.leaveStay") }}
+          </button>
+          <button class="btn-primary" @click="leave(true)">
+            {{ t(leaveKept ? "record.leaveDrop" : "record.leaveStop") }}
+          </button>
         </div>
       </div>
     </dialog>
