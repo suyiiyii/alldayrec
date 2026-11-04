@@ -45,8 +45,8 @@ Map cannedStatus(String name) {
   };
 }
 
-/// A tab's page load. A first launch's system prompt (国行 「允许使用无线数据」) failed the first loads of all three tabs
-/// and left them blank, refresh's reload() doing nothing for a page never loaded (live-record#392): such a tab is
+/// A tab's page load. All three tabs stayed blank after a first sign-in, most likely their first loads failed under a
+/// system prompt (国行 「允许使用无线数据」), and refresh's reload() does nothing for a page never loaded: such a tab is
 /// loaded again from its address, by itself with a backoff, on coming back to the front, or by a tap on its cover.
 class WebLoad {
   bool loaded = false;  // its page finished once: reload() works from here on
@@ -72,6 +72,16 @@ class WebLoad {
     failed = false;
     attempts = 0;
   }
+
+  /// Retried on coming back to the front: not loaded yet (a load may hang without an error), or failed.
+  bool get unsettled => !loaded || failed;
+
+  /// A retry by itself goes now: still failed, and the app in front (in the background or under a system prompt it
+  /// waits for coming back to the front).
+  bool due(AppLifecycleState? state) => failed && state == AppLifecycleState.resumed;
+
+  /// Loads the page again: from its address if it never loaded (reload() does nothing for it on iOS), else reload.
+  void load({required VoidCallback reload, required VoidCallback fromStart}) => loaded ? reload() : fromStart();
 
   /// The wait before the next retry by itself; null once they are used up.
   Duration? nextRetry() => attempts < maxAttempts ? Duration(seconds: 2 << attempts++) : null;
@@ -158,7 +168,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       dropped.clear();
       // a tab not loaded yet (a system prompt over the first launch, the network back): again now, its retries afresh
       for (var i = 0; i < webs.length; i++) {
-        if (webs[i] != null && (!loads[i].loaded || loads[i].failed)) _retry(i);
+        if (webs[i] != null && loads[i].unsettled) _retry(i);
       }
     }
     if (state == AppLifecycleState.paused) Recorder.listen(false);  // listening is for the app in front only
@@ -269,19 +279,18 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     final wait = w.nextRetry();
     if (wait == null) return;
     w.timer = Timer(wait, () {
-      if (mounted && w == loads[i] && w.failed && WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) _load(i);
+      if (mounted && w == loads[i] && w.due(WidgetsBinding.instance.lifecycleState)) _load(i);
     });
   }
 
-  /// Refresh, a tap on the cover, coming back to the front: a page never loaded from its address (reload() does nothing
-  /// for it on iOS), else reload; the retries by itself start afresh.
+  /// Refresh, a tap on the cover, coming back to the front: loaded again, the retries by itself afresh.
   void _retry(int i) {
     loads[i].timer?.cancel();
     loads[i].attempts = 0;
     _load(i);
   }
 
-  void _load(int i) => loads[i].loaded ? webs[i]!.reload() : webs[i]!.loadRequest(_url(paths[i]));
+  void _load(int i) => loads[i].load(reload: webs[i]!.reload, fromStart: () => webs[i]!.loadRequest(_url(paths[i])));
 
   /// One of 我的's entries, over the bottom bar; back (the key or the app bar's arrow) comes back to 我的.
   void _open(String title, Widget body) =>

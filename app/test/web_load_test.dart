@@ -4,7 +4,7 @@ import 'package:live_record/home.dart';
 import 'package:live_record/l10n/app_localizations.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-// the callbacks each platform's WebView gives a failed first load, then a good one (live-record#392)
+// the callbacks each platform's WebView gives a failed first load, then a good one
 const offlineIos = WebResourceError(errorCode: -1009, description: 'offline', isForMainFrame: true);
 const offlineAndroid = WebResourceError(errorCode: -2, description: 'host lookup', errorType: WebResourceErrorType.hostLookup, isForMainFrame: true);
 
@@ -38,6 +38,27 @@ void main() {
       w.finished();
       expect([w.failed, w.loaded], [false, true], reason: e.description);
     }
+  });
+
+  test('a page never loaded is loaded from its address, a loaded one reloaded', () {
+    final w = WebLoad(), calls = <String>[];
+    void load() => w.load(reload: () => calls.add('reload'), fromStart: () => calls.add('fromStart'));
+    w..started()..error(offlineIos);
+    load();  // the first launch's failed load: reload() would do nothing
+    w..started()..finished()..started()..error(offlineIos);
+    load();  // a later navigation failed: the page is there to reload
+    expect(calls, ['fromStart', 'reload']);
+  });
+
+  test('retries by itself only in front; coming back retries what is not loaded', () {
+    final w = WebLoad();
+    expect(w.unsettled, isTrue);  // a first load under way, maybe hung
+    w..started()..error(offlineIos);
+    expect([for (final s in AppLifecycleState.values) if (w.due(s)) s], [AppLifecycleState.resumed]);
+    expect(w.due(null), isFalse);
+    expect(w.unsettled, isTrue);
+    w..started()..finished();
+    expect([w.unsettled, w.due(AppLifecycleState.resumed)], [false, false]);
   });
 
   test('retries back off and stop', () {
