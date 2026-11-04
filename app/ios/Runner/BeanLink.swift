@@ -274,6 +274,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func now() -> Int64 { Recorder.now() }
   func monotonicNow() -> Int64 { mono() }
   func liveUnits() -> Int { sliceS() * 50 }
+  func watched() -> Bool { Uploader.monoMs() < Uploader.watchedUntil }
 
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) {
     Ble.log("bean \(kind): \(text)")

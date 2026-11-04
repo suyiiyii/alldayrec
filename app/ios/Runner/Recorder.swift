@@ -523,6 +523,11 @@ final class Uploader: Thread {
 
   init(dir: URL) { self.dir = dir }
 
+  /// The latest upload's answer said the live page is open (slice.watched): until a minute after it, for BeanSync
+  /// (BeanLink.watched()); monotonic ms that go on while the phone sleeps (systemUptime does not).
+  @Shared static var watchedUntil: Int64 = 0
+  static func monoMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
+
   /// A queued file's start (unix ms) and sample count: <start>_<n>.ogg, or <start>.ogg for a piece a kill cut short;
   /// the BLE recorder's carry its name instead: <start>@LR-P1-XXXX.ogg, uploaded as that device.
   static func piece(_ f: URL) -> (start: Int64, n: Int64?, device: String?)? {
@@ -620,8 +625,9 @@ final class Uploader: Thread {
   /// background.
   private static func slices(_ reply: Data) {
     let d = Recorder.defaults
-    guard let s = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["slice"] as? [String: Any],
-          let fg = s["foreground"] as? Int, let bg = s["background"] as? Int, min(fg, bg) >= 1,
+    guard let s = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["slice"] as? [String: Any] else { return }
+    watchedUntil = s["watched"] as? Bool == true ? monoMs() + 60_000 : 0
+    guard let fg = s["foreground"] as? Int, let bg = s["background"] as? Int, min(fg, bg) >= 1,
           fg != d.integer(forKey: "foreground") || bg != d.integer(forKey: "background") else { return }  // on a change only: an answer a second
     NSLog("live-record slices from the server: fg=%d bg=%d", fg, bg)
     DispatchQueue.main.async { Recorder.slices(s) }
