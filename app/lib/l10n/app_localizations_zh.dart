@@ -173,6 +173,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get goToSettings => '去设置';
 
   @override
+  String get pageLoadFailed => '加载失败，点重试';
+
+  @override
   String unbindTitle(Object name) {
     return '解除绑定 $name？';
   }

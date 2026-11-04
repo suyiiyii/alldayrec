@@ -380,6 +380,12 @@ abstract class AppLocalizations {
   /// **'去设置'**
   String get goToSettings;
 
+  /// No description provided for @pageLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'加载失败，点重试'**
+  String get pageLoadFailed;
+
   /// No description provided for @unbindTitle.
   ///
   /// In zh, this message translates to:

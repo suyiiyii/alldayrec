@@ -102,6 +102,7 @@
   "startRecording": "开始录音",
   "emptyNotSignedIn": "扫码登录或填好 Token 后显示",
   "goToSettings": "去设置",
+  "pageLoadFailed": "加载失败，点重试",
   "unbindTitle": "解除绑定 {name}？",
   "@unbindTitle": {
     "placeholders": {

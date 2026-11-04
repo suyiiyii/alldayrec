@@ -47,6 +47,7 @@
   "startRecording": "Start recording",
   "emptyNotSignedIn": "Shows once you scan to sign in or enter the token",
   "goToSettings": "Open settings",
+  "pageLoadFailed": "Couldn't load, tap to retry",
   "unbindTitle": "Unbind {name}?",
   "unbindLinkedBody": "The recorder forgets every phone and stops recording (the audio on its card has been fetched). This phone switches to its own microphone.",
   "unbindAwayBody": "The recorder is not nearby: only this phone lets go of it; the recorder still remembers the binding and keeps recording. You can force-bind it later when adding.",
