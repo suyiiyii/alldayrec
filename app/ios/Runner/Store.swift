@@ -59,6 +59,10 @@ enum Store {
     return out
   }
 
+  /// Until when the live page counts as open after an upload's answer, from its `slice`: a minute on from `now` while
+  /// it says watched, else 0 (Uploader.watchedUntil, for BeanSync; the server's slices()).
+  static func watchedUntil(_ slice: [String: Any], now: Int64) -> Int64 { slice["watched"] as? Bool == true ? now + 60_000 : 0 }
+
   /// 16 kHz Opus packets of `ms` each into one Ogg Opus file (RFC 7845), as Store.kt and web/src/lib/ogg.ts do:
   /// pre-skip 0 (the board's encoder runs on across pieces), granule counting every frame from the piece's start. The
   /// bean's (Bean.swift): 20 ms frames, stereo.

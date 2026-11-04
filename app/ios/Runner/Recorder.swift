@@ -626,7 +626,7 @@ final class Uploader: Thread {
   private static func slices(_ reply: Data) {
     let d = Recorder.defaults
     guard let s = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["slice"] as? [String: Any] else { return }
-    watchedUntil = s["watched"] as? Bool == true ? monoMs() + 60_000 : 0
+    watchedUntil = Store.watchedUntil(s, now: monoMs())
     guard let fg = s["foreground"] as? Int, let bg = s["background"] as? Int, min(fg, bg) >= 1,
           fg != d.integer(forKey: "foreground") || bg != d.integer(forKey: "background") else { return }  // on a change only: an answer a second
     NSLog("live-record slices from the server: fg=%d bg=%d", fg, bg)

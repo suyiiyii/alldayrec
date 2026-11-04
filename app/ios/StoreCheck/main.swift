@@ -615,4 +615,14 @@ do {
   check(UploadAnswer.waits(haltedAt: t, now: t + UploadAnswer.haltMs), false, "half an hour on: once more")
 }
 
+// the live page open, from an upload's answer (its slice, as the server sends it): a minute from now, else none
+do {
+  func slice(_ json: String) -> [String: Any] {
+    (try! JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["slice"] as! [String: Any]
+  }
+  check(Store.watchedUntil(slice(#"{"slice":{"foreground":1,"background":2,"screenOff":2,"watched":true}}"#), now: 5000), 65_000, "watched")
+  check(Store.watchedUntil(slice(#"{"slice":{"foreground":1,"background":20,"screenOff":60,"watched":false}}"#), now: 5000), 0, "not watched")
+  check(Store.watchedUntil(slice(#"{"slice":{"foreground":1,"background":20,"screenOff":60}}"#), now: 5000), 0, "a server before #187")
+}
+
 print("storecheck ok")

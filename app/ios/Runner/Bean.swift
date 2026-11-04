@@ -559,7 +559,7 @@ final class BeanSync {
   private func plan(_ open: Int64) -> Xfer {
     let f = files[open]
     let tail = f?.have.last?.1 ?? 0  // the first unit after the phone's latest stretch
-    let lack = f.flatMap(gap) ?? 0
+    let lack = f.flatMap(gap) ?? tail  // all of it here (its length known): nothing older to fill, on from the tail
     let watched = io.watched()
     let now = edge(open)
     let mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's

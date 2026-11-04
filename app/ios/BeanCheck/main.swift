@@ -655,13 +655,13 @@ final class Rec {
   var have: [[Int64]] { f.have.map { [$0.0, $0.1] } }
   var reasons: [String] { bean.logFields.compactMap { $0["reason"] as? String } }
 }
-func rec(_ s: Int64, _ have: [(Int64, Int64)], watched: Bool, units: Int = 600) -> Rec {
+func rec(_ s: Int64, _ have: [(Int64, Int64)], watched: Bool, units: Int = 600, total: Int64 = -1) -> Rec {
   let dir = tmp(), state = dir.appendingPathComponent("state.json")
   let bean = FakeBean(t0)
   bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.list(bean.open, 0)
   bean.pageOpen = watched
   if !have.isEmpty {
-    try! "{\"\(bean.open)\":{\"a\":\(bean.openAt),\"t\":-1,\"r\":0,\"h\":[\(have.map { "[\($0.0),\($0.1)]" }.joined(separator: ","))]}}"
+    try! "{\"\(bean.open)\":{\"a\":\(bean.openAt),\"t\":\(total),\"r\":0,\"h\":[\(have.map { "[\($0.0),\($0.1)]" }.joined(separator: ","))]}}"
       .write(to: state, atomically: true, encoding: .utf8)
   }
   bean.onTransfer = { file, from, realtime in bean.answer(file, from, realtime); bean.more(units) }
@@ -840,6 +840,16 @@ for code: UInt8? in [2, 3, nil, 0] {
   check(r.reasons, ["fill_tail", "fill_tail", "fill_tail", "live_fallback"])
   check(r.f.have.first!.1, 1000)
   check(r.f.have.count, 2)
+}
+
+/// The open file with its length known and all of it on the phone (a live header that carried a size, or a unit with the
+/// end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() crashed the app here
+/// (PR #230 review) at every connection.
+do {
+  let r = rec(150, [(0, 7000)], watched: false, total: 7000)  // the bean at unit 7500
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 7000, 0]])
+  check(r.reasons, ["fill_tail"])
 }
 
 /// A file the bean began before it was added here: live only (realtime=1), its start is not this phone's (10-14).
