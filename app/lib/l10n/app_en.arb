@@ -274,6 +274,8 @@
   "usbOn": "USB disk mode: an OMI disk shows up on the computer (about 20 s); eject it there before switching back",
   "noteRejected": "The server could not decode a piece: dropped",
   "noteUploadFailed": "Upload failed: {detail}",
+  "noteUploadRefused": "Upload refused ({detail}); not retrying. The pieces not sent stay on the phone: check the server address, then start recording again",
+  "noteUploadUnauthorized": "Upload refused ({detail}): signed out. Scan the code to sign in again, then start recording; the pieces not sent stay on the phone",
   "noteEndFailed": "End signal failed: {detail}",
   "noteArchiveFailed": "Archiving failed: {detail}",
   "noteKilled": "The system ended the last recording: uploading the {count} pieces left; start again by hand",

@@ -300,6 +300,7 @@ enum Recorder {
     u.token = defaults.string(forKey: "token") ?? ""
     u.device = defaults.string(forKey: "device") ?? "phone"
     u.archive = archive
+    u.halted = false  // a start tries a refused queue again, with the server and token it brings
     if uploader == nil { uploader = u; u.start() }
   }
 
@@ -496,8 +497,10 @@ final class Slicer {
   }
 }
 
-/// Uploads the .ogg files (.aac from the app before) in start order, retrying forever; a file is archived or deleted once
-/// the server has it, so the directory is the offline queue. The BLE recorder's back-to-back pieces waiting together go
+/// Uploads the .ogg files (.aac from the app before) in start order; a file is archived or deleted once the server has it,
+/// so the directory is the offline queue. What an answer means is UploadAnswer (Store.swift): a 5xx or no answer is tried
+/// again, forever; a piece the server says it cannot decode leaves the queue; any other 4xx stops the uploads with the
+/// queue kept until a start (Recorder.upload). The BLE recorder's back-to-back pieces waiting together go
 /// as one request, as on Android (each is a whole Ogg stream, so their bytes in a row decode as one): with 1 s pieces
 /// one request per piece cannot keep up when a request takes over a second.
 final class Uploader: Thread {
@@ -508,6 +511,9 @@ final class Uploader: Thread {
   @Shared private var fails = 0      // in a row, and since when (unix ms)
   private var failedAt: Int64 = 0
   @Shared private var okAt: Int64 = 0  // the last upload the server took (unix ms; 0: none since the launch)
+  /// An answer no retry fixes came (UploadAnswer .auth, .refused): nothing goes up, the queue stays, until a start
+  /// (Recorder.upload, with the server and token it brings) clears it.
+  @Shared var halted = false
 
   init(dir: URL) { self.dir = dir }
 
@@ -546,6 +552,7 @@ final class Uploader: Thread {
   override func main() { while true { autoreleasepool(invoking: pass) } }
 
   private func pass() {
+    if halted { Thread.sleep(forTimeInterval: 2); return }
     // a recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card)
     let all = Uploader.files(dir), ahead = { (f: URL) in
       Uploader.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
@@ -557,11 +564,14 @@ final class Uploader: Thread {
     // the hold with every upload while there is one: the server lets go when an upload comes without it
     let hold = p.device.flatMap(Recorder.hold).map { "&hold=\($0)" } ?? ""
     do {
+      var got: Data?
       let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold,
                           try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac",
-                          reply: Uploader.slices)
-      switch code {
-      case 200:
+                          reply: { got = $0 })
+      let answer = UploadAnswer.of(code, got)
+      if answer == .ok, let got { Uploader.slices(got) }
+      switch answer {
+      case .ok:
         b.forEach(keep); sent += b.count; note = nil
         okAt = Recorder.now()
         if fails > 0 {
@@ -570,7 +580,7 @@ final class Uploader: Thread {
                         fields: ["fails": fails, "ms": okAt - failedAt])
         }
         fails = 0
-      case 400:  // the server keeps the bytes (recordings/rejected/); this phone says it lost them
+      case .badAudio:  // the server keeps the bytes (recordings/rejected/); this phone says it lost them
         let bytes = b.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
         DeviceLog.app(p.device ?? device, "upload_rejected", "服务端无法解码 \(b.count) 块（起于 \(Recorder.clock(p.start))，\(bytes / 1024) KB），已丢弃",
                       level: "error", fields: ["start": p.start, "pieces": b.count, "bytes": bytes])
@@ -580,7 +590,13 @@ final class Uploader: Thread {
           u.set(Array(Set((u.stringArray(forKey: k) ?? []) + b.compactMap { Uploader.piece($0).map { "\($0.start)" } })), forKey: k)
         }
         b.forEach { try? FileManager.default.removeItem(at: $0) }; note = ["code": "rejected"]
-      default: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
+      case .auth, .refused:  // not the server's "not audio": a proxy's, a token's; the pieces stay
+        halted = true
+        let n = Uploader.pending(dir)
+        DeviceLog.app(p.device ?? device, "upload_refused", "上传被拒绝（HTTP \(code)），停止重试，\(n) 块留在手机上，重新开始录音后再传",
+                      level: "error", fields: ["code": code, "pieces": n])
+        note = ["code": answer == .auth ? "uploadUnauthorized" : "uploadRefused", "detail": "HTTP \(code)"]
+      case .retry: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
       }
     } catch {
       fails += 1
@@ -688,7 +704,7 @@ final class Uploader: Thread {
     }.resume()
     done.wait()
     if let err { throw err }
-    if (200..<300).contains(code), let got { reply(got) }
+    if let got { reply(got) }  // whatever the code: the upload reads a 400's detail (UploadAnswer)
     return code
   }
 

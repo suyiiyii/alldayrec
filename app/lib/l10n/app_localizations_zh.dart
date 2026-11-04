@@ -963,6 +963,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String noteUploadRefused(Object detail) {
+    return '上传被拒绝（$detail），已停止重试；没传的录音留在手机上，检查服务器地址后重新开始录音';
+  }
+
+  @override
+  String noteUploadUnauthorized(Object detail) {
+    return '上传被拒绝（$detail）：登录已失效，重新扫码登录后再开始录音；没传的录音留在手机上';
+  }
+
+  @override
   String noteEndFailed(Object detail) {
     return '结束信号失败 $detail';
   }

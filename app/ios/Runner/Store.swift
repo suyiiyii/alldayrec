@@ -397,3 +397,24 @@ final class Mirror {
     return true
   }
 }
+
+/// What an upload's answer means for its pieces (live-record#328), as the Android Uploader.answer and
+/// web/src/lib/upload.ts read it; what is deleted off a recorder follows (Mirror.done: once the pieces left the queue).
+/// badAudio only for the server's own "not audio" (400 with exactly that detail; it keeps the bytes in
+/// recordings/rejected/): the pieces go. auth (401, 403) and refused (any other 4xx: a proxy's, a wrong address): kept,
+/// no more tries. retry: 5xx, 408, 429, anything else.
+enum UploadAnswer: Equatable {
+  case ok, badAudio, auth, refused, retry
+
+  static func of(_ code: Int, _ body: Data?) -> UploadAnswer {
+    switch code {
+    case 200: return .ok
+    case 400 where body.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }?["detail"] as? String == "could not decode":
+      return .badAudio
+    case 401, 403: return .auth
+    case 408, 429: return .retry
+    case 400..<500: return .refused
+    default: return .retry
+    }
+  }
+}

@@ -1742,6 +1742,18 @@ abstract class AppLocalizations {
   /// **'上传失败 {detail}'**
   String noteUploadFailed(Object detail);
 
+  /// No description provided for @noteUploadRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传被拒绝（{detail}），已停止重试；没传的录音留在手机上，检查服务器地址后重新开始录音'**
+  String noteUploadRefused(Object detail);
+
+  /// No description provided for @noteUploadUnauthorized.
+  ///
+  /// In zh, this message translates to:
+  /// **'上传被拒绝（{detail}）：登录已失效，重新扫码登录后再开始录音；没传的录音留在手机上'**
+  String noteUploadUnauthorized(Object detail);
+
   /// No description provided for @noteEndFailed.
   ///
   /// In zh, this message translates to:

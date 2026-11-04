@@ -593,4 +593,20 @@ do {
   check(Store.ack(0xFFFF_FFFF, 0xFFFF_FFFF), [8] + [UInt8](repeating: 0xFF, count: 8), "ack at the top")
 }
 
+// an upload's answer (UploadAnswer, live-record#328): only the server's own "not audio" drops the pieces
+do {
+  let a = { (code: Int, body: String?) in UploadAnswer.of(code, body.map { Data($0.utf8) }) }
+  check(a(200, #"{"seconds":1.0}"#), .ok, "taken")
+  check(a(400, #"{"detail":"could not decode"}"#), .badAudio, "not audio")
+  check(a(400, "<html>400 Bad Request</html>"), .refused, "a proxy's 400: kept")
+  check(a(400, nil), .refused, "a 400 without a body")
+  check(a(400, #"{"detail":"something else"}"#), .refused, "another 400")
+  check(a(422, #"{"detail":[{"msg":"field required"}]}"#), .refused, "422")
+  check(a(404, nil), .refused, "404")
+  check(a(413, nil), .refused, "413")
+  check(a(401, #"{"detail":"could not decode"}"#), .auth, "401")
+  check(a(403, nil), .auth, "403")
+  for c in [0, 204, 302, 408, 429, 500, 502, 503] { check(a(c, nil), .retry, "\(c)") }
+}
+
 print("storecheck ok")

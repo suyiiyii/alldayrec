@@ -274,7 +274,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
          *  prefs until it takes it). */
         fun end(at: Long)
         fun piece()
-        /** Starts of this bean's pieces the server refused (Uploader: HTTP 400): their files stay on the bean. */
+        /** Starts of this bean's pieces the server could not decode (Uploader.answer BAD_AUDIO): their files stay on the bean. */
         fun refused(): Set<Long>
         /** A debug capture of the session (off unless asked for: BeanLink). */
         fun trace(what: String, v: Map<String, Any?>) {}
