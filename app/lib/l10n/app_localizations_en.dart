@@ -176,6 +176,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get goToSettings => 'Open settings';
 
   @override
+  String get pageLoadFailed => 'Couldn\'t load, tap to retry';
+
+  @override
   String unbindTitle(Object name) {
     return 'Unbind $name?';
   }

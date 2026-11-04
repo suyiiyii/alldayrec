@@ -45,6 +45,38 @@ Map cannedStatus(String name) {
   };
 }
 
+/// A tab's page load. A first launch's system prompt (国行 「允许使用无线数据」) failed the first loads of all three tabs
+/// and left them blank, refresh's reload() doing nothing for a page never loaded (live-record#392): such a tab is
+/// loaded again from its address, by itself with a backoff, on coming back to the front, or by a tap on its cover.
+class WebLoad {
+  bool loaded = false;  // its page finished once: reload() works from here on
+  bool failed = false;  // the last main-frame load failed: the 「加载失败，点重试」 cover shows
+  bool _error = false;  // an error in the load under way (Android still calls onPageFinished after one)
+  int attempts = 0;  // retries by itself since the last success, return to the front or tap
+  Timer? timer;  // the next of those
+  static const maxAttempts = 6;  // 2+4+...+64 s ≈ 2 min, then only coming back to the front or a tap
+
+  void started() => _error = false;
+
+  /// A main-frame error; false for one that is no failed load: a navigation cut short by another (iOS -999 cancelled,
+  /// WebKit 102 interrupted) or iOS ending the web process (handled on its own).
+  bool error(WebResourceError e) {
+    if (e.isForMainFrame == false || e.errorType == WebResourceErrorType.webContentProcessTerminated) return false;
+    if (e.errorCode == -999 || e.errorCode == 102) return false;
+    return _error = failed = true;
+  }
+
+  void finished() {
+    if (_error) return;
+    loaded = true;
+    failed = false;
+    attempts = 0;
+  }
+
+  /// The wait before the next retry by itself; null once they are used up.
+  Duration? nextRetry() => attempts < maxAttempts ? Duration(seconds: 2 << attempts++) : null;
+}
+
 class Home extends StatefulWidget {
   const Home({super.key});
   @override
@@ -61,6 +93,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   // WebViews whose page iOS took away while the app was in the background (it reclaims web processes idle for hours:
   // the three tabs stayed blank, 10-25): loaded again when the app comes back to the front
   final dropped = <WebViewController>{};
+  final loads = [WebLoad(), WebLoad(), WebLoad()];  // the tabs' page loads
   Timer? ticker;
   int ticks = 0;
   String version = '';
@@ -103,6 +136,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   @override
   void dispose() {
     ticker?.cancel();
+    for (final w in loads) {
+      w.timer?.cancel();
+    }
     rev.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -120,6 +156,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         c.reload();
       }
       dropped.clear();
+      // a tab not loaded yet (a system prompt over the first launch, the network back): again now, its retries afresh
+      for (var i = 0; i < webs.length; i++) {
+        if (webs[i] != null && (!loads[i].loaded || loads[i].failed)) _retry(i);
+      }
     }
     if (state == AppLifecycleState.paused) Recorder.listen(false);  // listening is for the app in front only
   }
@@ -192,9 +232,14 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ..clearCache()  // the page changes with server deploys
       // the web page hides its own navigation in the app: Android's WebView says so in its user agent, iOS's does not
       ..setNavigationDelegate(NavigationDelegate(
-          onPageFinished: (_) => c.runJavaScript("document.documentElement.classList.add('in-app')").ignore(),
-          // iOS ended the page's web process (memory, or idle for hours): reload, in front now, else on coming back
+          onPageStarted: tab == null ? null : (_) => loads[tab].started(),
+          onPageFinished: (_) {
+            c.runJavaScript("document.documentElement.classList.add('in-app')").ignore();
+            if (tab != null && mounted) setState(() => loads[tab].finished());
+          },
           onWebResourceError: (e) {
+            if (tab != null && mounted && loads[tab].error(e)) return _failed(tab);
+            // iOS ended the page's web process (memory, or idle for hours): reload, in front now, else on coming back
             if (e.errorType != WebResourceErrorType.webContentProcessTerminated) return;
             if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
               c.reload();
@@ -210,9 +255,33 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   void _loadWeb() {
     if (settings!.token.isEmpty) return;
     for (var i = 0; i < webs.length; i++) {
+      loads[i].timer?.cancel();
+      loads[i] = WebLoad();  // another server or token: what loaded before says nothing
       (webs[i] ??= _web(tab: i)).loadRequest(_url(paths[i]));
     }
   }
+
+  /// A tab's load failed: its cover shows, and it is tried again after a while (if still failed and in front then).
+  void _failed(int i) {
+    final w = loads[i];
+    setState(() {});
+    w.timer?.cancel();
+    final wait = w.nextRetry();
+    if (wait == null) return;
+    w.timer = Timer(wait, () {
+      if (mounted && w == loads[i] && w.failed && WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) _load(i);
+    });
+  }
+
+  /// Refresh, a tap on the cover, coming back to the front: a page never loaded from its address (reload() does nothing
+  /// for it on iOS), else reload; the retries by itself start afresh.
+  void _retry(int i) {
+    loads[i].timer?.cancel();
+    loads[i].attempts = 0;
+    _load(i);
+  }
+
+  void _load(int i) => loads[i].loaded ? webs[i]!.reload() : webs[i]!.loadRequest(_url(paths[i]));
 
   /// One of 我的's entries, over the bottom bar; back (the key or the app bar's arrow) comes back to 我的.
   void _open(String title, Widget body) =>
@@ -320,13 +389,17 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             StatusChip(status: status, ble: ble, stopping: stopping, onPressed: _statusSheet,
                 warn: status['error'] != null || status['note'] != null || note.isNotEmpty),
           if (page < webs.length && webs[page] != null)  // the WebView can get stuck
-            IconButton(icon: const Icon(Icons.refresh), tooltip: l.refresh, visualDensity: VisualDensity.compact, onPressed: () => webs[page]!.reload()),
+            IconButton(icon: const Icon(Icons.refresh), tooltip: l.refresh, visualDensity: VisualDensity.compact, onPressed: () => _retry(page)),
         ],
       ),
       body: settings == null
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [const UpdateBanner(), Expanded(child: IndexedStack(index: page, children: [  // keeps the WebView alive across pages
-              for (final w in webs) w == null ? _Empty(onSetup: _openSettings) : WebViewWidget(controller: w),
+              for (final (i, w) in webs.indexed)
+                w == null ? _Empty(onSetup: _openSettings) : Stack(children: [
+                  WebViewWidget(controller: w),
+                  if (loads[i].failed) Positioned.fill(child: LoadFailed(onRetry: () => _retry(i))),  // over Android's error page too
+                ]),
               _me(cs),
             ]))]),
       bottomNavigationBar: settings == null ? null : NavigationBar(
@@ -502,6 +575,26 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ),
     ];
   }
+}
+
+/// A tab whose page did not load: 「加载失败，点重试」 instead of a blank page.
+class LoadFailed extends StatelessWidget {
+  final VoidCallback onRetry;
+  const LoadFailed({super.key, required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: InkWell(
+          onTap: onRetry,
+          child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.cloud_off_outlined, size: 40, color: Theme.of(context).colorScheme.outline),
+              const SizedBox(height: 12),
+              Text(AppLocalizations.of(context).pageLoadFailed),
+            ]),
+          ),
+        ),
+      );
 }
 
 class _Empty extends StatelessWidget {
