@@ -252,3 +252,22 @@ def test_live_ai_speaker_contract(tmp_path, lang):
     assert '所有说话人（「我」、其他标签或姓名）都用同一标准区分听众' in prompt
     assert '夹在 AI 请求之间的对人说话和人类回应，仍按人的对话提取' in prompt
     assert prompt.endswith(summary.EN if lang == 'en' else summary.ZH)
+
+
+def test_topic_without_time_is_filled():
+    """A topic's time is where the page jumps in: one the model left out, wrote as HH:MM or between two rows still lands
+    on a row; one that matches nothing stays null (the page shows the title alone). Exact times are as before."""
+    rows = [dict(start="2026-11-04T20:00:01.500", text="今天先说服务器迁移的事", speaker="我"),
+            dict(start="2026-11-04T20:03:10.000", text="新机房下周三能上架", speaker="S1"),
+            dict(start="2026-11-04T20:10:05.000", text="对了你家猫最近怎么样", speaker="S1"),
+            dict(start="2026-11-04T20:10:20.000", text="猫挺好的，就是掉毛", speaker="我")]
+    topics = summary.anchor({"topics": [
+        {"title": "服务器迁移", "points": ["下周三上架"], "at": "20:00:01"},  # exact
+        {"title": "上架时间", "points": [], "at": "20:03"},  # HH:MM
+        {"title": "闲聊", "points": ["猫掉毛"], "at": "20:10:00"},  # between rows: the next one
+        {"title": "闲聊", "points": ["猫挺好但掉毛"]},  # no time: the row that says it
+        {"title": "猫", "points": [], "at": None},  # one shared piece is too little
+        {"title": "预算", "points": ["没定"], "at": "21:00:00"},  # past the last row, no row says it
+    ]}, rows)["topics"]
+    assert [t["at"] for t in topics] == [rows[0]["start"], rows[1]["start"], rows[2]["start"], rows[3]["start"], None, None], topics
+    assert [t["title"] for t in topics][-2:] == ["猫", "预算"]  # nulls still sort last
