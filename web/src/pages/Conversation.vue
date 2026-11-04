@@ -977,16 +977,12 @@ h3 .fold {
 }
 /* a topic: its title (the rest of the line) and its time on one line, its points under them */
 .topic {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
 }
-.topic > .fold {
-  flex: 1;
-  min-width: 0;
-}
 .topic > .points {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
 }
 /* 议题's heading, with the one control that opens or folds every topic */
 .hrow {
