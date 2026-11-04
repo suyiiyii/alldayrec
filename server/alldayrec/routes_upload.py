@@ -53,6 +53,9 @@ def slices() -> dict:
             "watched": watched}
 
 
+BAD_AUDIO = "could not decode"  # /api/chunks' detail for a piece that is not audio: see chunk()
+
+
 @router.post("/api/chunks")
 async def chunk(request: Request, device: str, start: int, n: int | None = None, hold: int | None = None):
     """One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz
@@ -85,8 +88,10 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
         raise HTTPException(503, detail)
     if seconds is None:
         log.warning("%s: piece at %s (%s, %d bytes) could not be decoded", device, dt.datetime.fromtimestamp(start / 1000), kind, size)
-        ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端收到 400 会丢弃它；原始字节留在 recordings/rejected/", "error")
-        raise HTTPException(400, "could not decode")
+        ws.note(f"{device} 的一块音频（起于 {dt.datetime.fromtimestamp(start / 1000).strftime('%H:%M:%S')}）无法解码，客户端会丢弃它；原始字节留在 recordings/rejected/", "error")
+        # the one answer the clients drop a piece on (#328): 400 with exactly this detail. Any other 4xx (a proxy's, a
+        # token's) they keep the audio for, 5xx they retry; keep the words as they are (the apps out there match them)
+        raise HTTPException(400, BAD_AUDIO)
     audio.piece_in(device)
     if released:
         late_store.release(device)

@@ -4,6 +4,7 @@ import { onBeforeRouteLeave } from "vue-router";
 import { intl, t } from "../i18n";
 import { oggOpus } from "../lib/ogg";
 import { RecordStream } from "../lib/stream";
+import { verdict } from "../lib/upload";
 
 // Two sources, one queue. The phone's microphone: every SLICE_MS the recorder is stopped and restarted, so each
 // blob is a complete webm file. The BLE recorder: the Opus frames of its record stream go into Ogg pieces of
@@ -29,11 +30,13 @@ const device = ref((localStorage.device ||= `web-recorder-${crypto.randomUUID().
   packets = ref(0),
   hw = ref(""),
   lastPiece = ref(""),
+  blocked = ref(""), // why uploads stopped (an answer no retry fixes: a token, a proxy), the queue kept; "" none
   recording = ref(false);
 let rec: MediaRecorder | null = null,
   stream: MediaStream | null = null,
   sending = false,
-  fails = 0;
+  fails = 0,
+  pendingEnd: { dev: string; at: number } | null = null; // a stop's end, sent once the queue is up
 const queue: { blob: Blob; start: number; device: string }[] = [];
 const stat = computed(() =>
   recording.value
@@ -62,15 +65,19 @@ async function send(url: string, body?: Blob, type?: string): Promise<unknown> {
     await sleep(20000); // server catching up
     return send(url, body, type);
   }
-  if (!r.ok)
-    throw new Error("HTTP " + r.status + " " + ((await r.json().catch(() => ({}))).detail || ""));
+  if (!r.ok) {
+    const body = await r.json().catch(() => null);
+    const detail = body?.detail;
+    throw Object.assign(new Error("HTTP " + r.status + (typeof detail === "string" ? " " + detail : "")), { status: r.status, body });
+  }
   return r.json();
 }
 async function drain() {
-  // in start order, one at a time, retried until sent
-  if (sending) return;
+  // in start order, one at a time; what the answer means (lib/upload.ts): a 5xx or no answer is tried again, a piece
+  // the server cannot decode is dropped, any other 4xx stops the uploads with the queue kept until 重试上传
+  if (sending || blocked.value) return;
   sending = true;
-  while (queue.length) {
+  while (queue.length && !blocked.value) {
     const { blob, start, device: dev } = queue[0];
     try {
       await send(
@@ -82,9 +89,19 @@ async function drain() {
       sent.value++;
       fails = 0;
     } catch (e) {
-      fails++;
-      note(t("record.uploadFailed", { error: (e as Error).message, s: Math.min(fails, 6) * 5 }));
-      await sleep(Math.min(fails, 6) * 5000);
+      const x = e as Error & { status?: number; body?: unknown },
+        v = x.status ? verdict(x.status, x.body) : "retry";
+      if (v === "bad") {
+        queue.shift();
+        note(t("record.badAudio", { at: new Date(start).toLocaleTimeString(intl()) }));
+      } else if (v === "retry") {
+        fails++;
+        note(t("record.uploadFailed", { error: x.message, s: Math.min(fails, 6) * 5 }));
+        await sleep(Math.min(fails, 6) * 5000);
+      } else {
+        blocked.value = t(v === "auth" ? "record.authFailed" : "record.refused", { error: x.message });
+        note(blocked.value);
+      }
     }
     queued.value = queue.length;
   }
@@ -273,6 +290,8 @@ async function start() {
   localStorage.source = source.value;
   localStorage.upload = upload.value ? "1" : "0";
   sent.value = 0;
+  pendingEnd = null; // recording again carries on the conversation: no end for the last stop
+  blocked.value = ""; // a start tries the kept pieces again
   recording.value = true;
   try {
     await (source.value === "ble" ? startBle() : startMic());
@@ -298,12 +317,28 @@ async function stop() {
   }
   note(t("record.stopping"));
   await sleep(500);
-  while (queue.length || sending) await sleep(500);
-  if (upload.value)
-    await send(`/api/chunks/end?device=${encodeURIComponent(dev)}&t=${at}`).catch((e) =>
-      note(t("record.endFailed", { error: e.message })),
-    );
+  while ((queue.length && !blocked.value) || sending) await sleep(500);
+  if (upload.value) {
+    pendingEnd = { dev, at };
+    if (queue.length) note(t("record.endHeld", { n: queue.length }, queue.length));
+    else await sendEnd();
+  }
   note(t("record.stopped"));
+}
+/** The last stop's end, once none of the queue is left (it closes the conversation the server has open). */
+async function sendEnd() {
+  if (!pendingEnd || queue.length) return;
+  const { dev, at } = pendingEnd;
+  pendingEnd = null;
+  await send(`/api/chunks/end?device=${encodeURIComponent(dev)}&t=${at}`).catch((e) =>
+    note(t("record.endFailed", { error: e.message })),
+  );
+}
+/** 重试上传: the kept queue goes again; after a stop, its end follows. */
+async function retry() {
+  blocked.value = "";
+  await drain();
+  if (!recording.value) await sendEnd();
 }
 const toggle = () =>
   recording.value ? stop() : start().catch((e) => note(t("record.startFailed", { error: String(e) })));
@@ -364,6 +399,10 @@ onUnmounted(() => {
         </div>
       </div>
       <p class="stat">{{ stat }}</p>
+      <p v-if="blocked" class="blocked">
+        {{ blocked }}
+        <button class="btn-ghost" @click="retry">{{ t("record.retry") }}</button>
+      </p>
       <audio v-if="lastPiece" :src="lastPiece" controls></audio>
       <details>
         <summary>{{ t("record.log") }}</summary>
@@ -448,6 +487,11 @@ audio {
 }
 .stat {
   color: var(--fg-2);
+  font-size: var(--fs-sm);
+  margin: 6px 0 0;
+}
+.blocked {
+  color: var(--err);
   font-size: var(--fs-sm);
   margin: 6px 0 0;
 }

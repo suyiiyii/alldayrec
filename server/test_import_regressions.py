@@ -41,7 +41,8 @@ def test_no_audio_is_400_and_quarantined(tmp_path, kind):
                     '-frames:v', '1', '-an', '-y', str(path)], check=True)
     body = path.read_bytes()
     r = client(t).post(f'/api/chunks?device=fixture&start={START}', content=body)
-    assert r.status_code == 400 and r.json()['detail'] == 'could not decode'
+    # the literal the apps and /record drop a piece on (#328): any other answer keeps their audio
+    assert r.status_code == 400 and r.json() == {'detail': 'could not decode'}
     assert (t.recordings / 'rejected' / 'fixture' / f'{START}.bin').read_bytes() == body
     assert db.conn().execute('SELECT count(*) FROM pieces').fetchone()[0] == 0
 
