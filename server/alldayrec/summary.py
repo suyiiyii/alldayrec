@@ -168,15 +168,36 @@ def day(x) -> str | None:
         return None
 
 
+def _grams(text) -> set[str]:
+    """Two-character pieces of letters and digits: Chinese has no spaces to split words at."""
+    text = text if isinstance(text, str) else ""
+    return {text[i:i + 2] for i in range(len(text) - 1) if text[i:i + 2].isalnum()}
+
+
+def topic_row(topic: dict, rows: list[dict]) -> str | None:
+    """The start of the first row sharing the most two-character pieces with the topic's title and points, at least
+    two; None when no row shares that much."""
+    # ponytail: plain overlap over the whole transcript, no word weights; bound it by the neighbouring topics if it picks wrong rows
+    words = _grams(" ".join(p for p in [topic.get("title"), *(topic.get("points") or [])] if isinstance(p, str)))
+    best = max(rows, key=lambda r: len(words & _grams(r.get("text"))), default=None)
+    return best["start"] if best and len(words & _grams(best.get("text"))) >= 2 else None
+
+
 def anchor(res: dict, rows: list[dict]) -> dict:
     """The model cites HH:MM:SS; turn each into the start of the row it names (null when none matches), topics in time order.
     A todo's due_date stays only when it is a date and the todo has a due: without words for a time it was made up.
     A person's points ({text, at} each) are kept as two lists side by side, points (the texts, what every reader takes)
     and points_at; a plain text point has no time. A cited point must match its speaker as well as its time;
-    unsupported citations are cleared without guessing a different line or changing the point text."""
+    unsupported citations are cleared without guessing a different line or changing the point text.
+    A topic's time is only where to jump in, so it is filled in: a time with no row of its own (HH:MM, or between two
+    rows) takes the first row at or after it; none, or one past the last row, takes topic_row's; else it stays null."""
     def at(hms, who=None):
         return next((r["start"] for r in rows if r["start"][11:19] == hms and (who is None or r.get("speaker") == who)), None) if isinstance(hms, str) else None
-    for k in ("topics", "todos", "decisions", "ai_requests"):
+    def after(hms):
+        hms = hms + ":00" if isinstance(hms, str) and len(hms) == 5 else hms
+        return next((r["start"] for r in rows if r["start"][11:19] >= hms), None) if isinstance(hms, str) and len(hms) == 8 else None
+    res["topics"] = [{**x, "at": at(x.get("at")) or after(x.get("at")) or topic_row(x, rows)} for x in res.get("topics") or []]
+    for k in ("todos", "decisions", "ai_requests"):
         res[k] = [{**x, "at": at(x.get("at"))} for x in res.get(k) or []]
     res["todos"] = [{**x, "due_date": day(x.get("due_date")) if x.get("due") else None} for x in res["todos"]]
     for k in ("ai_spans", "media_spans"):
