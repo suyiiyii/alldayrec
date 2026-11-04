@@ -607,6 +607,12 @@ do {
   check(a(401, #"{"detail":"could not decode"}"#), .auth, "401")
   check(a(403, nil), .auth, "403")
   for c in [0, 204, 302, 408, 429, 500, 502, 503] { check(a(c, nil), .retry, "\(c)") }
+  // stopped by one: waits, then tries once more half an hour on; 0 (settings saved, a start): goes now
+  let t: Int64 = 1_800_000_000_000
+  check(UploadAnswer.waits(haltedAt: 0, now: t), false, "not stopped")
+  check(UploadAnswer.waits(haltedAt: t, now: t + 2_000), true, "stopped")
+  check(UploadAnswer.waits(haltedAt: t, now: t + UploadAnswer.haltMs - 1), true, "still within the half hour")
+  check(UploadAnswer.waits(haltedAt: t, now: t + UploadAnswer.haltMs), false, "half an hour on: once more")
 }
 
 print("storecheck ok")

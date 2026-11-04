@@ -178,8 +178,8 @@ class UploaderTest {
         for (c in listOf(0, 204, 302, 408, 429, 500, 502, 503)) assertEquals("$c", A.RETRY, a(c, null))
     }
 
-    /** A proxy's 400 leaves the piece in the queue and stops the uploads (it was deleted, and the bean's card file
-     *  with it); a start (halted = false) sends it again. The server's "not audio" drops it and the next goes. */
+    /** A proxy's 400 leaves the piece in the queue and stops the uploads (it was deleted, and the LR-P3's card file
+     *  with it); half an hour on it tries once more, and settings saved or a start (haltedAt = 0) send it again. The server's "not audio" drops it and the next goes. */
     @Test fun refusedKeeps() {
         val dir = kotlin.io.path.createTempDirectory().toFile()
         val kept = File(dir, "1000.ogg").apply { writeBytes(ByteArray(64)) }
@@ -211,15 +211,19 @@ class UploaderTest {
         try {
             assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped: no second try", null, got.poll(3, TimeUnit.SECONDS))
-            assertTrue(up.halted && kept.exists())
+            assertTrue(up.haltedAt > 0 && kept.exists())
             assertEquals("uploadRefused", up.note?.get("code"))
+            up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on: it tries once more on its own
+            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("stopped again", null, got.poll(3, TimeUnit.SECONDS))
+            assertTrue(up.haltedAt > System.currentTimeMillis() - 10_000 && kept.exists())
             File(dir, "5000.ogg").writeBytes(ByteArray(64))  // not batched with it: over BATCH_GAP_MS apart
-            proxy.set(false); up.halted = false
+            proxy.set(false); up.haltedAt = 0  // settings saved, or a start
             assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
             assertEquals("200 /api/chunks?device=phone&start=5000", got.poll(5, TimeUnit.SECONDS))
             Thread.sleep(200)
             assertEquals(emptyList<File>(), Uploader.queue(dir))
-            assertEquals(false, up.halted)
+            assertEquals(0L, up.haltedAt)
         } finally { up.running = false; up.join(3000); http.close(); dir.deleteRecursively() }
     }
 }

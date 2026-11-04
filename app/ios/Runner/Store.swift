@@ -417,4 +417,9 @@ enum UploadAnswer: Equatable {
     default: return .retry
     }
   }
+  /// A refused queue (.auth, .refused) tries again on its own this long after (a proxy fixed meanwhile: a recorder as the
+  /// source has no start to tap), as the Android Uploader.HALT_MS.
+  static let haltMs: Int64 = 30 * 60_000
+  /// Uploads wait: stopped at `haltedAt` (unix ms; 0: not stopped) and not yet haltMs on.
+  static func waits(haltedAt: Int64, now: Int64) -> Bool { haltedAt > 0 && now - haltedAt < haltMs }
 }

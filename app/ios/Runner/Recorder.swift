@@ -46,6 +46,11 @@ enum Recorder {
         result(nil)
       case "deviceName": result(UIDevice.current.name)  // "iPhone" since iOS 16 without the user-assigned-device-name entitlement
       case "upload": if Uploader.pending(dir) > 0 { upload() }; result(nil)
+      case "account":  // settings saved (a new server or token, a scan to sign in again): the queue goes there now, a refused
+        // one tries again (Uploader.haltedAt); with a recorder as the source no start would bring them
+        for k in ["server", "token"] { defaults.set(a[k] as? String ?? "", forKey: k) }
+        if let u = uploader { u.server = a["server"] as? String ?? ""; u.token = a["token"] as? String ?? ""; u.haltedAt = 0 }
+        result(nil)
       case "recorder":  // the bound BLE recorder, what it last said, and how a firmware update goes
         result(["name": defaults.string(forKey: "bleName") ?? NSNull(), "model": defaults.string(forKey: "bleModel") ?? NSNull(),
                 "fw": defaults.string(forKey: "bleFw") ?? NSNull(), "dfu": Dfu.state ?? NSNull(), "kicked": defaults.bool(forKey: "bleKicked")] as [String: Any])
@@ -300,7 +305,7 @@ enum Recorder {
     u.token = defaults.string(forKey: "token") ?? ""
     u.device = defaults.string(forKey: "device") ?? "phone"
     u.archive = archive
-    u.halted = false  // a start tries a refused queue again, with the server and token it brings
+    u.haltedAt = 0  // a start tries a refused queue again, with the server and token it brings
     if uploader == nil { uploader = u; u.start() }
   }
 
@@ -500,7 +505,7 @@ final class Slicer {
 /// Uploads the .ogg files (.aac from the app before) in start order; a file is archived or deleted once the server has it,
 /// so the directory is the offline queue. What an answer means is UploadAnswer (Store.swift): a 5xx or no answer is tried
 /// again, forever; a piece the server says it cannot decode leaves the queue; any other 4xx stops the uploads with the
-/// queue kept until a start (Recorder.upload). The BLE recorder's back-to-back pieces waiting together go
+/// queue kept (haltedAt). The BLE recorder's back-to-back pieces waiting together go
 /// as one request, as on Android (each is a whole Ogg stream, so their bytes in a row decode as one): with 1 s pieces
 /// one request per piece cannot keep up when a request takes over a second.
 final class Uploader: Thread {
@@ -511,9 +516,10 @@ final class Uploader: Thread {
   @Shared private var fails = 0      // in a row, and since when (unix ms)
   private var failedAt: Int64 = 0
   @Shared private var okAt: Int64 = 0  // the last upload the server took (unix ms; 0: none since the launch)
-  /// An answer no retry fixes came (UploadAnswer .auth, .refused): nothing goes up, the queue stays, until a start
-  /// (Recorder.upload, with the server and token it brings) clears it.
-  @Shared var halted = false
+  /// When an answer no retry fixes came (UploadAnswer .auth, .refused; unix ms, 0: none): nothing goes up, the queue
+  /// stays, until settings saved in the app or a start clear it (Recorder "account", Recorder.upload, with the server and
+  /// token they bring), or UploadAnswer.haltMs on, when it tries once more.
+  @Shared var haltedAt: Int64 = 0
 
   init(dir: URL) { self.dir = dir }
 
@@ -552,7 +558,7 @@ final class Uploader: Thread {
   override func main() { while true { autoreleasepool(invoking: pass) } }
 
   private func pass() {
-    if halted { Thread.sleep(forTimeInterval: 2); return }
+    if UploadAnswer.waits(haltedAt: haltedAt, now: Recorder.now()) { Thread.sleep(forTimeInterval: 2); return }
     // a recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card)
     let all = Uploader.files(dir), ahead = { (f: URL) in
       Uploader.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
@@ -591,9 +597,9 @@ final class Uploader: Thread {
         }
         b.forEach { try? FileManager.default.removeItem(at: $0) }; note = ["code": "rejected"]
       case .auth, .refused:  // not the server's "not audio": a proxy's, a token's; the pieces stay
-        halted = true
+        haltedAt = Recorder.now()
         let n = Uploader.pending(dir)
-        DeviceLog.app(p.device ?? device, "upload_refused", "上传被拒绝（HTTP \(code)），停止重试，\(n) 块留在手机上，重新开始录音后再传",
+        DeviceLog.app(p.device ?? device, "upload_refused", "上传被拒绝（HTTP \(code)），暂停上传，\(n) 块留在手机上；保存设置后马上再试，否则 30 分钟后再试",
                       level: "error", fields: ["code": code, "pieces": n])
         note = ["code": answer == .auth ? "uploadUnauthorized" : "uploadRefused", "detail": "HTTP \(code)"]
       case .retry: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])

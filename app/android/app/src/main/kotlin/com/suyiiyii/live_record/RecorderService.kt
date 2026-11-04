@@ -197,7 +197,7 @@ class RecorderService : Service() {
                 for (k in listOf("foreground", "background", "screenOff")) putInt(k, intent.getIntExtra(k, 20))
                 putBoolean("archive", intent.getBooleanExtra("archive", true))
             }.apply()
-            uploader?.apply { server = prefs.getString("server", "")!!; token = prefs.getString("token", "")!!; halted = false }  // a start tries a refused queue again
+            uploader?.apply { server = prefs.getString("server", "")!!; token = prefs.getString("token", "")!!; haltedAt = 0 }  // a start tries a refused queue again
         } else if (!prefs.getBoolean("active", false)) {  // restarted after a kill while only uploading, or nothing to do
             uploadOnly(prefs, dir)
             return START_STICKY
@@ -300,16 +300,18 @@ class RecorderService : Service() {
 
 /** Uploads the .ogg files in start order; a file is archived or deleted once the server has it, so the directory is
  *  the offline queue. What an answer means is answer(): a 5xx or no answer is tried again, forever; a piece the server
- *  says it cannot decode leaves the queue; any other 4xx stops the uploads with the queue kept until a start.
+ *  says it cannot decode leaves the queue; any other 4xx stops the uploads with the queue kept (haltedAt).
  *  Back-to-back pieces waiting together go as one request (each piece is a whole Ogg stream, so their bytes in a row
  *  decode as one): with 1 s pieces one request per piece cannot keep up when a request takes over a second (10-03:
  *  the queue grew to 16 s). */
 class Uploader(private val prefs: android.content.SharedPreferences, private val dir: File, @Volatile var server: String, @Volatile var token: String, private val device: String,
                private val archive: File?) : Thread() {
     @Volatile var running = true
-    /** An answer no retry fixes (answer(): AUTH, REFUSED) came: nothing goes up, the queue stays, until a start
-     *  (RecorderService.onStartCommand, with the server and token it brings) clears it. */
-    @Volatile var halted = false
+    /** When an answer no retry fixes (answer(): AUTH, REFUSED) came (wall ms; 0: none): nothing goes up, the queue
+     *  stays, until settings saved in the app or a start clear it (MainActivity "account", RecorderService.onStartCommand,
+     *  with the server and token they bring), or HALT_MS on, when it tries once more (a proxy fixed meanwhile: a recorder
+     *  as the source has no start to tap). */
+    @Volatile var haltedAt = 0L
     @Volatile var sent = 0
     @Volatile var note: Map<String, Any?>? = null
     @Volatile private var fails = 0      // in a row, and since when (wall ms)
@@ -319,6 +321,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     companion object {
         const val MAX_BATCH = 30        // pieces in one request
         const val BATCH_GAP_MS = 1500L  // starts further apart than this are not one stretch (only 1 s pieces get batched)
+        const val HALT_MS = 30 * 60_000L  // a refused queue tries again after this on its own (haltedAt)
         /** The latest upload's answer said the live page is open (slice.watched): until a minute after it (elapsedRealtime). */
         @Volatile var watchedUntil = 0L
         /** The pieces waiting, oldest first: the directory is the queue. */
@@ -379,7 +382,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
 
     override fun run() {
         while (running) {
-            if (halted) { sleep(2000); continue }
+            if (haltedAt > 0 && System.currentTimeMillis() - haltedAt < HALT_MS) { sleep(2000); continue }
             val q = files()
             letGo(q)
             ends(q)
@@ -418,9 +421,9 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                         b.forEach { it.delete() }; note = say("rejected")
                     }
                     Answer.AUTH, Answer.REFUSED -> {  // not the server's "not audio": a proxy's, a token's; the pieces stay
-                        halted = true
-                        DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_refused", "上传被拒绝（HTTP $code），停止重试，" +
-                            "${queue(dir).size} 块留在手机上，重新开始录音后再传", "error", mapOf("code" to code, "pieces" to queue(dir).size))
+                        haltedAt = System.currentTimeMillis()
+                        DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_refused", "上传被拒绝（HTTP $code），暂停上传，" +
+                            "${queue(dir).size} 块留在手机上；保存设置后马上再试，否则 30 分钟后再试", "error", mapOf("code" to code, "pieces" to queue(dir).size))
                         note = say(if (a == Answer.AUTH) "uploadUnauthorized" else "uploadRefused", "detail" to "HTTP $code")
                     }
                     Answer.RETRY -> throw Exception("HTTP $code")
