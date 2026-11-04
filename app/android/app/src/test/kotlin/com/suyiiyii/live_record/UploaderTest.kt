@@ -1,6 +1,7 @@
 package com.suyiiyii.live_record
 
 import android.content.SharedPreferences
+import com.suyiiyii.live_record.Uploader.Companion.Answer as A
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -159,5 +160,70 @@ class UploaderTest {
             sent(9000)
             assertEquals(0L, Uploader.watchedUntil)
         } finally { up.running = false; up.join(2000); http.close(); RecorderService.slicer = null; dir.deleteRecursively() }
+    }
+
+    /** Only the server's own "not audio" drops pieces; another 4xx keeps them and stops (live-record#328). */
+    @Test fun answer() {
+        fun a(code: Int, body: String?) = Uploader.answer(code, body?.toByteArray())
+        assertEquals(A.OK, a(200, """{"seconds":1.0}"""))
+        assertEquals(A.BAD_AUDIO, a(400, """{"detail":"could not decode"}"""))
+        assertEquals("a proxy's 400", A.REFUSED, a(400, "<html><body>400 Bad Request</body></html>"))
+        assertEquals(A.REFUSED, a(400, null))
+        assertEquals(A.REFUSED, a(400, """{"detail":"something else"}"""))
+        assertEquals(A.REFUSED, a(422, """{"detail":[{"msg":"field required"}]}"""))
+        assertEquals(A.REFUSED, a(404, null))
+        assertEquals(A.REFUSED, a(413, null))
+        assertEquals(A.AUTH, a(401, """{"detail":"could not decode"}"""))
+        assertEquals(A.AUTH, a(403, null))
+        for (c in listOf(0, 204, 302, 408, 429, 500, 502, 503)) assertEquals("$c", A.RETRY, a(c, null))
+    }
+
+    /** A proxy's 400 leaves the piece in the queue and stops the uploads (it was deleted, and the LR-P3's card file
+     *  with it); half an hour on it tries once more, and settings saved or a start (haltedAt = 0) send it again. The server's "not audio" drops it and the next goes. */
+    @Test fun refusedKeeps() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        val kept = File(dir, "1000.ogg").apply { writeBytes(ByteArray(64)) }
+        lateinit var edit: SharedPreferences.Editor
+        edit = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { _, m, _ ->
+            if (m.name == "commit") true else edit } as SharedPreferences.Editor
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            when (m.name) { "getLong" -> a[1]; "getStringSet" -> a[1]; "edit" -> edit; else -> null } } as SharedPreferences
+        val got = LinkedBlockingQueue<String>()
+        val proxy = java.util.concurrent.atomic.AtomicBoolean(true)
+        val http = ServerSocket(0)
+        Thread {
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                val (code, body) = when {
+                    proxy.get() -> 400 to "<html>400 Bad Request</html>"
+                    "start=1000" in path -> 400 to """{"detail":"could not decode"}"""
+                    else -> 200 to """{"seconds":1.0}"""
+                }
+                got += "$code $path"
+                c.getOutputStream().write("HTTP/1.1 $code X\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        try {
+            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("stopped: no second try", null, got.poll(3, TimeUnit.SECONDS))
+            assertTrue(up.haltedAt > 0 && kept.exists())
+            assertEquals("uploadRefused", up.note?.get("code"))
+            up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on: it tries once more on its own
+            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("stopped again", null, got.poll(3, TimeUnit.SECONDS))
+            assertTrue(up.haltedAt > System.currentTimeMillis() - 10_000 && kept.exists())
+            File(dir, "5000.ogg").writeBytes(ByteArray(64))  // not batched with it: over BATCH_GAP_MS apart
+            proxy.set(false); up.haltedAt = 0  // settings saved, or a start
+            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("200 /api/chunks?device=phone&start=5000", got.poll(5, TimeUnit.SECONDS))
+            Thread.sleep(200)
+            assertEquals(emptyList<File>(), Uploader.queue(dir))
+            assertEquals(0L, up.haltedAt)
+        } finally { up.running = false; up.join(3000); http.close(); dir.deleteRecursively() }
     }
 }

@@ -310,6 +310,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   Future<void> _saved() async {
     await settings!.save();
+    await Recorder.account(settings!.server, settings!.token);
     _loadWeb();
     // the source changed under a running recorder: stop it; with the BLE recorder as the new source the ticker starts it
     final changed = running && status['source'] != settings!.source;

@@ -215,6 +215,8 @@ String nativeText(BuildContext context, Object? v) {
     'usbOn' => l.usbOn,
     'rejected' => l.noteRejected,
     'uploadFailed' => l.noteUploadFailed(detail),
+    'uploadRefused' => l.noteUploadRefused(detail),
+    'uploadUnauthorized' => l.noteUploadUnauthorized(detail),
     'endFailed' => l.noteEndFailed(detail),
     'archiveFailed' => l.noteArchiveFailed(detail),
     'killed' => l.noteKilled(v['count']),

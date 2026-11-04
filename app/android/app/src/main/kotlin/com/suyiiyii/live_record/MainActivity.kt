@@ -104,6 +104,13 @@ class MainActivity : FlutterActivity() {
                         startForegroundService(Intent(this, RecorderService::class.java).setAction("upload"))
                     result.success(null)
                 }
+                "account" -> {  // settings saved (a new server or token, a scan to sign in again): the queue goes there now,
+                    // a refused one tries again (Uploader.haltedAt); with a recorder as the source no start would bring them
+                    val server = call.argument<String>("server")!!; val token = call.argument<String>("token")!!
+                    getSharedPreferences("recorder", MODE_PRIVATE).edit().putString("server", server).putString("token", token).apply()
+                    RecorderService.uploader?.apply { this.server = server; this.token = token; haltedAt = 0 }
+                    result.success(null)
+                }
                 "status" -> result.success(RecorderService.status(File(filesDir, "chunks")))
                 "version" -> result.success(DeviceLog.version)  // 我的 › 关于
                 "error" -> {  // an error the Flutter side did not catch: its type and first frames, no message

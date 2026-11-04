@@ -243,7 +243,7 @@ protocol BeanIo: AnyObject {
   /// Uploader sends it until the server takes it).
   func end(_ at: Int64)
   func piece()
-  /// Starts of this bean's pieces the server refused (Uploader: HTTP 400): their files stay on the bean.
+  /// Starts of this bean's pieces the server could not decode (UploadAnswer.badAudio): their files stay on the bean.
   func refused() -> Set<Int64>
 }
 

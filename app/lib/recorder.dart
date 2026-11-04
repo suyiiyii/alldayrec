@@ -15,6 +15,8 @@ class Recorder {
   static Future<void> slices(Map<String, int> slices) => _ch.invokeMethod('slices', slices);  // a running recorder takes them at once
   static Future<void> stop() => _ch.invokeMethod('stop');
   static Future<void> upload() => _ch.invokeMethod('upload');  // pieces left and not recording: send them anyway
+  // the server and token saved: the upload queue goes there now, also one the server refused (no start needed)
+  static Future<void> account(String server, String token) => _ch.invokeMethod('account', {'server': server, 'token': token});
   static Future<void> foreground(bool on) => _ch.invokeMethod('foreground', {'on': on});
   static Future<Map> status() async => (await _ch.invokeMethod('status')) as Map;
   static Future<String> deviceName() async => (await _ch.invokeMethod('deviceName')) as String;

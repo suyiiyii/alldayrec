@@ -197,6 +197,7 @@ class RecorderService : Service() {
                 for (k in listOf("foreground", "background", "screenOff")) putInt(k, intent.getIntExtra(k, 20))
                 putBoolean("archive", intent.getBooleanExtra("archive", true))
             }.apply()
+            uploader?.apply { server = prefs.getString("server", "")!!; token = prefs.getString("token", "")!!; haltedAt = 0 }  // a start tries a refused queue again
         } else if (!prefs.getBoolean("active", false)) {  // restarted after a kill while only uploading, or nothing to do
             uploadOnly(prefs, dir)
             return START_STICKY
@@ -297,13 +298,20 @@ class RecorderService : Service() {
     }
 }
 
-/** Uploads the .ogg files in start order, retrying forever; a file is archived or deleted once the server has it,
- *  so the directory is the offline queue. Back-to-back pieces waiting together go as one request (each piece is a
- *  whole Ogg stream, so their bytes in a row decode as one): with 1 s pieces one request per piece cannot keep up
- *  when a request takes over a second (10-03: the queue grew to 16 s). */
-class Uploader(private val prefs: android.content.SharedPreferences, private val dir: File, private val server: String, private val token: String, private val device: String,
+/** Uploads the .ogg files in start order; a file is archived or deleted once the server has it, so the directory is
+ *  the offline queue. What an answer means is answer(): a 5xx or no answer is tried again, forever; a piece the server
+ *  says it cannot decode leaves the queue; any other 4xx stops the uploads with the queue kept (haltedAt).
+ *  Back-to-back pieces waiting together go as one request (each piece is a whole Ogg stream, so their bytes in a row
+ *  decode as one): with 1 s pieces one request per piece cannot keep up when a request takes over a second (10-03:
+ *  the queue grew to 16 s). */
+class Uploader(private val prefs: android.content.SharedPreferences, private val dir: File, @Volatile var server: String, @Volatile var token: String, private val device: String,
                private val archive: File?) : Thread() {
     @Volatile var running = true
+    /** When an answer no retry fixes (answer(): AUTH, REFUSED) came (wall ms; 0: none): nothing goes up, the queue
+     *  stays, until settings saved in the app or a start clear it (MainActivity "account", RecorderService.onStartCommand,
+     *  with the server and token they bring), or HALT_MS on, when it tries once more (a proxy fixed meanwhile: a recorder
+     *  as the source has no start to tap). */
+    @Volatile var haltedAt = 0L
     @Volatile var sent = 0
     @Volatile var note: Map<String, Any?>? = null
     @Volatile private var fails = 0      // in a row, and since when (wall ms)
@@ -313,6 +321,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
     companion object {
         const val MAX_BATCH = 30        // pieces in one request
         const val BATCH_GAP_MS = 1500L  // starts further apart than this are not one stretch (only 1 s pieces get batched)
+        const val HALT_MS = 30 * 60_000L  // a refused queue tries again after this on its own (haltedAt)
         /** The latest upload's answer said the live page is open (slice.watched): until a minute after it (elapsedRealtime). */
         @Volatile var watchedUntil = 0L
         /** The pieces waiting, oldest first: the directory is the queue. */
@@ -320,6 +329,19 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         /** A piece's file name is its start (ms) and, for the BLE recorder, @ its name: start@LR-P1-XXXX.ogg */
         fun startMs(f: File) = f.nameWithoutExtension.substringBefore('@').toLong()
         fun deviceOf(f: File) = f.nameWithoutExtension.substringAfter('@', "")
+
+        enum class Answer { OK, BAD_AUDIO, AUTH, REFUSED, RETRY }
+        /** What an upload's answer means for its pieces (live-record#328), as web/src/lib/upload.ts reads it. BAD_AUDIO
+         *  only for the server's own "not audio" (400 with exactly that detail; it keeps the bytes in recordings/rejected/):
+         *  the pieces go. AUTH (401, 403) and REFUSED (any other 4xx: a proxy's, a wrong address): kept, no more tries.
+         *  RETRY: 5xx, 408, 429, anything else. */
+        fun answer(code: Int, body: ByteArray?): Answer = when {
+            code == 200 -> Answer.OK
+            code == 400 && body != null && (try { org.json.JSONObject(String(body)).opt("detail") } catch (_: Exception) { null }) == "could not decode" -> Answer.BAD_AUDIO
+            code == 401 || code == 403 -> Answer.AUTH
+            code in 400..499 && code != 408 && code != 429 -> Answer.REFUSED
+            else -> Answer.RETRY
+        }
 
         /** The first pieces of the queue `q` of one device that follow each other without a gap (a stop or a kill
          *  leaves one), at most MAX_BATCH: one request, one stretch from its first piece's start. Following means
@@ -360,6 +382,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
 
     override fun run() {
         while (running) {
+            if (haltedAt > 0 && System.currentTimeMillis() - haltedAt < HALT_MS) { sleep(2000); continue }
             val q = files()
             letGo(q)
             ends(q)
@@ -368,13 +391,16 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
             try {
                 // the hold with every upload while there is one: the server lets go when an upload comes without it
                 val held = hold(deviceOf(b[0]))
+                var got: ByteArray? = null
                 val code = post("$server/api/chunks?device=${enc(deviceOf(b[0]).ifEmpty { device })}&start=${startMs(b[0])}" +
                                 (held?.let { "&hold=$it" } ?: ""),
-                                b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg", ::slices)
-                Log.i("live-record", "upload ${b.size} pieces of ${deviceOf(b[0]).ifEmpty { device }} from ${startMs(b[0])}: HTTP $code")
-                if (code == 200 || code == 400) { if (held != null) holding += deviceOf(b[0]) else holding -= deviceOf(b[0]) }  // the server took the hold either way
-                when {
-                    code == 200 -> {
+                                b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg") { got = it }
+                val a = answer(code, got)
+                if (a == Answer.OK) got?.let(::slices)
+                Log.i("live-record", "upload ${b.size} pieces of ${deviceOf(b[0]).ifEmpty { device }} from ${startMs(b[0])}: HTTP $code $a")
+                if (a == Answer.OK || a == Answer.BAD_AUDIO) { if (held != null) holding += deviceOf(b[0]) else holding -= deviceOf(b[0]) }  // the server took the hold either way
+                when (a) {
+                    Answer.OK -> {
                         b.forEach(::keep); sent += b.size; note = null
                         okAt = System.currentTimeMillis()
                         if (fails > 0) {
@@ -384,7 +410,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                         }
                         fails = 0
                     }
-                    code == 400 -> {  // the server keeps the bytes (recordings/rejected/); this phone says it lost them
+                    Answer.BAD_AUDIO -> {  // the server keeps the bytes (recordings/rejected/); this phone says it lost them
                         val bytes = b.sumOf { it.length() }
                         DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_rejected", "服务端无法解码 ${b.size} 块" +
                             "（起于 ${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(startMs(b[0])))}，${bytes / 1024} KB），已丢弃",
@@ -394,7 +420,13 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                         prefs.edit().putStringSet(k, prefs.getStringSet(k, null).orEmpty() + b.map { "${startMs(it)}" }).commit()
                         b.forEach { it.delete() }; note = say("rejected")
                     }
-                    else -> throw Exception("HTTP $code")
+                    Answer.AUTH, Answer.REFUSED -> {  // not the server's "not audio": a proxy's, a token's; the pieces stay
+                        haltedAt = System.currentTimeMillis()
+                        DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_refused", "上传被拒绝（HTTP $code），暂停上传，" +
+                            "${queue(dir).size} 块留在手机上；保存设置后马上再试，否则 30 分钟后再试", "error", mapOf("code" to code, "pieces" to queue(dir).size))
+                        note = say(if (a == Answer.AUTH) "uploadUnauthorized" else "uploadRefused", "detail" to "HTTP $code")
+                    }
+                    Answer.RETRY -> throw Exception("HTTP $code")
                 }
             } catch (e: Exception) {
                 Log.w("live-record", "upload failed (${fails + 1}): ${e.message}")
@@ -470,7 +502,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         f.delete()
     }
 
-    /** `reply` gets the body of a 2xx answer. */
+    /** `reply` gets the body of the answer, whatever its code. */
     private fun post(url: String, body: ByteArray, type: String?, reply: (ByteArray) -> Unit = {}): Int {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.connectTimeout = 15_000; c.readTimeout = 60_000; c.doOutput = true
@@ -479,7 +511,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         c.outputStream.use { it.write(body) }
         val code = c.responseCode
         val got = (if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes() }  // read to the end: the connection is reused
-        if (code in 200..299 && got != null) reply(got)
+        if (got != null) reply(got)
         return code
     }
 

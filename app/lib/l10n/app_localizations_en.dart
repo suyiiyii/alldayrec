@@ -1001,6 +1001,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String noteUploadRefused(Object detail) {
+    return 'Upload refused ($detail); paused. The pieces not sent stay on the phone. Check the server address: saving the settings retries at once, else it tries again in 30 min';
+  }
+
+  @override
+  String noteUploadUnauthorized(Object detail) {
+    return 'Upload refused ($detail): signed out. Scan the code to sign in again and save: it retries at once; the pieces not sent stay on the phone';
+  }
+
+  @override
   String noteEndFailed(Object detail) {
     return 'End signal failed: $detail';
   }
