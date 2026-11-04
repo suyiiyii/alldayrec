@@ -555,7 +555,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun plan(open: Long): Xfer {
         val f = files[open]
         val tail = f?.have?.lastOrNull()?.get(1) ?: 0L  // the first unit after the phone's latest stretch
-        val gap = f?.let(::gap) ?: 0L
+        val gap = f?.let(::gap) ?: tail  // all of it here (its length known): nothing older to fill, on from the tail
         val watched = io.watched()
         val edge = edge(open)
         val mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's

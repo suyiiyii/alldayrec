@@ -996,14 +996,14 @@ class BeanTest {
         val f get() = sync.files[id]!!
         val reasons get() = bean.logFields.mapNotNull { it["reason"] }
     }
-    private fun rec(s: Long, have: List<Pair<Long, Long>>, watched: Boolean, units: Int = 600): Rec {
+    private fun rec(s: Long, have: List<Pair<Long, Long>>, watched: Boolean, units: Int = 600, total: Long = -1): Rec {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
         bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.listed[bean.open] = 0
         bean.watched = watched
         val state = File(dir, "state.json")
-        if (have.isNotEmpty()) state.writeText("""{"${bean.open}":{"a":${bean.openAt},"t":-1,"r":0,"h":[${have.joinToString(",") { "[${it.first},${it.second}]" }}]}}""")
+        if (have.isNotEmpty()) state.writeText("""{"${bean.open}":{"a":${bean.openAt},"t":$total,"r":0,"h":[${have.joinToString(",") { "[${it.first},${it.second}]" }}]}}""")
         bean.onTransfer = { file, from, realtime -> bean.answer(file, from, realtime); bean.more(units) }
         return Rec(bean, BeanSync("D3200-0A0B", state, File(dir, "chunks"), bean), bean.open)
     }
@@ -1179,6 +1179,16 @@ class BeanTest {
             assertEquals(1000L, r.f.have.first()[1])
             assertEquals(2, r.f.have.size)
         }
+    }
+
+    /** The open file with its length known and all of it on the phone (a live header that carried a size, or a unit
+     *  with the end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() threw at
+     *  every connection (PR #230 review: a crash on iOS, reconnects without end here). */
+    @Test fun openFileWholeGoesOnFromTail() {
+        val r = rec(150, listOf(0L to 7000L), watched = false, total = 7000)  // the bean at unit 7500
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(Triple(r.id, 7000L, false)), r.bean.transfers)
+        assertEquals(listOf("fill_tail"), r.reasons)
     }
 
     /** A file the bean began before it was added here: live only (realtime=1), its start is not this phone's (10-14). */

@@ -234,6 +234,8 @@ protocol BeanIo: AnyObject {
   func monotonicNow() -> Int64
   /// Units in a piece while recording live: the app's slice.
   func liveUnits() -> Int
+  /// The live page is open: the latest upload's answer said so (slice.watched) and is under a minute old.
+  func watched() -> Bool
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?)
   func report(_ hw: [String: Any])
   /// prefs hold:<tag>, sent with every upload while set (Uploader); nil: let go.
@@ -249,8 +251,8 @@ protocol BeanIo: AnyObject {
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
-/// the bean allows no more and cannot be stopped mid-file: the file being recorded, as it is recorded (realtime), else
-/// the oldest file this phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units
+/// the bean allows no more and cannot be stopped mid-file: the file being recorded, from where the phone lacks it on to
+/// live (plan()), else the oldest file this phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units
 /// go into dated Ogg pieces in `chunks` (the Uploader's queue). Per file (`state`, JSON, kept after every piece): when
 /// its unit 0 was on the phone's clock (its anchor) and which units are in pieces already. A file the server has whole
 /// is then deleted on the bean (prune()); nothing else is. See Bean.kt for the whole story; the logic is the same.
@@ -264,6 +266,7 @@ final class BeanSync {
   static let paceMs: Int64 = 200  // between transfers (ws/soundcore: the SDK's 200 ms)
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
+  static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
@@ -272,8 +275,10 @@ final class BeanSync {
     }
   }
 
+  /// live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
+  /// watched: begun for the live page (tail_short, live_now): ended when the page closes or opens (loop()).
   private final class Xfer {
-    let file: Int64, live: Bool, from: Int64
+    let file: Int64, live: Bool, from: Int64, realtime: Bool, watched: Bool
     var until: Int64 = -1  // the phone has the rest of the file from here: the link goes once this unit is in (rest())
     var cut = false
     var key: [UInt8]?
@@ -283,7 +288,9 @@ final class BeanSync {
     var lost: Int64 = 0, at: Int64 = 0
     var seen: Int64 = 0  // when its last unit came
     var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
-    init(_ file: Int64, _ live: Bool, _ from: Int64) { self.file = file; self.live = live; self.from = from }
+    init(_ file: Int64, _ live: Bool, _ from: Int64, realtime: Bool = false, watched: Bool = false) {
+      self.file = file; self.live = live; self.from = from; self.realtime = realtime; self.watched = watched
+    }
   }
 
   // Read by the app's status (main thread) while the session thread writes them
@@ -323,6 +330,7 @@ final class BeanSync {
   private var marked = false
   private var unknown: Set<Int> = []
   private var run: [Data] = []
+  private var fills: [Int64: Int] = [:]  // realtime=0 reads of the open file that came to nothing (missed())
   private var runFile: Int64 = -1, runFrom: Int64 = 0
   private var writeFailed = false  // said once until a piece is written again
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
@@ -402,19 +410,43 @@ final class BeanSync {
         if xfer == nil && io.now() >= quietUntil {
           if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
           let open = listing.open
-          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? Xfer(open, true, files[open].flatMap(gap) ?? 0)
-            : recording ? nil : backlog()
+          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording ? nil : backlog()
           if let x { try begin(x) } else { state = ["code": "beanIdle"] }
         }
         let quiet = quietUntil - io.now()
         if let f = try next(xfer == nil && quiet > 0 ? quiet : 1000) { try take(f) }
-        if let x = xfer, x.cut { complete(x, 0); throw Again(description: "file \(x.file): the rest is here already") }
+        if let x = xfer, x.cut {
+          complete(x, 0)
+          if let g = files[x.file].flatMap(gap), g <= x.from { missed(x) }
+          throw Again(description: "file \(x.file): the rest is here already")
+        }
+        if let x = xfer, x.live && !x.realtime && !x.watched && io.watched() {  // the live page opened
+          let at = x.last >= 0 ? x.last + 1 : x.from
+          let behind = edge(x.file) - at
+          if behind > BeanSync.watchedGapUnits {
+            flush()
+            log("bean_xfer", "实时页开了：实时文件 \(x.file) 补到单元 \(at)，离实时还差 \(behind * Bean.frameMs / 1000) s，" +
+                "超过 1 分钟：断开重连再定，没取的留在豆子上", fields: ["file": x.file, "realtime": false, "reason": "watched_abort",
+                "from": at, "hole_units": behind, "hole_ms": behind * Bean.frameMs, "watched": true])
+            throw Again(description: "file \(x.file): the live page opened \(behind) units behind")
+          }
+        }
+        if let x = xfer, x.live && x.realtime && x.watched && x.first >= 0 && !io.watched(),  // the page closed
+           let f = files[x.file], let g = gap(f), g < x.first {  // a hole live_now left: the next start fills it
+          let hole = (f.have.first { $0.0 > g }?.0 ?? x.first) - g
+          flush()
+          log("bean_xfer", "实时页关了：实时文件 \(x.file) 单元 \(g) 起缺 \(hole * Bean.frameMs / 1000) s，断开重连去补",
+              fields: ["file": x.file, "realtime": true, "reason": "watched_end", "from": g, "hole_units": hole,
+                       "hole_ms": hole * Bean.frameMs, "watched": false])
+          throw Again(description: "file \(x.file): the live page closed, a hole from \(g)")
+        }
         let now = io.now()
         if paused { liveSeen = now }
         if (recording || xfer?.live == true) && !paused && liveFile != 0 && now - liveSeen > 30_000 {
           flush()
           if !liveStalled { log("bean_stall", "实时文件 \(liveFile) 30 s 没收到单元，断开重连", "warn", ["file": liveFile]) }
           liveStalled = true
+          if let x = xfer, x.units == 0 { missed(x) }
           throw Again(description: "file \(liveFile): no audio for 30 s")
         }
         if let x = xfer {  // the bean did not answer, or a transfer stopped: on with the next
@@ -518,12 +550,51 @@ final class BeanSync {
     return Xfer(id, false, files[id].flatMap(gap) ?? 0)
   }
 
+  /// The file being recorded, from where the phone lacks it (the owner, 10-27; Bean.kt's plan()). realtime=0 reads it
+  /// from the offset at about twice real time, then goes on live with no end (10-27 probe); realtime=1 starts where the
+  /// bean is, whatever the offset. While the live page is open a tail hole of up to a minute is read first, a longer
+  /// one is left until the page closes (watched_end) and live starts now; else the holes go oldest first, each cut
+  /// where a long stretch the phone has begins (rest(); the link goes, the next hole from its own offset), then the
+  /// tail, which carries on live. A new file has no stretch here yet: read from unit 0.
+  private func plan(_ open: Int64) -> Xfer {
+    let f = files[open]
+    let tail = f?.have.last?.1 ?? 0  // the first unit after the phone's latest stretch
+    let lack = f.flatMap(gap) ?? tail  // all of it here (its length known): nothing older to fill, on from the tail
+    let watched = io.watched()
+    let now = edge(open)
+    let mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's
+    let fallback = fills[open, default: 0] >= BeanSync.tries  // realtime=0 came to nothing `tries` times: live, the holes after stop
+    let x: Xfer
+    if !mine || fallback { x = Xfer(open, true, tail, realtime: true) }  // not for the page: the page closing never ends it
+    else if watched { x = Xfer(open, true, tail, realtime: now - tail > BeanSync.watchedGapUnits, watched: true) }
+    else if let f, lack < tail { x = Xfer(open, true, lack); x.until = rest(f, lack) }
+    else { x = Xfer(open, true, tail) }
+    let older = x.from < tail
+    let hole = older ? f!.have.first { $0.0 > x.from }!.0 - x.from : max(0, now - tail)
+    let reason = mine && fallback ? "live_fallback" : x.realtime ? "live_now" : watched ? "tail_short" : older ? "fill_hole" : "fill_tail"
+    let s = hole * Bean.frameMs / 1000
+    let how: String
+    switch reason {
+    case "live_now": how = "直接实时（realtime=1）：" + (mine ? "实时页开着，尾部缺 \(s) s，超过 1 分钟，留到以后补" : "文件在豆子加到这台手机前就开始了")
+    case "live_fallback": how = "直接实时（realtime=1）：realtime=0 已 \(BeanSync.tries) 次没取到，这个文件改回实时，缺的停录后补"
+    case "tail_short": how = "补尾部 \(s) s（realtime=0）：实时页开着，不超过 1 分钟，补上接着实时"
+    case "fill_hole": how = "补前面的洞 \(s) s（realtime=0）" + (x.until > 0 ? "，单元 \(x.until) 起手机已有，到那里断开" : "，补完接着实时")
+    default: how = "补尾部 \(s) s（realtime=0），补上接着实时"
+    }
+    log("bean_xfer", "实时文件 \(open) 从单元 \(x.from) 起" + how, fields: ["file": open, "realtime": x.realtime, "reason": reason,
+        "from": x.from, "hole_units": hole, "hole_ms": hole * Bean.frameMs, "watched": watched])
+    return x
+  }
+
+  /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
+  private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.anchor ?? file * 1000)) / Bean.frameMs) }
+
   private func begin(_ x: Xfer) throws {
     xfer = x; x.at = io.now(); x.seen = x.at; marked = false
     if x.live && liveFile != x.file { liveFile = x.file; liveSeen = x.at }
     state = ["code": x.live ? "joining" : "beanIdle"]
     if x.live { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
-    try send(Bean.transfer(x.file, x.from * Int64(Bean.unit), x.live))
+    try send(Bean.transfer(x.file, x.from * Int64(Bean.unit), x.realtime))
   }
 
   /// Release legacy holds while recording: even closed-file backlog cannot be fetched then. After a stop, finish
@@ -629,6 +700,7 @@ final class BeanSync {
         f.total = h.size / Int64(Bean.unit)
         if !x.live { x.until = rest(f, x.from) }
       }
+    case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
       let f = file(x.file, x.file * 1000)
       if f.total < 0 { f.total = x.from }
@@ -644,11 +716,16 @@ final class BeanSync {
   }
 
   private func failed(_ x: Xfer, _ why: String) {
-    log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 没开始：\(why)", "warn", ["file": x.file, "from": x.from])
-    if x.live { liveAgain = io.now() + 30_000 } else { file(x.file, x.file * 1000).tries += 1 }
+    log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 没开始：\(why)", "warn", ["file": x.file, "from": x.from, "realtime": x.realtime])
+    if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
     xfer = nil
     save()
   }
+
+  /// A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole where
+  /// it was (the bean did not honour the offset). After `tries` in a row (a read from its offset clears them: first())
+  /// that file is read realtime=1, as before (plan()).
+  private func missed(_ x: Xfer) { if x.live && !x.realtime { fills[x.file, default: 0] += 1 } }
 
   private func file(_ id: Int64, _ anchor: Int64) -> F {
     if let f = files[id] { return f }
@@ -704,18 +781,19 @@ final class BeanSync {
   /// A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop.
   private func first(_ x: Xfer, _ s: Bean.Slice, _ audio: [UInt8]) {
     x.first = s.seq
+    if x.live && !x.realtime && s.seq == x.from { fills[x.file] = nil }  // the bean honoured the offset: misses start again
     let now = io.now(), byId = x.file * 1000, est = now - s.seq * Bean.frameMs
     if files[x.file] == nil {
-      let phone = x.live && (-2000...3000).contains(est - byId)
+      let phone = x.realtime && (-2000...3000).contains(est - byId)  // realtime=0 starts behind: its first unit is not now
       _ = file(x.file, phone ? est : byId)
-      if x.live {
+      if x.realtime {
         log("bean_clock", "文件 \(x.file) 的起点按\(phone ? "手机" : "豆子")的钟：豆子的钟比手机\(est >= byId ? "慢" : "快") \(abs(est - byId)) ms",
             fields: ["file": x.file, "ms": est - byId])
       }
     }
     let toc = Int(audio.first ?? 0)
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 开始：首单元 \(s.seq)（请求从 \(x.from) 起），Opus 配置 \(toc >> 3)",
-        fields: ["file": x.file, "seq": s.seq, "from": x.from, "toc": toc])
+        fields: ["file": x.file, "seq": s.seq, "from": x.from, "realtime": x.realtime, "toc": toc])
     if x.live { state = ["code": "connected"] }
   }
 

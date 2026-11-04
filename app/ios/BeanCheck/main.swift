@@ -120,6 +120,8 @@ final class FakeBean: BeanIo {
   var onTransfer: (Int64, Int64, Bool) -> Void = { _, _, _ in }
   var script: [() throws -> Void] = []
   var logs: [(String, String)] = []
+  var logFields: [[String: Any]] = []  // each log's fields, as `logs`
+  var pageOpen = false  // the live page is open (BeanIo.watched)
   var heldAt: Int64?
   var holds: [Int64?] = []
   var ends: [Int64] = []
@@ -182,7 +184,8 @@ final class FakeBean: BeanIo {
   func now() -> Int64 { t }
   func monotonicNow() -> Int64 { t }
   func liveUnits() -> Int { 50 }
-  func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)) }
+  func watched() -> Bool { pageOpen }
+  func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
   func hold(_ at: Int64?) { holds.append(at); heldAt = at }
   func held() -> Int64? { heldAt }
@@ -231,6 +234,28 @@ final class FakeBean: BeanIo {
         return acc + [Bean.le32(s), [flags], enc, [0]].flatMap { $0 }
       }, wait: ms * Int64(c.count) + (i == 0 ? wait : 0))
     }
+  }
+
+  /// The file being recorded as the bean answers a 1A/07 for it (the 10-27 probe): realtime=1 from the unit it is at,
+  /// whatever the offset; realtime=0 from the offset, at 2.5× real time while behind, then on as it records; never an
+  /// end. A closed file asked for meanwhile: the open file from 0 (10-26). `openAt`: its unit 0.
+  var openAt: Int64 = 0
+  private var nextSeq: Int64 = 0  // its next unit on the way
+  private var nextAt: Int64 = 0   // when the last went
+  func answer(_ file: Int64, _ from: Int64, _ realtime: Bool) {
+    header(open, 0xFFFF_FFFF)
+    nextSeq = file != open ? 0 : realtime ? (t - openAt) / Bean.frameMs : from
+    nextAt = t
+  }
+  /// `n` more of those units, three to a frame.
+  func more(_ n: Int) {
+    nextAt = max(nextAt, t)
+    for c in stride(from: nextSeq, to: nextSeq + Int64(n), by: 3).map({ Array($0..<min($0 + 3, nextSeq + Int64(n))) }) {
+      let at = max(nextAt + 8 * Int64(c.count), openAt + (c.last! + 1) * Bean.frameMs)
+      units(open, c, wait: at - nextAt, ms: 0)
+      nextAt = at
+    }
+    nextSeq += Int64(n)
   }
 
   func complete(_ file: Int64) { push(0x1A0A, [[0], Bean.le32(0), Bean.le32(file)].flatMap { $0 }) }
@@ -290,10 +315,10 @@ check(Bean.isBean("D3200-0A0B"), true); check(Bean.isBean("LR-P3-0A0B"), false);
 
 let t0: Int64 = 1_793_000_000_000
 
-/// What a fake bean records goes up as pieces, each unit once and dated by its seq: live from where the bean is (begun
-/// 30 s before), on in the next file it rotates to, a drop mid-file resumed by its byte offset, a hole asked for again
-/// once the recording stops, the start of the first file pulled as backlog, then the end after everything uploads. A
-/// file from before the bean was added is never asked for.
+/// What a fake bean records goes up as pieces, each unit once and dated by its seq: the file being recorded from its
+/// start (begun 30 s before) on to live, on in the next file it rotates to, a drop mid-file resumed by its byte offset,
+/// a hole asked for again once the recording stops, then the end after everything uploads. A file from before the bean
+/// was added is never asked for.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks"), state = dir.appendingPathComponent("state.json")
   let since = t0 - 3_600_000
@@ -302,10 +327,10 @@ do {
   var b: Int64 = 0
   bean.recording = true; bean.open = a; bean.list(old, 60_000)
   bean.onTransfer = { file, from, live in
-    switch (live, file) {
-    case (true, a):  // live from where the bean is, whatever was asked: 1500 units (30 s) in
+    switch (file == bean.open, file) {
+    case (true, a):  // from the offset asked (realtime=0), on to live
       bean.header(file, 0xFFFF_FFFF)
-      bean.units(file, Array(1500...1749), last: 1749)
+      bean.units(file, Array(from...1749), last: 1749)
       bean.complete(file)
       b = (bean.t + 5000) / 1000 + 1
       bean.rotation(b); bean.open = b; bean.list(a, 35_000)
@@ -327,7 +352,7 @@ do {
   let one = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
   check(error(BeanSync.Gone.self) { try one.session(since: since, steps: "") }.description, "link dropped")
   let anchors = one.files.mapValues(\.anchor)  // the files go once deleted on the bean
-  check((0...3000).contains(anchors[a]! - a * 1000), true, "the phone's clock, near the bean's")
+  check(anchors[a]!, a * 1000, "the bean's clock: a read from 0 starts behind, its first unit is not now")
   check(bean.heldAt, nil, "closed A is pending while B records: no hold")
   check(bean.holds.isEmpty, true, "live never sets a hold")
   check((t0 / 1000 - 1...t0 / 1000 + 1).contains(Bean.u32(bean.sentOf(0x01A6), 0)), true)
@@ -342,7 +367,7 @@ do {
   let two = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
   bean.confirmed = { two.deletable }
   _ = error(BeanSync.Gone.self) { try two.session(since: since, steps: "") }
-  check(bean.transfers, [[a, 0, 1], [b, 0, 1], [b, 200, 1], [a, 0, 0], [b, 250, 0]])
+  check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 200, 0], [b, 250, 0]])
   check(bean.logs.contains { $0.0 == "bean_gap" && $0.1.contains("250..259") }, true)
   var seen: [Int64: [Int64]] = [:]
   for (start, ps) in pieces {
@@ -372,7 +397,7 @@ func rollover(late: Bool, manual: Bool = false, paused: Bool = false) {
   bean.recording = true; bean.open = a; bean.list(a, 0)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   bean.onTransfer = { file, from, live in
-    switch (live, file) {
+    switch (file == bean.open, file) {
     case (true, a):
       bean.header(file, 0xFFFF_FFFF)
       bean.units(file, Array(0...24))
@@ -403,10 +428,10 @@ func rollover(late: Bool, manual: Bool = false, paused: Bool = false) {
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description, "file \(a): rolled over to \(b)")
   check(again.naturalRollover, !manual && !paused)
-  check(bean.transfers, [[a, 0, 1]], "no rejoin on the old connection")
+  check(bean.transfers, [[a, 0, 0]], "no rejoin on the old connection")
   check(packets(queue(chunks)[0]).count - 2, 25)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers, [[a, 0, 1], [b, 0, 1], [a, 25, 0]])
+  check(bean.transfers, [[a, 0, 0], [b, 0, 0], [a, 25, 0]])
   var seen: [Int64: [Int64]] = [:]
   for piece in queue(chunks) {
     for (i, p) in packets(piece).dropFirst(2).enumerated() {
@@ -436,8 +461,8 @@ do {
   let since = t0 - 3_600_000
   let bean = FakeBean(t0)
   bean.startable = true
-  bean.onTransfer = { file, from, live in
-    if live {  // where the bean is (36 units in, 10-25), until the button stops it
+  bean.onTransfer = { file, from, _ in
+    if file == bean.open {  // units 0..35 lost on the way, until the button stops it
       bean.header(file, 0xFFFF_FFFF)
       bean.units(file, Array(36...1999))
       bean.push(0x1882, [0]); bean.complete(file)
@@ -447,7 +472,7 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Again.self) { try sync.session(since: since, steps: "") }
   let c = t0 / 1000  // the file the start began
-  check(bean.transfers, [[c, 0, 1], [c, 0, 0]])
+  check(bean.transfers, [[c, 0, 0], [c, 0, 0]])
   check(bean.starts, 1)
   check(bean.logs.filter { $0.0 == "bean_start" }.map(\.1), ["自动开始录音"])
   _ = error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }  // the app's own reconnect: the stop holds
@@ -575,7 +600,7 @@ do {
   }
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers, [[a, 0, 1]])
+  check(bean.transfers, [[a, 0, 0]])
   check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 9, 9], "filling the tail at the first two, caught up at the next two")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
@@ -617,6 +642,275 @@ do {
   print(String(format: "bean session, %d min of live audio: %.1f MB kept", minutes, mb))
   check(bean.t - t0 >= Int64(minutes) * 60_000, true, "the hour went through")
   check(mb < 5, true, "a pool per pass keeps the session's memory flat")
+}
+
+// The file being recorded, read from where the phone lacks it on to live (plan(), Bean.kt; the owner, 10-27)
+
+/// The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found it
+/// (FakeBean.answer): `units` of it a 1A/07, then the link goes.
+final class Rec {
+  let bean: FakeBean, sync: BeanSync, id: Int64
+  init(_ bean: FakeBean, _ sync: BeanSync, _ id: Int64) { self.bean = bean; self.sync = sync; self.id = id }
+  var f: BeanSync.F { sync.files[id]! }
+  var have: [[Int64]] { f.have.map { [$0.0, $0.1] } }
+  var reasons: [String] { bean.logFields.compactMap { $0["reason"] as? String } }
+}
+func rec(_ s: Int64, _ have: [(Int64, Int64)], watched: Bool, units: Int = 600, total: Int64 = -1) -> Rec {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.list(bean.open, 0)
+  bean.pageOpen = watched
+  if !have.isEmpty {
+    try! "{\"\(bean.open)\":{\"a\":\(bean.openAt),\"t\":\(total),\"r\":0,\"h\":[\(have.map { "[\($0.0),\($0.1)]" }.joined(separator: ","))]}}"
+      .write(to: state, atomically: true, encoding: .utf8)
+  }
+  bean.onTransfer = { file, from, realtime in bean.answer(file, from, realtime); bean.more(units) }
+  return Rec(bean, BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean), bean.open)
+}
+/// Only the five reads went out: no start (recording), no delete (the file is open).
+func onlyReads(_ bean: FakeBean, line: Int = #line) {
+  check(bean.sent.allSatisfy { Bean.sends.contains(Int($0[5]) << 8 | Int($0[6])) }, true, "only reads", line: line)
+  check(bean.deleted.isEmpty, true, "nothing deleted", line: line)
+}
+/// Sessions one after another (BeanLink connects again after each) until one ends with `end`.
+func until(_ r: Rec, _ end: String = "done", since: Int64 = 0, line: Int = #line) {
+  for _ in 0..<20 {
+    do { try r.sync.session(since: since, steps: "") } catch { if "\(error)" == end { return } }
+  }
+  check("never \(end)", "", line: line)
+}
+func session<E: Error>(_ r: Rec, _ type: E.Type, since: Int64 = 0, line: Int = #line) -> E {
+  error(type, line: line) { try r.sync.session(since: since, steps: "") }
+}
+
+/// The live page open, the tail hole 50 s: read with realtime=0 from its start, caught up faster than real time, then
+/// on live in the same transfer; no hole left.
+do {
+  let r = rec(190, [(0, 7000)], watched: true, units: 6000)  // the bean at unit 9500
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 7000, 0]])
+  check(r.reasons, ["tail_short"])
+  check(r.bean.logFields.first { $0["reason"] != nil }!["hole_units"] as? Int64, 2500)
+  check(r.bean.logs.contains { $0.1.contains("首单元 7000（请求从 7000 起）") }, true)
+  check(r.have, [[0, 13000]])
+  check((13000 * 20...13000 * 20 + 100).contains(r.bean.t - r.bean.openAt), true, "caught up: the last units came as recorded")
+  onlyReads(r.bean)
+}
+
+/// The live page open, the tail hole 100 s: live now (realtime=1, from where the bean is), the hole kept.
+do {
+  let r = rec(240, [(0, 7000)], watched: true, units: 300)  // the bean at unit 12000
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 7000, 1]])
+  check(r.reasons, ["live_now"])
+  check(r.have, [[0, 7000], [12000, 12300]])
+  onlyReads(r.bean)
+}
+
+/// Nobody watching: the older hole first (realtime=0), cut where the long stretch the phone has begins, then the tail
+/// from its own offset, on into live.
+do {
+  let r = rec(80, [(0, 100), (400, 2500)], watched: false, units: 3000)  // the bean at unit 4000
+  _ = session(r, BeanSync.Again.self)
+  check(r.have, [[0, 2500]])
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 100, 0], [r.id, 2500, 0]])
+  check(r.reasons, ["fill_hole", "fill_tail"])
+  check(r.have, [[0, 5500]])
+  onlyReads(r.bean)
+}
+
+/// The live page opens while a fill is over a minute behind: it ends (the link goes), the next start is live now and
+/// what was not read stays on the bean.
+do {
+  let r = rec(202, [(0, 100)], watched: false)  // the bean at unit 10100
+  r.bean.script.append { r.bean.pageOpen = true; r.bean.more(300) }
+  check(session(r, BeanSync.Again.self).description.hasPrefix("file \(r.id): the live page opened"), true)
+  check(r.f.have.count, 1)
+  let read = r.f.have[0].1
+  check((700...1000).contains(read), true, "read \(read)")
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 100, 0], [r.id, read, 1]])
+  check(r.reasons, ["fill_tail", "watched_abort", "live_now"])
+  check(r.f.have.count, 2, "the hole stays")
+  onlyReads(r.bean)
+}
+
+/// A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by the
+/// bean's clock (its first unit came late, not as recorded). Before (iOS 1.6.0) it was read with realtime=1 and its
+/// first seconds waited for the stop.
+for watched in [false, true] {
+  let r = rec(10, [], watched: watched)
+  let a = r.id, b = a + 11
+  r.bean.script.append { r.bean.t = b * 1000; r.bean.open = b; r.bean.openAt = b * 1000; r.bean.list(b, 0); r.bean.rotation(b) }
+  check(session(r, BeanSync.Again.self).naturalRollover, true)
+  r.bean.t += 1500
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[a, 0, 0], [b, 0, 0]])
+  check(r.reasons, Array(repeating: watched ? "tail_short" : "fill_tail", count: 2))
+  check(r.bean.logs.contains { $0.1.contains("文件 \(b) 开始：首单元 0（请求从 0 起）") }, true)
+  check(r.sync.files[b]!.have.first!.0, 0)
+  check(r.sync.files[b]!.anchor, b * 1000)
+  onlyReads(r.bean)
+}
+
+/// A read the bean honoured (its first unit the offset asked) clears the file's misses: only misses in a row switch it
+/// to realtime=1.
+do {
+  let r = rec(100, [(0, 1000)], watched: false)
+  var n = 0
+  r.bean.onTransfer = { file, from, realtime in
+    n += 1
+    switch n {
+    case 3: r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script.insert({ throw BeanSync.Gone("drop") }, at: 0)
+    case 6: r.bean.answer(file, from, realtime); r.bean.more(30); r.bean.script = [{ throw BeanSync.Gone("done") }]
+    default: r.bean.header(file, 0xFFFF_FFFF, code: 2)
+    }
+  }
+  for _ in 0..<300 { r.bean.script.append {} }
+  until(r)
+  check(r.bean.transfers.map { $0[2] }, Array(repeating: 0, count: 6))
+  check(r.reasons, Array(repeating: "fill_tail", count: 6))
+  check(r.have, [[0, 1060]])
+}
+
+/// The live page closes during a live read it began with a hole left behind (live_now): the read ends, the hole is
+/// filled with a cut, then the tail, on live.
+do {
+  let r = rec(240, [(0, 7000)], watched: true, units: 6000)  // the bean at unit 12000
+  r.bean.script.append { r.bean.pageOpen = false; r.bean.more(300) }
+  check(session(r, BeanSync.Again.self).description.hasPrefix("file \(r.id): the live page closed"), true)
+  _ = session(r, BeanSync.Again.self)  // the hole, cut where the live stretch begins
+  check(r.have, [[0, 18003]])
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 7000, 1], [r.id, 7000, 0], [r.id, 18003, 0]])
+  check(r.reasons, ["live_now", "watched_end", "fill_hole", "fill_tail"])
+  check(r.bean.logFields.first { $0["reason"] as? String == "watched_end" }!["hole_units"] as? Int64, 5000)
+  check(r.have, [[0, 24003]])
+  onlyReads(r.bean)
+}
+
+/// A live read not begun for the page (live_fallback, a file begun before the bean was added here) goes on when the
+/// page closes, even with a hole behind it.
+do {
+  let r = rec(100, [(0, 1000)], watched: false)
+  var refused = 0
+  r.bean.onTransfer = { file, from, realtime in
+    if realtime {
+      r.bean.pageOpen = false; r.bean.answer(file, from, true); r.bean.more(30)
+      r.bean.script = [{ throw BeanSync.Gone("done") }]
+    } else { r.bean.header(file, 0xFFFF_FFFF, code: 2); refused += 1; if refused == 3 { r.bean.pageOpen = true } }
+  }
+  for _ in 0..<300 { r.bean.script.append {} }
+  until(r)
+  check(r.reasons, ["fill_tail", "fill_tail", "fill_tail", "live_fallback"])
+  let p = rec(100, [], watched: true, units: 30)
+  p.bean.script.append { p.bean.pageOpen = false; p.bean.more(30) }
+  _ = session(p, BeanSync.Gone.self, since: (p.id + 50) * 1000)
+  check(p.reasons, ["live_now"])
+  check(p.have, [[5000, 5060]])
+}
+
+/// A bean that ignored the offset of the open file (starting where it is) cuts each fill of an older hole at once:
+/// three tries, then realtime=1 for that file.
+do {
+  let r = rec(80, [(0, 100), (400, 2500)], watched: false, units: 30)
+  r.bean.onTransfer = { file, _, _ in r.bean.answer(file, 0, true); r.bean.more(30) }
+  for _ in 0..<3 { _ = session(r, BeanSync.Again.self) }
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers.prefix(3).map { $0[1] }, [100, 100, 100])
+  check(r.reasons, ["fill_hole", "fill_hole", "fill_hole", "live_fallback"])
+  check(r.bean.transfers[3][2], 1)
+  onlyReads(r.bean)
+}
+
+/// A bean that refuses realtime=0 for the file it records (code 2, code 3, no answer, or a header and no unit in 30 s):
+/// three tries, then live as before (realtime=1); the holes stay for after the stop.
+for code: UInt8? in [2, 3, nil, 0] {
+  let r = rec(100, [(0, 1000)], watched: false)
+  r.bean.onTransfer = { file, from, realtime in
+    if realtime {
+      r.bean.answer(file, from, true); r.bean.more(30)
+      r.bean.script = [{ throw BeanSync.Gone("done") }]
+    } else if let code { r.bean.header(file, 0xFFFF_FFFF, code: code) }
+  }
+  for _ in 0..<300 { r.bean.script.append {} }
+  until(r)  // the live guard may end a session meanwhile (Again): BeanLink connects again
+  check(r.bean.transfers.map { $0[2] }, [0, 0, 0, 1], "code \(String(describing: code))")
+  check(r.reasons, ["fill_tail", "fill_tail", "fill_tail", "live_fallback"])
+  check(r.f.have.first!.1, 1000)
+  check(r.f.have.count, 2)
+}
+
+/// The open file with its length known and all of it on the phone (a live header that carried a size, or a unit with the
+/// end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() crashed the app here
+/// (PR #230 review) at every connection.
+do {
+  let r = rec(150, [(0, 7000)], watched: false, total: 7000)  // the bean at unit 7500
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 7000, 0]])
+  check(r.reasons, ["fill_tail"])
+}
+
+/// A file the bean began before it was added here: live only (realtime=1), its start is not this phone's (10-14).
+do {
+  let r = rec(100, [], watched: false, units: 30)  // the bean at unit 5000
+  _ = session(r, BeanSync.Gone.self, since: (r.id + 50) * 1000)
+  check(r.bean.transfers, [[r.id, 0, 1]])
+  check(r.reasons, ["live_now"])
+  check(r.have, [[5000, 5030]])
+}
+
+/// Code 3 (nothing from that offset) for the file being recorded is not its end: no length, the rest still due.
+do {
+  let r = rec(10, [(0, 400)], watched: false)
+  r.bean.onTransfer = { file, _, _ in r.bean.header(file, 0xFFFF_FFFF, code: 3) }
+  _ = session(r, BeanSync.Gone.self)
+  check(r.f.total, -1)
+  check(r.sync.gap(r.f), 400)
+}
+
+/// 10-25 T2: live, the link drops (the phone's Bluetooth off 30 s), back: the file from where the phone lacks it on to
+/// live, the bean stops; the tail on the same connection; then the app is killed before the pieces are up. The
+/// recording's end still goes to the server, once, after all of it is up, and only then is the file deleted.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks"), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let c = t0 / 1000
+  bean.recording = true; bean.open = c; bean.openAt = t0; bean.list(c, 0)
+  var live = 0
+  bean.onTransfer = { file, from, realtime in
+    if file == bean.open && live == 0 {
+      live += 1
+      bean.answer(file, from, realtime); bean.more(1092)
+      bean.script.append { throw BeanSync.Gone("link gone") }
+    } else if file == bean.open {
+      bean.answer(file, from, realtime); bean.more(5688 - Int(from))
+      bean.push(0x1882, [0]); bean.complete(file)
+      bean.recording = false; bean.open = 0; bean.list(c, 5699 * 20)
+    } else {
+      bean.header(file, 5699 * Int64(Bean.unit)); bean.units(file, Array(from...5698), last: 5698); bean.complete(file)
+      if from > 0 { bean.script.append { throw BeanSync.Gone("app killed") } }
+    }
+  }
+  let since = t0 - 3_600_000
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
+  bean.confirmed = { sync.deletable }
+  check(error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }.description, "link gone")
+  bean.t += 30_000
+  check(error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }.description, "app killed")
+  check(bean.transfers, [[c, 0, 0], [c, 1092, 0], [c, 5688, 0]])
+  let anchor = sync.files[c]!.anchor
+  check(bean.ends, [], "not yet: its pieces are not up")
+  check(bean.deleted, [], "nothing off the bean before the server has it")
+  let again = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)  // the app back
+  bean.confirmed = { again.deletable }
+  bean.script.append { for f in queue(chunks) { try FileManager.default.removeItem(at: f) }; bean.t += 1000 }  // all of it goes up
+  for _ in 0..<12 { bean.script.append {} }
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.ends, [anchor + 5699 * 20], "the end, once")
+  check(bean.transfers.count, 3)
+  check(bean.deleted, [c])
 }
 
 print("bean check: all passed")
