@@ -1,6 +1,6 @@
 // node --experimental-strip-types web/stream.check.ts
 import { readFileSync } from "node:fs";
-import { RecordStream } from "./src/lib/stream.ts";
+import { RecordStream, bootRate, frameAt } from "./src/lib/stream.ts";
 
 const fixture = JSON.parse(readFileSync(new URL("../fixtures/record-stream.json", import.meta.url), "utf8"));
 const v = fixture.mirror;
@@ -26,5 +26,18 @@ check(late.put(v.file, at, bytes.subarray(at, 100)) === null && late.end() === b
 late.cut();
 // frames 10–29 are one run, dated back from the 'T' at frame 20; 40–49 come after the lost frames 30–39
 check(JSON.stringify(pieces) === JSON.stringify([[999900, 20], [1000200, 10]]), "late follow runs");
+// a board's frame clock ~74 ppm fast: the boot's rate learned from its 'T' pairs (late, another boot's, too close
+// ones left out), the file's run dated by it; too few pairs: 10 ms a frame
+const rate = fixture.rate;
+for (const c of rate.cases) {
+  check(Math.abs(bootRate(c.syncs) - c.rate) < 1e-12, `${c.what}: rate ${bootRate(c.syncs)}`);
+  for (const [q, t] of c.at) check(frameAt(c.syncs, q) === t, `${c.what}: at ${q} ${frameAt(c.syncs, q)}`);
+}
+pieces.length = 0;
+const fast = new RecordStream((frames, start) => pieces.push([start, frames.length]), v.liveFrames);
+fast.follow(rate.file, 0);
+fast.put(rate.file, 0, Uint8Array.from(Buffer.from(rate.hex, "hex")));
+fast.cut();
+check(JSON.stringify(pieces) === JSON.stringify(rate.runs), "run dated at the boot's rate");
 // RecordStream has no persistent mirror, undated archive or boot-reuse API (see fixture.notes).
 console.log("stream check ok");

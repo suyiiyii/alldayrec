@@ -20,7 +20,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 
 /** What happened on the capture side, for the server's device page (/device/<name>, POST /api/device-log): the
  *  recorder's own event log (firmware lr_log.h), read over BLE from where the last read ended, and the app's key events
@@ -32,7 +31,6 @@ object DeviceLog {
     data class Rec(val seq: Long, val boot: Int, val t: Long, val code: Int, val x: Int, val a: Long, val b: Long)
     private const val TIME = 14       // a | b << 32: the epoch ms the phone said frame t was at
     private const val UPTIME = 0x80   // before the boot's first frame: t is ms since power-up
-    private const val FRAME_MS = 10L
 
     private lateinit var file: File            // the queue: one JSON event per line, the device it belongs to inside
     private lateinit var prefs: SharedPreferences
@@ -89,15 +87,17 @@ object DeviceLog {
     }
 
     /** Each record's wall time (epoch ms) or null, as lr_sync.py dates them: a frame by the boot's TIME record nearest
-     *  to it, among these and `known` (boot -> (frame, epoch) of earlier reads). A record from before the boot's first
-     *  frame goes at that frame: a few seconds late at most (the log has no record of the first frame's uptime). A boot
-     *  that ended before any phone set its clock stays undated. */
+     *  to it, among these and `known` (boot -> (frame, epoch) of earlier reads), at the boot's rate (Store.at). A
+     *  record from before the boot's first frame goes at that frame: a few seconds late at most (the log has no record
+     *  of the first frame's uptime). A boot that ended before any phone set its clock stays undated. */
     fun dates(recs: List<Rec>, known: Map<Int, Pair<Long, Long>>): List<Long?> {
-        val sync = known.mapValues { mutableListOf(it.value) }.toMutableMap()
-        for (r in recs) if (r.code == TIME) sync.getOrPut(r.boot) { mutableListOf() } += r.t to (r.b shl 32 or r.a)
+        val sync = known.mapValues { mutableListOf(longArrayOf(it.value.first, it.value.second)) }.toMutableMap()
+        for (r in recs) if (r.code == TIME)
+            sync.getOrPut(r.boot) { mutableListOf() } += longArrayOf(r.t, r.b shl 32 or r.a)
+        val rates = sync.mapValues { Store.bootRate(it.value) }
         return recs.map { r ->
             val frame = if (r.code and UPTIME != 0) 0L else r.t
-            sync[r.boot]?.minByOrNull { abs(it.first - frame) }?.let { (f, e) -> e + (frame - f) * FRAME_MS }
+            sync[r.boot]?.let { Store.at(it, frame, rates.getValue(r.boot)) }
         }
     }
 

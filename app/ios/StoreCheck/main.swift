@@ -238,6 +238,25 @@ do {
   }
 }
 
+// a board's frame clock ~74 ppm fast: the boot's rate learned from its 'T' pairs (late, another boot's, too close
+// ones left out), its closed file's run dated by it; too few pairs: 10 ms a frame
+do {
+  let v = fixture["rate"] as! [String: Any]
+  for c in v["cases"] as! [[String: Any]] {
+    let ts = (c["syncs"] as! [[NSNumber]]).map { (frame: $0[0].int64Value, epochMs: $0[1].int64Value) }
+    check(abs(Store.bootRate(ts) - (c["rate"] as! NSNumber).doubleValue) < 1e-12, true, "\(c["what"]!): rate")
+    for q in c["at"] as! [[NSNumber]] {
+      check(Store.at(ts, q[0].int64Value), q[1].int64Value, "\(c["what"]!): at \(q[0])")
+    }
+  }
+  let dir = tmp(), out = tmp(), undated = tmp(), f = (v["file"] as! NSNumber).int64Value, b = hex(v["hex"] as! String)
+  let m = Mirror(dir)
+  check(try m.put(f, 0, b), nil, "rate file")
+  m.listed([f: Int64(b.count)], open: 6 << 16)
+  check(try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 6), 1, "rate file's run")
+  check(names(out), (v["runs"] as! [[NSNumber]]).map { "\($0[0].int64Value)@X.ogg" }, "dated at the boot's rate")
+}
+
 // a piece appends one line to the state instead of writing all of it again (at 1 s pieces that grew with every
 // piece of the open file); a restart reads the lines back, finds the 'T' again and goes on where the last piece ended
 do {

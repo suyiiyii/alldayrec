@@ -43,6 +43,32 @@ class StoreTest {
         }
         assertEquals(runs.length() - 1, out.listFiles()!!.size)
     }
+    /** A board's frame clock ~74 ppm fast: the boot's rate learned from its 'T' pairs (late, another boot's, too
+     *  close ones left out), its closed file's run dated by it; too few pairs: 10 ms a frame. */
+    @Test fun sharedRate() {
+        val v = fixture.getJSONObject("rate")
+        val cases = v.getJSONArray("cases")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val syncs = c.getJSONArray("syncs")
+            val ts = (0 until syncs.length()).map { syncs.getJSONArray(it) }
+                .map { longArrayOf(it.getLong(0), it.getLong(1)) }
+            assertEquals(c.getString("what"), c.getDouble("rate"), Store.bootRate(ts), 1e-12)
+            val at = c.getJSONArray("at")
+            for (j in 0 until at.length()) {
+                val q = at.getJSONArray(j)
+                assertEquals(c.getString("what"), q.getLong(1), Store.at(ts, q.getLong(0)))
+            }
+        }
+        val f = v.getLong("file"); val b = hex(v.getString("hex"))
+        val m = Mirror(tmp()); val out = tmp()
+        m.put(f, 0, b)
+        m.listed(mapOf(f to b.size.toLong()), 6L shl 16)
+        assertEquals(1, m.pieces(out, tmp(), "X", 15, 6))
+        val runs = v.getJSONArray("runs")
+        assertEquals((0 until runs.length()).map { "${runs.getJSONArray(it).getLong(0)}@X.ogg" }, names(out))
+    }
+
     private fun pieceNames(v: JSONObject, count: Int) = (0 until count).map {
         "${v.getJSONArray("pieces").getJSONArray(it).getLong(0)}@LR-P1-BDAE.ogg"
     }

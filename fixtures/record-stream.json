@@ -4,7 +4,8 @@
     "web": "RecordStream follows one file; no persisted boot reuse or undated archive API. cut flushes the last run.",
     "python": "runs consumes complete file snapshots; assemble tests transport holes separately. No persistent mirror/reused API.",
     "native": "Mirror buffers incomplete records and flushes the last run only when the file closes.",
-    "ogg": "Compare page structure, not whole bytes: serial numbers are random."
+    "ogg": "Compare page structure, not whole bytes: serial numbers are random.",
+    "rate": "A boot's ms per frame: the median rate of its 'T' pairs (each 'T' by frame and the first one >= 120000 frames after it, a rate within 300 ppm of 10 ms), 10 until 3 pairs; a frame's time: its nearest 'T' + frames since x rate, rounded half up. The file: a closed one of boot 5, its run dated so"
   },
   "mirror": {
     "file": 65539,
@@ -105,5 +106,245 @@
     "packetHex": "f8fffe",
     "count": 120,
     "pages": 5
+  },
+  "rate": {
+    "file": 327680,
+    "hex": "54e8030000006c50c4a00100005448ee0000999359c4a001000054a8d8010023bb62c4a00100005408c30200bee26bc4a00100005468ad03004c0a75c4a0010000549822040070a079c4a001000054c8970400e6317ec4a00100005428820500735987c4a0010000410158f70500020000",
+    "runs": [
+      [
+        1790003899709,
+        1
+      ]
+    ],
+    "cases": [
+      {
+        "what": "74 ppm fast; unsorted, a TIME 600 ms late, a repeat, another boot's 'T' (3 days on)",
+        "syncs": [
+          [
+            301000,
+            1790002999782
+          ],
+          [
+            361000,
+            1790003599731
+          ],
+          [
+            421000,
+            1790004199695
+          ],
+          [
+            271000,
+            1790002700400
+          ],
+          [
+            181000,
+            1790001799870
+          ],
+          [
+            541000,
+            1790264599600
+          ],
+          [
+            571000,
+            1790005699580
+          ],
+          [
+            1000,
+            1790000000000
+          ],
+          [
+            61000,
+            1790000599961
+          ],
+          [
+            121000,
+            1790001199907
+          ],
+          [
+            181000,
+            1790001799870
+          ],
+          [
+            241000,
+            1790002399820
+          ]
+        ],
+        "rate": 9.999266666666667,
+        "at": [
+          [
+            0,
+            1789999990001
+          ],
+          [
+            1000,
+            1790000000000
+          ],
+          [
+            91000,
+            1790000899939
+          ],
+          [
+            445000,
+            1790004439677
+          ],
+          [
+            475000,
+            1790004739655
+          ]
+        ]
+      },
+      {
+        "what": "2 pairs: 10 ms a frame",
+        "syncs": [
+          [
+            1000,
+            1790000000000
+          ],
+          [
+            61000,
+            1790000599956
+          ],
+          [
+            121000,
+            1790001199911
+          ],
+          [
+            181000,
+            1790001799867
+          ]
+        ],
+        "rate": 10,
+        "at": [
+          [
+            211000,
+            1790002099867
+          ],
+          [
+            481000,
+            1790004799867
+          ]
+        ]
+      },
+      {
+        "what": "'T's 1 min apart for 15 min: no pair 20 min apart, 10 ms a frame",
+        "syncs": [
+          [
+            1000,
+            1790000000000
+          ],
+          [
+            7000,
+            1790000059996
+          ],
+          [
+            13000,
+            1790000119991
+          ],
+          [
+            19000,
+            1790000179987
+          ],
+          [
+            25000,
+            1790000239982
+          ],
+          [
+            31000,
+            1790000299978
+          ],
+          [
+            37000,
+            1790000359973
+          ],
+          [
+            43000,
+            1790000419969
+          ],
+          [
+            49000,
+            1790000479964
+          ],
+          [
+            55000,
+            1790000539960
+          ],
+          [
+            61000,
+            1790000599956
+          ],
+          [
+            67000,
+            1790000659951
+          ],
+          [
+            73000,
+            1790000719947
+          ],
+          [
+            79000,
+            1790000779942
+          ],
+          [
+            85000,
+            1790000839938
+          ],
+          [
+            91000,
+            1790000899933
+          ]
+        ],
+        "rate": 10,
+        "at": [
+          [
+            61000,
+            1790000599956
+          ],
+          [
+            361000,
+            1790003599933
+          ]
+        ]
+      },
+      {
+        "what": "2 good pairs, 2 with another boot's 'T's (3 days on): left out, 10 ms a frame",
+        "syncs": [
+          [
+            1000,
+            1790000000000
+          ],
+          [
+            61000,
+            1790000599956
+          ],
+          [
+            121000,
+            1790001199911
+          ],
+          [
+            181000,
+            1790001799867
+          ],
+          [
+            241000,
+            1790261599822
+          ],
+          [
+            301000,
+            1790262199778
+          ]
+        ],
+        "rate": 10,
+        "at": [
+          [
+            91000,
+            1790000899956
+          ],
+          [
+            205000,
+            1790002039867
+          ]
+        ]
+      }
+    ]
   }
 }

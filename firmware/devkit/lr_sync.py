@@ -26,6 +26,8 @@ from bleak import BleakClient, BleakScanner
 U = lambda n: f"7c3e{n:04x}-1a2b-4c5d-8e9f-6c6976657265"
 TIME, CTRL, DATA, LIVE = U(1), U(2), U(3), U(4)
 FRAME_MS = 10
+RATE_MIN_FRAMES = 120_000  # 20 min: a TIME comes up to ~20 ms either way (more with some phones), ~15 ppm on a pair
+RATE_MAX_PPM = 300
 
 
 def records(b: bytes):
@@ -70,12 +72,32 @@ def runs(files: dict[int, bytes]):
             yield cur_time(ts, cur[0]), cur[1]
 
 
-def cur_time(ts, frame):
-    """The boot's sync nearest the frame (a later one is as good: the mic's clock runs on in between)."""
+def boot_rate(ts):
+    """A boot's ms per frame on the phone's clock: the frame clock runs off the board's 32 MHz crystal, up to ~90 ppm
+    off (+74 ppm: 44 ms each 10 min). The median of its 'T' pairs' rates (each 'T' by frame and the first one at least
+    RATE_MIN_FRAMES after it; a rate within RATE_MAX_PPM of 10 ms: a late TIME, frames a stalled codec lost or another
+    boot's 'T' are further off), FRAME_MS until there are 3 such pairs."""
+    ts, r, j = sorted(ts), [], 0
+    for f0, e0 in ts:
+        while j < len(ts) and ts[j][0] - f0 < RATE_MIN_FRAMES:
+            j += 1
+        if j == len(ts):
+            break
+        if abs((d := (ts[j][1] - e0) / (ts[j][0] - f0)) - FRAME_MS) <= FRAME_MS * RATE_MAX_PPM / 1e6:
+            r.append(d)
+    r.sort()
+    if len(r) < 3:
+        return FRAME_MS
+    return r[len(r) // 2] if len(r) % 2 else (r[len(r) // 2 - 1] + r[len(r) // 2]) / 2
+
+
+def cur_time(ts, frame, rate=None):
+    """The boot's sync nearest the frame (a later one is as good: the mic's clock runs on in between) + the frames
+    since at the boot's rate (boot_rate), rounded half up."""
     if not ts:
         return None
     f, e = min(ts, key=lambda t: abs(t[0] - frame))
-    return e + (frame - f) * FRAME_MS
+    return e + math.floor((frame - f) * (rate or boot_rate(ts)) + 0.5)
 
 
 def assemble(parts: dict[int, bytes], start: int = 0) -> tuple[bytes, int | None]:
@@ -405,12 +427,13 @@ def timeline(recs):
     for boot, t, code, x, a, b in recs.values():
         if code == 14:
             sync.setdefault(boot, []).append((t, b << 32 | a))
+    rates = {}
     for seq in sorted(recs):
         boot, t, code, x, a, b = recs[seq]
         name, fmt = EVENTS.get(code & ~UPTIME, (f"0x{code & ~UPTIME:02x}", lambda x, a, b: f"x {x} a {a} b {b}"))
         if code & UPTIME:
             when = f"(uptime {t / 1000:.3f} s)"
-        elif (e := cur_time(sync.get(boot), t)) is not None:
+        elif (e := cur_time(sync.get(boot), t, rates.setdefault(boot, boot_rate(sync.get(boot, []))))) is not None:
             when = dt.datetime.fromtimestamp(e / 1000).isoformat(" ", "milliseconds")
         else:
             when = f"(frame {t})"
@@ -443,6 +466,13 @@ def selftest():
     files = {f["file"]: bytes.fromhex(f["hex"]) for f in fixture["archive"]["files"]}
     got = list(runs(files))
     assert [[s, len(f)] for s, f in got] == fixture["archive"]["runs"], got
+    v = fixture["rate"]  # a board's frame clock ~74 ppm fast, the rate learned from its 'T' pairs
+    got = [[s, len(f)] for s, f in runs({v["file"]: bytes.fromhex(v["hex"])})]
+    assert got == v["runs"], got
+    for c in v["cases"]:
+        ts = [tuple(t) for t in c["syncs"]]
+        assert abs(boot_rate(ts) - c["rate"]) < 1e-12, (c["what"], boot_rate(ts))
+        assert [[q, cur_time(ts, q)] for q, _ in c["at"]] == c["at"], c["what"]
     v = fixture["mirror"]
     stream, parts = bytes.fromhex(v["hex"]), {}
     for d in v["deliveries"]:
