@@ -253,8 +253,26 @@ do {
   let m = Mirror(dir)
   check(try m.put(f, 0, b), nil, "rate file")
   m.listed([f: Int64(b.count)], open: 6 << 16)
+  check(m.nextStart(from: f), (v["runs"] as! [[NSNumber]])[0][0].int64Value, "nextStart at the boot's rate")
   check(try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 6), 1, "rate file's run")
   check(names(out), (v["runs"] as! [[NSNumber]]).map { "\($0[0].int64Value)@X.ogg" }, "dated at the boot's rate")
+  // the event log's records dated as the pieces: the cases' 'T's as TIME records, then one record at each frame asked
+  for c in v["cases"] as! [[String: Any]] {
+    let syncs = c["syncs"] as! [[NSNumber]], at = c["at"] as! [[NSNumber]]
+    let recs = (syncs.map { ($0[0].int64Value, 14, $0[1].int64Value) } + at.map { ($0[0].int64Value, 9, 0) })
+      .enumerated().map { DeviceLog.Rec(seq: Int64($0.offset), boot: 1, t: $0.element.0, code: $0.element.1, x: 0,
+                                        a: $0.element.2 & 0xffff_ffff, b: $0.element.2 >> 32) }
+    check(Array(DeviceLog.dates(recs, known: [:]).suffix(at.count)), at.map { $0[1].int64Value }, "\(c["what"]!): log")
+  }
+  // a board 92 ppm fast, 8 days into one boot: still this boot at its rate (at 10 ms a frame 64 s off)
+  let ru = v["reuse"] as! [String: Any], rf = (ru["file"] as! NSNumber).int64Value
+  for c in ru["cases"] as! [[String: Any]] {
+    let m = Mirror(tmp())
+    _ = try m.put(rf, 0, hex(ru["hex"] as! String))
+    let frame = (c["frame"] as! NSNumber).int64Value, at = (c["at"] as! NSNumber).int64Value
+    check(try m.reused(boot: rf >> 16, frame: frame, at: at, out: tmp(), undated: tmp(), tag: "X"),
+          c["reused"] as! Bool, "\(c["what"]!)")
+  }
 }
 
 // a piece appends one line to the state instead of writing all of it again (at 1 s pieces that grew with every

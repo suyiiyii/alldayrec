@@ -64,9 +64,19 @@ class StoreTest {
         val m = Mirror(tmp()); val out = tmp()
         m.put(f, 0, b)
         m.listed(mapOf(f to b.size.toLong()), 6L shl 16)
-        assertEquals(1, m.pieces(out, tmp(), "X", 15, 6))
         val runs = v.getJSONArray("runs")
+        assertEquals(runs.getJSONArray(0).getLong(0), m.nextStart(f))
+        assertEquals(1, m.pieces(out, tmp(), "X", 15, 6))
         assertEquals((0 until runs.length()).map { "${runs.getJSONArray(it).getLong(0)}@X.ogg" }, names(out))
+        // a board 92 ppm fast, 8 days into one boot: still this boot at its rate (at 10 ms a frame 64 s off)
+        val ru = v.getJSONObject("reuse"); val rf = ru.getLong("file"); val rc = ru.getJSONArray("cases")
+        for (i in 0 until rc.length()) {
+            val c = rc.getJSONObject(i)
+            val r = Mirror(tmp())
+            r.put(rf, 0, hex(ru.getString("hex")))
+            val got = r.reused(rf shr 16, c.getLong("frame"), c.getLong("at"), tmp(), tmp(), "X")
+            assertEquals(c.getString("what"), c.getBoolean("reused"), got)
+        }
     }
 
     private fun pieceNames(v: JSONObject, count: Int) = (0 until count).map {

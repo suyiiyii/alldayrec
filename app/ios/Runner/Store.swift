@@ -402,8 +402,9 @@ final class Mirror {
     save()
   }
 
-  /// How far one boot's 'T' records may disagree on when it began (epochMs - frame * 10 ms): the frame clock runs
-  /// within ~30 ppm of the phone's (59998-60000 frames in 10 min), frames a stalled codec lost move it on.
+  /// How far one boot's 'T' records may disagree on when it began (epochMs - frames at the boot's rate,
+  /// Store.bootRate): TIME's jitter and frames a stalled codec lost move it on. At 10 ms a frame a board 92 ppm fast
+  /// passed it after 7.5 days of one boot, and its mirror was taken for another boot's.
   static let sameBootMs: Int64 = 60_000
 
   /// The board is on boot `b` at `frame` now (`at`: the phone's clock then). A boot number can come back: the card's
@@ -418,8 +419,11 @@ final class Mirror {
   func reused(boot b: Int64, frame: Int64, at: Int64, out: URL, undated: URL, tag: String) throws -> Bool {
     if b == 0 { return false }  // no card at boot: each file is its own clock
     scanSyncs()
-    let mine = files.keys.filter { $0 >> 16 == b }, ts = syncs[b] ?? [], began = at - frame * Store.frameMs
-    if !ts.contains(where: { $0.frame > frame || abs($0.epochMs - $0.frame * Store.frameMs - began) > Mirror.sameBootMs }) { return false }
+    let mine = files.keys.filter { $0 >> 16 == b }, ts = syncs[b] ?? [], rate = Store.bootRate(ts)
+    let ms = { (n: Int64) in Int64((Double(n) * rate + 0.5).rounded(.down)) }, began = at - ms(frame)
+    if !ts.contains(where: { $0.frame > frame || abs($0.epochMs - ms($0.frame) - began) > Mirror.sameBootMs }) {
+      return false
+    }
     for f in mine { files[f]!.closed = true; files[f]!.size = have(f) }
     _ = try pieces(out, undated, tag: tag, liveFrames: Store.oldPieceFrames, boot: Int(b) + 1)  // that boot is over
     for f in mine { try? fm.removeItem(at: bin(f)); files[f] = nil }
