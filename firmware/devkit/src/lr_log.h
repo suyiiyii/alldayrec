@@ -38,7 +38,8 @@
  *    17 PAIR_FAIL   x reason (enum bt_security_err)
  *    18 FORGET      x 0: a phone asked (FORGET), 1: a stale bond dropped; a bonds removed
  *    19 DROPPED     a frames lost on the way to the card (the mic's 1 s ring full, mic_ring.h; the TX queue full), b this
- *                   boot's total
+ *                   boot's total; x the gaps a's frames were in: those in one second of audio with nothing else logged
+ *                   between are one record (255: more; 0: firmware older than this field, one record a gap)
  *    20 SEGMENT     a the new open file (boot << 16 | segment)
  *    21 DFU         x GPREGRET: 0x57 UF2 bootloader, 0xA8 OTA bootloader
  *    22 HEARTBEAT   x battery mV / 20, a free card KB, b frames dropped this boot (every 10 min)

@@ -443,7 +443,7 @@ void lr_store_frame(uint32_t frame_no, const uint8_t *data, uint16_t len, bool a
     k_mutex_lock(&stream_mtx, K_FOREVER);
     if (rec_count && frame_no > rec_next && !after_gap) {
         dropped += frame_no - rec_next;
-        lr_log(LR_DROPPED, 0, frame_no - rec_next, dropped);
+        lr_log(LR_DROPPED, 1, frame_no - rec_next, dropped);  // lr_log makes a second's gaps one record
     }
     if (rec_count && (frame_no != rec_next || rec_count == REC_FRAMES)) {
         close_record();

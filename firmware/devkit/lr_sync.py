@@ -362,7 +362,7 @@ EVENTS = {
     16: ("PAIRED", lambda x, a, b: "bonded" if x else "not bonded"),
     17: ("PAIR_FAIL", lambda x, a, b: SECURITY[x] if x < len(SECURITY) else str(x)),
     18: ("FORGET", lambda x, a, b: f"{a} bond(s): {'stale bond' if x else 'a phone asked'}"),
-    19: ("DROPPED", lambda x, a, b: f"{a} frames, {b} this boot"),
+    19: ("DROPPED", lambda x, a, b: f"{a} frames" + (f" in {x} gaps" if x > 1 else "") + f", {b} this boot"),
     20: ("SEGMENT", lambda x, a, b: f"{a:08X}.BIN"),
     21: ("DFU", lambda x, a, b: {0x57: "into the UF2 bootloader", 0xA8: "into the OTA bootloader"}.get(x, f"0x{x:02x}")),
     22: ("HEARTBEAT", lambda x, a, b: f"battery {x * 20} mV, {a // 1024} MB free, {b} frames dropped"),
@@ -482,6 +482,7 @@ def selftest():
     assert EVENTS[25][1](1, 601 | 250 << 20, 4 | 2 << 10 | 2 << 20) == \
         "9 appends, 601 ms in all, slowest 250 ms; under 20 ms 4, 20-49 ms 2, 50-200 ms 2, over 200 ms 1"
     assert EVENTS[3][1](0, (-116) & 0xFFFFFFFF, 0) == "again: -116 -ETIMEDOUT"
+    assert EVENTS[19][1](0, 3, 9) == "3 frames, 9 this boot" and EVENTS[19][1](40, 75, 81) == "75 frames in 40 gaps, 81 this boot"
     assert EVENTS[28][1](0, 1, 0) == "off: System OFF" and EVENTS[28][1](1, 9, 0) == "on: 9"
     assert EVENTS[29][1](204, 0, 0) == "on battery, VDDH 4080 mV"
     assert EVENTS[29][1](165, 2, 0).startswith("low battery (3300 mV)")
