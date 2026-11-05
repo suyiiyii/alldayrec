@@ -89,6 +89,44 @@ def test_apart_takes_over(store):
     assert colocate.decide(X, at(1100), at(1120)) is None
 
 
+def test_no_comparable_levels_takes_over(store):
+    """The other's mic sends only zeros (255): its audio covers the piece but says nothing; the standby takes over."""
+    room = walk(16, 2400)
+    put(X, room)
+    put(Y, np.r_[room[:1200] + 5, np.full(1200, 127.5)])  # zeros after 10 min
+    assert colocate.decide(X, at(400), at(420)) == Y
+    took = next(s for s in range(420, 1200, 20) if colocate.decide(X, at(s), at(s + 20)) is None)
+    assert 540 <= took <= 660, took  # under MIN_FRAMES of the window around the piece left
+
+
+@pytest.mark.parametrize("first_come", [True, False])
+def test_apart_sends_what_it_stood_by_for_late(store, first_come):
+    """Leaving shows a minute or two after the two part: the pieces X left to Y in the last window go to the late
+    layer, which leaves out again what Y has in the same place (left) and transcribes the rest. first_come: Y has
+    transcribed the time already (X skips, no standby); else X stands by for Y and takes over."""
+    room, away = walk(5, 2400), walk(6, 2400)
+    put(X, np.r_[room[:1200], away[1200:]])
+    put(Y, room)
+    if first_come:
+        with db.tx() as t:
+            db.record_processed(t, Y, [[at(0), at(1200)]], "final")
+    s = 300
+    while (got := colocate.decide(X, at(s), at(s + 20))) == Y:
+        with db.tx() as t:
+            db.record_processed(t, X, [[at(s), at(s + 20)]], "standby")
+        s += 20
+    assert got is None and 600 < s <= 760, s
+    queued = [json.loads(r[0]) for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (X,))]
+    assert queued == [[[at(s - 300), at(s)]]], queued
+    assert db.processed(X, at(s - 300), at(s), "standby") == [], "no longer counted as handled"
+    assert db.processed(X, at(0), at(s - 300), "standby"), "older standby pieces stay"
+    assert colocate.standby_of(X) is None
+    if not first_come:
+        return
+    skip = colocate.left(X, queued[0])
+    assert skip and late_store.subtract([[at(600), at(s)]], skip) == [[at(600), at(s)]], ("apart part transcribed", skip)
+
+
 def test_first_come_and_never_to_one_that_left_it(store):
     room = walk(7, 2400)
     put(X, room)
@@ -119,7 +157,8 @@ def test_late_audio_left_to_who_has_it(store, monkeypatch):
     put(Y, room)
     with db.tx() as t:
         db.record_processed(t, Y, [[at(0), at(1200)]], "final")
-    assert colocate.left(X, [[at(0), at(1200)]]) == [[at(0), at(300)], [at(300), at(600)]], "together: Y has it; apart: not"
+    skip = colocate.left(X, [[at(0), at(1200)]])
+    assert late_store.subtract([[at(60), at(480)]], skip) == [] and skip[-1][1] <= at(660), ("together: Y has it; apart: not", skip)
     db.put_kv(f"finalized_to:{X}", core.iso(dt.datetime.fromtimestamp(at(1300) / 1000)))
     with db.tx() as t:
         late_store.enqueue(t, X, at(0), at(1200), round(time.time() * 1000), True)
@@ -128,8 +167,8 @@ def test_late_audio_left_to_who_has_it(store, monkeypatch):
     read = []
     monkeypatch.setattr(late, "read_exact", lambda d, a, b: read.append((a, b)) or np.zeros(round((b - a) * audio.SR / 1000), np.int16))
     anyio.run(late.process, span)
-    assert read and min(a for a, _ in read) >= at(600), "only the audio apart was read for the engine"
-    assert db.processed(X, at(0), at(600), "standby") == [[at(0), at(300)], [at(300), at(600)]]
+    assert read and min(a for a, _ in read) == skip[-1][1], "only the audio apart (and a part at the seam) was read for the engine"
+    assert db.processed(X, at(0), at(1200), "standby") == skip
     assert db.conn().execute("SELECT status FROM late_spans").fetchone()[0] == "done"
 
 

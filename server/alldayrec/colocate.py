@@ -3,20 +3,22 @@
 device transcribes, or will (its audio is in, it is not itself standing by), and correlates with it is that one's
 standby: its audio is kept, its final pieces and drafts send nothing to the engine (processed_audio layer `standby`),
 so no sentences, conversations, summaries, live analysis or drafts come of it twice. It takes over once the other's
-audio stops for GONE_S, or the two no longer correlate. Late audio (late.py) is left out where another device in the
-same place transcribed that time: first come, first transcribed. Not judged (no envelope: older pieces, quiet, a
-gap): as before this, each transcribes its own.
+audio stops for GONE_S, or the two no longer correlate (then what it stood by for since they parted is transcribed
+late). Late audio (late.py) is left out where another device in the same place transcribed that time: first come,
+first transcribed. Not judged (no envelope: older pieces, quiet, a gap): as before this, each transcribes its own.
 
-Thresholds from the 11-05 study (live-record#310): 11-01, two recorders on one person 14 h, envelopes of the stored
-audio each 0.5 s: 5 min windows together r 0.49-0.96 (most above 0.6), apart -0.26-0.41; 603 controls shifted 10-40 min
-max 0.51. 11-05 (two devices in one room): together r 0.69-0.95."""
+Thresholds from envelopes of stored audio on a test instance, 0.5 s frames, 5 min windows, best lag within 6 s:
+11-01, two recorders on one person 14 h: together r 0.49-0.96 (most above 0.6), apart -0.26-0.41; 603 controls
+shifted 10-40 min: max 0.51. 11-05, a bean and a phone, 3.9 h both recording: in one room r 0.58-0.95, dips to
+0.26-0.48 in quiet stretches; one 30 dB quieter (elsewhere or covered) -0.06-0.41; 609 controls shifted 10-40 min:
+max 0.51."""
 import datetime as dt
 import logging
 import time
 
 import numpy as np
 
-from alldayrec import db
+from alldayrec import db, late_store
 from alldayrec.audio import ENV_MS
 from alldayrec.late_store import subtract, union
 
@@ -27,6 +29,7 @@ MAX_LAG_S = 6       # the two clocks may be this far apart (#233: a bean loses ~
 R_TOGETHER = 0.6    # a device becomes standby above this (11-01 controls: none of 603 reached it)
 R_APART = 0.3       # ... and takes over below it (11-01 apart: median 0.08; together windows went down to 0.35)
 MIN_FRAMES = 0.6    # of a window's frames both have, or not judged (a gap, a device just started)
+PART_S = 60         # late audio is judged by parts this long (left)
 COVER = 0.9         # of a piece the other device's audio (or transcript) covers, to leave it that piece
 GONE_S = 90         # the other device sent nothing this long after the piece: it is gone, take over
 
@@ -72,6 +75,12 @@ def correlation(x: str, y: str, a: int, b: int) -> float | None:
     return best
 
 
+def muted(y: str, x: str, a: int, b: int) -> bool:
+    """y has no level (zeros from its mic, no envelope) in over 1 - MIN_FRAMES of where x has one in [a, b)."""
+    X, Y = levels(x, a, b), levels(y, a, b)
+    return bool((~np.isnan(X)).any()) and float(np.isnan(Y[~np.isnan(X)]).mean()) > 1 - MIN_FRAMES
+
+
 def share(ranges: list, a: int, b: int) -> float:
     """How much of [a, b) the ranges cover."""
     return 1 - sum(hi - lo for lo, hi in subtract([[a, b]], ranges)) / max(1, b - a)
@@ -107,10 +116,11 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
     """Of a final piece [a, b) (unix ms) of speech: the device it is left to (standby), WAIT, or None (transcribe it).
     Standing by: stays while the other's audio covers the piece and the window around its middle does not fall below
     R_APART (it waits for the audio after the piece: a standby is not read, it may run a few minutes behind); its
-    audio missing GONE_S after the piece, or apart: takes over. Not standing by: leaves the piece to another whose
-    audio covers it and whose last WINDOW_S correlate R_TOGETHER, that has transcribed it, or will: one that is no
-    standby (none waits on the other) and has not left any of it to another (so the last of them to get to a piece
-    transcribes it); in the window after a takeover it does not stand by again."""
+    audio missing GONE_S after the piece, apart, or no levels from it (its mic sends only zeros): takes over.
+    Not standing by: leaves the piece to another whose audio covers it and whose last WINDOW_S correlate R_TOGETHER,
+    that has transcribed it, or will: one that is no standby (none waits on the other) and has not left any of it to
+    another (so the last of them to get to a piece transcribes it); in the window after a takeover it does not stand
+    by again. Transcribing again after leaving pieces to another (but for gone): resume()."""
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
     w = WINDOW_S * 1000
     if y := standby_of(device):
@@ -120,7 +130,9 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             if now_ms < hi + GONE_S * 1000 and min(audio_end(device), audio_end(y)) < hi:
                 return WAIT
             r = correlation(device, y, lo, hi)
-            if r is not None and r < R_APART:
+            if r is None and muted(y, device, lo, hi):
+                why = "no levels from it"
+            elif r is not None and r < R_APART:
                 why = f"apart (r {r:.2f})"
             elif db.processed(y, a, b, "standby") and transcribed(y, a, b) < COVER:
                 return None  # y left it to a third device: this one cannot tell that one will have it
@@ -130,8 +142,11 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             return WAIT
         else:
             why = "gone"
-        db.put_kv(f"standby:{device}", None)
-        db.put_kv(f"standby_left:{device}", b)
+        with db.tx() as t:
+            db.put_kv(f"standby:{device}", None, t)
+            db.put_kv(f"standby_left:{device}", b, t)
+            if why != "gone":  # gone: the other's audio covered all it left, the other transcribes that
+                resume(t, device, a, now_ms)
         log.info("%s takes over from %s at %s: %s", device, y, dt.datetime.fromtimestamp(a / 1000), why)
         return None
     if b - w < (db.kv(f"standby_left:{device}") or 0):
@@ -145,16 +160,30 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             db.put_kv(f"standby:{device}", {"of": y, "since": a})
             log.info("%s stands by for %s from %s (r %.2f)", device, y, dt.datetime.fromtimestamp(a / 1000), r)
             return y
+    if db.processed(device, a - 1000, a, "standby"):  # it left the piece before to another (first come): no longer
+        with db.tx() as t:
+            resume(t, device, a, now_ms)
     return None
 
 
+def resume(t, device: str, a: int, now_ms: int):
+    """A device transcribes again from a after leaving pieces to another: what it left in the WINDOW_S before goes to
+    the late layer (the correlation that let it go shows a parting a minute or two late), which leaves out again the
+    parts the other has in the same place (left) and transcribes the rest."""
+    where = "FROM processed_audio WHERE device = ? AND layer = 'standby' AND start_ms >= ? AND end_ms <= ?"
+    back = [list(r) for r in t.execute("SELECT start_ms, end_ms " + where, (device, a - WINDOW_S * 1000, a))]
+    t.execute("DELETE " + where, (device, a - WINDOW_S * 1000, a))
+    late_store.enqueue_ranges(t, device, back, now_ms, ready=True)
+
+
 def left(device: str, ranges: list) -> list:
-    """Of late audio (unix ms ranges), what another device in the same place transcribed: by WINDOW_S parts, each one
-    another's transcript covers COVER of and whose window around it correlates R_TOGETHER."""
+    """Of late audio (unix ms ranges), what another device in the same place transcribed: by PART_S parts, each one
+    another's transcript covers COVER of and whose WINDOW_S around it correlates R_TOGETHER."""
     w, out = WINDOW_S * 1000, []
     for a, b in union(ranges):
-        for lo in range(a, b, w):
-            hi, mid = min(b, lo + w), lo + (min(b, lo + w) - lo) // 2
+        for lo in range(a, b, PART_S * 1000):
+            hi = min(b, lo + PART_S * 1000)
+            mid = (lo + hi) // 2
             for y in others(device, lo, hi):
                 if transcribed(y, lo, hi) >= COVER and (r := correlation(device, y, mid - w // 2, mid + w // 2)) is not None and r >= R_TOGETHER:
                     out.append([lo, hi])
