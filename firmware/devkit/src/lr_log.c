@@ -46,6 +46,7 @@ static __noinit struct {
 static struct fcb fcb;
 static bool ready;
 static struct k_spinlock lock;
+static uint16_t taken;  // the records flush is writing: lr_log no longer adds to them
 static K_MUTEX_DEFINE(flush_mtx);
 static struct k_thread *bt_rx;  // the connected callback runs on it: its stack is the one to watch
 
@@ -58,11 +59,14 @@ static uint32_t check(void)
 static void flush(void)
 {
     k_mutex_lock(&flush_mtx, K_FOREVER);
-    uint16_t n = ram.n;  // records past n may arrive meanwhile: only lr_log writes there
+    k_spinlock_key_t k = k_spin_lock(&lock);
+    uint16_t n = taken = ram.n;  // records past n may arrive meanwhile: only lr_log writes there, and not to these
+    k_spin_unlock(&lock, k);
+    int err = -ENODEV;
     if (ready && n) {
         struct fcb_entry loc;
         uint16_t len = 4 + n * sizeof(struct rec);
-        int err = fcb_append(&fcb, len, &loc);
+        err = fcb_append(&fcb, len, &loc);
         if (err == -ENOSPC) {
             err = fcb_rotate(&fcb) ?: fcb_append(&fcb, len, &loc);
         }
@@ -71,15 +75,16 @@ static void flush(void)
             err = flash_area_write(fcb.fap, off, &ram.first, 4) ?:
                   flash_area_write(fcb.fap, off + 4, ram.r, len - 4) ?: fcb_append_finish(&fcb, &loc);
         }
-        if (!err) {
-            k_spinlock_key_t k = k_spin_lock(&lock);
-            memmove(ram.r, ram.r + n, (ram.n - n) * sizeof(struct rec));
-            ram.n -= n;
-            ram.first += n;
-            ram.check = check();
-            k_spin_unlock(&lock, k);
-        }
     }
+    k = k_spin_lock(&lock);
+    if (!err) {
+        memmove(ram.r, ram.r + n, (ram.n - n) * sizeof(struct rec));
+        ram.n -= n;
+        ram.first += n;
+        ram.check = check();
+    }
+    taken = 0;
+    k_spin_unlock(&lock, k);
     k_mutex_unlock(&flush_mtx);
 }
 
@@ -96,7 +101,14 @@ void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
         bt_rx = k_current_get();
     }
     k_spinlock_key_t k = k_spin_lock(&lock);
-    if (ram.n < N) {  // ponytail: a full batch drops the event; flushing at half full leaves 80 records of slack
+    struct rec *last = ram.n > taken ? &ram.r[ram.n - 1] : NULL;
+    // a CPU held up loses frames at each catch-up (X1 10-18: some 2000 DROPPED in a minute pushed the lend's records
+    // out of the log): the gaps in one second of audio, with nothing else logged between, are one record
+    if (code == LR_DROPPED && f && last && last->boot == ram.boot && last->code == LR_DROPPED && last->t / 100 == f / 100) {
+        last->x += last->x < 255;
+        last->a += a;
+        last->b = b;
+    } else if (ram.n < N) {  // ponytail: a full batch drops the event; flushing at half full leaves 80 records of slack
         ram.r[ram.n++] = (struct rec){ram.boot, f ? f : k_uptime_get_32(), f ? code : code | LR_UPTIME, x, a, b};
         ram.check = check();
     }
