@@ -44,8 +44,38 @@ LR-P3 整机另加（`--p3`，引脚同 `lr_promicro.overlay`）：
 | 麦克风 | 按固件的配置（P0.17 供电，1.28 MHz，单声道下降沿采样，比率 80，增益 0x28）先安静采 2 s，再在 Mac 用 `say` 念数字时采 3 s | 安静时不是一条直线（直线 = DAT 卡死：没时钟、没供电，或 DAT 断/短）；念数字时最响的 100 ms 比安静时高 10 dB 以上（达不到报 LOOK：Mac 离得远或静音，对着板子说话重跑）。安静那项没过就不判说话、只报 LOOK：麦克风没电或 DAT 卡住时，每次上电 PDM 输出仍有一段衰减到直线的瞬态，最响一块会比直线高出 30 dB 以上 |
 | 开关（P1.15） | 只开内部上拉读电平，不驱动；合上接 GND 为开 | 等待期间读到开、关两档；只读到一档报 LOOK（断线也读成「关」） |
 
+## LR-N4
+
+LR-N4（自己的板子，裸 nRF52840）用单独的构建，引脚和 `firmware/devkit/overlay/lr_n4.overlay` 一样，不能和 Pro Micro 的混刷：
+
+```bash
+python3 firmware/selftest/selftest.py build --n4            # 输出在 firmware/selftest/build-n4/zephyr/（zephyr.uf2，SWD 首烧用 zephyr.hex）
+uv run firmware/selftest/selftest.py flash SERIAL --n4
+uv run firmware/selftest/selftest.py run SERIAL --n4 [--flip 20] [--cover 5]
+python3 firmware/selftest/selftest.py swd                    # 首烧后、Pico 探针还接着、CPU 停着时：读回 FICR / UICR
+```
+
+`run --n4` 先读 `info` 核对板子上跑的是 N4 版（不是就退出，免得 Pro Micro 版的 `gpio` 去驱动 N4 的外设脚）。在上面各项之外（射频、晶振、DCDC 照旧；VDD 按 3.0 V 判 2.70–3.15 V；32.768 kHz 按 ±50 ppm 判）：
+
+| 项目 | 怎么测 | 通过标准 |
+|---|---|---|
+| 芯片、UICR | `info` 的 REGOUT0、PSELRESET，按 build code 判 APPROTECT：F 及以后要 UICR APPROTECT = 0x5A，且固件启动后 APPROTECT.DISABLE（0x40000558）= 0x5A | REGOUT0 低 3 位 = 4（3.0 V）、PSELRESET = 0x12，APPROTECT 按左边 |
+| GPIO | ① 板上没接东西的 28 个 GPIO 球，照 Pro Micro 的做法查卡死和短路；② 打开卡、麦、IMU 三路电源后，外设上拉的 5 根线（SD CS、MOSI、MISO，IMU SDA、SCL）各自应读高，再逐根拉低，看有没有别的线（这 5 根、空闲球、SD SCK、麦 CLK / DAT）跟着变低。接外设的脚只在外设上电后才拉，只往低拉，不往高推 | 没有卡死、没有短路 |
+| 电池、VDDH | AIN0 ×2；VDDH 是系统电源轨（插 USB 时经二极管来自 USB） | 电池只记录；VDDH 4.3–5.5 V |
+| 充电状态（CHRG P0.29） | 有 VBUS 时开片内上拉读一下就关 | 电池低于 4.1 V 时必须读到「充电中」（低）；满电或没接电池不判 |
+| SD 卡 | 同 LR-P3，电源换成 SD_EN（P0.31）控制的 LDO | 同 LR-P3 |
+| 两颗麦 | `mic N s` 立体声：左 = MK1（下降沿）、右 = MK2（上升沿）；每颗各自判安静底噪和说话（同 LR-P3）；再依次提示「捂住 MK1 / MK2 的声孔」，Mac 念数字时录 3 s | 每颗不是直线、说话比安静高 10 dB；捂住的那颗相对另一颗下降 ≥ 6 dB |
+| IMU | `imu`：P1.08 上电，100 kHz 读 WHO_AM_I；加速度、陀螺 104 Hz，数据就绪接到 INT1，等 INT1 变高 10 次、每次读一组；读完关两路传感器、关 TWIM、放开三根线、P1.08 拉低 | WHO_AM_I = 0x6A，INT1 10/10，平放 \|a\| 800–1200 mg，陀螺 < 25 dps |
+| 开关 | 同 LR-P3（P1.15） | 同 LR-P3 |
+| 两颗灯 | P0.15 黄绿、P1.13 红轮流各闪 5 次 | 人眼看 |
+
+`vcc N` 在 N4 上同时打开 SD_EN 和 MIC_PWR，用来量 SD_VDD、MIC_VDD。
+
+`swd` 用 pyOCD（`-O auto_unlock=false`，只读）读 FICR INFO.PART / VARIANT、UICR PSELRESET[0]/[1]、REGOUT0、NRFFW[0]/[1]、APPROTECT、APPROTECT.DISABLE、CTRL-AP 状态和 CPU 状态，按 build code 判。
+
 测不到的：
 - **焊盘虚接**（芯片引脚和焊盘没连上）：这要在焊盘上接线才能测出来。
 - **复位键**：要人按。
 - **充电电流**：要接电池。
 - **VCC 开关**（P0.13 控制的 VCC 排针）：要在 VCC 排针上量电压。
+- **LR-N4**：两颗 LDO 的输出电压、SD_VDD 断电后是否真的掉到 0.2 V 以下（`vcc N` 打开后用表量）；两颗麦的频响对比（要扫频声源）；I2C 波形（要示波器）；外设线之间、外设线和电源域之间在断电状态下的桥连（上电前用万用表查）。

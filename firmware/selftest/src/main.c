@@ -3,7 +3,9 @@
  * "ok" is the board's verdict: info gpio adc rx led clk N dcdc all dfu, and for an LR-P3 (the board wired into a
  * recorder) gpio p3, sd, mic N, sw. selftest.py drives it and adds the checks that need the host (the 32 MHz crystal
  * against the Mac's clock, the board's advertising as the Mac hears it). README.md says what each check proves and its
- * pass mark. */
+ * pass mark.
+ * Built with LR_N4 (selftest.py build --n4) it is LR-N4's, our own board around a bare nRF52840: its own pins (as
+ * firmware/devkit's lr_n4.overlay), gpio over its free balls and its pulled-up lines, mic N s (both mics), imu, chrg. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,26 +97,45 @@ static int early_clocks(void)
 }
 SYS_INIT(early_clocks, PRE_KERNEL_1, 0);
 
+#define P(port, n) NRF_GPIO_PIN_MAP(port, n)
+#ifdef LR_N4
+/* LR-N4's GPIO balls with nothing on them (the hardware's netlist): only these are pulled and driven freely. The
+ * others are XL1/XL2 (P0.00/P0.01), RESET (P0.18) and the parts below */
+static const uint8_t pins[] = {
+	P(0, 3), P(0, 4), P(0, 5), P(0, 7), P(0, 9), P(0, 10), P(0, 13), P(0, 14), P(0, 16), P(0, 17),
+	P(0, 21), P(0, 25), P(0, 26), P(0, 27), P(0, 28), P(0, 30), P(1, 1), P(1, 2), P(1, 3), P(1, 4),
+	P(1, 5), P(1, 6), P(1, 7), P(1, 9), P(1, 10), P(1, 11), P(1, 12), P(1, 14),
+};
+#define LED_PIN P(0, 15)  /* D1 yellow-green, through 1k */
+#define LED_RED P(1, 13)  /* D1 red, through 1k */
+#define SD_PWR P(0, 31)  /* SD_EN: the card's 3.0 V LDO (U3), 100k pull-down */
+#define MIC_PWR P(0, 12)  /* the mics' 3.0 V LDO (U5), 100k pull-down */
+#define IMU_PWR P(1, 8)  /* the IMU's supply (and its I2C pull-ups'), from the pin as on the XIAO Sense */
+#define IMU_SDA P(0, 23)
+#define IMU_SCL P(0, 19)
+#define IMU_INT P(0, 11)  /* INT1 (push-pull, from the IMU); INT2 is open */
+#define CHRG P(0, 29)  /* TP4054 CHRG, open drain, no resistor on the board */
+#else
 /* The Pro Micro footprint's GPIOs (USB up; left row, right row, the three pads at the bottom edge). Not here: RST
  * (P0.18), the LED (P0.15) and the VCC switch (P0.13), which have parts on them */
-#define P(port, n) NRF_GPIO_PIN_MAP(port, n)
 static const uint8_t pins[] = {
 	P(0, 6), P(0, 8), P(0, 17), P(0, 20), P(0, 22), P(0, 24), P(1, 0), P(0, 11), P(1, 4), P(1, 6),
 	P(0, 31), P(0, 29), P(0, 2), P(1, 15), P(1, 13), P(1, 11), P(0, 10), P(0, 9),
 	P(1, 1), P(1, 2), P(1, 7),
 };
 #define LED_PIN P(0, 15)
-
-/* LR-P3: the recorder's parts wired to the Pro Micro, pins as firmware/devkit's lr_promicro.overlay. Only the
- * sd, mic and sw commands use them; "gpio p3" leaves them out, since the parts drive some of them */
 #define SD_PWR P(0, 13)  /* the VCC pin's switch (high: on), the SD module's supply */
+#define MIC_PWR P(0, 17)
+#endif
+
+/* LR-P3 (and LR-N4): the recorder's parts wired to the Pro Micro, pins as firmware/devkit's lr_promicro.overlay. Only
+ * the sd, mic and sw commands use them; "gpio p3" leaves them out, since the parts drive some of them */
 #define SD_CS P(0, 20)
 #define SD_MOSI P(0, 22)
 #define SD_SCK P(0, 24)
 #define SD_MISO P(1, 0)
 #define MIC_DAT P(0, 6)
 #define MIC_CLK P(0, 8)
-#define MIC_PWR P(0, 17)
 #define SWITCH P(1, 15)  /* to GND when on */
 static const uint8_t p3_pins[] = {SD_CS, SD_MOSI, SD_SCK, SD_MISO, MIC_DAT, MIC_CLK, MIC_PWR, SWITCH};
 static bool p3;  /* gpio skips p3_pins */
@@ -148,6 +169,109 @@ static void pins_input(nrf_gpio_pin_pull_t pull)
 		}
 	}
 }
+
+#ifdef LR_N4
+/* The card's, the mics' and the IMU's supplies on (the IMU's at the XIAO Sense's drive), or off: the LDO enables
+ * released to their pull-downs, the IMU's pin low */
+static void domains(bool on)
+{
+	if (on) {
+		nrf_gpio_pin_set(SD_PWR);
+		nrf_gpio_cfg_output(SD_PWR);
+		nrf_gpio_pin_set(MIC_PWR);
+		nrf_gpio_cfg_output(MIC_PWR);
+	} else {
+		nrf_gpio_cfg_default(SD_PWR);
+		nrf_gpio_cfg_default(MIC_PWR);
+	}
+	nrf_gpio_pin_write(IMU_PWR, on);
+	nrf_gpio_cfg(IMU_PWR, NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0H1,
+		     NRF_GPIO_PIN_NOSENSE);
+	k_msleep(on ? 50 : 10);
+}
+
+/* LR-N4's lines that a powered part pulls up: SD CS, MOSI, MISO (10k to the card's 3.0 V), IMU SDA, SCL (4.7k to its
+ * supply). With the three supplies on and no part driving (the card not selected, the IMU not addressed, the mics
+ * not clocked) each must read high by itself, else it is tied low. Then each driven low in turn: another that follows
+ * is shorted to it, among these, the free balls (pulled up inside meanwhile) and SD SCK, MIC CLK and DAT (pulled up
+ * inside, counted only if they read high before). Never driven high, so never against a part's output, and nothing
+ * is pulled or driven while the supplies are off: a part without power would be fed through its pins */
+static const uint8_t pulled[] = {SD_CS, SD_MOSI, SD_MISO, IMU_SDA, IMU_SCL};
+static const uint8_t watched[] = {SD_SCK, MIC_CLK, MIC_DAT};
+
+static int gpio_lines(char *out, int size, int *bad, int *shorts)
+{
+	char a[8], b[8];
+	int n = 0, nb = 0, ns = 0;
+	bool rest[ARRAY_SIZE(watched)];
+
+	domains(true);
+	ARRAY_FOR_EACH(pulled, i) {
+		nrf_gpio_cfg_input(pulled[i], NRF_GPIO_PIN_NOPULL);
+	}
+	ARRAY_FOR_EACH(watched, i) {
+		nrf_gpio_cfg_input(watched[i], NRF_GPIO_PIN_PULLUP);
+	}
+	pins_input(NRF_GPIO_PIN_PULLUP);
+	k_busy_wait(200);
+	ARRAY_FOR_EACH(watched, i) {
+		rest[i] = nrf_gpio_pin_read(watched[i]);
+	}
+	n += snprintf(out + n, size - n, ",\"lines_stuck\":[");
+	ARRAY_FOR_EACH(pulled, i) {
+		if (!nrf_gpio_pin_read(pulled[i])) {
+			n += snprintf(out + n, size - n, "%s\"%s low\"", nb++ ? "," : "", pin_name(pulled[i], a));
+		}
+	}
+	n += snprintf(out + n, size - n, "],\"lines_shorts\":[");
+	ARRAY_FOR_EACH(pulled, i) {
+		nrf_gpio_pin_clear(pulled[i]);
+		nrf_gpio_cfg_output(pulled[i]);
+		k_busy_wait(100);
+		ARRAY_FOR_EACH(pulled, j) {
+			if (j != i && !nrf_gpio_pin_read(pulled[j]) && n < size - 40) {
+				n += snprintf(out + n, size - n, "%s\"%s-%s\"", ns++ ? "," : "", pin_name(pulled[i], a),
+					      pin_name(pulled[j], b));
+			}
+		}
+		ARRAY_FOR_EACH(watched, j) {
+			if (rest[j] && !nrf_gpio_pin_read(watched[j]) && n < size - 40) {
+				n += snprintf(out + n, size - n, "%s\"%s-%s\"", ns++ ? "," : "", pin_name(pulled[i], a),
+					      pin_name(watched[j], b));
+			}
+		}
+		ARRAY_FOR_EACH(pins, j) {
+			if (!skip(pins[j]) && !nrf_gpio_pin_read(pins[j]) && n < size - 40) {
+				n += snprintf(out + n, size - n, "%s\"%s-%s\"", ns++ ? "," : "", pin_name(pulled[i], a),
+					      pin_name(pins[j], b));
+			}
+		}
+		nrf_gpio_cfg_input(pulled[i], NRF_GPIO_PIN_NOPULL);
+	}
+	n += snprintf(out + n, size - n, "],\"watched_low\":[");
+	int nl = 0;
+	ARRAY_FOR_EACH(watched, i) {
+		if (!rest[i]) {
+			n += snprintf(out + n, size - n, "%s\"%s\"", nl++ ? "," : "", pin_name(watched[i], a));
+		}
+	}
+	n += snprintf(out + n, size - n, "]");
+	ARRAY_FOR_EACH(pulled, i) {
+		nrf_gpio_cfg_default(pulled[i]);
+	}
+	ARRAY_FOR_EACH(watched, i) {
+		nrf_gpio_cfg_default(watched[i]);
+	}
+	pins_input(NRF_GPIO_PIN_NOPULL);
+	ARRAY_FOR_EACH(pins, i) {
+		nrf_gpio_cfg_default(pins[i]);
+	}
+	domains(false);
+	*bad += nb;
+	*shorts += ns;
+	return n;
+}
+#endif
 
 /* Each pin alone: pulled up it must read 1, pulled down 0 (else it is tied to GND or VDD). Then each pin driven low
  * with all others pulled up, and driven high with all others pulled down: another pin that follows it is shorted to
@@ -202,7 +326,11 @@ static void cmd_gpio(void)
 	ARRAY_FOR_EACH(pins, i) {
 		nrf_gpio_cfg_default(pins[i]);
 	}
-	printk("R {\"test\":\"gpio\",\"ok\":%d,\"pins\":%d,\"nfc_as_gpio\":%d,\"p3\":%d,%s]}\n", !bad && !shorts,
+	n += snprintf(out + n, sizeof(out) - n, "]");
+#ifdef LR_N4
+	n += gpio_lines(out + n, sizeof(out) - n, &bad, &shorts);
+#endif
+	printk("R {\"test\":\"gpio\",\"ok\":%d,\"pins\":%d,\"nfc_as_gpio\":%d,\"p3\":%d,%s}\n", !bad && !shorts,
 	       tested, !(NRF_UICR->NFCPINS & UICR_NFCPINS_PROTECT_Msk), p3, out);
 }
 
@@ -247,7 +375,11 @@ static bool vdd_ok(int mv)
 {
 	int e = vdd_expected();
 
+#ifdef LR_N4
+	return mv >= e * 90 / 100 && mv <= e * 105 / 100;  /* REGOUT0 3.0 V: 2.70-3.15 V, the first boards' T-02 */
+#else
 	return mv > e * 95 / 100 && mv < e * 105 / 100;
+#endif
 }
 
 /* VDD from the chip's regulator; VDDH, where USB (through the board's diode) and the battery come in: on USB it reads
@@ -257,9 +389,14 @@ static void cmd_adc(void)
 	int vdd = adc_mv(NRF_SAADC_INPUT_VDD);
 	int vddh = adc_mv(NRF_SAADC_INPUT_VDDHDIV5) * 5;
 	int ain2 = adc_mv(NRF_SAADC_INPUT_AIN2);
+#ifdef LR_N4
+	int vbat = adc_mv(NRF_SAADC_INPUT_AIN0) * 2;  /* LR-N4: the battery through 1M / 1M on P0.02; VDDH is the system rail */
+#else
+	int vbat = -1;
+#endif
 
-	printk("R {\"test\":\"adc\",\"ok\":%d,\"vdd_mv\":%d,\"vdd_expected_mv\":%d,\"vddh_mv\":%d,\"p0_04_mv\":%d}\n",
-	       vdd_ok(vdd) && vddh > 4300 && vddh < 5500, vdd, vdd_expected(), vddh, ain2);
+	printk("R {\"test\":\"adc\",\"ok\":%d,\"vdd_mv\":%d,\"vdd_expected_mv\":%d,\"vddh_mv\":%d,\"p0_04_mv\":%d,"
+	       "\"vbat_mv\":%d}\n", vdd_ok(vdd) && vddh > 4300 && vddh < 5500, vdd, vdd_expected(), vddh, ain2, vbat);
 }
 
 static bt_addr_le_t seen[64];
@@ -292,17 +429,25 @@ static void cmd_rx(void)
 	       !err && nseen > 0 && best_rssi >= -90, err, nseen, best_rssi);
 }
 
-/* The blue LED, by eye: five blinks */
+/* The blue LED, by eye: five blinks (LR-N4: yellow-green and red in turn, five each) */
+static void blink(uint8_t pin)
+{
+	nrf_gpio_cfg_output(pin);
+	nrf_gpio_pin_set(pin);
+	k_msleep(300);
+	nrf_gpio_pin_clear(pin);
+	k_msleep(300);
+	nrf_gpio_cfg_default(pin);
+}
+
 static void cmd_led(void)
 {
-	nrf_gpio_cfg_output(LED_PIN);
 	for (int i = 0; i < 5; i++) {
-		nrf_gpio_pin_set(LED_PIN);
-		k_msleep(300);
-		nrf_gpio_pin_clear(LED_PIN);
-		k_msleep(300);
+		blink(LED_PIN);
+#ifdef LR_N4
+		blink(LED_RED);
+#endif
 	}
-	nrf_gpio_cfg_default(LED_PIN);
 	printk("R {\"test\":\"led\",\"blinks\":5}\n");
 }
 
@@ -473,7 +618,8 @@ static uint32_t csd_sectors(const uint8_t *csd)
  * that fail (CRC errors: bits lost on the wires), stopping after 10 s or 20 failures. "fail" names the first step that
  * went wrong */
 #define SD_READS 2048
-static void pdm_start(bool rising);
+enum { MIC_FALLING, MIC_RISING, MIC_STEREO };
+static void pdm_start(int mode);
 static void pdm_stop(void);
 
 /* read_only: no write test, reads only (a card with recordings on a board whose wiring is in doubt). with_mic: the
@@ -501,7 +647,7 @@ static void cmd_sd(int khz, bool with_mic, bool read_only)
 	nrf_gpio_pin_set(SD_PWR);
 	k_msleep(50);
 	if (with_mic) {
-		pdm_start(false);
+		pdm_start(MIC_FALLING);
 	}
 	nrf_gpio_pin_set(SD_CS);
 	nrf_gpio_cfg_output(SD_CS);
@@ -645,11 +791,13 @@ static bool event(volatile uint32_t *ev)
  * SEL is tied to 3V; "mic N r": the rising edge, to tell which half of the clock the mic drives), ratio 80 (16 kHz),
  * gain 0x28. secs seconds after 200 ms of start-up; each 100 ms block's level
  * on an "A i rms" line, then the whole: DC (mean), AC RMS, the loudest block, min and max. A stuck DAT (no clock or no
- * power reaching the mic, DAT open or shorted) gives a flat line at full scale or zero */
+ * power reaching the mic, DAT open or shorted) gives a flat line at full scale or zero.
+ * LR-N4 (MIC_PWR P0.12, its LDO): MK1 drives the half read on the falling edge, MK2 the rising one; "mic N s" reads
+ * both (stereo: left MK1, right MK2), 50 ms blocks, "A i" then rms flat_ms full for each, and each one's whole */
 static int16_t __aligned(4) pdm_buf[2][1600];
 
 /* The mic powered and clocked into pdm_buf[0]; pdm_stop() undoes it */
-static void pdm_start(bool rising)
+static void pdm_start(int mode)
 {
 	hfxo(true);  /* the PDM clock is divided from HFCLK */
 	nrf_gpio_pin_set(MIC_PWR);
@@ -661,8 +809,8 @@ static void pdm_start(bool rising)
 	NRF_PDM->PSEL.DIN = MIC_DAT;
 	NRF_PDM->PDMCLKCTRL = PDM_PDMCLKCTRL_FREQ_1280K;
 	NRF_PDM->RATIO = PDM_RATIO_RATIO_Ratio80;
-	NRF_PDM->MODE = PDM_MODE_OPERATION_Mono << PDM_MODE_OPERATION_Pos |
-			(rising ? PDM_MODE_EDGE_LeftRising : PDM_MODE_EDGE_LeftFalling) << PDM_MODE_EDGE_Pos;
+	NRF_PDM->MODE = (mode == MIC_STEREO ? PDM_MODE_OPERATION_Stereo : PDM_MODE_OPERATION_Mono) << PDM_MODE_OPERATION_Pos |
+			(mode == MIC_RISING ? PDM_MODE_EDGE_LeftRising : PDM_MODE_EDGE_LeftFalling) << PDM_MODE_EDGE_Pos;
 	NRF_PDM->GAINL = NRF_PDM->GAINR = 0x28;
 	NRF_PDM->SAMPLE.MAXCNT = ARRAY_SIZE(pdm_buf[0]);
 	NRF_PDM->SAMPLE.PTR = (uint32_t)pdm_buf[0];
@@ -686,15 +834,30 @@ static void pdm_stop(void)
 /* Dropouts too (08B2 in its box: >10 ms of zeros and full-scale pops in the recordings): a run of 160 identical
  * samples (10 ms; the mic's own noise never repeats that long, a DAT that stops toggling does) and samples at full
  * scale, per block on the "A i rms flat_ms full" line and in all */
-static void cmd_mic(int secs, bool rising)
+struct mic_ch {
+	int64_t sum, sq;
+	int lo, hi, loudest, run, flats, flat, full;
+	int16_t prev;
+};
+
+static void mic_json(const struct mic_ch *c, int count)
 {
-	int64_t sum = 0, sq = 0;
-	int lo = INT16_MAX, hi = INT16_MIN, loudest = 0, count = 0, run = 0, flats = 0, flat = 0, full = 0;
-	int16_t prev = 0;
+	double mean = count ? (double)c->sum / count : 0;
+
+	printk("\"mean\":%d,\"rms\":%d,\"loudest\":%d,\"min\":%d,\"max\":%d,\"flats\":%d,\"flat_ms\":%d,\"full\":%d",
+	       (int)mean, count ? (int)sqrt((double)c->sq / count - mean * mean) : 0, c->loudest, c->lo, c->hi, c->flats,
+	       c->flat / 16, c->full);
+}
+
+static void cmd_mic(int secs, int mode)
+{
+	int nch = mode == MIC_STEREO ? 2 : 1, per = ARRAY_SIZE(pdm_buf[0]) / nch;  /* a channel's samples in a block */
+	struct mic_ch ch[2] = {{.lo = INT16_MAX, .hi = INT16_MIN}, {.lo = INT16_MAX, .hi = INT16_MIN}};
+	int count = 0;
 	bool ok = true;
 
-	pdm_start(rising);
-	for (int b = 0; ok && b < secs * 10 + 2; b++) {
+	pdm_start(mode);
+	for (int b = 0; ok && b < secs * 16000 / per + 2; b++) {
 		/* once a buffer has started, point at the other one for the block after; it fills while this one is read */
 		ok = event(&NRF_PDM->EVENTS_STARTED);
 		NRF_PDM->EVENTS_STARTED = 0;
@@ -705,37 +868,52 @@ static void cmd_mic(int secs, bool rising)
 			continue;
 		}
 		const int16_t *s = pdm_buf[b & 1];
-		int64_t bs = 0, bq = 0;
-		int bflat = 0, bfull = 0;
 
-		for (int i = 0; i < (int)ARRAY_SIZE(pdm_buf[0]); i++) {
-			bs += s[i];
-			bq += s[i] * s[i];
-			lo = MIN(lo, s[i]);
-			hi = MAX(hi, s[i]);
-			run = s[i] == prev ? run + 1 : 0;
-			prev = s[i];
-			flats += run == 160;
-			bflat += run >= 160;
-			bfull += s[i] == INT16_MAX || s[i] == INT16_MIN;
+		printk("A %d", b - 2);
+		for (int k = 0; k < nch; k++) {
+			struct mic_ch *c = &ch[k];
+			int64_t bs = 0, bq = 0;
+			int bflat = 0, bfull = 0;
+
+			for (int i = k; i < (int)ARRAY_SIZE(pdm_buf[0]); i += nch) {
+				bs += s[i];
+				bq += s[i] * s[i];
+				c->lo = MIN(c->lo, s[i]);
+				c->hi = MAX(c->hi, s[i]);
+				c->run = s[i] == c->prev ? c->run + 1 : 0;
+				c->prev = s[i];
+				c->flats += c->run == 160;
+				bflat += c->run >= 160;
+				bfull += s[i] == INT16_MAX || s[i] == INT16_MIN;
+			}
+			c->flat += bflat;
+			c->full += bfull;
+			c->sum += bs;
+			c->sq += bq;
+			double m = (double)bs / per;
+			int rms = (int)sqrt((double)bq / per - m * m);
+
+			c->loudest = MAX(c->loudest, rms);
+			printk(" %d %d %d", rms, bflat / 16, bfull);
 		}
-		flat += bflat;
-		full += bfull;
-		sum += bs;
-		sq += bq;
-		count += ARRAY_SIZE(pdm_buf[0]);
-		double m = (double)bs / ARRAY_SIZE(pdm_buf[0]);
-		int rms = (int)sqrt((double)bq / ARRAY_SIZE(pdm_buf[0]) - m * m);
-
-		loudest = MAX(loudest, rms);
-		printk("A %d %d %d %d\n", b - 2, rms, bflat / 16, bfull);
+		printk("\n");
+		count += per;
 	}
 	pdm_stop();
-	double mean = count ? (double)sum / count : 0;
-
-	printk("R {\"test\":\"mic\",\"ok\":%d,\"samples\":%d,\"mean\":%d,\"rms\":%d,\"loudest\":%d,\"min\":%d,\"max\":%d,"
-	       "\"flats\":%d,\"flat_ms\":%d,\"full\":%d}\n", ok && hi - lo > 2, count, (int)mean,
-	       count ? (int)sqrt((double)sq / count - mean * mean) : 0, loudest, lo, hi, flats, flat / 16, full);
+	if (nch == 1) {
+		printk("R {\"test\":\"mic\",\"ok\":%d,\"samples\":%d,", ok && ch[0].hi - ch[0].lo > 2, count);
+		mic_json(&ch[0], count);
+		printk("}\n");
+		return;
+	}
+	printk("R {\"test\":\"mic\",\"stereo\":1,\"ok\":%d,\"samples\":%d", ok && ch[0].hi - ch[0].lo > 2 &&
+	       ch[1].hi - ch[1].lo > 2, count);
+	for (int k = 0; k < 2; k++) {
+		printk(",\"%s\":{\"ok\":%d,", k ? "r" : "l", ok && ch[k].hi - ch[k].lo > 2);
+		mic_json(&ch[k], count);
+		printk("}");
+	}
+	printk("}\n");
 }
 
 /* LR-P3's switch: P1.15 on its pull-up, closed to GND = on; read only, never driven */
@@ -748,6 +926,134 @@ static void cmd_sw(void)
 	nrf_gpio_cfg_default(SWITCH);
 	printk("R {\"test\":\"sw\",\"on\":%d}\n", on);
 }
+
+#ifdef LR_N4
+/* The IMU's I2C on TWIM0 at 100 kHz, one write then a read when rx: false on a NACK or a hang (10 ms) */
+static bool twim(const uint8_t *tx, int ntx, uint8_t *rx, int nrx)
+{
+	NRF_TWIM0->EVENTS_STOPPED = 0;
+	NRF_TWIM0->EVENTS_ERROR = 0;
+	NRF_TWIM0->ERRORSRC = NRF_TWIM0->ERRORSRC;  /* write 1 to clear */
+	NRF_TWIM0->TXD.PTR = (uint32_t)tx;
+	NRF_TWIM0->TXD.MAXCNT = ntx;
+	NRF_TWIM0->RXD.PTR = (uint32_t)rx;
+	NRF_TWIM0->RXD.MAXCNT = nrx;
+	NRF_TWIM0->SHORTS = nrx ? TWIM_SHORTS_LASTTX_STARTRX_Msk | TWIM_SHORTS_LASTRX_STOP_Msk : TWIM_SHORTS_LASTTX_STOP_Msk;
+	NRF_TWIM0->TASKS_STARTTX = 1;
+	for (int i = 0; i < 100 && !NRF_TWIM0->EVENTS_STOPPED && !NRF_TWIM0->EVENTS_ERROR; i++) {
+		k_busy_wait(100);
+	}
+	if (!NRF_TWIM0->EVENTS_STOPPED) {  /* an error (a NACK: no IMU, or not powered) or a hang: stop the bus */
+		NRF_TWIM0->TASKS_STOP = 1;
+		for (int i = 0; i < 100 && !NRF_TWIM0->EVENTS_STOPPED; i++) {
+			k_busy_wait(100);
+		}
+		return false;
+	}
+	return !NRF_TWIM0->EVENTS_ERROR && !NRF_TWIM0->ERRORSRC;
+}
+
+static uint8_t imu_tx[2], imu_rx[12];  /* EasyDMA: in RAM */
+
+static bool imu_read(uint8_t reg, int n)
+{
+	imu_tx[0] = reg;
+	return twim(imu_tx, 1, imu_rx, n);
+}
+
+static bool imu_write(uint8_t reg, uint8_t val)
+{
+	imu_tx[0] = reg;
+	imu_tx[1] = val;
+	return twim(imu_tx, 2, NULL, 0);
+}
+
+/* LR-N4's IMU (LSM6DS3TR-C at 0x6A): P1.08 up, WHO_AM_I (0x0F) must say 0x6A; then accelerometer and gyro at
+ * 104 Hz (CTRL1_XL, CTRL2_G 0x40: +-2 g, 250 dps) with their data-ready on INT1 (INT1_CTRL 0x03), which must rise ten
+ * times (INT1 wired), each followed by a read of both (gyro then accelerometer, 0x22-0x2D; the last read counts, past
+ * the gyro's ~35 ms start). Lying still: |a| near 1 g, the gyro near 0. Down in the reverse order (R9 review): both
+ * to power-down, TWIM off, SDA / SCL / INT1 inputs without pulls, P1.08 low */
+static void cmd_imu(void)
+{
+	uint8_t who = 0;
+	int drdy = 0, reads = 0;
+	int16_t g[3] = {0}, a[3] = {0};
+
+	nrf_gpio_cfg_input(IMU_INT, NRF_GPIO_PIN_NOPULL);
+	nrf_gpio_pin_set(IMU_PWR);
+	nrf_gpio_cfg(IMU_PWR, NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0H1,
+		     NRF_GPIO_PIN_NOSENSE);
+	k_msleep(50);  /* its boot (loading its trim) after power-up */
+	nrf_gpio_cfg(IMU_SCL, NRF_GPIO_PIN_DIR_INPUT, NRF_GPIO_PIN_INPUT_CONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0D1,
+		     NRF_GPIO_PIN_NOSENSE);
+	nrf_gpio_cfg(IMU_SDA, NRF_GPIO_PIN_DIR_INPUT, NRF_GPIO_PIN_INPUT_CONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_S0D1,
+		     NRF_GPIO_PIN_NOSENSE);
+	NRF_TWIM0->PSEL.SCL = IMU_SCL;
+	NRF_TWIM0->PSEL.SDA = IMU_SDA;
+	NRF_TWIM0->FREQUENCY = TWIM_FREQUENCY_FREQUENCY_K100;  /* not 400: errata 219 (lr_n4.overlay) */
+	NRF_TWIM0->ADDRESS = 0x6A;
+	NRF_TWIM0->ENABLE = TWIM_ENABLE_ENABLE_Enabled;
+	bool i2c = imu_read(0x0F, 1);
+
+	who = imu_rx[0];
+	if (i2c && who == 0x6A && imu_write(0x12, 0x44) && imu_write(0x0D, 0x03) && imu_write(0x10, 0x40) &&
+	    imu_write(0x11, 0x40)) {  /* CTRL3_C: BDU + auto-increment */
+		for (int i = 0; i < 10; i++) {
+			bool up = false;
+
+			for (int t = 0; t < 50 && !(up = nrf_gpio_pin_read(IMU_INT)); t++) {
+				k_msleep(1);
+			}
+			drdy += up;
+			if (imu_read(0x22, 12)) {  /* reading both clears their data-ready */
+				reads++;
+				for (int k = 0; k < 3; k++) {
+					g[k] = imu_rx[2 * k] | imu_rx[2 * k + 1] << 8;
+					a[k] = imu_rx[6 + 2 * k] | imu_rx[7 + 2 * k] << 8;
+				}
+			}
+		}
+	}
+	if (i2c) {
+		imu_write(0x10, 0);
+		imu_write(0x11, 0);
+	}
+	NRF_TWIM0->ENABLE = 0;
+	NRF_TWIM0->PSEL.SCL = NRF_TWIM0->PSEL.SDA = 0xFFFFFFFF;
+	nrf_gpio_cfg_default(IMU_SCL);
+	nrf_gpio_cfg_default(IMU_SDA);
+	nrf_gpio_cfg_default(IMU_INT);
+	nrf_gpio_pin_clear(IMU_PWR);
+	int amg = (int)(sqrt((double)a[0] * a[0] + (double)a[1] * a[1] + (double)a[2] * a[2]) * 0.061);  /* 0.061 mg/LSB */
+	int gmax = 0;
+
+	for (int k = 0; k < 3; k++) {
+		gmax = MAX(gmax, abs(g[k]) * 875 / 100000);  /* 8.75 mdps/LSB, in dps */
+	}
+	printk("R {\"test\":\"imu\",\"ok\":%d,\"i2c\":%d,\"who_am_i\":\"0x%02X\",\"drdy\":%d,\"reads\":%d,"
+	       "\"accel_mg\":[%d,%d,%d],\"accel_abs_mg\":%d,\"gyro_dps_max\":%d}\n",
+	       i2c && who == 0x6A && drdy == 10 && reads == 10 && amg > 800 && amg < 1200 && gmax < 25, i2c, who, drdy, reads,
+	       a[0] * 61 / 1000, a[1] * 61 / 1000, a[2] * 61 / 1000, amg, gmax);
+}
+
+/* LR-N4's charge status: TP4054 CHRG on P0.29 (open drain: low while charging, a weak pull-down once done, open
+ * without USB), read on the pull-up inside only while VBUS is there and only for the read: without USB the charger
+ * is unpowered and that pull-up would feed it. The battery (AIN0 x2) beside it */
+static void cmd_chrg(void)
+{
+	bool usb = NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk;
+	int level = -1;
+
+	if (usb) {
+		nrf_gpio_cfg_input(CHRG, NRF_GPIO_PIN_PULLUP);
+		k_busy_wait(100);
+		level = nrf_gpio_pin_read(CHRG);
+		nrf_gpio_cfg_default(CHRG);
+	}
+	printk("R {\"test\":\"chrg\",\"usb\":%d,\"level\":%d,\"vbat_mv\":%d}\n", usb, level,
+	       adc_mv(NRF_SAADC_INPUT_AIN0) * 2);
+}
+#endif
 
 /* The DCDC converters (each needs its inductor; without one the chip browns out and resets, which the host sees as
  * the port going away after an "S" line): REG1 (DCDCEN), then REG0 (DCDCEN0, the high-voltage stage), VDD after each */
@@ -781,13 +1087,21 @@ static void cmd_info(void)
 	printk("R {\"test\":\"info\",\"ok\":%d,\"id\":\"%08X%08X\",\"part\":\"%X\",\"variant\":\"%c%c%c%c\","
 	       "\"package\":\"%X\",\"ram_kb\":%u,\"flash_kb\":%u,\"resetreas\":\"0x%X\",\"regout0\":\"0x%X\","
 	       "\"pselreset\":\"0x%X\",\"nfcpins\":\"0x%X\",\"approtect\":\"0x%X\",\"bootloader\":\"0x%X\","
-	       "\"hfxo_ok\":%d,\"hfxo_us\":%u,\"lfxo_ok\":%d,\"lfxo_ms\":%u,\"lfxo_ppb_vs_hfxo\":%d,\"ble\":\"%04X\"}\n",
+	       "\"hfxo_ok\":%d,\"hfxo_us\":%u,\"lfxo_ok\":%d,\"lfxo_ms\":%u,\"lfxo_ppb_vs_hfxo\":%d,\"ble\":\"%04X\","
+	       "\"board\":\"%s\",\"approtect_disable\":\"0x%X\"}\n",
 	       early.hfxo_ok && early.hfxo_us < 5000 && lf_ok, NRF_FICR->DEVICEID[1], NRF_FICR->DEVICEID[0],
 	       NRF_FICR->INFO.PART, (int)(var >> 24), (int)(var >> 16) & 0xFF, (int)(var >> 8) & 0xFF, (int)var & 0xFF, NRF_FICR->INFO.PACKAGE,
 	       NRF_FICR->INFO.RAM, NRF_FICR->INFO.FLASH, early.resetreas, NRF_UICR->REGOUT0, NRF_UICR->PSELRESET[0],
 	       NRF_UICR->NFCPINS, NRF_UICR->APPROTECT, NRF_UICR->NRFFW[0], early.hfxo_ok, early.hfxo_us,
 	       early.lfxo_ok, early.lfxo_ms, early.lfxo_ppb,
-	       NRF_FICR->DEVICEADDR[0] & 0xFFFF);  /* the recorder's BLE name suffix (transport.c lr_set_name) */
+	       NRF_FICR->DEVICEADDR[0] & 0xFFFF,  /* the recorder's BLE name suffix (transport.c lr_set_name) */
+#ifdef LR_N4
+	       /* APPROTECT.DISABLE (0x40000558, PS v1.11 p.70-71), written by SystemInit from UICR APPROTECT on build code Fxx
+		* and later (CONFIG_NRF_APPROTECT_USE_UICR): 0x5A there keeps SWD open */
+	       "n4", *(volatile uint32_t *)0x40000558);
+#else
+	       "promicro", 0);
+#endif
 }
 
 static void run(char *line)
@@ -812,11 +1126,23 @@ static void run(char *line)
 	} else if (!strncmp(line, "vcc", 3)) {  /* the SD module's supply on for N s, its pins left open: measure it */
 		nrf_gpio_pin_set(SD_PWR);
 		nrf_gpio_cfg_output(SD_PWR);
+#ifdef LR_N4
+		nrf_gpio_pin_set(MIC_PWR);  /* and the mics' LDO: SD_VDD and MIC_VDD */
+		nrf_gpio_cfg_output(MIC_PWR);
+#endif
 		k_sleep(K_SECONDS(CLAMP(atoi(line + 3), 1, 600)));
 		nrf_gpio_cfg_default(SD_PWR);
+		nrf_gpio_cfg_default(MIC_PWR);
 		printk("R {\"test\":\"vcc\"}\n");
 	} else if (!strncmp(line, "mic", 3)) {
-		cmd_mic(CLAMP(atoi(line + 3), 1, 120), strchr(line, 'r') != NULL);
+		cmd_mic(CLAMP(atoi(line + 3), 1, 120), strchr(line, 's') ? MIC_STEREO : strchr(line, 'r') ? MIC_RISING :
+			MIC_FALLING);
+#ifdef LR_N4
+	} else if (!strcmp(line, "imu")) {
+		cmd_imu();
+	} else if (!strcmp(line, "chrg")) {
+		cmd_chrg();
+#endif
 	} else if (!strcmp(line, "sw")) {
 		cmd_sw();
 	} else if (!strcmp(line, "all")) {  /* everything the board judges alone, for a plain serial terminal */
@@ -831,7 +1157,7 @@ static void run(char *line)
 		NRF_POWER->GPREGRET = 0x57;
 		NVIC_SystemReset();
 	} else {
-		printk("R {\"test\":\"?\",\"commands\":\"info gpio [p3] adc rx led clk N dcdc sd [kHz] [m] [r] vcc N mic N [r] sw all dfu\"}\n");
+		printk("R {\"test\":\"?\",\"commands\":\"info gpio [p3] adc rx led clk N dcdc sd [kHz] [m] [r] vcc N mic N [r|s] sw imu chrg all dfu\"}\n");
 	}
 }
 

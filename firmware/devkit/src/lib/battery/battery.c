@@ -22,6 +22,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <hal/nrf_gpio.h>
+#include <hal/nrf_power.h>
 LOG_MODULE_REGISTER(battery, LOG_LEVEL_INF);
 
 static const struct device *gpio_battery_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
@@ -35,6 +37,11 @@ static K_MUTEX_DEFINE(battery_mut);
 // only kept the LED lit on the battery (~0.65 mA). The pull-up: a bare input costs ~50 uA (Seeed's forum).
 #define GPIO_BATTERY_CHG 17
 #define GPIO_BATTERY_READ_ENABLE 14
+// LR-N4's TP4054 CHRG on P0.29 (open drain, no resistor on the board): low while it charges, a weak pull-down when
+// done, open without USB. Pulled up inside only for the read and only with VBUS there: unpowered, the charger would be
+// fed through that pin. Neither the XIAO's nor the ProMicro's charger pins exist there (VDDH and AIN0 builds).
+#define GPIO_N4_CHRG 29
+#define OWN_CHARGER_PINS !(IS_ENABLED(CONFIG_LR_BATTERY_VDDH) || IS_ENABLED(CONFIG_LR_BATTERY_AIN0))
 
 // Change this to a higher number for better averages
 // Note that increasing this holds up the thread / ADC for longer.
@@ -45,6 +52,8 @@ int16_t sample_buffer[ADC_TOTAL_SAMPLES];
 #define ADC_CHANNEL 7
 #ifdef CONFIG_LR_BATTERY_VDDH
 #define ADC_PORT SAADC_CH_PSELP_PSELP_VDDHDIV5 // VDDH / 5: the battery feeds VDDH on the nice!nano
+#elif defined(CONFIG_LR_BATTERY_AIN0)
+#define ADC_PORT SAADC_CH_PSELP_PSELP_AnalogInput0 // AIN0 (P0.02): LR-N4's battery through 1M / 1M
 #else
 #define ADC_PORT SAADC_CH_PSELP_PSELP_AnalogInput7 // AIN7
 #endif
@@ -53,7 +62,12 @@ int16_t sample_buffer[ADC_TOTAL_SAMPLES];
 
 struct adc_channel_cfg channel_7_cfg = {.gain = ADC_GAIN,
                                         .reference = ADC_REFERENCE,
+#ifdef CONFIG_LR_BATTERY_AIN0
+                                        // 1M / 1M is a 500k source: 40 us covers up to 800k (PS v1.11 SAADC, TACQ)
+                                        .acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40),
+#else
                                         .acquisition_time = ADC_ACQ_TIME_DEFAULT,
+#endif
                                         .channel_id = ADC_CHANNEL,
 #ifdef CONFIG_ADC_NRFX_SAADC
                                         .input_positive = ADC_PORT
@@ -104,7 +118,7 @@ static uint8_t is_initialized = false;
 
 static int battery_enable_read()
 {
-    if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
+    if (!OWN_CHARGER_PINS) {
         return 0;
     }
     return gpio_pin_set(gpio_battery_dev, GPIO_BATTERY_READ_ENABLE, 1);
@@ -112,7 +126,7 @@ static int battery_enable_read()
 
 int battery_set_fast_charge()
 {
-    if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
+    if (!OWN_CHARGER_PINS) {
         return 0; // no charger pins
     }
     if (!is_initialized) {
@@ -124,7 +138,7 @@ int battery_set_fast_charge()
 
 int battery_set_slow_charge()
 {
-    if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
+    if (!OWN_CHARGER_PINS) {
         return 0; // no charger pins
     }
     if (!is_initialized) {
@@ -136,6 +150,16 @@ int battery_set_slow_charge()
 
 int battery_charging()
 {
+#ifdef CONFIG_LR_BATTERY_AIN0
+    if (!nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {
+        return -ENODATA;
+    }
+    nrf_gpio_cfg_input(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG), NRF_GPIO_PIN_PULLUP);
+    k_busy_wait(50);
+    int level = nrf_gpio_pin_read(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG));
+    nrf_gpio_cfg_default(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG));
+    return !level;  // the weak pull-down when done loses to the ~13k pull-up: high
+#endif
     if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
         return -ENOTSUP; // the ProMicro's charger drives its blue LED only (a wire from its CHRG would read it)
     }
@@ -176,7 +200,9 @@ int battery_get_millivolt(uint16_t *battery_millivolt)
     ret |= adc_raw_to_millivolts(adc_vref, ADC_GAIN, ADC_RESOLUTION, &adc_mv);
 
     // Calculate battery voltage.
-    *battery_millivolt = IS_ENABLED(CONFIG_LR_BATTERY_VDDH) ? adc_mv * 5 : adc_mv * ((R1 + R2) / R2);
+    *battery_millivolt = IS_ENABLED(CONFIG_LR_BATTERY_VDDH)   ? adc_mv * 5
+                         : IS_ENABLED(CONFIG_LR_BATTERY_AIN0) ? adc_mv * 2
+                                                              : adc_mv * ((R1 + R2) / R2);
     k_mutex_unlock(&battery_mut);
 
     LOG_DBG("%d mV", *battery_millivolt);
@@ -230,7 +256,7 @@ int battery_init()
         LOG_ERR("ADC setup failed (error %d)", ret);
     }
 
-    if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
+    if (!OWN_CHARGER_PINS) {
         is_initialized = true;
         return ret;
     }

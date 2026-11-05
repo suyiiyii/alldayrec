@@ -20,7 +20,7 @@ on:
       variant:
         description: Recorder variant (all excludes experimental expansion)
         type: choice
-        options: [all, sdmod, promicro, promicro-p2, promicro-p3, expansion]
+        options: [all, sdmod, promicro, promicro-p2, promicro-p3, n4, expansion]
         default: all
 
 permissions:

@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-FORMAL_VARIANTS = ["sdmod", "promicro", "promicro-p2", "promicro-p3"]
+FORMAL_VARIANTS = ["sdmod", "promicro", "promicro-p2", "promicro-p3", "n4"]
 FAMILIES = ["devkit", "selftest", "blerelay"]
 
 

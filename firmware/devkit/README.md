@@ -9,6 +9,7 @@ XIAO nRF52840 Sense 上的录音固件：PDM 麦克风 → Opus 16 kHz → 记�
 |---|---|---|---|
 | `LR-X1` | XIAO nRF52840 Sense（板载麦克风，焊 SD 模块和电池） | `sdmod` | 板载分压 AIN7 |
 | `LR-P3` | ProMicro nRF52840（nice!nano 兼容），飞线接 SD 模块、PDM 麦（SEL 接 3V）和拨动开关（P1.15），装进外壳；新机先跑 `selftest.py run SERIAL --p3` | `promicro-p3` | 芯片内部 VDDH/5（电池接 VDDH，不用外接电阻） |
+| `LR-N4` | 自己的板子：裸 nRF52840（aQFN73），LR-P3 的全部件加第二颗麦和 IMU；新机先跑 `selftest.py run SERIAL --n4` | `n4` | AIN0（P0.02）经 1M/1M 分压 ×2；VDDH 接系统电源轨，插 USB 时是 USB 那一侧 |
 
 `lr.sh` 的其余变体（`expansion`、`promicro`、`promicro-p2`）是维护者的测试板。
 
@@ -22,6 +23,7 @@ nrfutil install sdk-manager && nrfutil sdk-manager install --ncs-version v2.7.0 
 ./lr.sh build sdmod        # 焊在右排的 SD 模块（正式）
 ./lr.sh build expansion    # Seeed XIAO 扩展底板（只做测试）
 ./lr.sh build promicro-p3  # LR-P3：ProMicro nRF52840（nice!nano 兼容）+ PDM 麦克风 + SD 模块 + 拨动开关
+./lr.sh build n4           # LR-N4：自己的板子（引脚见下面「LR-N4」）
 ./lr.sh flash sdmod        # 运行中的固件收到 1200 bps 触碰自己进 UF2 bootloader，不用按 reset
 ```
 
@@ -60,6 +62,25 @@ App 录音设备页 › 固件更新列出这个型号的所有版本和说明�
 - 电池：红线–B+，黑线–右列 GND。
 
 RST 不要接地。bootloader 是 Adafruit UF2 + S140 6.1.1，应用从 0x26000 起（`overlay/lr_promicro.overlay`）。
+
+## LR-N4
+
+`n4` 变体在 LR-P3 的基础上（`lr_promicro.overlay`：同一套 bootloader 和分区、同样的麦 DAT/CLK、SD 四根线和开关）叠 `overlay/lr_n4.overlay`，功能和 LR-P3 一样（录音、卡、蓝牙、DFU、电量、充电状态、开关、灯、手机模式）。不同的地方：
+
+| 功能 | 脚 | 说明 |
+|---|---|---|
+| 麦克风 LDO 使能（MIC_PWR） | P0.12 | 两颗麦共用一颗 3.0 V LDO；LR-P3 是 P0.17 直接供电 |
+| TF 卡 LDO 使能（SD_EN） | P0.31 | LR-P3 是 P0.13 |
+| 第二颗麦 MK2 | 同一对 CLK/DAT | MK1 L/R 接电源、MK2 接地；固件仍是单声道下降沿，只录 MK1。怎么录 MK2 或两颗都录，见 `lr_n4.overlay` 的注释 |
+| 灯 | 黄绿 P0.15、红 P1.13 | 状态闪码照旧在 P0.15（现在是黄绿）；红灯只在开机启动麦克风那一下和启动出错时亮 |
+| IMU（LSM6DS3TR-C，0x6A） | SDA P0.23、SCL P0.19、INT1 P0.11、供电 P1.08 | I2C 首批板用 100 kHz（nRF52840 勘误 219）；开机读 WHO_AM_I 后加速度、陀螺都停在掉电模式，现在不用它 |
+| 电池电压 | AIN0（P0.02）×2 | 1M/1M 分压，采样 40 µs |
+| 充电状态（TP4054 CHRG） | P0.29 | 只在有 VBUS 时、只在读的那一下开片内上拉：充电中读低、充满读高 |
+| 32.768 kHz 晶振 | XL1/XL2 | 板上自己的晶振，精度用默认的 50 ppm（ProMicro 克隆板是 250 ppm） |
+
+供电：VDDH 接系统电源轨，芯片工作在高压模式，REG0、REG1 两级 DCDC 的电感都焊了，固件照 LR-P3 打开两级 DCDC。VDD = 3.0 V 由 UICR REGOUT0 = 4 决定，是第一次用 SWD 烧 bootloader 时一起写进去的，固件不写 UICR。
+APPROTECT：`n4` 显式打开 `CONFIG_NRF_APPROTECT_USE_UICR`（NCS 2.7 的默认），build code F 及以后的芯片，UICR APPROTECT 写成 0x5A 时，SystemInit 每次启动写 APPROTECT.DISABLE，调试口保持打开；不开 `CONFIG_NRF_APPROTECT_LOCK`。
+新板没有 bootloader：第一次用 SWD 烧 bootloader + UICR + 自检固件（`firmware/selftest`），之后和 LR-P3 一样走 UF2 / 蓝牙 DFU。
 
 ## 低电关机
 
