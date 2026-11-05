@@ -17,9 +17,11 @@
  * names. Records, little endian:
  *   'A' count:u8 first_frame:u32  then count x (len:u8 opus[len])   consecutive frames first_frame, +1, ... (<= 10)
  *   'T' frame:u32 epoch_ms:u64                                      the phone said frame `frame` was at epoch_ms
- * Finished records gather in RAM (CONFIG_LR_STORE_BATCH, ~1 s) and go to the card in one write; a power cut loses at
- * most those (a crash or watchdog reset keeps the batches queued: the next boot writes them as a file of their own). A
- * file cut short by power loss ends in a partial record: readers stop there.
+ * Finished records gather in RAM in batches (CONFIG_LR_STORE_BATCH, ~1 s); the batches go to the card once the queue
+ * has room for less than 3 more (each batch with the 16 KB queue, ~8 s with LR-P3's 44 KB) or 10 s after the last
+ * write; a power cut loses at most those and the open batch (a crash or watchdog reset keeps the queued ones: the next
+ * boot writes them as a file of their own; the open batch, ~1 s, is lost; switching off, low battery and an update
+ * write them all first). A file cut short by power loss ends in a partial record: readers stop there.
  *
  * Phone mode (CONFIG_LR_STORE_PHONE, LR-P3): a phone that follows the stream and acks it (ACK) takes it instead of the
  * card. The card's copy of the open file ends there and the card is powered off; the batches stay in RAM until acked,

@@ -52,7 +52,7 @@ config LR_STORE_RESERVE_KB
     default 1024
 
 config LR_STORE_BATCH
-    int "Record stream: finished records gather in RAM until this many bytes (4 KB is ~1 s of audio), then go to the card in one write"
+    int "Record stream: finished records gather in RAM until this many bytes (4 KB is ~1 s of audio), then queue for the card as one batch (written together: card_due in lr_store.c)"
     default 4096
 
 config LR_STORE_PHONE
