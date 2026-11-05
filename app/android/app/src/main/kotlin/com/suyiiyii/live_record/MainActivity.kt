@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -99,15 +100,19 @@ class MainActivity : FlutterActivity() {
                     RecorderService.slicer?.apply { fgS = fg; bgS = bg; offS = off }
                     result.success(null)
                 }
-                "upload" -> {  // pieces left from a stop, a kill or a lost network: send them without recording
-                    if (RecorderService.slicer == null && RecorderService.uploader == null)
-                        startForegroundService(Intent(this, RecorderService::class.java).setAction("upload"))
+                "upload" -> {  // pieces left from a stop, a kill or a lost network: send them without recording; not while refused
+                    // and only in the foreground: that resets the day's 6 h of dataSync, from the background (with a battery
+                    // exemption) every tick would start a service the system then refuses or times out again
+                    val haltedAt = getSharedPreferences("recorder", MODE_PRIVATE).getLong("haltedAt", 0L)
+                    if (RecorderService.foregroundApp && RecorderService.slicer == null && RecorderService.uploader == null &&
+                        System.currentTimeMillis() - haltedAt >= Uploader.HALT_MS)
+                        try { startForegroundService(Intent(this, RecorderService::class.java).setAction("upload")) } catch (e: Exception) { Log.w("live-record", "upload: $e") }
                     result.success(null)
                 }
                 "account" -> {  // settings saved (a new server or token, a scan to sign in again): the queue goes there now,
                     // a refused one tries again (Uploader.haltedAt); with a recorder as the source no start would bring them
                     val server = call.argument<String>("server")!!; val token = call.argument<String>("token")!!
-                    getSharedPreferences("recorder", MODE_PRIVATE).edit().putString("server", server).putString("token", token).apply()
+                    getSharedPreferences("recorder", MODE_PRIVATE).edit().putString("server", server).putString("token", token).remove("haltedAt").apply()
                     RecorderService.uploader?.apply { this.server = server; this.token = token; haltedAt = 0 }
                     result.success(null)
                 }

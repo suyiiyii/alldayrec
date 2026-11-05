@@ -179,17 +179,20 @@ class UploaderTest {
     }
 
     /** A proxy's 400 leaves the piece in the queue and stops the uploads (it was deleted, and the LR-P3's card file
-     *  with it); half an hour on it tries once more, and settings saved or a start (haltedAt = 0) send it again. The server's "not audio" drops it and the next goes. */
+     *  with it); half an hour on the refusal is over (settings saved or a start end it at once) and it tries once more, a lost network then is only that. The server's "not audio" drops it and the next goes. */
     @Test fun refusedKeeps() {
         val dir = kotlin.io.path.createTempDirectory().toFile()
         val kept = File(dir, "1000.ogg").apply { writeBytes(ByteArray(64)) }
         lateinit var edit: SharedPreferences.Editor
-        edit = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { _, m, _ ->
+        val saved = mutableMapOf<String, Any?>()
+        edit = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences.Editor::class.java)) { _, m, a ->
+            if (m.name == "putLong") saved[a[0] as String] = a[1]
             if (m.name == "commit") true else edit } as SharedPreferences.Editor
         val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
             when (m.name) { "getLong" -> a[1]; "getStringSet" -> a[1]; "edit" -> edit; else -> null } } as SharedPreferences
         val got = LinkedBlockingQueue<String>()
         val proxy = java.util.concurrent.atomic.AtomicBoolean(true)
+        val down = java.util.concurrent.atomic.AtomicBoolean(false)
         val http = ServerSocket(0)
         Thread {
             while (!http.isClosed) try { http.accept().use { c ->
@@ -199,6 +202,7 @@ class UploaderTest {
                     .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
                 repeat(n) { r.read() }
                 val (code, body) = when {
+                    down.get() -> 503 to ""
                     proxy.get() -> 400 to "<html>400 Bad Request</html>"
                     "start=1000" in path -> 400 to """{"detail":"could not decode"}"""
                     else -> 200 to """{"seconds":1.0}"""
@@ -212,14 +216,18 @@ class UploaderTest {
             assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped: no second try", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > 0 && kept.exists())
+            assertEquals("kept for MainActivity's upload gate", up.haltedAt, saved["haltedAt"])
             assertEquals("uploadRefused", up.note?.get("code"))
             up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on: it tries once more on its own
             assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped again", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > System.currentTimeMillis() - 10_000 && kept.exists())
+            down.set(true); up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on, the network down
+            assertEquals("503 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("the refusal is over: a stop's drain must not report it", 0L, up.haltedAt)
             File(dir, "5000.ogg").writeBytes(ByteArray(64))  // not batched with it: over BATCH_GAP_MS apart
-            proxy.set(false); up.haltedAt = 0  // settings saved, or a start
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            down.set(false); proxy.set(false)  // the network back, the proxy fixed: the next try (5 s on) goes through
+            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(10, TimeUnit.SECONDS))
             assertEquals("200 /api/chunks?device=phone&start=5000", got.poll(5, TimeUnit.SECONDS))
             Thread.sleep(200)
             assertEquals(emptyList<File>(), Uploader.queue(dir))
