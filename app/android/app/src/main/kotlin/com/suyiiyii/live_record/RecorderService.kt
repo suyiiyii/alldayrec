@@ -198,6 +198,7 @@ class RecorderService : Service() {
                 putBoolean("archive", intent.getBooleanExtra("archive", true))
             }.apply()
             uploader?.apply { server = prefs.getString("server", "")!!; token = prefs.getString("token", "")!!; haltedAt = 0 }  // a start tries a refused queue again
+            prefs.edit().remove("haltedAt").apply()
         } else if (!prefs.getBoolean("active", false)) {  // restarted after a kill while only uploading, or nothing to do
             uploadOnly(prefs, dir)
             return START_STICKY
@@ -241,21 +242,38 @@ class RecorderService : Service() {
         uploadOnly(prefs, dir)
     }
 
-    /** Stays up while pieces or an end (Uploader.ends) are left and nothing records; then stops. */
+    /** Stays up while pieces or an end (Uploader.ends) are left and nothing records; then stops. A refused queue
+     *  (Uploader.haltedAt) stops it too: Android 15+ gives a dataSync service 6 h a day, a refused queue would hold it
+     *  for good; the app's "upload" brings it back once the halt is over or settings are saved. */
     private fun uploadOnly(prefs: android.content.SharedPreferences, dir: File) {
         val left = { Uploader.queue(dir).isNotEmpty() || prefs.all.keys.any { it.startsWith("end:") } }
         if (!left()) { background(); stopSelf(); return }
-        foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        try { foreground(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC) } catch (e: Exception) {  // Android 15+: the day's 6 h used up
+            DeviceLog.app(DeviceLog.mine(), "upload_fgs_refused", "系统不让再开后台上传（${e.message}），" +
+                "${Uploader.queue(dir).size} 块留在手机上，打开 App 后继续", "warn")
+            background(); stopSelf(); return
+        }
         val u = ensureUploader(prefs, dir)
         if (draining) return
         draining = true
         Thread {
-            while (slicer == null && left()) Thread.sleep(2000)
+            while (slicer == null && left() && u.running && u.haltedAt == 0L) Thread.sleep(2000)
             draining = false
-            if (slicer != null) return@Thread  // recording again: the service carries on as before
+            if (slicer != null || !u.running) return@Thread  // recording again: the service carries on; or stopped (onTimeout, onDestroy)
+            if (u.haltedAt > 0) DeviceLog.app(DeviceLog.mine(), "upload_halted_stop", "上传被拒，停止后台上传，" +
+                "${Uploader.queue(dir).size} 块留在手机上；保存设置后或 30 分钟后打开 App 时再试", "warn")
             u.running = false; uploader = null
             background(); stopSelf()
         }.start()
+    }
+
+    /** Android 15+: the dataSync service ran its 6 h of the day (only uploading uses that type: recording is microphone
+     *  or connectedDevice). It has a few seconds to stop, or the app is killed; the pieces stay for the next upload. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        DeviceLog.app(DeviceLog.mine(), "upload_fgs_timeout", "后台上传到了系统每天 6 小时的上限，停止上传，" +
+            "${Uploader.queue(File(filesDir, "chunks")).size} 块留在手机上，打开 App 后继续", "warn", mapOf("type" to fgsType))
+        uploader?.running = false; uploader = null
+        background(); stopSelf()
     }
 
     @Volatile private var draining = false
@@ -382,7 +400,10 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
 
     override fun run() {
         while (running) {
-            if (haltedAt > 0 && System.currentTimeMillis() - haltedAt < HALT_MS) { sleep(2000); continue }
+            if (haltedAt > 0) {  // over the half hour the refusal is over, whatever the retry gets: uploadOnly's drain reads it
+                if (System.currentTimeMillis() - haltedAt < HALT_MS) { sleep(2000); continue }
+                haltedAt = 0
+            }
             val q = files()
             letGo(q)
             ends(q)
@@ -422,6 +443,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                     }
                     Answer.AUTH, Answer.REFUSED -> {  // not the server's "not audio": a proxy's, a token's; the pieces stay
                         haltedAt = System.currentTimeMillis()
+                        prefs.edit().putLong("haltedAt", haltedAt).apply()  // MainActivity "upload" waits it out
                         DeviceLog.app(deviceOf(b[0]).ifEmpty { device }, "upload_refused", "上传被拒绝（HTTP $code），暂停上传，" +
                             "${queue(dir).size} 块留在手机上；保存设置后马上再试，否则 30 分钟后再试", "error", mapOf("code" to code, "pieces" to queue(dir).size))
                         note = say(if (a == Answer.AUTH) "uploadUnauthorized" else "uploadRefused", "detail" to "HTTP $code")
