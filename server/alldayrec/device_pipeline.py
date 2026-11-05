@@ -359,7 +359,8 @@ async def pipeline(device: str):
             other = None
         if not speech or other:
             with perf.timed(fcost, "commit_ms"):  # no rows: pages still drop their drafts of this time
-                await commit(grouper.advance(hi), [], iso(base), hi, heard, "standby" if other else "final")
+                await commit(grouper.advance(hi), [], iso(base), hi, colocate.split(device, other, heard) if other else heard,
+                             "standby" if other else "final")
             final_row(len(x) / SR, 0)
             return True
         t_run = time.perf_counter()

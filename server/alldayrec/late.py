@@ -49,7 +49,8 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
     if not await quiet_seam(span):
         return [], {}  # the final reader invalidated this claim during lookahead
     ranges = json.loads(span["ranges"])
-    if skip := colocate.left(span["device"], ranges):  # another device in the same place has it (attach: not this span's)
+    # another device in the same place has it (attach: not this span's)
+    if skip := await anyio.to_thread.run_sync(colocate.left, span["device"], ranges, limiter=threads.MEDIA):
         with db.tx() as t:
             db.record_processed(t, span["device"], skip, "standby")
         log.info("late span %s: %.0f s of %.0f s left to another device in the same place", span["id"],
