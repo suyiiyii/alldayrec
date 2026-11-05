@@ -61,15 +61,16 @@ enum DeviceLog {
   }
 
   /// Each record's wall time (epoch ms) or nil, as lr_sync.py dates them: a frame by the boot's TIME record nearest to
-  /// it, among these and `known` (boot -> (frame, epoch) of earlier reads). A record from before the boot's first frame
-  /// goes at that frame: a few seconds late at most (the log has no record of the first frame's uptime). A boot that
-  /// ended before any phone set its clock stays undated.
+  /// it, among these and `known` (boot -> (frame, epoch) of earlier reads), at the boot's rate (Store.at). A record
+  /// from before the boot's first frame goes at that frame: a few seconds late at most (the log has no record of the
+  /// first frame's uptime). A boot that ended before any phone set its clock stays undated.
   static func dates(_ recs: [Rec], known: [Int: (frame: Int64, epoch: Int64)]) -> [Int64?] {
-    var sync = known.mapValues { [$0] }
+    var sync: [Int: [(frame: Int64, epochMs: Int64)]] = known.mapValues { [($0.frame, $0.epoch)] }
     for r in recs where r.code == time { sync[r.boot, default: []].append((r.t, r.b << 32 | r.a)) }
+    let rates = sync.mapValues { Store.bootRate($0) }
     return recs.map { r in
       let frame = r.code & uptime != 0 ? 0 : r.t
-      return sync[r.boot]?.min { abs($0.frame - frame) < abs($1.frame - frame) }.map { $0.epoch + (frame - $0.frame) * Store.frameMs }
+      return sync[r.boot].map { Store.at($0, frame, rate: rates[r.boot]) }
     }
   }
 

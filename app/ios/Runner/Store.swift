@@ -1,7 +1,8 @@
 // The BLE recorder's record stream (firmware src/lr_store.h, reference client firmware/devkit/lr_sync.py), port of the
 // Android app's Store.kt: files of 'A' records (consecutive 10 ms Opus frames from `first`) and 'T' records (frame
 // `frame` was at the phone's `epochMs`), named boot << 16 | segment. A frame's wall time is its boot's nearest 'T' +
-// 10 ms per frame. Foundation only: app/ios/StoreCheck runs it on a Mac and in CI (Linux).
+// the frames since at the boot's rate (Store.bootRate, ~10 ms). Foundation only: app/ios/StoreCheck runs it on a Mac
+// and in CI (Linux).
 import Foundation
 
 #if !canImport(ObjectiveC)
@@ -11,6 +12,34 @@ func autoreleasepool<Result>(invoking body: () throws -> Result) rethrows -> Res
 
 enum Store {
   static let frameMs: Int64 = 10
+  /// bootRate's 'T' pairs: at least 20 min apart (a TIME comes up to ~20 ms either way, ~15 ppm on a pair), rates
+  /// within 300 ppm of 10 ms
+  static let rateMinFrames: Int64 = 120_000, rateMaxPpm = 300.0
+
+  /// A boot's ms per frame on the phone's clock (lr_sync.py boot_rate): the frame clock runs off the board's 32 MHz
+  /// crystal, up to ~90 ppm off. The median of its 'T' pairs' rates (each 'T' by frame and the first one rateMinFrames
+  /// after it), 10 until 3 pairs.
+  static func bootRate(_ ts: [(frame: Int64, epochMs: Int64)]) -> Double {
+    let s = ts.sorted { $0.frame != $1.frame ? $0.frame < $1.frame : $0.epochMs < $1.epochMs }
+    var r: [Double] = [], j = 0
+    for a in s {
+      while j < s.count && s[j].frame - a.frame < rateMinFrames { j += 1 }
+      if j == s.count { break }
+      let d = Double(s[j].epochMs - a.epochMs) / Double(s[j].frame - a.frame)
+      if abs(d - Double(frameMs)) <= Double(frameMs) * rateMaxPpm / 1e6 { r.append(d) }
+    }
+    if r.count < 3 { return Double(frameMs) }
+    r.sort()
+    let m = r.count / 2
+    return r.count % 2 == 1 ? r[m] : (r[m - 1] + r[m]) / 2
+  }
+
+  /// When `frame` was (lr_sync.py cur_time): the nearest 'T' + the frames since at the boot's rate, rounded half up.
+  static func at(_ ts: [(frame: Int64, epochMs: Int64)], _ frame: Int64, rate: Double? = nil) -> Int64 {
+    let near = ts.min { abs($0.frame - frame) < abs($1.frame - frame) }!
+    return near.epochMs + Int64((Double(frame - near.frame) * (rate ?? bootRate(ts)) + 0.5).rounded(.down))
+  }
+
   static let oldPieceFrames = 6000  // a file the board has closed goes up in 60 s pieces
 
   enum Rec {
@@ -271,8 +300,7 @@ final class Mirror {
       guard !s.finished, let ts = syncs[clock(f)], !ts.isEmpty else { continue }
       for (r, _) in Store.scan(bytes(f, s.cut, max: 8192), base: s.cut) {  // a record is at most 2.6 KB
         if case let .audio(first, _) = r {
-          let near = ts.min { abs($0.frame - first) < abs($1.frame - first) }!
-          return near.epochMs + (first - near.frame) * Store.frameMs
+          return Store.at(ts, first)
         }
       }
     }
@@ -280,11 +308,11 @@ final class Mirror {
   }
 
   /// Turns what the mirror has into Ogg pieces in `out`, `start@tag.ogg`, `start` = the frame's boot's nearest 'T' +
-  /// 10 ms per frame. Pieces end at a gap in the frames, at `liveFrames` (the open file) or 60 s (a closed one), and
-  /// at the end of a closed file the mirror has whole; a file's last frames otherwise wait for more. Frames of a boot
-  /// with no 'T' yet wait for one; a file of a boot that is over (`boot` is the live one) and never had one goes to
-  /// `undated` once the mirror has it whole, as one Ogg of all its frames (its runs back to back: no time to put
-  /// them at anyway).
+  /// the frames since at the boot's rate (Store.at). Pieces end at a gap in the frames, at `liveFrames` (the open file)
+  /// or 60 s (a closed one), and at the end of a closed file the mirror has whole; a file's last frames otherwise wait
+  /// for more. Frames of a boot with no 'T' yet wait for one; a file of a boot that is over (`boot` is the live one)
+  /// and never had one goes to `undated` once the mirror has it whole, as one Ogg of all its frames (its runs back to
+  /// back: no time to put them at anyway).
   /// Returns the number of pieces written.
   func pieces(_ out: URL, _ undated: URL, tag: String, liveFrames: Int, boot: Int) throws -> Int {
     scanSyncs()
@@ -306,8 +334,7 @@ final class Mirror {
           if ts.isEmpty {
             lost += run
           } else {
-            let near = ts.min { abs($0.frame - first) < abs($1.frame - first) }!
-            let name = "\(near.epochMs + (first - near.frame) * Store.frameMs)@\(tag)"
+            let name = "\(Store.at(ts, first))@\(tag)"
             let part = out.appendingPathComponent("\(name).part"), ogg = out.appendingPathComponent("\(name).ogg")
             try Store.oggOpus(run).write(to: part)
             try? fm.removeItem(at: ogg)  // the same piece again (a kill before the state was saved)

@@ -10,10 +10,41 @@ import kotlin.random.Random
 
 /** The BLE recorder's record stream (firmware src/lr_store.h, reference client firmware/devkit/lr_sync.py): files of
  *  'A' records (consecutive 10 ms Opus frames from `first`) and 'T' records (frame `frame` was at the phone's
- *  `epochMs`), named boot << 16 | segment. A frame's wall time is its boot's nearest 'T' + 10 ms per frame. Plain
- *  Kotlin: the unit test runs it. */
+ *  `epochMs`), named boot << 16 | segment. A frame's wall time is its boot's nearest 'T' + the frames since at the
+ *  boot's rate (Store.bootRate, ~10 ms). Plain Kotlin: the unit test runs it. */
 object Store {
     const val FRAME_MS = 10L
+    /** bootRate's 'T' pairs: at least 20 min apart (a TIME comes up to ~20 ms either way, ~15 ppm on a pair), rates
+     *  within 300 ppm of 10 ms */
+    const val RATE_MIN_FRAMES = 120_000L
+    const val RATE_MAX_PPM = 300.0
+
+    /** A boot's ms per frame on the phone's clock (lr_sync.py boot_rate): the frame clock runs off the board's 32 MHz
+     *  crystal, up to ~90 ppm off. The median of its 'T' pairs' rates (each 'T' by frame and the first one
+     *  RATE_MIN_FRAMES after it), 10 until 3 pairs. `ts`: (frame, epoch ms). */
+    fun bootRate(ts: List<LongArray>): Double {
+        val s = ts.sortedWith(compareBy<LongArray>({ it[0] }, { it[1] }))
+        val r = mutableListOf<Double>()
+        var j = 0
+        for (a in s) {
+            while (j < s.size && s[j][0] - a[0] < RATE_MIN_FRAMES) j++
+            if (j == s.size) break
+            val d = (s[j][1] - a[1]).toDouble() / (s[j][0] - a[0]).toDouble()
+            if (Math.abs(d - FRAME_MS.toDouble()) <= FRAME_MS.toDouble() * RATE_MAX_PPM / 1e6) r += d
+        }
+        r.sort()
+        if (r.size < 3) return FRAME_MS.toDouble()
+        val m = r.size / 2
+        return if (r.size % 2 == 1) r[m] else (r[m - 1] + r[m]) / 2
+    }
+
+    /** When `frame` was (lr_sync.py cur_time): the nearest 'T' + the frames since at the boot's rate, rounded half
+     *  up. */
+    fun at(ts: List<LongArray>, frame: Long, rate: Double = bootRate(ts)): Long {
+        val near = ts.minBy { Math.abs(it[0] - frame) }
+        return near[1] + Math.floor((frame - near[0]).toDouble() * rate + 0.5).toLong()
+    }
+
     const val OLD_PIECE_FRAMES = 6000  // a file the board has closed goes up in 60 s pieces
 
     sealed class Rec
@@ -206,19 +237,18 @@ class Mirror(private val dir: File) {
             val ts = syncs[clock(f)]
             if (s.finished || ts.isNullOrEmpty()) continue
             for ((r, _) in Store.scan(bytes(f, s.cut, 8192), s.cut)) if (r is Store.Audio) {  // a record is at most 2.6 KB
-                val near = ts.minBy { Math.abs(it[0] - r.first) }
-                return near[1] + (r.first - near[0]) * Store.FRAME_MS
+                return Store.at(ts, r.first)
             }
         }
         return null
     }
 
     /** Turns what the mirror has into Ogg pieces in `out`, `start@tag.ogg`, `start` = the frame's boot's nearest 'T' +
-     *  10 ms per frame. Pieces end at a gap in the frames, at `liveFrames` (the open file) or 60 s (a closed one), and
-     *  at the end of a closed file the mirror has whole; a file's last frames otherwise wait for more. Frames of a boot
-     *  with no 'T' yet wait for one; a file of a boot that is over (`boot` is the live one) and never had one goes to
-     *  `undated` once the mirror has it whole, as one Ogg of all its frames (its runs back to back: no time to put
-     *  them at anyway).
+     *  the frames since at the boot's rate (Store.at). Pieces end at a gap in the frames, at `liveFrames` (the open
+     *  file) or 60 s (a closed one), and at the end of a closed file the mirror has whole; a file's last frames
+     *  otherwise wait for more. Frames of a boot with no 'T' yet wait for one; a file of a boot that is over (`boot` is
+     *  the live one) and never had one goes to `undated` once the mirror has it whole, as one Ogg of all its frames
+     *  (its runs back to back: no time to put them at anyway).
      *  Returns the number of pieces written. */
     fun pieces(out: File, undated: File, tag: String, liveFrames: Int, boot: Int): Int {
         scanSyncs()
@@ -239,8 +269,7 @@ class Mirror(private val dir: File) {
                     if (ts.isNullOrEmpty()) {
                         lost += run
                     } else {
-                        val near = ts.minBy { Math.abs(it[0] - first) }
-                        val name = "${near[1] + (first - near[0]) * Store.FRAME_MS}@$tag"
+                        val name = "${Store.at(ts, first)}@$tag"
                         val part = File(out, "$name.part")
                         part.writeBytes(Store.oggOpus(run))
                         part.renameTo(File(out, "$name.ogg"))
