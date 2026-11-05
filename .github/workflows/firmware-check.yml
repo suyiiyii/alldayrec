@@ -24,6 +24,8 @@ jobs:
           cc -w -I$d -o $d/sdhc_check test/sdhc_check.c && $d/sdhc_check  # the SD card's SPI waits (src/sdhc_spi.c)
           mkdir -p $d/zephyr/storage $d/hal && touch $d/zephyr/fs/fcb.h $d/zephyr/storage/flash_map.h $d/hal/nrf_power.h $d/mpsl_temp.h
           cc -w -I$d -o $d/log_check test/log_check.c && $d/log_check  # a second's DROPPED gaps are one record (src/lr_log.c)
+          mkdir -p $d/zephyr/storage $d/zephyr/usb/class $d/hal && touch $d/zephyr/drivers/disk.h $d/zephyr/drivers/uart.h $d/zephyr/storage/disk_access.h $d/zephyr/usb/class/usbd_msc.h $d/zephyr/usb/usbd.h $d/zephyr/sys/iterable_sections.h $d/hal/nrf_power.h
+          cc -w -I$d -o $d/usb_check test/usb_check.c && $d/usb_check  # only a lent card's reads and writes that work keep it lent (src/usb.c)
           cc -o $d/led_check test/led_check.c && $d/led_check  # the one-LED boards' flash codes (src/led_code.h)
           cc -o $d/power_check test/power_check.c && $d/power_check  # when a low battery turns it off (src/lr_power.h)
           cc -o $d/switch_check test/switch_check.c && $d/switch_check  # LR-P3's switch debounce (src/lr_switch.h)

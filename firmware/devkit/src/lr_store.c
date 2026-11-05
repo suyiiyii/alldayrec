@@ -913,7 +913,7 @@ static void forget_bond(const struct bt_bond_info *info, void *arg)
 }
 
 extern volatile bool usb_disk_lent;  // usb.c: the card reader shows the card
-extern volatile uint32_t usb_disk_used;  // usb.c: when the computer last read or wrote it (k_uptime_get_32)
+extern volatile uint32_t usb_disk_used;  // usb.c: when the computer last read or wrote it and that worked (k_uptime_get_32)
 extern bool usb_charge;
 static int mount_card(int (*mount)(void));
 
