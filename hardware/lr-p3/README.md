@@ -83,7 +83,7 @@ LR-P3 是全天录的蓝牙录音设备：ProMicro nRF52840 克隆板 + 3.3 V mi
 | `CONFIG_LR_ONE_LED` | ProMicro 系列 | P0.15 单灯闪码：暂停或关机中不闪；没绑定手机每秒 1 下；卡写不进（没卡、卡满、写失败、借给 USB）每 3 s 3 下；录音且手机连着每 3 s 1 下；只录在卡上每 3 s 2 下。开始录音时常亮 1 s，拨到关时快闪 3 下 |
 | `CONFIG_LR_BATTERY_VDDH` | ProMicro 系列 | 电池接 VDDH，芯片内部量 VDDH/5 |
 | `CONFIG_LR_LOW_BATTERY_MV=3300` | 所有型号（默认） | 用电池时连续 3 次每分钟读数低于 3.3 V，就收尾并进 System OFF，插 USB 或拨开关唤醒；0 = 不关 |
-| `CONFIG_CLOCK_CONTROL_NRF_K32SRC_100PPM` | ProMicro 系列 | 这类克隆板的 32.768 kHz 晶振偏 +47 到 +81 ppm，所以声明 100 ppm |
+| `CONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM` | ProMicro 系列 | 这类克隆板的 32.768 kHz 晶振偏 +47 到 +125 ppm，所以声明 250 ppm（编译期设置，所有 ProMicro 构建和 OTA 包都一样）；每小时只多耗不到 1 µAh |
 
 ## 外壳 v5.5L
 

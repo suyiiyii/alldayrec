@@ -23,7 +23,7 @@ case $V in
             EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y "-DCONFIG_LR_NAME_PREFIX=\"$M\"" "-DCONFIG_BT_DEVICE_NAME=\"$M\""
                     "-DCONFIG_BT_DIS_MODEL=\"$M\"" '-DCONFIG_BT_DIS_HW_REV_STR="ProMicro nRF52840"'
                     -DCONFIG_LR_ONE_LED=y  # only P0.15's LED is fitted: short flash codes
-                    -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_100PPM=y)  # its 32.768 kHz crystals run +47..+81 ppm
+                    -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)  # its 32.768 kHz crystals run +47..+125 ppm
             # only LR-P3 has the switch on P1.15, and keeps a power trail while its battery cuts out
             # and phone mode (the card idle while the phone acks what it has: lr_store.c). Phone mode's way back to the
             # card mounts it, from a DFU write (BT RX) and the switch, low battery or 1200 bps touch (the system
