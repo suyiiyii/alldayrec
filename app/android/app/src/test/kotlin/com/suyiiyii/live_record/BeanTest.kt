@@ -1220,16 +1220,19 @@ class BeanTest {
     }
 
     /** #233: a bean whose units take 20.015 ms by the phone's clock (750 ppm slow, as one was for half an hour on
-     *  11-05), live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file):
-     *  each live piece within 60 ms of when its first unit was recorded, those read on return (the 2 min and the
+     *  11-05), live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file),
+     *  with each slice the app uses (1 s in front, 20 s iOS in the background, 60 s Android with the screen off): each
+     *  live piece within 60 ms of when its first unit was recorded, those read on return (the 2 min and the
      *  catch-up) by the anchor from before, off by what the bean drifted meanwhile (by seq × 20 ms alone the last were
      *  1.5 s early); each piece within 10 ms of where the one before ends, so the server's decoder goes on from it
-     *  (audio.before()). */
-    @Test fun driftingBeanIsDatedAnew() {
+     *  (audio.before()); bean_clock at most once in 10 min. */
+    @Test fun driftingBeanIsDatedAnew() { for (slice in listOf(50, 1000, 3000)) drifting(slice) }
+    private fun drifting(slice: Int) {
         val dir = Files.createTempDirectory("bean").toFile()
         val chunks = File(dir, "chunks"); val state = File(dir, "state.json")
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
+        bean.slice = slice
         bean.unitUs = 20_015; bean.openAt = t0 - 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.listed[bean.open] = 0
         var n = 90_000
         bean.onTransfer = { file, from, realtime -> bean.answer(file, from, realtime); bean.more(n) }
@@ -1237,7 +1240,8 @@ class BeanTest {
         assertThrows(IOException::class.java) { one.session(0, "") }
         val moves = one.files[bean.open]!!.anchors.size
         assertTrue("1.35 s in steps of 5–9 ms: $moves", moves in 100..300)
-        assertTrue(bean.logs.any { it.first == "bean_clock" })
+        val said = bean.logs.count { it.first == "bean_clock" }
+        assertTrue("bean_clock $said", said in 1..3)
         bean.now += 120_000; n = 12_000
         val again = BeanSync("D3200-0A0B", state, chunks, bean)
         assertEquals("kept in the state file", one.files[bean.open]!!.anchors.map { it.toList() }, again.files[bean.open]!!.anchors.map { it.toList() })
@@ -1249,25 +1253,25 @@ class BeanTest {
         for ((start, seq, units) in ps) {
             val off = kotlin.math.abs(start - (bean.openAt + seq * bean.unitUs / 1000))
             if (seq in 90_000L until 102_000L) back = maxOf(back, off) else worst = maxOf(worst, off)
-            assertTrue("piece at $seq ${start - end} ms after the one before", end == 0L || kotlin.math.abs(start - end) < 10)
+            assertTrue("slice $slice: piece at $seq ${start - end} ms after the one before", end == 0L || kotlin.math.abs(start - end) < 10)
             end = start + units * 20
         }
-        assertTrue("live pieces within 60 ms (a minute of 750 ppm) of their time: $worst ms", worst <= 60)
-        assertTrue("read on return within 0.25 s: $back ms", back <= 250)
+        assertTrue("slice $slice: live pieces within 60 ms (a minute of 750 ppm) of their time: $worst ms", worst <= 60)
+        assertTrue("slice $slice: read on return within 0.25 s: $back ms", back <= 250)
     }
 
     /** A hole of the file being recorded filled later (#230, #187) is dated by the anchors in force at its units, not
      *  the latest: each piece by one of them. */
     @Test fun filledHoleKeepsItsAnchor() {
         val a = 1_793_000_000_000L - 80_000
-        val r = rec(80, listOf(0L to 1000L, 2000L to 4000L), watched = false, units = 1500, anchors = listOf(1500L to a + 300, 2500L to a + 900))
+        val r = rec(80, listOf(0L to 1000L, 2000L to 4000L), watched = false, units = 1500, anchors = listOf(1525L to a + 300, 2500L to a + 900))
         assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(0L, 4000L), r.f.have.single().toList())
         val ps = piecesIn(r.chunks)
         assertEquals(1000L, ps.sumOf { it.third })
         for ((start, seq, units) in ps) {
-            assertEquals("unit $seq", (if (seq < 1500) a else a + 300) + seq * 20, start)
-            assertFalse("a piece across 1500", seq < 1500 && seq + units > 1500)
+            assertEquals("unit $seq", (if (seq < 1525) a else a + 300) + seq * 20, start)  // 1525: inside a 50-unit slice
+            assertFalse("a piece across 1525", seq < 1525 && seq + units > 1525)
         }
         assertEquals(a + 900 + 2600 * 20, r.f.at(2600))
     }
@@ -1364,7 +1368,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
     }
 
     override fun now() = now
-    override fun liveUnits() = 50
+    var slice = 50  // live units a piece (the app's slice)
+    override fun liveUnits() = slice
     override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text; logFields += fields }
     override fun watched() = watched
     val reports = mutableListOf<Map<String, Any?>>()

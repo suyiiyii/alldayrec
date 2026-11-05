@@ -269,6 +269,7 @@ final class BeanSync {
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
   static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
   static let clockUnits: Int64 = 1500  // half a minute of live units: the fastest of each dates the file (reanchor())
+  static let stepUnits = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
@@ -296,6 +297,7 @@ final class BeanSync {
     var seen: Int64 = 0  // when its last unit came
     var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
     var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
+    var clockSaid: Int64 = 0  // when bean_clock was last logged
     var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     init(_ file: Int64, _ live: Bool, _ from: Int64, realtime: Bool = false, watched: Bool = false) {
       self.file = file; self.live = live; self.from = from; self.realtime = realtime; self.watched = watched
@@ -789,7 +791,10 @@ final class BeanSync {
     if run.isEmpty { runFile = x.file; runFrom = s.seq; if x.live { step(x, f, s.seq) } }
     run.append(Data(audio))
     if !x.live { caught += 1; syncDoneKb = caught * Int64(Bean.unit) / 1024 }
-    if run.count >= (x.live ? io.liveUnits() : Bean.pieceUnits) { flush() }
+    // off the target (step()): a live piece ends at 5 s, the next one a step nearer, whatever the slice (iOS in the
+    // background 20 s, Android with the screen off 60 s: a step a piece could not keep up with 750 ppm)
+    let owed = x.target.map { abs($0 - f.latest) >= 5 } ?? false
+    if run.count >= (!x.live ? Bean.pieceUnits : owed ? min(io.liveUnits(), BeanSync.stepUnits) : io.liveUnits()) { flush() }
   }
 
   /// The bean's units do not keep the phone's time (#233: up to 750 ppm slow for half an hour, then on time, 2–3 s over
@@ -802,7 +807,9 @@ final class BeanSync {
     if seq - x.half + 1 < BeanSync.clockUnits { return }
     if let b = x.before, abs(x.fastest - b) <= 50 {
       let d = x.fastest - f.latest
-      if abs(d) >= 20 {
+      let now = io.now()
+      if abs(d) >= 200 || abs(d) >= 20 && now - x.clockSaid >= 600_000 {  // a jump, else at most once in 10 min
+        x.clockSaid = now
         log("bean_clock", "文件 \(x.file) 到单元 \(seq) 按序号排比手机的钟\(d >= 0 ? "早" : "晚") \(abs(d)) ms，之后的块逐段对齐",
             fields: ["file": x.file, "seq": seq, "ms": d])
       }

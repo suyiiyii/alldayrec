@@ -307,6 +307,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var fastest = Long.MAX_VALUE
         var before: Long? = null
         var target: Long? = null  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
+        var clockSaid = 0L  // when bean_clock was last logged
         var lag: Long? = null  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     }
 
@@ -767,7 +768,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (run.isEmpty()) { runFile = x.file; runFrom = s.seq; if (x.live) step(x, f, s.seq) }
         run += audio
         if (!x.live) { caught++; syncDoneKb = caught * Bean.UNIT / 1024 }
-        if (run.size >= if (x.live) io.liveUnits() else Bean.PIECE_UNITS) flush()
+        // off the target (step()): a live piece ends at 5 s, the next one a step nearer, whatever the slice (iOS in the
+        // background 20 s, Android with the screen off 60 s: a step a piece could not keep up with 750 ppm)
+        val owed = x.target?.let { kotlin.math.abs(it - f.latest) >= 5 } ?: false
+        if (run.size >= if (!x.live) Bean.PIECE_UNITS else if (owed) minOf(io.liveUnits(), STEP_UNITS) else io.liveUnits()) flush()
     }
 
     /** The bean's units do not keep the phone's time (#233: up to 750 ppm slow for half an hour, then on time, 2–3 s over
@@ -781,9 +785,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val b = x.before
         if (b != null && kotlin.math.abs(x.fastest - b) <= 50) {
             val d = x.fastest - f.latest
-            if (kotlin.math.abs(d) >= 20)
+            val now = io.now()
+            if (kotlin.math.abs(d) >= 200 || kotlin.math.abs(d) >= 20 && now - x.clockSaid >= 600_000) {  // a jump, else at most once in 10 min
+                x.clockSaid = now
                 io.log("bean_clock", "文件 ${x.file} 到单元 $seq 按序号排比手机的钟${if (d >= 0) "早" else "晚"} ${kotlin.math.abs(d)} ms，之后的块逐段对齐",
                     fields = mapOf("file" to x.file, "seq" to seq, "ms" to d))
+            }
             x.target = x.fastest
         }
         x.before = x.fastest; x.half = seq + 1; x.fastest = Long.MAX_VALUE
@@ -921,6 +928,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         const val WATCHED_GAP_UNITS = 3000L  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
         const val CLOCK_UNITS = 1500L  // half a minute of live units: the fastest of each dates the file (reanchor())
+        const val STEP_UNITS = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
     }
 }

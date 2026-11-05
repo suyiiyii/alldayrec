@@ -183,7 +183,8 @@ final class FakeBean: BeanIo {
 
   func now() -> Int64 { t }
   func monotonicNow() -> Int64 { t }
-  func liveUnits() -> Int { 50 }
+  var slice = 50  // live units a piece (the app's slice)
+  func liveUnits() -> Int { slice }
   func watched() -> Bool { pageOpen }
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
@@ -923,13 +924,16 @@ func piecesIn(_ chunks: URL) -> [(start: Int64, seq: Int64, n: Int64)] {
 }
 
 /// #233: a bean whose units take 20.015 ms by the phone's clock (750 ppm slow, as one was for half an hour on 11-05),
-/// live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file): each live
-/// piece within 60 ms of when its first unit was recorded, those read on return (the 2 min and the catch-up) by the
-/// anchor from before, off by what the bean drifted meanwhile (by seq × 20 ms alone the last were 1.5 s early); each
-/// piece within 10 ms of where the one before ends, so the server's decoder goes on from it (audio.before()).
-do {
+/// live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file), with each
+/// slice the app uses (1 s in front, 20 s iOS in the background, 60 s Android with the screen off): each live piece
+/// within 60 ms of when its first unit was recorded, those read on return (the 2 min and the catch-up) by the anchor
+/// from before, off by what the bean drifted meanwhile (by seq × 20 ms alone the last were 1.5 s early); each piece
+/// within 10 ms of where the one before ends, so the server's decoder goes on from it (audio.before()); bean_clock
+/// at most once in 10 min.
+for slice in [50, 1000, 3000] {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks"), state = dir.appendingPathComponent("state.json")
   let bean = FakeBean(t0)
+  bean.slice = slice
   bean.unitUs = 20_015; bean.openAt = t0 - 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.list(bean.open, 0)
   var n = 90_000
   bean.onTransfer = { file, from, realtime in bean.answer(file, from, realtime); bean.more(n) }
@@ -937,7 +941,7 @@ do {
   _ = error(BeanSync.Gone.self) { try one.session(since: 0, steps: "") }
   let moves = one.files[bean.open]!.anchors.count
   check((100...300).contains(moves), true, "1.35 s in steps of 5–9 ms: \(moves)")
-  check(bean.logs.contains { $0.0 == "bean_clock" }, true)
+  check((1...3).contains(bean.logs.filter { $0.0 == "bean_clock" }.count), true, "bean_clock \(bean.logs.filter { $0.0 == "bean_clock" }.count)")
   bean.t += 120_000; n = 12_000
   let again = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
   check(again.files[bean.open]!.anchors.map { [$0.0, $0.1] }, one.files[bean.open]!.anchors.map { [$0.0, $0.1] }, "kept in the state file")
@@ -949,25 +953,26 @@ do {
   for p in ps {
     let off = abs(p.start - (bean.openAt + p.seq * bean.unitUs / 1000))
     if (90_000..<102_000).contains(p.seq) { back = max(back, off) } else { worst = max(worst, off) }
-    check(end == 0 || abs(p.start - end) < 10, true, "piece at \(p.seq) \(p.start - end) ms after the one before")
+    check(end == 0 || abs(p.start - end) < 10, true, "slice \(slice): piece at \(p.seq) \(p.start - end) ms after the one before")
     end = p.start + p.n * 20
   }
-  check(worst <= 60, true, "live pieces within 60 ms (a minute of 750 ppm) of their time: \(worst) ms")
-  check(back <= 250, true, "read on return within 0.25 s: \(back) ms")
+  check(worst <= 60, true, "slice \(slice): live pieces within 60 ms (a minute of 750 ppm) of their time: \(worst) ms")
+  check(back <= 250, true, "slice \(slice): read on return within 0.25 s: \(back) ms")
+  print("drift check, slice \(slice / 50) s: live \(worst) ms, on return \(back) ms, \(ps.count) pieces")
 }
 
 /// A hole of the file being recorded filled later (#230, #187) is dated by the anchors in force at its units, not the
 /// latest: each piece by one of them.
 do {
   let a = t0 - 80_000
-  let r = rec(80, [(0, 1000), (2000, 4000)], watched: false, units: 1500, anchors: [(1500, a + 300), (2500, a + 900)])
+  let r = rec(80, [(0, 1000), (2000, 4000)], watched: false, units: 1500, anchors: [(1525, a + 300), (2500, a + 900)])
   _ = session(r, BeanSync.Again.self)
   check(r.have, [[0, 4000]])
   let ps = piecesIn(r.chunks)
   check(ps.reduce(Int64(0)) { $0 + $1.n }, 1000)
   for p in ps {
-    check(p.start, (p.seq < 1500 ? a : a + 300) + p.seq * 20, "unit \(p.seq)")
-    check(p.seq < 1500 && p.seq + p.n > 1500, false, "a piece across 1500")
+    check(p.start, (p.seq < 1525 ? a : a + 300) + p.seq * 20, "unit \(p.seq)")  // 1525: inside a 50-unit slice
+    check(p.seq < 1525 && p.seq + p.n > 1525, false, "a piece across 1525")
   }
   check(r.f.at(2600), a + 900 + 2600 * 20)
 }
