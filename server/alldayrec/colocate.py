@@ -231,6 +231,14 @@ def left(device: str, ranges: list) -> list:
 
 
 def stood_by(device: str, start: str, end: str) -> list[str]:
-    """Recorders other than device that stood by somewhere in [start, end] (iso): their audio of it is kept, to listen to."""
+    """Recorders other than device that stood by somewhere in [start, end] (iso) in the same place as device (their
+    levels there correlate R_TOGETHER: not one that stood by for a third device elsewhere): their audio of it is kept,
+    to listen to."""
     a, b = (ms(dt.datetime.fromisoformat(x)) for x in (start, end))
-    return [d for d in devices() if d != device and db.processed(d, a, b, "standby")]
+    out = []
+    for d in devices():
+        if d != device and (rows := db.processed(d, a, b, "standby")):
+            lo, hi = max(a, min(r[0] for r in rows)), min(b, max(r[1] for r in rows))
+            if (r := correlation(device, d, lo, hi)) is not None and r >= R_TOGETHER:
+                out.append(d)
+    return out

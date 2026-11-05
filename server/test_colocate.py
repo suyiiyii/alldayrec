@@ -394,3 +394,7 @@ def test_conversation_lists_who_stood_by(store):
     with db.tx() as t:
         db.record_processed(t, X, [[at(100), at(400)]], "standby")  # its own does not count
     assert anyio.run(routes_api.conversation, "c1")["standby"] == [Y]
+    put("LR-TEST-C", walk(21, 1200))  # stood by for a fourth device elsewhere: not this conversation's
+    with db.tx() as t:
+        db.record_processed(t, "LR-TEST-C", [[at(100), at(400)]], "standby")
+    assert anyio.run(routes_api.conversation, "c1")["standby"] == [Y]
