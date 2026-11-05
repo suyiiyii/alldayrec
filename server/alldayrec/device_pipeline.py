@@ -14,6 +14,7 @@ import numpy as np
 
 from alldayrec import asr
 from alldayrec import audio
+from alldayrec import colocate
 from alldayrec import db
 from alldayrec import live
 from alldayrec import perf
@@ -59,7 +60,7 @@ async def pipeline(device: str):
     st = T().devices[device] = PipelineState(
         seg=seg, done_to=done0,
         draft_to=dt.datetime.fromisoformat(draft0) if draft0 else None,
-        drafts=db.drafts(iso(done0) if done0 else "", None, device))
+        drafts=db.drafts(iso(done0) if done0 else "", None, device), standby=colocate.standby_of(device))
     if resume:
         log.info("%s resuming after the last finalized row at %s", device, resume)
     fcost, dcost = {}, {}  # what the final and the draft layer spent since their last perf_pieces row (perf.piece)
@@ -167,15 +168,16 @@ async def pipeline(device: str):
                 r["speaker"], changed = new, changed + 1
         return (rows, changed) if missing <= len(rows) // 10 else None
 
-    async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None, coverage=None):
+    async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None, coverage=None,
+                     layer: str = "final"):
         """One transaction: the piece's rows replace [lo, hi), closed conversations (with the live analysis that
-        overlaps one), the finalized time, the open conversation."""
+        overlaps one), the finalized time, the open conversation. layer standby: the piece was left to another device."""
         recs = [record(c) for c in closed]
         lv = st.live
         with db.tx() as t:
             if rows is not None:
                 db.replace_sentences(t, lo, iso(hi), rows, device)
-                db.record_processed(t, device, coverage or [], "final")
+                db.record_processed(t, device, coverage or [], layer)
             attached, relabelled = False, []
             for rec in recs:
                 if (rl := relabel_rows(rec)) and rl[1]:  # every label again, with the whole conversation in view
@@ -342,9 +344,22 @@ async def pipeline(device: str):
                  for a, b in zip(points, points[1:])]
         # no speech: nothing to send, the clock still advances. Nor in less than a VAD frame (25 ms), whatever the VAD is
         # in at the newest audio: a store finalized to the ms before this fix left the last samples of a recording here
-        if len(x) < SR // 40 or (not any(rel(u[0]) < cut for u in known) and not seg.speaking()):
-            with perf.timed(fcost, "commit_ms"):
-                await commit(grouper.advance(hi), [], iso(base), hi, heard)  # no rows: pages still drop their drafts of this time
+        speech = len(x) >= SR // 40 and (any(rel(u[0]) < cut for u in known) or seg.speaking())
+        # speech another device in the same place transcribes: none here either (colocate.py); a standby's silence
+        # too, so it takes over when the other goes, speech or not
+        if speech or st.standby:
+            if (other := colocate.decide(device, heard[0][0], heard[-1][1])) == colocate.WAIT:
+                return False
+            was, st.standby = st.standby, colocate.standby_of(device)
+            if st.standby and not was:
+                ws.note(f"{device}：和 {st.standby} 在同一处，转为备用：音频照存，不转写", "state")
+            elif was and not st.standby:
+                ws.note(f"{device}：{was} 断开或不在同一处了，从 {base.strftime('%H:%M:%S')} 起接着转写", "state")
+        else:
+            other = None
+        if not speech or other:
+            with perf.timed(fcost, "commit_ms"):  # no rows: pages still drop their drafts of this time
+                await commit(grouper.advance(hi), [], iso(base), hi, heard, "standby" if other else "final")
             final_row(len(x) / SR, 0)
             return True
         t_run = time.perf_counter()
@@ -417,8 +432,8 @@ async def pipeline(device: str):
             await anyio.sleep(2)
 
     def drafting() -> bool:
-        """A page watches and this device is recording now (its newest audio is recent, backlog or not)."""
-        return (time.time() < T().watch_until and bool(dseg.anchors) and st.edge_end is not None
+        """A page watches and this device is recording now (its newest audio is recent, backlog or not), not as a standby."""
+        return (time.time() < T().watch_until and bool(dseg.anchors) and st.edge_end is not None and not st.standby
                 and (dt.datetime.now() - st.edge_end).total_seconds() < LIVE_AUDIO_S)
 
     async def publish_drafts(rows: list[dict], upto: dt.datetime, engine: str):

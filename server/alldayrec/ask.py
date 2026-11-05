@@ -257,8 +257,10 @@ TAIL_S = 0.5  # ... in by when its last sentence reaches this close to the end (
 
 def said(device: str, lo: dt.datetime, hi: dt.datetime) -> list[dict]:
     """The device's sentences that overlap [lo, hi], in time order: its final rows, its drafts after them and the
-    sentence still being said (partial)."""
+    sentence still being said (partial); a standby's (colocate.py) are those of the device it is left to."""
     st = T().devices.get(device)
+    if st and st.standby:
+        device, st = st.standby, T().devices.get(st.standby)
     a, b = iso(lo), iso(hi)
     rows = [r for r in db.sentences(iso(lo - dt.timedelta(minutes=1)), b, source=device) if r["end"] > a]
     if st:

@@ -71,6 +71,7 @@ def device_status(device: str, st: PipelineState) -> dict:
             "rate": round(rate, 1) if rate else None, "eta_s": round(left / rate) if rate and rate > 0.1 and left > 30 else None,
             "last_speech": st.last_speech.isoformat(timespec="seconds") if st.last_speech else None,
             "refine": st.refine, "conversation": st.conversation, "drafting": st.drafting, "draft": st.draft,
+            "standby": st.standby,  # its speech left to this device in the same place (colocate.py): audio kept, not transcribed
             "analyzing": st.analyzing,  # the live analysis is running
             "draft_to": st.draft_to.isoformat(timespec="seconds") if st.draft_to else None,
             # how far behind what one reads now is: its newest sentence's end to its showing; the median a diagnosis
