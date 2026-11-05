@@ -8,9 +8,12 @@ import { today } from "../lib/calendar";
 type Card = Recorder & Partial<DeviceStatus>;
 const { d } = defineProps<{ d: Card }>();
 
+// standby: another device in the same place transcribes (its finals wait a few minutes for that one's audio);
 // behind: its finals are short of its audio; offline: no audio in the last 2 min
 const badge = (d: Card) =>
-  !caughtUp(d)
+  d.standby
+    ? { text: t("deviceCard.standby"), cls: "off" }
+    : !caughtUp(d)
     ? { text: t("deviceCard.behind", { n: Math.max(1, Math.round((d.left_s ?? 0) / 60)) }), cls: "warn" }
     : d.recording
       ? { text: t("deviceCard.caughtUp"), cls: "ok" }
@@ -36,6 +39,7 @@ const seen = (iso: string | null) => {
       <b>{{ d.device }}</b>
       <span class="badge" :class="badge(d).cls">{{ badge(d).text }}</span>
     </div>
+    <p v-if="d.standby" class="sb">{{ t("deviceCard.standbyOf", { d: d.standby }) }}</p>
     <div class="tiles">
       <div>
         <span class="v">{{ d.hw?.battery != null ? d.hw.battery + "%" : "—" }}</span>
@@ -92,6 +96,11 @@ const seen = (iso: string | null) => {
 .badge.off {
   color: var(--fg-2);
   background: var(--line);
+}
+.sb {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
 .tiles {
   display: grid;

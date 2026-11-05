@@ -19,7 +19,7 @@ import time
 import numpy as np
 
 from alldayrec import db, late_store
-from alldayrec.audio import ENV_MS
+from alldayrec.audio import ENV_MS, devices
 from alldayrec.late_store import subtract, union
 
 log = logging.getLogger("live")
@@ -227,4 +227,19 @@ def left(device: str, ranges: list) -> list:
                 if transcribed(y, lo, hi) >= COVER and (r := correlation(device, y, mid - w // 2, mid + w // 2)) is not None and r >= R_TOGETHER:
                     out += meet([[lo, hi]], done(y, lo, hi))
                     break
+    return out
+
+
+def stood_by(device: str, start: str, end: str) -> list[str]:
+    """Recorders other than device that stood by somewhere in [start, end] (iso) in the same place as device (their
+    levels over WINDOW_S around that correlate R_TOGETHER: not one that stood by for a third device elsewhere): their audio of it is kept,
+    to listen to."""
+    a, b = (ms(dt.datetime.fromisoformat(x)) for x in (start, end))
+    out = []
+    for d in devices():
+        if d != device and (rows := db.processed(d, a, b, "standby")):
+            lo, hi = max(a, min(r[0] for r in rows)), min(b, max(r[1] for r in rows))
+            mid, w = (lo + hi) // 2, WINDOW_S * 1000  # a short conversation: still WINDOW_S around it (as decide)
+            if (r := correlation(device, d, min(lo, mid - w // 2), max(hi, mid + w // 2))) is not None and r >= R_TOGETHER:
+                out.append(d)
     return out

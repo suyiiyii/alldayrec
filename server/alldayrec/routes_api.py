@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from alldayrec import ask
 from alldayrec import asr
 from alldayrec import audio
+from alldayrec import colocate
 from alldayrec import db
 from alldayrec import live
 from alldayrec import local_asr
@@ -344,7 +345,7 @@ async def conversation(conv_id: str):
     if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark)
         s["todos"] = [{**t, "id": i, "mark": closed.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
-            "rows": conversation_rows(c)}
+            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"])}
 
 
 @router.post("/api/conversation/{conv_id}/feedback")

@@ -98,6 +98,7 @@ export interface Conversation {
   speech_s?: number; // seconds of speech in it
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
+  standby?: string[]; // other recorders that stood by in its time (same place): their audio of it is kept
 }
 
 export interface LiveTopic {
@@ -141,6 +142,7 @@ export interface DeviceStatus {
   latency_med_s?: number | null; // the same over its last 10 rows, the median
   final_latency_s?: number | null; // its newest final row's end to its showing
   drafting?: boolean; // a page watches: drafts come up
+  standby?: string | null; // in the same place as this device, which transcribes: its audio kept, not transcribed
   refine?: { at: string; ms: number; error?: string; backlog_s?: number } | null;
   conversation?: { start: string; end: string; sentences: number; speech_s: number } | null; // the one going on
   analyzing?: boolean; // its live analysis is running

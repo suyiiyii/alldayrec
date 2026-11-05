@@ -168,6 +168,10 @@
     "linkDraining": "连接已作废；已有调用可能继续完成，新的调用已被拒绝。"
   },
   "conv": {
+    "otherNow": "正在听 {d} 录的",
+    "otherBack": "换回 {d}",
+    "otherListen": "听 {d} 录的",
+    "other": "{d} 也录到了这段",
     "regenerating": "摘要重新生成中",
     "made": "AI 摘要 · {at}，由 {model} 生成",
     "madeLive": "AI 摘要 · {at}，由 {model} 生成，会中实时分析写的",
@@ -307,6 +311,8 @@
     "noEvents": "这段时间没有事件"
   },
   "deviceCard": {
+    "standbyOf": "和 {d} 在同一处：{d} 转写，这台只存音频",
+    "standby": "备用",
     "behind": "落后 {n} 分钟",
     "caughtUp": "已追上",
     "offline": "离线",
