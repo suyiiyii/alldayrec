@@ -195,7 +195,10 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             db.put_kv(f"standby:{device}", {"of": y, "since": a})
             log.info("%s stands by for %s from %s (r %.2f)", device, y, dt.datetime.fromtimestamp(a / 1000), r)
             return y
-    if db.processed(device, a - 1000, a, "standby"):  # it left the piece before to another (first come): no longer
+    # it left the piece before to another (first come), no longer: the newest it did in the window is leaving, not
+    # transcribing (the end of that piece may have gone to its late layer: split)
+    sb, fin = (max((r[1] for r in db.processed(device, a - w, a, layer)), default=0) for layer in ("standby", "final"))
+    if sb > fin:
         with db.tx() as t:
             resume(t, device, a, now_ms)
     return None

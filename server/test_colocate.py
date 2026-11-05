@@ -157,6 +157,44 @@ def test_tail_of_first_come(store, monkeypatch):
     assert colocate.transcribed(Y, at(400), at(420)) == 1, "the 20 s are transcribed by Y"
 
 
+def test_parting_after_a_tail_to_late(store):
+    """X leaves Y the time first come; Y's audio misses 1 s at the end of X's last piece before X transcribes again
+    (that 1 s went to X's late layer: split). Leaving was still the newest X did: the window goes back (resume), not
+    only the 1 s, and once X transcribes it does not again."""
+    room, away = walk(5, 2400), walk(6, 2400)
+    put(X, np.r_[room[:1200], away[1200:]])  # X leaves at 600 s
+    put(Y, room[:1438])
+    put(Y, room[1440:], start_s=720)  # Y has nothing in [719, 720)
+    with db.tx() as t:
+        db.record_processed(t, Y, [[at(0), at(719)], [at(720), at(1200)]], "final")
+    s = 300
+    while (got := colocate.decide(X, at(s), at(s + 20))) == Y:
+        with db.tx() as t:
+            db.record_processed(t, X, colocate.split(X, Y, [[at(s), at(s + 20)]]), "standby")
+        s += 20
+    spans = late_store.union([x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (X,)) for x in json.loads(r[0])])
+    assert got is None and late_store.subtract([[at(600), at(s)]], spans) == [], (s, spans)
+    with db.tx() as t:
+        db.record_processed(t, X, [[at(s), at(s + 20)]], "final")
+        db.record_processed(t, X, [[at(s - 100), at(s - 80)]], "standby")  # what the late layer left to Y again (left)
+    assert colocate.decide(X, at(s + 20), at(s + 40)) is None
+    assert db.processed(X, at(s - 100), at(s - 80), "standby"), "transcribing: no resume again"
+
+
+def test_has_what_the_other_will_transcribe(store):
+    """split() leaves Y what Y has: its transcript and the audio it will transcribe, not what it stands by for
+    itself, nor what it left to a third device."""
+    put(Y, walk(22, 800))
+    with db.tx() as t:
+        db.record_processed(t, Y, [[at(0), at(100)]], "final")
+    assert colocate.split(X, Y, [[at(0), at(200)]]) == [[at(0), at(200)]], "Y will transcribe its audio"
+    with db.tx() as t:
+        db.record_processed(t, Y, [[at(130), at(150)]], "standby")
+    assert colocate.split(X, Y, [[at(0), at(200)]]) == [[at(0), at(130)], [at(150), at(200)]], "not what Y left to a third"
+    db.put_kv(f"standby:{Y}", {"of": "LR-TEST-C", "since": at(100)})
+    assert colocate.split(X, Y, [[at(0), at(200)]]) == [[at(0), at(100)]], "Y stands by: only what it has transcribed"
+
+
 def test_left_skips_only_what_the_other_has(store):
     room = walk(20, 1200)
     put(X, room)
@@ -271,15 +309,16 @@ def recording(room: int, noise: int, first: int = 0, at: int = 10) -> np.ndarray
     return x
 
 
-def run_two(tmp_path, monkeypatch, xa, xb, b_upto=N * PIECE_S, b_after=False):
+def run_two(tmp_path, monkeypatch, xa, xb, b_upto=N * PIECE_S, b_after=False, holes=None):
     """X's and Y's pipelines over their stored audio of an hour ago, Y's only to b_upto; b_after: Y's starts once X's
-    is done (its final layer behind). Their final rows' texts."""
+    is done (its final layer behind); holes: {device: piece index} saved 1 s short. Their final rows' texts."""
     rig(tmp_path, monkeypatch, hear)
     t0 = dt.datetime.fromtimestamp(time.time() - 3600).replace(microsecond=0)
     for d, x, upto in ((X, xa, N * PIECE_S), (Y, xb, b_upto)):
         for k in range(upto // PIECE_S):
+            short = audio.SR if (holes or {}).get(d) == k else 0
             audio.save(d, round((t0 + dt.timedelta(seconds=k * PIECE_S)).timestamp() * 1000),
-                       flac(x[k * PIECE_S * audio.SR:(k + 1) * PIECE_S * audio.SR]), "audio/flac")
+                       flac(x[k * PIECE_S * audio.SR:(k + 1) * PIECE_S * audio.SR - short]), "audio/flac")
         db.put_kv(f"end_at:{d}", core.iso(t0 + dt.timedelta(seconds=upto)))  # the recorder stopped: its last piece is cut
 
     async def until_final(d, upto):
@@ -312,6 +351,17 @@ def test_two_pipelines_together(tmp_path, monkeypatch):
     assert sorted(set(both), key=int) == ALL and [t for t in both if int(t) >= 7] == ALL[7:], (a, b)
     assert min(len(a), len(b)) <= 7, ("the standby has only what came before the first window", a, b)
     assert [d for d in (X, Y) if T().devices[d].standby] in ([X], [Y])
+
+
+def test_two_pipelines_together_hole_in_the_others_audio(tmp_path, monkeypatch):
+    """Each misses 1 s of silence (Y at 419 s, X at 539 s): the standby sends the other's missing second to its own
+    late layer instead of leaving it to the other (device_pipeline: colocate.split)."""
+    run_two(tmp_path, monkeypatch, recording(11, 1), recording(11, 2), holes={X: 53, Y: 41})
+    sb = next(d for d in (X, Y) if T().devices[d].standby)
+    hole = {X: 539, Y: 419}[T().devices[sb].standby]
+    spans = [x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (sb,)) for x in json.loads(r[0])]
+    t0 = min(r[0] for r in db.processed(sb, 0, 2 ** 62))
+    assert any(a <= t0 + hole * 1000 + 100 and b >= t0 + (hole + 1) * 1000 - 100 for a, b in spans), (sb, hole, spans)
 
 
 def test_two_pipelines_apart(tmp_path, monkeypatch):
