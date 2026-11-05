@@ -49,11 +49,20 @@ LR-P3 整机另加（`--p3`，引脚同 `lr_promicro.overlay`）：
 LR-N4（自己的板子，裸 nRF52840）用单独的构建，引脚和 `firmware/devkit/overlay/lr_n4.overlay` 一样，不能和 Pro Micro 的混刷：
 
 ```bash
-python3 firmware/selftest/selftest.py build --n4            # 输出在 firmware/selftest/build-n4/zephyr/（zephyr.uf2，SWD 首烧用 zephyr.hex）
-uv run firmware/selftest/selftest.py flash SERIAL --n4
+python3 firmware/selftest/selftest.py build --n4            # 输出在 firmware/selftest/build-n4/zephyr/zephyr.uf2
+python3 firmware/selftest/selftest.py swd                    # SWD 首烧（bootloader + UICR）后、Pico 探针还接着：读回 FICR / UICR，打印 USB 序列号
+uv run firmware/selftest/selftest.py flash SERIAL --n4       # 拆光探针线、插 USB：板子停在 NICENANO 盘，拷自检固件
 uv run firmware/selftest/selftest.py run SERIAL --n4 [--flip 20] [--cover 5]
-python3 firmware/selftest/selftest.py swd                    # 首烧后、Pico 探针还接着、CPU 停着时：读回 FICR / UICR
 ```
+
+首烧顺序：
+1. SWD 只烧 bootloader 和 UICR。用 SWD 烧进去的应用不会运行：bootloader 设置页（0xFF000）是空的，它会停在 `NICENANO` 盘，拷一次 UF2 才写设置页。
+2. `swd` 读回。
+3. 拆光探针的线，插 USB。
+4. `flash SERIAL --n4`。
+5. `run SERIAL --n4`。
+
+UICR REGOUT0 不是 4（3.0 V）时（比如 UICR 漏烧，bootloader 会自己写成 3.3 V），`run --n4` 判完芯片那一行就退出，固件也拒绝 `gpio`、`sd`、`vcc`、`mic`、`imu`、`all`，不给 3.0 V 的卡、麦、IMU 上电。
 
 `run --n4` 先读 `info` 核对板子上跑的是 N4 版（不是就退出，免得 Pro Micro 版的 `gpio` 去驱动 N4 的外设脚）。在上面各项之外（射频、晶振、DCDC 照旧；VDD 按 3.0 V 判 2.70–3.15 V；32.768 kHz 按室温 ±50 ppm 判：固件声明 250 ppm，N4 的晶振（Seiko SC-16S）在 −40 °C 会再偏 −194 ppm，室温超过 50 时低温端就出了 250）：
 

@@ -78,9 +78,12 @@ RST 不要接地。bootloader 是 Adafruit UF2 + S140 6.1.1，应用从 0x26000 
 | 充电状态（TP4054 CHRG） | P0.29 | 只在有 VBUS 时、只在读的那一下开片内上拉：充电中读低、充满读高 |
 | 32.768 kHz 晶振 | XL1/XL2 | X1 Seiko SC-16S（Q-SC16S0322070AAAN）：规格书 WF11077297 写 25 °C ±20 ppm、二次温度系数 −0.036 ppm/°C²（拐点 25 ± 5 °C，−40 °C 时 −194 ppm）、每年 ±3 ppm 老化、两次回流后 ±10 ppm。最坏情况约 240 ppm，所以声明 `K32SRC_250PPM`，和 ProMicro 一样；自检在室温下按 ±50 判 |
 
-供电：VDDH 接系统电源轨，芯片工作在高压模式，REG0、REG1 两级 DCDC 的电感都焊了，固件照 LR-P3 打开两级 DCDC。VDD = 3.0 V 由 UICR REGOUT0 = 4 决定，是第一次用 SWD 烧 bootloader 时一起写进去的，固件不写 UICR。
+供电：VDDH 接系统电源轨，芯片工作在高压模式，REG0、REG1 两级 DCDC 的电感都焊了，固件照 LR-P3 打开两级 DCDC。VDD = 3.0 V 由 UICR REGOUT0 = 4 决定，是第一次用 SWD 烧 bootloader 时一起写进去的，固件不写 UICR。nice!nano 0.10.0 bootloader 发现 REGOUT0 还是擦除值时会自己写成 3.3 V，所以 UICR 文件必须和 bootloader 放在同一条 load 里。
 APPROTECT：`n4` 显式打开 `CONFIG_NRF_APPROTECT_USE_UICR`（NCS 2.7 的默认），build code F 及以后的芯片，UICR APPROTECT 写成 0x5A 时，SystemInit 每次启动写 APPROTECT.DISABLE，调试口保持打开；不开 `CONFIG_NRF_APPROTECT_LOCK`。
-新板没有 bootloader：第一次用 SWD 烧 bootloader + UICR + 自检固件（`firmware/selftest`），之后和 LR-P3 一样走 UF2 / 蓝牙 DFU。
+新板没有 bootloader：
+1. 第一次用 SWD 只烧 bootloader + UICR。
+2. 插 USB，板子停在 `NICENANO` 盘：bootloader 设置页（0xFF000）是空的，它不会运行用 SWD 烧进去的应用，拷一次 UF2 才会写设置页。
+3. 先拷自检固件（`firmware/selftest`，`selftest.py flash SERIAL --n4`），之后和 LR-P3 一样走 UF2 / 蓝牙 DFU。
 
 ## 低电关机
 

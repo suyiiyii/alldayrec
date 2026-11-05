@@ -162,7 +162,7 @@ def mic_verdict(quiet, qb, loud, lb):
 # [1] as the bootloader's HEX writes them; UICR APPROTECT 0x5A (HwDisabled) on build code F and later, erased before
 SWD_READS = {"part": 0x10000100, "variant": 0x10000104, "pselreset0": 0x10001200, "pselreset1": 0x10001204,
              "approtect": 0x10001208, "regout0": 0x10001304, "nrffw0": 0x10001014, "nrffw1": 0x10001018,
-             "approtect_disable": 0x40000558}
+             "approtect_disable": 0x40000558, "deviceid0": 0x10000060, "deviceid1": 0x10000064}
 PYOCD = ["pyocd", "commander", "-t", "nrf52840", "-O", "resume_on_disconnect=false", "-O", "auto_unlock=false",
          "--connect", "halt"]
 
@@ -176,10 +176,11 @@ def swd_verdict(out):
         return [("SWD", "FAIL", "no read-back (locked, or not connected): " + out.strip()[-300:])]
     variant = r["variant"].to_bytes(4, "big").decode(errors="replace")
     fxx = variant[2] >= "F"
+    serial = f"{r['deviceid1']:08X}{r['deviceid0']:08X}" if None not in (r["deviceid0"], r["deviceid1"]) else "?"
     ok = lambda b: "PASS" if b else "FAIL"
     return [
         ("chip (FICR)", ok(r["part"] == 0x52840), f"INFO.PART 0x{r['part']:X}, VARIANT {variant} (build code "
-         f"{variant[2:]}: {'Fxx or later, ships locked' if fxx else 'before Fxx'})"),
+         f"{variant[2:]}: {'Fxx or later, ships locked' if fxx else 'before Fxx'}); USB serial (DEVICEID) {serial}"),
         ("CTRL-AP APPROTECTSTATUS", ok(int(ap.group(1), 16) == 1), f"0x{int(ap.group(1), 16):X} (1: open)"),
         ("UICR PSELRESET[0] / [1]", ok(r["pselreset0"] == r["pselreset1"] == 0x12),
          f"0x{r['pselreset0']:08X} / 0x{r['pselreset1']:08X} (0x00000012: P0.18 is RESET)"),
@@ -216,10 +217,12 @@ def check():
     assert mic_verdict(good, qb, good, lb + [400])[::2] == (True, True)  # someone speaks close: PASS
     print("mic_verdict: ok")
     words = {0x10000100: 0x52840, 0x10000104: 0x41414630, 0x10001200: 0x12, 0x10001204: 0x12, 0x10001208: 0x5A,
-             0x10001304: 0xFFFFFFFC, 0x10001014: 0xF4000, 0x10001018: 0xFE000, 0x40000558: 0}
+             0x10001304: 0xFFFFFFFC, 0x10001014: 0xF4000, 0x10001018: 0xFE000, 0x40000558: 0,
+             0x10000060: 0x89ABCDEF, 0x10000064: 0x01234567}
     out = "AP register 0x100000c = 0x00000001\n" + "".join(f"{a:08x}:  {v:08x}    |....|\n" for a, v in words.items())
     good = swd_verdict(out + "Core 0 (cortex_m):  Halted\n")
     assert [r[1] for r in good] == ["PASS"] * 6 + ["INFO", "PASS"], good
+    assert good[0][2].endswith("DEVICEID) 0123456789ABCDEF"), good[0]
     bad = swd_verdict(out.replace("fffffffc", "ffffffff").replace("0000005a", "ffffffff") + "Core 0 (cortex_m):  Running\n")
     assert [r[0] for r in bad if r[1] == "FAIL"] == ["UICR REGOUT0", "UICR APPROTECT", "CPU"], bad
     assert swd_verdict("Error: target is locked")[0][1] == "FAIL"
@@ -259,6 +262,10 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
             and unlocked, f"{chip}; APPROTECT.DISABLE {info['approtect_disable']} (pass: REGOUT0 VOUT 4 = 3.0 V, "
             "PSELRESET 0x12, " + ("Fxx: UICR APPROTECT 0x5A and DISABLE 0x5A, SWD open)" if fxx else
                                    "pre-Fxx: UICR APPROTECT erased)"))
+        if int(info["regout0"], 16) & 7 != 4:  # VDD is then 3.3 V (the bootloader writes it into an erased REGOUT0)
+            sys.exit(f"{serial}: UICR REGOUT0 {info['regout0']} is not VOUT 4 (3.0 V), so VDD is likely the bootloader's "
+                     "3.3 V, past what the 3.0 V card, mics and IMU take on their pins: nothing powered (the firmware "
+                     "refuses too). Rewrite the UICR with the bootloader over SWD first")
     else:
         row("chip", True, chip)
     row("USB", True, f"enumerated as {PRODUCT} {serial}, serial port {b.s.port}")
@@ -382,9 +389,11 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
     row("32 MHz crystal accuracy", abs(ppm) <= 40,
         f"{ppm:+.1f} ppm against the Mac's clock over {clk_secs} s (limit ±40; fit residual {jitter:.2f} ms)")
     lf_ppm = info["lfxo_ppb_vs_hfxo"] / 1000 + ppm
-    # the recording firmware tells the BLE stack its sleep clock is within 250 ppm (lr.sh K32SRC_250PPM). The ProMicro
-    # clones are judged against that; LR-N4's Seiko SC-16S is ±20 ppm at 25 °C (+±10 after reflow) and drifts to -194
-    # at -40 °C, so at room temperature it must read within 50 for the whole range to stay inside 250
+    # Two different numbers. 250 ppm is what the recording firmware declares to the BLE stack on every board, ProMicro
+    # and LR-N4 alike (lr.sh K32SRC_250PPM): the sleep clock's error at any temperature, which sets how wide each
+    # connection's receive window opens. 50 is LR-N4's room-temperature screen here, not a BLE limit: its Seiko SC-16S
+    # is ±20 ppm at 25 °C (±10 more after reflow) and drifts to -194 at -40 °C, so it must read within 50 now for the
+    # cold end to stay inside the 250 declared. The ProMicro clones' crystals have no datasheet: judged on the 250 alone
     lf_limit = 50 if n4 else 250
     row("32.768 kHz accuracy", abs(lf_ppm) <= lf_limit if lf_ok else False,
         f"{lf_ppm:+.1f} ppm absolute (limit ±{lf_limit}: " + ("room temperature, so the crystal's cold-end drift still "

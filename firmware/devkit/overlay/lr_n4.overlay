@@ -8,7 +8,9 @@
  * runs in high-voltage mode: REG0 (VDDH -> VDD) and REG1 (VDD -> DEC4), each with its DCDC inductor fitted (L1 on
  * DCCH; L3 + L4 on DCC, nRF52840 PS v1.11 7.3.4 configuration 4). The board's Kconfig has BOARD_ENABLE_DCDC and
  * BOARD_ENABLE_DCDC_HV on, and main.c sets DCDCEN and DCDCEN0. VDD is REG0's output, 3.0 V by UICR REGOUT0 = 4 (PS v1.11
- * 5.3.8 and the REGOUT0 register): it is written once with the bootloader over SWD, not by this firmware, and matches
+ * 5.3.8 and the REGOUT0 register): it is written once with the bootloader over SWD, not by this firmware (the nice!nano
+ * 0.10.0 bootloader writes 3.3 V there itself when it finds REGOUT0 erased, boards.c, so the UICR file goes in the same
+ * load as the bootloader), and matches
  * the SD card's and the mics' 3.0 V LDOs (SGM2036-3.0), so their I/O levels agree. REG0 needs VDDH 0.3 V above it,
  * which is why the low-battery cut-off stays at 3.3 V (CONFIG_LR_LOW_BATTERY_MV). */
 / {

@@ -1106,6 +1106,16 @@ static void cmd_info(void)
 
 static void run(char *line)
 {
+#ifdef LR_N4
+	/* REGOUT0 not VOUT 4 (3.0 V), e.g. the UICR file left out of the first flash: the bootloader then writes 3.3 V there
+	 * itself (it does so when it finds REGOUT0 erased), and pins driven at 3.3 V sit on the 3.0 V card's, mics' and IMU's
+	 * VDD + 0.3 limit. Nothing that powers them runs until the UICR is rewritten (ASSEMBLY-SELF 12.2) */
+	if ((NRF_UICR->REGOUT0 & 7) != 4 && (!strncmp(line, "gpio", 4) || !strncmp(line, "sd", 2) ||
+	    !strncmp(line, "vcc", 3) || !strncmp(line, "mic", 3) || !strcmp(line, "imu") || !strcmp(line, "all"))) {
+		printk("R {\"test\":\"%s\",\"ok\":0,\"err\":\"regout0\"}\n", line);
+		return;
+	}
+#endif
 	if (!strcmp(line, "info")) {
 		cmd_info();
 	} else if (!strcmp(line, "gpio") || !strcmp(line, "gpio p3")) {
