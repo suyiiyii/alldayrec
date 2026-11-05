@@ -9,7 +9,7 @@ from contextlib import nullcontext
 import anyio
 import numpy as np
 
-from alldayrec import asr, audio, db, late_merge, late_store, threads, ws
+from alldayrec import asr, audio, colocate, db, late_merge, late_store, threads, ws
 from alldayrec.conversations import GAP_S
 from alldayrec.core import conversation_rows, iso, owner_npz, state
 from alldayrec.diarist import Diarist, relabel
@@ -48,6 +48,14 @@ def read_exact(device: str, a: int, b: int) -> np.ndarray:
 async def transcribe(span: dict) -> tuple[list[dict], dict]:
     if not await quiet_seam(span):
         return [], {}  # the final reader invalidated this claim during lookahead
+    ranges = json.loads(span["ranges"])
+    # another device in the same place has it (attach: not this span's)
+    if skip := await anyio.to_thread.run_sync(colocate.left, span["device"], ranges, limiter=threads.MEDIA):
+        with db.tx() as t:
+            db.record_processed(t, span["device"], skip, "standby")
+        log.info("late span %s: %.0f s of %.0f s left to another device in the same place", span["id"],
+                 sum(b - a for a, b in skip) / 1000, sum(b - a for a, b in ranges) / 1000)
+        ranges = late_store.subtract(ranges, skip)
     vp = owner_npz()
     with np.load(vp) if vp.exists() else nullcontext({}) as bank:
         owner = dict(bank)
@@ -56,7 +64,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
     # Renames during model calls teach this diarist just like a live one.
     T().dias.append(dia)
     try:
-        for a, b in json.loads(span["ranges"]):
+        for a, b in ranges:
             # Feed at most one final window at a time; a long backlog never becomes a whole-day PCM allocation.
             seg, utts, done = Segmenter(), [], 0
             at0 = dt.datetime.fromtimestamp(a / 1000)

@@ -27,6 +27,7 @@ class PipelineState:
     final_latency: list[float] = field(default_factory=list)
     voiced: list[dict] = field(default_factory=list)
     refine: dict | None = None
+    standby: str | None = None  # the device this one's speech is left to (colocate.py), as of its final layer
 
     piece_in: anyio.Event = field(default_factory=anyio.Event)  # set when a piece comes in (audio.piece_in)
     edge_end: dt.datetime | None = None

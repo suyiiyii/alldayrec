@@ -53,9 +53,10 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, seconds REAL NOT NULL, path TEXT NOT NULL,  -- hour file, relative
     pos INTEGER, size INTEGER, n INTEGER,                                                       -- to the recordings dir;
     received_ms INTEGER, rms REAL, hum REAL, zero_ms INTEGER, full INTEGER,                     -- n: samples the client wrote;
-    PRIMARY KEY (start_ms, device));                                                            -- received_ms: when it came
-                                                                                                -- (NULL before 10-07);
-                                                                                                -- rms..full: audio.health()
+    env BLOB,                                                                                   -- received_ms: when it came
+    PRIMARY KEY (start_ms, device));                                                            -- (NULL before 10-07);
+                                                                                                -- rms..full: audio.health();
+                                                                                                -- env: audio.envelope() (colocate.py)
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE INDEX IF NOT EXISTS pieces_end ON pieces(device, start_ms + seconds * 1000);  -- where its audio ends: backlog, a stream's start, pending
 CREATE TABLE IF NOT EXISTS late_spans (
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS late_spans (
     ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL, seam_ms INTEGER);
 CREATE INDEX IF NOT EXISTS late_spans_queue ON late_spans(status, start_ms);
 CREATE INDEX IF NOT EXISTS late_spans_device ON late_spans(device, status);
-CREATE TABLE IF NOT EXISTS processed_audio (
+CREATE TABLE IF NOT EXISTS processed_audio (  -- layer final / late: transcribed; standby: left to another device (colocate.py)
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, layer TEXT NOT NULL,
     PRIMARY KEY(device, start_ms, end_ms, layer));
 CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
@@ -150,6 +151,8 @@ def init():
         conn().execute("ALTER TABLE sentences ADD COLUMN late_job INTEGER")
     if "seam_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
         conn().execute("ALTER TABLE late_spans ADD COLUMN seam_ms INTEGER")
+    if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
+        conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")

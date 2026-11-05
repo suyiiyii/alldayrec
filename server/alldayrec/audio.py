@@ -201,6 +201,18 @@ def health(x: np.ndarray) -> tuple[float, float, int, int]:
             int(np.count_nonzero((x >= 32767) | (x <= -32767))))
 
 
+ENV_MS = 500  # colocate.py: two recorders in one place hear the same rise and fall of the room's level
+
+
+def envelope(x: np.ndarray) -> bytes:
+    """A piece's level each ENV_MS from its start (the last part frame dropped), in -0.5 dBFS steps, 255 where the mic
+    sent only zeros: levels, never what was said."""
+    k = SR * ENV_MS // 1000
+    f = x[:len(x) // k * k].astype(np.float64).reshape(-1, k)
+    e = (f * f).mean(1)
+    return bytes(np.where(e > 0, np.clip(np.round(-20 * np.log10(np.maximum(e, 1e-12) / 32768 ** 2)), 0, 254), 255).astype(np.uint8))
+
+
 def hour_file(device: str, start_ms: int, ext: str) -> Path:
     """Where a piece starting at start_ms goes, relative to the recordings dir: its device's file for that (local) hour."""
     t = dt.datetime.fromtimestamp(start_ms / 1000)
@@ -254,9 +266,9 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h, envelope(x)))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -353,10 +365,13 @@ def pcm_blocks(pcm, count):
         yield x
 
 
-def file_health(pcm, count):
-    """health() in bounded blocks, carrying zero runs over block boundaries."""
+def file_health(pcm, count, env: list | None = None):
+    """health() in bounded blocks, carrying zero runs over block boundaries; each block's envelope() onto env (BLOCK_S
+    is whole ENV_MS frames)."""
     energy = hum = full = zeros = run = 0
     for x in pcm_blocks(pcm, count):
+        if env is not None:
+            env.append(envelope(x))
         f = x.astype(np.float64)
         energy += np.dot(f, f)
         hum += sum((2 * np.abs(f[i:i + SR] @ HUM[:len(f[i:i + SR])]) ** 2).sum() / len(f[i:i + SR])
@@ -400,7 +415,9 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
                 shutil.copyfileobj(source, out, COPY_BYTES)
             return None
         pcm, count = decoded
-        h = file_health(pcm, count)
+        env = []
+        h = file_health(pcm, count, env)
+        env = b"".join(env)
     path = hour_file(device, start_ms, ext)
     with _append:
         if r := kept():
@@ -421,9 +438,9 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         received = int(time.time() * 1000)
         with db.tx() as t:
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                      (device, start_ms, round(count / SR, 3), str(path), pos, size, n, received, *h))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (device, start_ms, round(count / SR, 3), str(path), pos, size, n, received, *h, env))
         if report is not None:
             report["late"] = is_late
         with _holds:
