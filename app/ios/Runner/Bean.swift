@@ -254,7 +254,8 @@ protocol BeanIo: AnyObject {
 /// the bean allows no more and cannot be stopped mid-file: the file being recorded, from where the phone lacks it on to
 /// live (plan()), else the oldest file this phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units
 /// go into dated Ogg pieces in `chunks` (the Uploader's queue). Per file (`state`, JSON, kept after every piece): when
-/// its unit 0 was on the phone's clock (its anchor) and which units are in pieces already. A file the server has whole
+/// its unit 0 was on the phone's clock (its anchor), the anchors it was dated by anew while live (reanchor()) and which
+/// units are in pieces already. A file the server has whole
 /// is then deleted on the bean (prune()); nothing else is. See Bean.kt for the whole story; the logic is the same.
 final class BeanSync {
   /// The link went (an IOException on Android): the next connection starts the bean again.
@@ -267,12 +268,18 @@ final class BeanSync {
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
   static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
+  static let clockUnits: Int64 = 1500  // half a minute of live units: the fastest of each dates the file (reanchor())
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
-    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0) {
-      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries
+    /// (seq, anchor): from that unit on the file is dated by that anchor instead (step()), in order
+    var anchors: [(Int64, Int64)]
+    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, anchors: [(Int64, Int64)] = []) {
+      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.anchors = anchors
     }
+    /// A unit's time on the phone's clock: by the anchor in force at its seq.
+    func at(_ seq: Int64) -> Int64 { (anchors.last { $0.0 <= seq }?.1 ?? anchor) + seq * Bean.frameMs }
+    var latest: Int64 { anchors.last?.1 ?? anchor }
   }
 
   /// live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
@@ -287,6 +294,8 @@ final class BeanSync {
     var units = 0, dupes = 0
     var lost: Int64 = 0, at: Int64 = 0
     var seen: Int64 = 0  // when its last unit came
+    var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
+    var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
     var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     init(_ file: Int64, _ live: Bool, _ from: Int64, realtime: Bool = false, watched: Bool = false) {
       self.file = file; self.live = live; self.from = from; self.realtime = realtime; self.watched = watched
@@ -347,7 +356,8 @@ final class BeanSync {
         if k == "end" { pendingEnd = (v as? NSNumber)?.int64Value ?? 0; continue }
         guard let id = Int64(k), let f = v as? [String: Any], let h = f["h"] as? [[NSNumber]] else { throw Bean.Fail("file \(k)") }
         files[id] = F((f["a"] as? NSNumber)?.int64Value ?? id * 1000, have: h.map { ($0[0].int64Value, $0[1].int64Value) },
-                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["r"] as? NSNumber)?.intValue ?? 0)
+                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["r"] as? NSNumber)?.intValue ?? 0,
+                      anchors: (f["p"] as? [[NSNumber]] ?? []).map { ($0[0].int64Value, $0[1].int64Value) })
       }
     } catch { log("bean_state", "手机上的录音豆文件记录读不了（\(error)），从头记", "warn") }
   }
@@ -360,7 +370,9 @@ final class BeanSync {
 
   private func save() {
     var o: [String: Any] = [:]
-    for (id, f) in files { o["\(id)"] = ["a": f.anchor, "t": f.total, "r": f.tries, "h": f.have.map { [$0.0, $0.1] }] }
+    for (id, f) in files {
+      o["\(id)"] = ["a": f.anchor, "t": f.total, "r": f.tries, "h": f.have.map { [$0.0, $0.1] }, "p": f.anchors.map { [$0.0, $0.1] }]
+    }
     if pendingEnd > 0 { o["end"] = pendingEnd }
     try? FileManager.default.createDirectory(at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
     try? JSONSerialization.data(withJSONObject: o).write(to: stateFile, options: .atomic)
@@ -518,7 +530,7 @@ final class BeanSync {
     // A just-closed file can be absent briefly. Keep its ranges until the server has every piece.
     let q = queued() + io.refused()
     for (id, f) in files where all[id] == nil && id != open &&
-      (f.have.isEmpty || gap(f) == nil && !q.contains { $0 >= f.anchor && $0 < f.anchor + f.total * Bean.frameMs }) {
+      (f.have.isEmpty || gap(f) == nil && !q.contains { $0 >= f.at(0) && $0 < f.at(f.total) }) {
       files[id] = nil
       if id * 1000 >= since {
         let missing = gap(f) != nil
@@ -587,7 +599,7 @@ final class BeanSync {
   }
 
   /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
-  private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.anchor ?? file * 1000)) / Bean.frameMs) }
+  private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.latest ?? file * 1000)) / Bean.frameMs) }
 
   private func begin(_ x: Xfer) throws {
     xfer = x; x.at = io.now(); x.seen = x.at; marked = false
@@ -617,7 +629,7 @@ final class BeanSync {
     let q = queued() + io.refused()
     return listing.files.map(\.id).filter { id in
       guard let f = files[id] else { return false }
-      return id * 1000 >= since && id != listing.open && gap(f) == nil && !q.contains { $0 >= f.anchor && $0 < f.anchor + f.total * Bean.frameMs }
+      return id * 1000 >= since && id != listing.open && gap(f) == nil && !q.contains { $0 >= f.at(0) && $0 < f.at(f.total) }
     }
   }
 
@@ -754,7 +766,8 @@ final class BeanSync {
       liveSeen = now; liveStalled = false; busy = 0
       // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
       // the transfer has caught up (a read from a unit behind starts behind by the hole it fills)
-      let lag = now - f.anchor - (s.seq + 1) * Bean.frameMs
+      reanchor(x, f, s.seq, now - (s.seq + 1) * Bean.frameMs)
+      let lag = now - f.at(s.seq + 1)
       if x.lag != nil || lag <= 10_000 {
         x.lag = lag
         if lagging ? lag <= 10_000 : lag > 60_000 {
@@ -767,15 +780,46 @@ final class BeanSync {
     if s.flags & 4 != 0 { f.total = s.seq + 1 }
     let dupe = has(f, s.seq) || runFile == x.file && s.seq >= runFrom && s.seq < runFrom + Int64(run.count)
     let mark = s.flags & 1 != 0
-    if mark && !marked && !dupe { log("mark", "双击标记", fields: ["file": x.file, "seq": s.seq], at: f.anchor + s.seq * Bean.frameMs) }
+    if mark && !marked && !dupe { log("mark", "双击标记", fields: ["file": x.file, "seq": s.seq], at: f.at(s.seq)) }
     marked = mark  // also on units had already: a mark that goes on past them is not a new one
     if x.until >= 1 && x.until <= s.seq + 1 { x.cut = true }
     if dupe { x.dupes += 1; return }
-    if !run.isEmpty && (runFile != x.file || s.seq != runFrom + Int64(run.count)) { flush() }
-    if run.isEmpty { runFile = x.file; runFrom = s.seq }
+    let n = Int64(run.count)  // a piece is dated by one anchor
+    if !run.isEmpty && (runFile != x.file || s.seq != runFrom + n || f.at(s.seq) != f.at(runFrom) + n * Bean.frameMs) { flush() }
+    if run.isEmpty { runFile = x.file; runFrom = s.seq; if x.live { step(x, f, s.seq) } }
     run.append(Data(audio))
     if !x.live { caught += 1; syncDoneKb = caught * Int64(Bean.unit) / 1024 }
     if run.count >= (x.live ? io.liveUnits() : Bean.pieceUnits) { flush() }
+  }
+
+  /// The bean's units do not keep the phone's time (#233: up to 750 ppm slow for half an hour, then on time, 2–3 s over
+  /// six hours): while live the file's anchor is measured each half minute. A unit never comes before its end, so the
+  /// fastest one of a half minute (`est`: now − (seq + 1) × 20 ms) says it; when two halves in a row agree within 50 ms
+  /// the units come as recorded (not a fill catching up, not a link slowed to a fraction) and that is the target.
+  private func reanchor(_ x: Xfer, _ f: F, _ seq: Int64, _ est: Int64) {
+    if x.half < 0 || seq < x.half { x.half = seq; x.fastest = est; x.before = nil; return }
+    x.fastest = min(x.fastest, est)
+    if seq - x.half + 1 < BeanSync.clockUnits { return }
+    if let b = x.before, abs(x.fastest - b) <= 50 {
+      let d = x.fastest - f.latest
+      if abs(d) >= 20 {
+        log("bean_clock", "文件 \(x.file) 到单元 \(seq) 按序号排比手机的钟\(d >= 0 ? "早" : "晚") \(abs(d)) ms，之后的块逐段对齐",
+            fields: ["file": x.file, "seq": seq, "ms": d])
+      }
+      x.target = x.fastest
+    }
+    x.before = x.fastest; x.half = seq + 1; x.fastest = .max
+  }
+
+  /// A live piece begins at `seq`: from it on the file is dated a step nearer the target, at most 9 ms so the server's
+  /// decoder goes on from the piece before (audio.before(): a join within 10 ms, else a click), at once when 0.2 s or
+  /// more off. Units before keep their dates, a hole among them filled later too.
+  /// ponytail: what is read on return from an absence (the tail before live) goes by the anchor from before it, off by
+  /// what the bean drifted meanwhile (≤ 750 ppm × the absence); extrapolate by the last rate if that matters.
+  private func step(_ x: Xfer, _ f: F, _ seq: Int64) {
+    guard let t = x.target, seq > f.anchors.last?.0 ?? 0 else { return }
+    let d = t - f.latest
+    if abs(d) >= 5 { f.anchors.append((seq, f.latest + (abs(d) >= 200 ? d : max(-9, min(9, d))))) }
   }
 
   /// A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop.
@@ -812,9 +856,9 @@ final class BeanSync {
     }
     guard let f else { return }
     if x.live {
-      if x.last >= 0 { pendingEnd = max(pendingEnd, f.anchor + (x.last + 1) * Bean.frameMs) }
+      if x.last >= 0 { pendingEnd = max(pendingEnd, f.at(x.last + 1)) }
     } else if gap(f) == nil {
-      pendingEnd = max(pendingEnd, f.anchor + f.total * Bean.frameMs)
+      pendingEnd = max(pendingEnd, f.at(f.total))
     } else if !(x.cut && gap(f)! > x.from) {  // cut with the hole filled: not a try
       f.tries += 1
       if f.tries > BeanSync.tries {
@@ -828,7 +872,7 @@ final class BeanSync {
   private func flush() {
     if run.isEmpty { return }
     guard let f = files[runFile] else { run = []; return }
-    let start = f.anchor + runFrom * Bean.frameMs
+    let start = f.at(runFrom)
     // one atomic write: a piece is whole or not there (Uploader takes <start>@<tag>.ogg)
     do {
       try Store.oggOpus(run, frameMs: Bean.frameMs, channels: 2).write(to: chunks.appendingPathComponent("\(start)@\(tag).ogg"), options: .atomic)

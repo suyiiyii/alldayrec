@@ -245,11 +245,12 @@ object Bean {
  *
  * Per file (`state`, JSON, kept after every piece): when its unit 0 was on the phone's clock (its anchor: the file id,
  * the bean's clock as it began, set at each connect; the phone's own clock when the file is first met by a realtime=1
- * read and the two agree within seconds) and which units are in pieces already. A unit's time is its anchor + seq ×
- * 20 ms; a transfer after a drop starts at the first unit missing (its byte offset), units had already are dropped, a
+ * read and the two agree within seconds), the anchors it was dated by anew while live (reanchor(): the bean's units do
+ * not keep the phone's time) and which units are in pieces already. A unit's time is the anchor in force at its seq +
+ * seq × 20 ms; a transfer after a drop starts at the first unit missing (its byte offset), units had already are dropped, a
  * hole is asked for again (three times); when a long stretch the phone has follows it, the session ends once the hole is in and the
- * next hole is asked for from its own offset (rest()), not by taking that stretch again. A pause inside a file would
- * date what follows it early (the app never pauses the bean): logged as bean_gap_time. Live transfers never hold
+ * next hole is asked for from its own offset (rest()), not by taking that stretch again. A pause inside a file dates
+ * what follows it early until the next anchor (the app never pauses the bean): logged as bean_gap_time. Live transfers never hold
  * finals; closed files are fetched only after recording stops. The end of the last recording goes to the server once
  * its pieces are up. A file the server has whole is then deleted on the
  * bean (prune()); nothing else is.
@@ -280,7 +281,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun trace(what: String, v: Map<String, Any?>) {}
     }
 
-    class F(var anchor: Long, val have: MutableList<LongArray> = mutableListOf(), var total: Long = -1, var tries: Int = 0)
+    /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
+    class F(var anchor: Long, val have: MutableList<LongArray> = mutableListOf(), var total: Long = -1, var tries: Int = 0,
+            val anchors: MutableList<LongArray> = mutableListOf()) {
+        /** A unit's time on the phone's clock: by the anchor in force at its seq. */
+        fun at(seq: Long) = (anchors.lastOrNull { it[0] <= seq }?.get(1) ?: anchor) + seq * Bean.FRAME_MS
+        val latest get() = anchors.lastOrNull()?.get(1) ?: anchor
+    }
 
     /** live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
      *  watched: begun for the live page (tail_short, live_now): ended when the page closes or opens (loop()). */
@@ -296,6 +303,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var lost = 0L
         var at = 0L
         var seen = 0L  // when its last unit came
+        var half = -1L  // reanchor(): this half minute's first seq and fastest, the last one's
+        var fastest = Long.MAX_VALUE
+        var before: Long? = null
+        var target: Long? = null  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
         var lag: Long? = null  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     }
 
@@ -350,9 +361,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             for (k in o.keys()) {
                 if (k == "end") { pendingEnd = o.getLong(k); continue }
                 val f = o.getJSONObject(k)
-                val h = f.getJSONArray("h")
-                files[k.toLong()] = F(f.getLong("a"), MutableList(h.length()) { longArrayOf(h.getJSONArray(it).getLong(0), h.getJSONArray(it).getLong(1)) },
-                    f.getLong("t"), f.getInt("r"))
+                fun pairs(a: JSONArray) = MutableList(a.length()) { longArrayOf(a.getJSONArray(it).getLong(0), a.getJSONArray(it).getLong(1)) }
+                files[k.toLong()] = F(f.getLong("a"), pairs(f.getJSONArray("h")), f.getLong("t"), f.getInt("r"), pairs(f.optJSONArray("p") ?: JSONArray()))
             }
         } catch (e: Exception) { io.log("bean_state", "手机上的录音豆文件记录读不了（$e），从头记", "warn") }
     }
@@ -360,7 +370,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun save() {
         val o = JSONObject()
         for ((id, f) in files) o.put("$id", JSONObject().put("a", f.anchor).put("t", f.total).put("r", f.tries)
-            .put("h", JSONArray(f.have.map { JSONArray(listOf(it[0], it[1])) })))
+            .put("h", JSONArray(f.have.map { JSONArray(listOf(it[0], it[1])) })).put("p", JSONArray(f.anchors.map { JSONArray(listOf(it[0], it[1])) })))
         if (pendingEnd > 0) o.put("end", pendingEnd)
         stateFile.parentFile?.mkdirs()
         val tmp = File(stateFile.path + ".tmp")
@@ -517,7 +527,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         // A just-closed file can be absent briefly. Keep its ranges until the server has every piece.
         val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs) + io.refused()
         for (id in files.filter { (id, f) -> id !in all && id != open && (f.have.isEmpty() ||
-            gap(f) == null && q.none { it in f.anchor until f.anchor + f.total * Bean.FRAME_MS }) }.keys) {
+            gap(f) == null && q.none { it in f.at(0) until f.at(f.total) }) }.keys) {
             val f = files.remove(id)!!
             if (id * 1000 >= since) {
                 val missing = gap(f) != null
@@ -583,7 +593,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     /** The unit the bean is at in the file it records, by the phone's clock (a pause would put it early). */
-    private fun edge(file: Long) = maxOf(0L, (io.now() - (files[file]?.anchor ?: (file * 1000))) / Bean.FRAME_MS)
+    private fun edge(file: Long) = maxOf(0L, (io.now() - (files[file]?.latest ?: (file * 1000))) / Bean.FRAME_MS)
 
     private fun begin(x: Xfer) {
         xfer = x; x.at = io.now(); x.seen = x.at; marked = false
@@ -614,7 +624,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val q = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs) + io.refused()
         return listing.files.map { it.first }.filter { id ->
             val f = files[id]
-            f != null && id * 1000 >= since && id != listing.open && gap(f) == null && q.none { it in f.anchor until f.anchor + f.total * Bean.FRAME_MS }
+            f != null && id * 1000 >= since && id != listing.open && gap(f) == null && q.none { it in f.at(0) until f.at(f.total) }
         }
     }
 
@@ -734,7 +744,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             liveSeen = now; liveStalled = false; busy = 0
             // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
             // the transfer has caught up (a realtime=0 read starts behind by the hole it fills)
-            val lag = now - f.anchor - (s.seq + 1) * Bean.FRAME_MS
+            reanchor(x, f, s.seq, now - (s.seq + 1) * Bean.FRAME_MS)
+            val lag = now - f.at(s.seq + 1)
             if (x.lag != null || lag <= 10_000) {
                 x.lag = lag
                 if (if (lagging) lag <= 10_000 else lag > 60_000) {
@@ -747,15 +758,47 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (s.flags and 4 != 0) f.total = s.seq + 1
         val dupe = has(f, s.seq) || runFile == x.file && s.seq in runFrom until runFrom + run.size
         val mark = s.flags and 1 != 0
-        if (mark && !marked && !dupe) io.log("mark", "双击标记", fields = mapOf("file" to x.file, "seq" to s.seq), at = f.anchor + s.seq * Bean.FRAME_MS)
+        if (mark && !marked && !dupe) io.log("mark", "双击标记", fields = mapOf("file" to x.file, "seq" to s.seq), at = f.at(s.seq))
         marked = mark  // also on units had already: a mark that goes on past them is not a new one
         if (x.until in 1..s.seq + 1) x.cut = true
         if (dupe) { x.dupes++; return }
-        if (run.isNotEmpty() && (runFile != x.file || s.seq != runFrom + run.size)) flush()
-        if (run.isEmpty()) { runFile = x.file; runFrom = s.seq }
+        val n = run.size  // a piece is dated by one anchor
+        if (run.isNotEmpty() && (runFile != x.file || s.seq != runFrom + n || f.at(s.seq) != f.at(runFrom) + n * Bean.FRAME_MS)) flush()
+        if (run.isEmpty()) { runFile = x.file; runFrom = s.seq; if (x.live) step(x, f, s.seq) }
         run += audio
         if (!x.live) { caught++; syncDoneKb = caught * Bean.UNIT / 1024 }
         if (run.size >= if (x.live) io.liveUnits() else Bean.PIECE_UNITS) flush()
+    }
+
+    /** The bean's units do not keep the phone's time (#233: up to 750 ppm slow for half an hour, then on time, 2–3 s over
+     *  six hours): while live the file's anchor is measured each half minute. A unit never comes before its end, so the
+     *  fastest one of a half minute (`est`: now − (seq + 1) × 20 ms) says it; when two halves in a row agree within
+     *  50 ms the units come as recorded (not a fill catching up, not a link slowed to a fraction) and that is the target. */
+    private fun reanchor(x: Xfer, f: F, seq: Long, est: Long) {
+        if (x.half < 0 || seq < x.half) { x.half = seq; x.fastest = est; x.before = null; return }
+        x.fastest = minOf(x.fastest, est)
+        if (seq - x.half + 1 < CLOCK_UNITS) return
+        val b = x.before
+        if (b != null && kotlin.math.abs(x.fastest - b) <= 50) {
+            val d = x.fastest - f.latest
+            if (kotlin.math.abs(d) >= 20)
+                io.log("bean_clock", "文件 ${x.file} 到单元 $seq 按序号排比手机的钟${if (d >= 0) "早" else "晚"} ${kotlin.math.abs(d)} ms，之后的块逐段对齐",
+                    fields = mapOf("file" to x.file, "seq" to seq, "ms" to d))
+            x.target = x.fastest
+        }
+        x.before = x.fastest; x.half = seq + 1; x.fastest = Long.MAX_VALUE
+    }
+
+    /** A live piece begins at `seq`: from it on the file is dated a step nearer the target, at most 9 ms so the server's
+     *  decoder goes on from the piece before (audio.before(): a join within 10 ms, else a click), at once when 0.2 s or
+     *  more off. Units before keep their dates, a hole among them filled later too.
+     *  ponytail: what is read on return from an absence (the tail before live) goes by the anchor from before it, off by
+     *  what the bean drifted meanwhile (≤ 750 ppm × the absence); extrapolate by the last rate if that matters. */
+    private fun step(x: Xfer, f: F, seq: Long) {
+        val t = x.target ?: return
+        if (seq <= (f.anchors.lastOrNull()?.get(0) ?: 0)) return
+        val d = t - f.latest
+        if (kotlin.math.abs(d) >= 5) f.anchors += longArrayOf(seq, f.latest + if (kotlin.math.abs(d) >= 200) d else d.coerceIn(-9L, 9L))
     }
 
     /** A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop. */
@@ -791,9 +834,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
         if (f == null) return
         if (x.live) {
-            if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.anchor + (x.last + 1) * Bean.FRAME_MS)
+            if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.at(x.last + 1))
         } else if (gap(f) == null) {
-            pendingEnd = maxOf(pendingEnd, f.anchor + f.total * Bean.FRAME_MS)
+            pendingEnd = maxOf(pendingEnd, f.at(f.total))
         } else if (!(x.cut && gap(f)!! > x.from) && ++f.tries > TRIES) {  // cut with the hole filled: not a try
             io.log("bean_xfer", "文件 ${x.file} 从单元 ${gap(f)} 起取了 $TRIES 次仍不全，不再取", "error", mapOf("file" to x.file, "gap" to gap(f)))
         }
@@ -804,7 +847,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun flush() {
         if (run.isEmpty()) return
         val f = files[runFile] ?: return run.clear()
-        val start = f.anchor + runFrom * Bean.FRAME_MS
+        val start = f.at(runFrom)
         val part = File(chunks, "$start@$tag.part")
         part.writeBytes(Store.oggOpus(run, Bean.FRAME_MS, 2))
         part.renameTo(File(chunks, "$start@$tag.ogg"))
@@ -877,6 +920,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         const val WATCHED_GAP_UNITS = 3000L  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
+        const val CLOCK_UNITS = 1500L  // half a minute of live units: the fastest of each dates the file (reanchor())
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
     }
 }
