@@ -11,7 +11,7 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-MODELS = {"sdmod": "LR-X1", "promicro": "LR-P1", "promicro-p2": "LR-P2", "promicro-p3": "LR-P3", "expansion": "LR-X1-expansion-test"}
+MODELS = {"sdmod": "LR-X1", "promicro": "LR-P1", "promicro-p2": "LR-P2", "promicro-p3": "LR-P3", "n4": "LR-N4", "expansion": "LR-X1-expansion-test"}
 
 
 def git(*args):

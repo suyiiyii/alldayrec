@@ -50,7 +50,8 @@ class FirmwareSelection(unittest.TestCase):
         result, jobs = self.select("push", "refs/heads/main", {}, self.base)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {
-            ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"), ("devkit", "promicro-p3")})
+            ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"), ("devkit", "promicro-p3"),
+            ("devkit", "n4")})
 
     def test_manual_dispatch_at_tag_stays_requested_test_family(self):
         # Dispatching a tag is not a formal tag-push event.
@@ -59,12 +60,12 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(jobs, [{"family": "devkit", "variant": "expansion", "sdk": "ncs"}])
 
-    def test_formal_tag_builds_exact_five_targets(self):
+    def test_formal_tag_builds_exact_six_targets(self):
         result, jobs = self.select("push", "refs/tags/firmware-test", {})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {
             ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"),
-            ("devkit", "promicro-p3"), ("selftest", "selftest")})
+            ("devkit", "promicro-p3"), ("devkit", "n4"), ("selftest", "selftest")})
 
     def test_formal_tag_outside_main_is_rejected(self):
         (self.root / "README").write_text("unmerged\n")

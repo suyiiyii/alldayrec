@@ -76,6 +76,10 @@ config LR_BATTERY_VDDH
     bool "Battery on VDDH (nice!nano): read VDDH/5 inside the chip, no divider or charger pins"
     default n
 
+config LR_BATTERY_AIN0
+    bool "Battery on AIN0 (LR-N4): P0.02 through a 1M / 1M divider, read x2, the charger's CHRG on P0.29; VDDH there is the system rail, USB's while plugged in"
+    default n
+
 config LR_SWITCH
     bool "LR-P3's slide switch on P1.15 (closed to GND = on): off stops recording and goes to System OFF (lr_switch.c)"
     depends on OMI_ENABLE_USB
@@ -88,8 +92,8 @@ config LR_LOW_BATTERY_MV
     default 3300
 
 config LR_POWER_TRACE
-    bool "On battery a POWER log record with VDDH every minute, and the power-fail warning, written to flash at once (lr_power.c)"
-    depends on LR_BATTERY_VDDH
+    bool "On battery a POWER log record with the battery reading every minute, and the power-fail warning, written to flash at once (lr_power.c)"
+    depends on LR_BATTERY_VDDH || LR_BATTERY_AIN0
     default n
 
 config LR_ONE_LED

@@ -5,8 +5,9 @@
 #   ./lr.sh build promicro            ProMicro nRF52840 (nice!nano clone) + external PDM mic and SD module
 #   ./lr.sh build promicro-p2         the same board as LR-P2: the spare ProMicro kept for tests (bootloader 0.10.0)
 #   ./lr.sh build promicro-p3         the same board as LR-P3: the ProMicro wired into the boxed recorder
-#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
-#   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
+#   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
+#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
+#   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
 #                                     builds, packs and uploads it to the server, where the app finds it
 set -euo pipefail
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -18,17 +19,29 @@ EXTRA=(-DCONFIG_OMI_ENABLE_SPEAKER=n -DCONFIG_OMI_ENABLE_HAPTIC=n -DCONFIG_OMI_E
 case $V in
   sdmod) OVL="$OVL;$D/overlay/lr_sdmod.overlay" ;;
   expansion) OVL="$OVL;$D/overlay/xiao_expansion_base.overlay" ;;
-  promicro|promicro-p2|promicro-p3) M=LR-P1; [ "$V" = promicro ] || M=LR-P${V#promicro-p}  # LR-P2/P3: the same board, their own model and name
-            OVL="$OVL;$D/overlay/lr_promicro.overlay"  # battery on VDDH, P0.13/P0.17 are not charger pins here
-            EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y "-DCONFIG_LR_NAME_PREFIX=\"$M\"" "-DCONFIG_BT_DEVICE_NAME=\"$M\""
-                    "-DCONFIG_BT_DIS_MODEL=\"$M\"" '-DCONFIG_BT_DIS_HW_REV_STR="ProMicro nRF52840"'
-                    -DCONFIG_LR_ONE_LED=y  # only P0.15's LED is fitted: short flash codes
-                    -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)  # its 32.768 kHz crystals run +47..+125 ppm
-            # only LR-P3 has the switch on P1.15, and keeps a power trail while its battery cuts out
+  promicro|promicro-p2|promicro-p3|n4) M=LR-P1; [ "$V" = promicro ] || M=LR-P${V#promicro-p}  # LR-P2/P3: the same board, their own model and name
+            OVL="$OVL;$D/overlay/lr_promicro.overlay"
+            if [ "$V" = n4 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
+              M=LR-N4 HW="LR-N4 nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
+              # battery on AIN0, CHRG on P0.29; Fxx chips ship locked: the UICR's APPROTECT 0x5A (written at the first
+              # flash) only opens SWD if the app writes APPROTECT.DISABLE at every boot, which SystemInit does with this
+              # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its 32.768 kHz crystal X1 (Seiko SC-16S
+              # Q-SC16S0322070AAAN, delivery spec WF11077297 [3]): ±20 ppm at 25 °C, -0.036 ppm/°C² ±10% about a 25 ±5 °C
+              # turnover (-194 ppm at -40 °C, -167 at +85: its -40..+85 range), ±3 ppm a year, ±10 after two reflows
+              # ([4] 7): ~240 ppm at the cold end after 5 years, ~70 over 0..45 °C. MPSL reads this at build time only
+              EXTRA+=(-DCONFIG_LR_BATTERY_AIN0=y -DCONFIG_NRF_APPROTECT_USE_UICR=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)
+            else  # battery on VDDH, P0.13/P0.17 are not charger pins here; the clones' 32.768 kHz crystals run +47..+125 ppm
+              HW="ProMicro nRF52840"
+              EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)
+            fi
+            EXTRA+=("-DCONFIG_LR_NAME_PREFIX=\"$M\"" "-DCONFIG_BT_DEVICE_NAME=\"$M\"" "-DCONFIG_BT_DIS_MODEL=\"$M\""
+                    "-DCONFIG_BT_DIS_HW_REV_STR=\"$HW\""
+                    -DCONFIG_LR_ONE_LED=y)  # only P0.15's LED is fitted (LR-N4: the yellow-green one): short flash codes
+            # only LR-P3 and LR-N4 have the switch on P1.15, and keep a power trail while the battery cuts out
             # and phone mode (the card idle while the phone acks what it has: lr_store.c). Phone mode's way back to the
             # card mounts it, from a DFU write (BT RX) and the switch, low battery or 1200 bps touch (the system
             # workqueue) too: 1.9-2.2 KB at the most (-fcallgraph-info) plus an FPU frame, past their 2200 and 2048
-            [ "$V" != promicro-p3 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y -DCONFIG_LR_STORE_PHONE=y
+            [ "$V" != promicro-p3 ] && [ "$V" != n4 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y -DCONFIG_LR_STORE_PHONE=y
                                                -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560) ;;
   *) echo "unknown variant $V" >&2; exit 2 ;;
 esac
