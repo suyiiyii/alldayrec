@@ -25,8 +25,11 @@ case $V in
               M=LR-N4 HW="LR-N4 nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
               # battery on AIN0, CHRG on P0.29; Fxx chips ship locked: the UICR's APPROTECT 0x5A (written at the first
               # flash) only opens SWD if the app writes APPROTECT.DISABLE at every boot, which SystemInit does with this
-              # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its own 32.768 kHz crystal: the 50 ppm default
-              EXTRA+=(-DCONFIG_LR_BATTERY_AIN0=y -DCONFIG_NRF_APPROTECT_USE_UICR=y)
+              # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its 32.768 kHz crystal X1 (Seiko SC-16S
+              # Q-SC16S0322070AAAN, delivery spec WF11077297 [3]): ±20 ppm at 25 °C, -0.036 ppm/°C² ±10% about a 25 ±5 °C
+              # turnover (-194 ppm at -40 °C, -167 at +85: its -40..+85 range), ±3 ppm a year, ±10 after two reflows
+              # ([4] 7): ~240 ppm at the cold end after 5 years, ~70 over 0..45 °C. MPSL reads this at build time only
+              EXTRA+=(-DCONFIG_LR_BATTERY_AIN0=y -DCONFIG_NRF_APPROTECT_USE_UICR=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)
             else  # battery on VDDH, P0.13/P0.17 are not charger pins here; the clones' 32.768 kHz crystals run +47..+125 ppm
               HW="ProMicro nRF52840"
               EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)

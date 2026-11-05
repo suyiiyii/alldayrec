@@ -382,11 +382,16 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
     row("32 MHz crystal accuracy", abs(ppm) <= 40,
         f"{ppm:+.1f} ppm against the Mac's clock over {clk_secs} s (limit ±40; fit residual {jitter:.2f} ms)")
     lf_ppm = info["lfxo_ppb_vs_hfxo"] / 1000 + ppm
-    lf_limit = 50 if n4 else 250  # what the recording firmware tells the BLE stack its sleep clock is within (lr.sh)
+    # the recording firmware tells the BLE stack its sleep clock is within 250 ppm (lr.sh K32SRC_250PPM). The ProMicro
+    # clones are judged against that; LR-N4's Seiko SC-16S is ±20 ppm at 25 °C (+±10 after reflow) and drifts to -194
+    # at -40 °C, so at room temperature it must read within 50 for the whole range to stay inside 250
+    lf_limit = 50 if n4 else 250
     row("32.768 kHz accuracy", abs(lf_ppm) <= lf_limit if lf_ok else False,
-        f"{lf_ppm:+.1f} ppm absolute (limit ±{lf_limit}: our firmware widens its BLE receive windows for a sleep clock "
-        "within that, lr.sh: K32SRC_250PPM on the ProMicros, the 50 ppm default on LR-N4)" + ("" if abs(lf_ppm) <=
-        lf_limit else ": past it the board drops phone links, replace the 32.768 kHz crystal") if lf_ok else "no crystal")
+        f"{lf_ppm:+.1f} ppm absolute (limit ±{lf_limit}: " + ("room temperature, so the crystal's cold-end drift still "
+        "fits the 250 ppm the firmware declares" if n4 else "our ProMicro firmware widens its BLE receive windows for "
+        "a sleep clock within 250 ppm, lr.sh K32SRC_250PPM") + ")" + ("" if abs(lf_ppm) <= lf_limit else ": past it "
+        "the board drops phone links, replace the 32.768 kHz crystal" if not n4 else ": check X1 and its two load "
+        "capacitors (its CL is 7 pF), or replace X1") if lf_ok else "no crystal")
 
     try:
         stage = None

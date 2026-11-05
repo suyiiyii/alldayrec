@@ -55,7 +55,7 @@ uv run firmware/selftest/selftest.py run SERIAL --n4 [--flip 20] [--cover 5]
 python3 firmware/selftest/selftest.py swd                    # 首烧后、Pico 探针还接着、CPU 停着时：读回 FICR / UICR
 ```
 
-`run --n4` 先读 `info` 核对板子上跑的是 N4 版（不是就退出，免得 Pro Micro 版的 `gpio` 去驱动 N4 的外设脚）。在上面各项之外（射频、晶振、DCDC 照旧；VDD 按 3.0 V 判 2.70–3.15 V；32.768 kHz 按 ±50 ppm 判）：
+`run --n4` 先读 `info` 核对板子上跑的是 N4 版（不是就退出，免得 Pro Micro 版的 `gpio` 去驱动 N4 的外设脚）。在上面各项之外（射频、晶振、DCDC 照旧；VDD 按 3.0 V 判 2.70–3.15 V；32.768 kHz 按室温 ±50 ppm 判：固件声明 250 ppm，N4 的晶振（Seiko SC-16S）在 −40 °C 会再偏 −194 ppm，室温超过 50 时低温端就出了 250）：
 
 | 项目 | 怎么测 | 通过标准 |
 |---|---|---|
