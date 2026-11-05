@@ -135,8 +135,9 @@ object Store {
 class Mirror(private val dir: File) {
     companion object {
         const val LIST_MAX = 64
-        /** How far one boot's 'T' records may disagree on when it began (epochMs - frame * 10 ms): the frame clock runs
-         *  within ~30 ppm of the phone's (59998-60000 frames in 10 min), frames a stalled codec lost move it on. */
+        /** How far one boot's 'T' records may disagree on when it began (epochMs - frames at the boot's rate,
+         *  Store.bootRate): TIME's jitter and frames a stalled codec lost move it on. At 10 ms a frame a board 92 ppm
+         *  fast passed it after 7.5 days of one boot, and its mirror was taken for another boot's. */
         const val SAME_BOOT_MS = 60_000L
     }
 
@@ -335,8 +336,10 @@ class Mirror(private val dir: File) {
     fun reused(b: Long, frame: Long, at: Long, out: File, undated: File, tag: String): Boolean {
         if (b == 0L) return false  // no card at boot: each file is its own clock
         scanSyncs()
-        val mine = files.keys.filter { it shr 16 == b }; val ts = syncs[b].orEmpty(); val began = at - frame * Store.FRAME_MS
-        if (ts.none { it[0] > frame || Math.abs(it[1] - it[0] * Store.FRAME_MS - began) > SAME_BOOT_MS }) return false
+        val mine = files.keys.filter { it shr 16 == b }; val ts = syncs[b].orEmpty(); val rate = Store.bootRate(ts)
+        fun ms(n: Long) = Math.floor(n.toDouble() * rate + 0.5).toLong()
+        val began = at - ms(frame)
+        if (ts.none { it[0] > frame || Math.abs(it[1] - ms(it[0]) - began) > SAME_BOOT_MS }) return false
         for (f in mine) files[f]!!.apply { closed = true; size = have(f) }
         pieces(out, undated, tag, Store.OLD_PIECE_FRAMES, (b + 1).toInt())  // that boot is over
         for (f in mine) { bin(f).delete(); files.remove(f) }

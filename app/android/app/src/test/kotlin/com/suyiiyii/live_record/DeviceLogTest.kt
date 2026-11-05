@@ -6,6 +6,7 @@ import org.junit.Test
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import org.json.JSONObject
 
 /** The event log case of firmware/devkit/lr_sync.py --selftest: boot 7's TIME fell out of the log, boot 8's frames
  *  are dated by its TIME at frame 1000; LOG packets out of order, one sent twice. */
@@ -38,6 +39,23 @@ class DeviceLogTest {
         val later = DeviceLog.records(listOf(pkt(5007, r(8, 61_000, 22, 190))))
         assertEquals(listOf(T + 600_000), DeviceLog.dates(later, mapOf(8 to (1000L to T))))
         assertEquals(listOf<Long?>(null), DeviceLog.dates(later, mapOf(7 to (1000L to T))))  // another boot's TIME: no
+    }
+
+    /** fixtures/record-stream.json's rate cases: their 'T's as TIME records, then one record at each frame asked,
+     *  dated as the pieces are (a boot's rate learned from its TIMEs). */
+    @Test fun sharedRate() {
+        val fixture = JSONObject(javaClass.getResource("/record-stream.json")!!.readText())
+        val cases = fixture.getJSONObject("rate").getJSONArray("cases")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i); val syncs = c.getJSONArray("syncs"); val at = c.getJSONArray("at")
+            val recs = (0 until syncs.length()).map { syncs.getJSONArray(it) }
+                .map { Triple(it.getLong(0), 14, it.getLong(1)) } +
+                (0 until at.length()).map { Triple(at.getJSONArray(it).getLong(0), 9, 0L) }
+            val got = DeviceLog.dates(recs.mapIndexed { n, (t, code, e) ->
+                DeviceLog.Rec(n.toLong(), 1, t, code, 0, e and 0xffffffffL, e shr 32) }, emptyMap())
+            val want = (0 until at.length()).map { at.getJSONArray(it).getLong(1) }
+            assertEquals(c.getString("what"), want, got.takeLast(at.length()))
+        }
     }
 
     @Test fun cursor() {

@@ -5,7 +5,7 @@
     "python": "runs consumes complete file snapshots; assemble tests transport holes separately. No persistent mirror/reused API.",
     "native": "Mirror buffers incomplete records and flushes the last run only when the file closes.",
     "ogg": "Compare page structure, not whole bytes: serial numbers are random.",
-    "rate": "A boot's ms per frame: the median rate of its 'T' pairs (each 'T' by frame and the first one >= 120000 frames after it, a rate within 300 ppm of 10 ms), 10 until 3 pairs; a frame's time: its nearest 'T' + frames since x rate, rounded half up. The file: a closed one of boot 5, its run dated so"
+    "rate": "A boot's ms per frame: the median rate of its 'T' pairs (each 'T' by frame and the first one >= 120000 frames after it, a rate within 300 ppm of 10 ms), 10 until 3 pairs; a frame's time: its nearest 'T' + frames since x rate, rounded half up. The file: a closed one of boot 5, its run dated so; reuse: a boot's start at its rate (Mirror.reused, native only)"
   },
   "mirror": {
     "file": 65539,
@@ -345,6 +345,24 @@
           ]
         ]
       }
-    ]
+    ],
+    "reuse": {
+      "file": 524288,
+      "hex": "54e8030000006c50c4a00100005448ee0000899359c4a001000054a8d8010012bb62c4a00100005408c302009ae26bc4a00100005468ad0300230a75c4a001000054c8970400ac317ec4a00100005428820500355987c4a0010000",
+      "cases": [
+        {
+          "what": "the same boot 8 days on (at 10 ms a frame 64 s off: taken for another boot's)",
+          "frame": 69481000,
+          "at": 1790694736084,
+          "reused": false
+        },
+        {
+          "what": "a boot that began 2 min later",
+          "frame": 69481000,
+          "at": 1790694856084,
+          "reused": true
+        }
+      ]
+    }
   }
 }

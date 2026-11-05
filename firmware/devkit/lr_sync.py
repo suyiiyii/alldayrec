@@ -52,24 +52,28 @@ def records(b: bytes):
 
 
 def runs(files: dict[int, bytes]):
-    """files: file id -> bytes. Yields (epoch_ms of the first frame or None, [opus...]) per run of consecutive frames;
-    a run is dated by its boot's 'T' records (in any of its files, wherever in the stream they are)."""
+    """files: file id -> bytes. Yields (epoch_ms of the first frame or None, [opus...], at) per run of consecutive
+    frames, at(i): epoch_ms of its frame i or None; a run is dated by its boot's 'T' records (in any of its files,
+    wherever in the stream they are)."""
     sync, audio = {}, {}
     for f in sorted(files):
         for r in records(files[f]):
             (sync if r[0] == "T" else audio).setdefault(f >> 16, []).append(r[1:])
     for boot, recs in sorted(audio.items()):
         ts = sync.get(boot)
+        rate = boot_rate(ts or [])
+        run = lambda first, frames, ts=ts, rate=rate: (cur_time(ts, first, rate), frames,
+                                                       lambda i: cur_time(ts, first + i, rate))
         cur = None
         for first, frames in recs:
             if cur and first == cur[0] + len(cur[1]):
                 cur[1].extend(frames)
                 continue
             if cur:
-                yield cur_time(ts, cur[0]), cur[1]
+                yield run(*cur)
             cur = [first, list(frames)]
         if cur:
-            yield cur_time(ts, cur[0]), cur[1]
+            yield run(*cur)
 
 
 def boot_rate(ts):
@@ -152,11 +156,11 @@ def ogg_opus(frames, frame_ms=FRAME_MS, rate=16000) -> bytes:
 PIECE_S = 60  # a run goes up in pieces of this length
 
 
-def upload(server: str, token: str, device: str, start: int, frames) -> None:
-    """One run, cut into pieces; raises if the server does not take one."""
+def upload(server: str, token: str, device: str, at, frames) -> None:
+    """One run, cut into pieces, each dated as the app dates it (at, runs()); raises if the server does not take one."""
     n = PIECE_S * 1000 // FRAME_MS
     for i in range(0, len(frames), n):
-        req = urllib.request.Request(f"{server}/api/chunks?device={urllib.request.quote(device)}&start={start + i * FRAME_MS}",
+        req = urllib.request.Request(f"{server}/api/chunks?device={urllib.request.quote(device)}&start={at(i)}",
                                      ogg_opus(frames[i:i + n]), {"Content-Type": "audio/ogg", "Authorization": f"Bearer {token}"})
         urllib.request.urlopen(req, timeout=60).read()
 
@@ -251,14 +255,14 @@ async def main(out: Path, delete: bool, name: str, follow: float, server: str | 
                 got[f] = b
         for f, b in got.items():
             (out / f"{f:08X}.BIN").write_bytes(b)  # as on the card, for a second look
-        for i, (start, frames) in enumerate(runs(got)):
+        for i, (start, frames, at) in enumerate(runs(got)):
             when = dt.datetime.fromtimestamp(start / 1000).strftime("%m%d-%H%M%S.%f")[:-3] if start else "undated"
             p = out / f"{i:03d}-{when}.wav"
             with wave.open(str(p), "wb") as w:
                 w.setnchannels(1), w.setsampwidth(2), w.setframerate(16000), w.writeframes(decode(frames))
             sent = ""
             if server and start:
-                upload(server, token, dev.name, start, frames)  # a failure stops here: nothing is deleted
+                upload(server, token, dev.name, at, frames)  # a failure stops here: nothing is deleted
                 sent = f", sent as {dev.name}"
             print(f"run {i}: {len(frames) * FRAME_MS / 1000:.2f} s from {when} -> {p.name}{sent}")
         if delete:
@@ -427,13 +431,13 @@ def timeline(recs):
     for boot, t, code, x, a, b in recs.values():
         if code == 14:
             sync.setdefault(boot, []).append((t, b << 32 | a))
-    rates = {}
+    rates = {boot: boot_rate(ts) for boot, ts in sync.items()}
     for seq in sorted(recs):
         boot, t, code, x, a, b = recs[seq]
         name, fmt = EVENTS.get(code & ~UPTIME, (f"0x{code & ~UPTIME:02x}", lambda x, a, b: f"x {x} a {a} b {b}"))
         if code & UPTIME:
             when = f"(uptime {t / 1000:.3f} s)"
-        elif (e := cur_time(sync.get(boot), t, rates.setdefault(boot, boot_rate(sync.get(boot, []))))) is not None:
+        elif (e := cur_time(sync.get(boot), t, rates.get(boot))) is not None:
             when = dt.datetime.fromtimestamp(e / 1000).isoformat(" ", "milliseconds")
         else:
             when = f"(frame {t})"
@@ -465,14 +469,23 @@ def selftest():
     fixture = json.loads((Path(__file__).resolve().parents[2] / "fixtures/record-stream.json").read_text())
     files = {f["file"]: bytes.fromhex(f["hex"]) for f in fixture["archive"]["files"]}
     got = list(runs(files))
-    assert [[s, len(f)] for s, f in got] == fixture["archive"]["runs"], got
+    assert [[s, len(f)] for s, f, _ in got] == fixture["archive"]["runs"], got
     v = fixture["rate"]  # a board's frame clock ~74 ppm fast, the rate learned from its 'T' pairs
-    got = [[s, len(f)] for s, f in runs({v["file"]: bytes.fromhex(v["hex"])})]
-    assert got == v["runs"], got
+    got = list(runs({v["file"]: bytes.fromhex(v["hex"])}))
+    assert [[s, len(f)] for s, f, _ in got] == v["runs"], got
+    ts = [r[1:] for r in records(bytes.fromhex(v["hex"])) if r[0] == "T"]
+    first = next(r[1] for r in records(bytes.fromhex(v["hex"])) if r[0] == "A")
+    at = got[0][2]  # upload's pieces of a run: each dated at the boot's rate, not 10 ms on from the run's start
+    assert at(0) == got[0][0] and at(6000) == cur_time(ts, first + 6000) != got[0][0] + 6000 * FRAME_MS
     for c in v["cases"]:
         ts = [tuple(t) for t in c["syncs"]]
         assert abs(boot_rate(ts) - c["rate"]) < 1e-12, (c["what"], boot_rate(ts))
         assert [[q, cur_time(ts, q)] for q, _ in c["at"]] == c["at"], c["what"]
+        # the event log's records dated as the pieces: the 'T's as TIME records, then one record at each frame asked
+        recs = [(1, f, 14, 0, e & 0xFFFFFFFF, e >> 32) for f, e in ts] + [(1, q, 9, 0, 0, 0) for q, _ in c["at"]]
+        got = [w for _, w, *_ in timeline(dict(enumerate(recs)))][len(ts):]
+        assert got == [dt.datetime.fromtimestamp(e / 1000).isoformat(" ", "milliseconds") for _, e in c["at"]], \
+            c["what"]
     v = fixture["mirror"]
     stream, parts = bytes.fromhex(v["hex"]), {}
     for d in v["deliveries"]:
@@ -482,7 +495,7 @@ def selftest():
     assert merged == stream
     # The snapshot reader merges consecutive frames; live clients slice at liveFrames.
     # Compare their frame clocks, not the transport-dependent piece boundaries.
-    actual = [s + i * FRAME_MS for s, frames in runs({v["file"]: merged}) for i in range(len(frames))]
+    actual = [s + i * FRAME_MS for s, frames, _ in runs({v["file"]: merged}) for i in range(len(frames))]
     expected = [s + i * FRAME_MS for s, count in v["pieces"] for i in range(count)]
     assert actual == expected, (actual, expected)
     o = fixture["ogg"]
