@@ -15,6 +15,7 @@
 
 #include "lr_log.h"
 #include "lr_power.h"
+#include "mic.h"
 #include "sdcard.h"
 #include "usb.h"
 #include "transport.h"
@@ -88,9 +89,10 @@ static uint32_t card_file = UINT32_MAX, card_at;  // the file seg_file is (or wa
 static char card_path[32];
 
 /* Finished batches on their way to the card: the stream puts each one here, its file and offset first, and
- * never waits for the card; the card writer (card_thread) appends them, SD mutex held. A card that stalls fills it
- * (~4 s of audio; ~11 s with a phone that acks) and the batches after go to LIVE only: the stream goes on in a new
- * segment once the writer has caught up, so a file on the card is still the start of the stream's file of that name.
+ * never waits for the card; the card writer (card_thread) appends them, SD mutex held, once it is 3/4 full or 10 s
+ * after its last write. A card that stalls fills the rest (~1 s of audio; ~3 s on LR-P3) and the batches after go to
+ * LIVE only: the stream goes on in a new segment once the writer has caught up, so a file on the card is still the
+ * start of the stream's file of that name.
  * While a phone takes the stream (phone mode, below) the batches stay here until it acks them, and the card is left
  * alone. __noinit: a crash or a watchdog reset leaves them for the next boot to write (ring_recover). One writer at a
  * time (stream mutex), one reader at a time (SD mutex): the head moves with the first, the tail with the second. */
@@ -306,13 +308,63 @@ static void card_drain(void)
 
 static void phone_step(void);
 
+/* The card writes once the queue is 3/4 full (~9 s on LR-P3, ~3 s with the 16 KB queue) or 10 s after its last write,
+ * not at each batch: a card stays awake ~1.9 s after a write, +21 mA (BDAE's card: ~1.9 s at 27 mA after each write, 6.4
+ * mA once asleep, CS high and 16 clocks or closing the file made no difference). A write a second kept it awake for
+ * good, 27.3 mA in all; every ~11 s, 10.4 mA. */
+#define CARD_EVERY_MS 10000
+
+#ifdef CONFIG_LR_POWER_DEBUG
+/* Power tests, CTRL 0x30 sub 8 (below): the card written every debug_write_s s instead (1: each batch, as before the
+ * fix above), as far as the ring holds (a batch's room kept), and after each write: debug_after bit 0, CS high and 16
+ * clocks; bit 1, the file closed; bit 2, the card unmounted and its supply off until the next write (card_up) */
+static uint16_t debug_write_s;
+static uint8_t debug_after;
+static int64_t debug_wrote_at;
+
+static void debug_drain(void)
+{
+    int64_t now = k_uptime_get();
+    if (phone_mode || !ring_used() ||
+        (now - debug_wrote_at < debug_write_s * 1000 && RING - ring_used() > sizeof(pend) + 2 * sizeof(struct card_rec))) {
+        return;
+    }
+    if (card_up()) {
+        return;
+    }
+    card_drain();
+    debug_wrote_at = now;
+    if (debug_after & 2) {
+        close_segment();
+    }
+    if (debug_after & 1) {
+        sd_idle_clocks();
+    }
+    if (debug_after & 4 && !store_err) {
+        close_segment();
+        unmount_sd_card();
+        sd_power_off();
+        card_off = true;
+    }
+}
+#endif
+
 static void card_thread(void)
 {
+    int64_t wrote_at = 0;
     for (;;) {
-        // phone mode: once a second too, for the link, the ACKs and the card's idle time
-        k_sem_take(&card_sem, IS_ENABLED(CONFIG_LR_STORE_PHONE) ? K_SECONDS(1) : K_FOREVER);
+        // once a second too: the 10 s; phone mode's link, ACKs and the card's idle time
+        k_sem_take(&card_sem, K_SECONDS(1));
         k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
-        card_drain();
+#ifdef CONFIG_LR_POWER_DEBUG
+        if (debug_write_s) {
+            debug_drain();
+        } else
+#endif
+        if (ring_used() >= RING / 4 * 3 || k_uptime_get() - wrote_at >= CARD_EVERY_MS) {
+            card_drain();
+            wrote_at = k_uptime_get();
+        }
         phone_step();
         k_mutex_unlock(&write_sdcard_mutex);
     }
@@ -433,7 +485,7 @@ static void put_sync(uint32_t frame, uint64_t epoch)
 //
 // Commands, handled on the store's own thread: SD access and notifications may block, the BT RX thread must not
 //
-enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20 };
+enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20, DEBUG = 0x30 };
 struct cmd {
     uint8_t op;
     uint32_t file, offset;
@@ -520,6 +572,13 @@ static ssize_t ctrl_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     }
     if ((c.op == USB_DISK || c.op == FORGET) && len >= 2) {
         c.file = b[1];  // USB disk on (1) / off (0); forget every phone, this one too (1)
+    }
+    if (c.op == DEBUG && len >= 2) {  // sub:u8 a:u16 b:u16 c:u16 d:u16 (debug below)
+        uint8_t a[8] = {0};
+        memcpy(a, b + 2, MIN(len - 2, sizeof(a)));
+        c.file = b[1];
+        c.offset = sys_get_le32(a);
+        c.epoch = sys_get_le32(a + 4);
     }
     if (c.op == PAUSE && len >= 5) {  // nothing to do with the card: at once, and on a recorder without one too
         lr_pause(sys_get_le32(b + 1));
@@ -1097,6 +1156,113 @@ static void phone_step(void)
     }
 }
 
+#ifdef CONFIG_LR_POWER_DEBUG
+/* Power tests (CONFIG_LR_POWER_DEBUG, never in a release): CTRL 0x30 sub:u8 a:u16 b:u16 c:u16 d:u16 turns one part of
+ * the recorder off (a = 0) or on (a = 1), for a meter on the battery line to tell what each one costs:
+ *   0 status only
+ *   1 mic: the PDM, the mic's supply and the crystal (HFXO) it holds
+ *   2 codec: off, the mic's frames are dropped before the high-pass and Opus, so nothing reaches the card or LIVE
+ *   3 card: off, written out, unmounted, its supply off and its lines let go, the store as with the card lent (-EBUSY);
+ *     on, powered and mounted again, the stream on in a new file
+ *   4 LED (the status flashes)
+ *   5 advertising while connected or held every a ms (0: as released; 0xFFFF: none)
+ *   6 link parameters asked of the central: interval a..b x 1.25 ms, latency c, timeout d x 10 ms
+ *   7 hold a s: the link dropped, scannable only (5) for a seconds, then connectable again (the reply comes first)
+ *   8 card writes: every a s (0: as released, 1: each batch), b after each (debug_drain); the card on (3) first
+ * -> 0xB0 sub:u8 err:i8 on:u8 (bit 0 mic, 1 codec, 2 card, 3 LED; 4 phone mode, 5 the card's supply off) adv_ms:u16 interval:u16 latency:u16 timeout:u16
+ *    write_s:u16 after:u8 (8)
+ *    (the link's now: an update asked for lands a few connection events later). Phone mode as a phone has it: follow
+ *    LIVE and ACK it (lr_store.h). */
+extern bool lr_debug_mic_off, lr_debug_codec_off, lr_debug_led_off;
+extern uint16_t lr_debug_adv_ms;
+static bool debug_card_off;
+
+static int debug_card(bool on)
+{
+    int err = 0;
+    if (on != debug_card_off) {
+        return 0;
+    }
+    k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+    if (!on) {
+        if (phone_mode) {
+            to_card(4);
+        }
+        k_mutex_lock(&stream_mtx, K_FOREVER);
+        flush();
+        k_mutex_unlock(&stream_mtx);
+        card_drain();
+        close_segment();
+        unmount_sd_card();
+        sd_power_off();
+        card_off = false;  // not phone mode's: card_up leaves it alone
+        store_err = -EBUSY;
+        debug_card_off = true;
+    } else {
+        err = mount_card(mount_sd_card_reset);
+        k_mutex_lock(&stream_mtx, K_FOREVER);
+        store_err = err;
+        if (!err) {
+            restart_segment();
+        }
+        k_mutex_unlock(&stream_mtx);
+        if (!err) {
+            count_free();
+        }
+        debug_card_off = false;
+    }
+    k_mutex_unlock(&write_sdcard_mutex);
+    return err;
+}
+
+static void debug(struct bt_conn *conn, uint8_t sub, uint16_t a, uint16_t b, uint16_t c, uint16_t d)
+{
+    int err = 0;
+    switch (sub) {
+    case 1:
+        mic_debug(a);
+        break;
+    case 2:
+        lr_debug_codec_off = !a;
+        break;
+    case 3:
+        err = debug_card(a);
+        break;
+    case 4:
+        lr_debug_led_off = !a;
+        break;
+    case 5:
+        lr_debug_adv(a);
+        break;
+    case 6:
+        err = bt_conn_le_param_update(conn, BT_LE_CONN_PARAM(a, b, c, d));
+        break;
+    case 8:
+        k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+        debug_write_s = a;
+        debug_after = b;
+        k_mutex_unlock(&write_sdcard_mutex);
+        break;
+    }
+    struct bt_conn_info info = {0};
+    bt_conn_get_info(conn, &info);
+    uint8_t v[15] = {0xB0, sub, (uint8_t) err,
+                     (!lr_debug_mic_off) | (!lr_debug_codec_off) << 1 | (!debug_card_off) << 2 | (!lr_debug_led_off) << 3 |
+                         phone_mode << 4 | (card_off || debug_card_off) << 5};
+    sys_put_le16(lr_debug_adv_ms, v + 4);
+    sys_put_le16(info.le.interval, v + 6);
+    sys_put_le16(info.le.latency, v + 8);
+    sys_put_le16(info.le.timeout, v + 10);
+    sys_put_le16(debug_write_s, v + 12);
+    v[14] = debug_after;
+    notify(conn, CTRL_ATTR, v, sizeof(v));
+    if (sub == 7) {
+        k_msleep(200);  // the reply out before the link goes
+        lr_debug_hold(a);
+    }
+}
+#endif
+
 static void store_thread(void)
 {
     struct cmd c;
@@ -1160,6 +1326,10 @@ static void store_thread(void)
         } else if (c.op == LOG) {
             uint16_t max = MIN(bt_gatt_get_mtu(conn) - 3 - 4, sizeof(pkt) - 4) / 16;
             reply(conn, 0x87, lr_log_read(c.file, pkt + 4, max, send_log, conn), 0, 0);
+#ifdef CONFIG_LR_POWER_DEBUG
+        } else if (c.op == DEBUG) {
+            debug(conn, c.file, c.offset & 0xFFFF, c.offset >> 16, c.epoch & 0xFFFF, c.epoch >> 16);
+#endif
         } else if (c.op == DELETE) {
             char p[32];
             int err = -EBUSY;

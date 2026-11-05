@@ -128,6 +128,18 @@ static void sd_spi_reset(void)
     lr_log(LR_SD_RESET, 0, r12, r0);
 }
 
+#ifdef CONFIG_LR_POWER_DEBUG
+void sd_idle_clocks(void)
+{
+    if (disk_card) {
+        lr_sdhc_spi_unlock(disk_card->sdhc);
+    }
+    gpio_pin_set_dt(&sd_cs, 0);
+    sd_byte(0xFF);
+    sd_byte(0xFF);
+}
+#endif
+
 /* A board that switches the card's supply (LR-P3, LR-P1: the nice!nano's VCC on P0.13): off at least 300 ms, long
  * enough to drain, its SPI lines let go meanwhile (sd_lines), then on, so the card starts from reset; the lines back as
  * the SPI driver set them (pinctrl, CS). LR-X1 feeds it from 3V3: nothing to do. */

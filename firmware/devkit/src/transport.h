@@ -33,5 +33,9 @@ void lr_pause(uint32_t s);  // s seconds (0: resume now)
 uint32_t lr_pause_left(void);
 extern volatile uint8_t lr_led_paired;  // half-seconds of the green "paired" blinks left
 
+/* CONFIG_LR_POWER_DEBUG: the link dropped and none taken for s seconds (scannable only), then connectable again */
+void lr_debug_hold(uint16_t s);
+void lr_debug_adv(uint16_t ms);  // advertising while connected or held every ms (0: as released; 0xFFFF: none)
+
 void accel_off();
 #endif

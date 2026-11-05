@@ -316,11 +316,38 @@ static bool status_now(void)
     return memcmp(was, lr_status + 2, 3);
 }
 
+#ifdef CONFIG_LR_POWER_DEBUG
+uint16_t lr_debug_adv_ms;  // advertising while connected or held every this many ms (0: as released; 0xFFFF: none)
+bool lr_debug_holding;     // lr_debug_hold: no link, scannable only
+
+/* Power tests: scannable only while connected or held, so no phone takes the link meanwhile; held, as often as a
+ * released recorder advertises for a phone (100-150 ms), or every lr_debug_adv_ms */
+static int debug_adv(void)
+{
+    uint16_t lo = lr_debug_holding ? BT_GAP_ADV_FAST_INT_MIN_2 : BT_GAP_ADV_SLOW_INT_MIN;
+    uint16_t hi = lr_debug_holding ? BT_GAP_ADV_FAST_INT_MAX_2 : BT_GAP_ADV_SLOW_INT_MAX;
+    if (lr_debug_adv_ms == 0xFFFF) {
+        return 0;
+    }
+    if (lr_debug_adv_ms) {
+        lo = hi = lr_debug_adv_ms * 8 / 5;  // 0.625 ms units
+    }
+    return bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_IDENTITY, lo, hi, NULL), bt_ad,
+                           ARRAY_SIZE(bt_ad), bt_sd, ARRAY_SIZE(bt_sd));
+}
+#endif
+
 static void adv_restart(struct k_work *work)
 {
     status_now();
     bt_le_adv_stop();
-    int err = current_connection
+    int err;
+#ifdef CONFIG_LR_POWER_DEBUG
+    if (current_connection || lr_debug_holding) {
+        err = debug_adv();
+    } else
+#endif
+    err = current_connection
                   ? bt_le_adv_start(BT_LE_ADV_PARAM(BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_USE_IDENTITY,
                                                     BT_GAP_ADV_SLOW_INT_MIN, BT_GAP_ADV_SLOW_INT_MAX, NULL),
                                     bt_ad, ARRAY_SIZE(bt_ad), bt_sd, ARRAY_SIZE(bt_sd))
@@ -339,6 +366,32 @@ static void adv_refresh(void)
 {
     k_work_reschedule(&adv_work, K_NO_WAIT);
 }
+
+#ifdef CONFIG_LR_POWER_DEBUG
+static void hold_end(struct k_work *work)
+{
+    lr_debug_holding = false;
+    adv_refresh();
+}
+static K_WORK_DELAYABLE_DEFINE(hold_work, hold_end);
+
+void lr_debug_adv(uint16_t ms)
+{
+    lr_debug_adv_ms = ms;
+    adv_refresh();
+}
+
+void lr_debug_hold(uint16_t s)
+{
+    lr_debug_holding = true;
+    k_work_reschedule(&hold_work, K_SECONDS(s));
+    if (current_connection) {
+        bt_conn_disconnect(current_connection, BT_HCI_ERR_REMOTE_USER_TERM_CONN);  // disconnected() advertises anew
+    } else {
+        adv_refresh();
+    }
+}
+#endif
 
 static void count_bonds(void)
 {
