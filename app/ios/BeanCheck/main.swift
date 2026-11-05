@@ -183,7 +183,8 @@ final class FakeBean: BeanIo {
 
   func now() -> Int64 { t }
   func monotonicNow() -> Int64 { t }
-  func liveUnits() -> Int { 50 }
+  var slice = 50  // live units a piece (the app's slice)
+  func liveUnits() -> Int { slice }
   func watched() -> Bool { pageOpen }
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
@@ -244,14 +245,15 @@ final class FakeBean: BeanIo {
   private var nextAt: Int64 = 0   // when the last went
   func answer(_ file: Int64, _ from: Int64, _ realtime: Bool) {
     header(open, 0xFFFF_FFFF)
-    nextSeq = file != open ? 0 : realtime ? (t - openAt) / Bean.frameMs : from
+    nextSeq = file != open ? 0 : realtime ? (t - openAt) * 1000 / unitUs : from
     nextAt = t
   }
+  var unitUs: Int64 = 20_000  // how long a unit takes the bean to record by the phone's clock (#233: up to 20.015 ms)
   /// `n` more of those units, three to a frame.
   func more(_ n: Int) {
     nextAt = max(nextAt, t)
     for c in stride(from: nextSeq, to: nextSeq + Int64(n), by: 3).map({ Array($0..<min($0 + 3, nextSeq + Int64(n))) }) {
-      let at = max(nextAt + 8 * Int64(c.count), openAt + (c.last! + 1) * Bean.frameMs)
+      let at = max(nextAt + 8 * Int64(c.count), openAt + (c.last! + 1) * unitUs / 1000)
       units(open, c, wait: at - nextAt, ms: 0)
       nextAt = at
     }
@@ -586,7 +588,8 @@ do {
 }
 
 /// A live transfer from a unit behind (recording for 2 min, nothing of it here yet) starts behind by what it fills:
-/// no live_lag_s nor bean_lag until it has caught up, then as above.
+/// no live_lag_s nor bean_lag until it has caught up, then as above; units that keep coming as recorded 9 s after
+/// their seq says date the file anew (reanchor()), so the lag is gone a minute on.
 do {
   let dir = tmp()
   let bean = FakeBean(t0 + 120_000)
@@ -601,7 +604,7 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0]])
-  check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 9, 9], "filling the tail at the first two, caught up at the next two")
+  check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 9, 0], "filling the tail at the first two, caught up, then dated anew")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 
@@ -649,23 +652,25 @@ do {
 /// The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found it
 /// (FakeBean.answer): `units` of it a 1A/07, then the link goes.
 final class Rec {
-  let bean: FakeBean, sync: BeanSync, id: Int64
-  init(_ bean: FakeBean, _ sync: BeanSync, _ id: Int64) { self.bean = bean; self.sync = sync; self.id = id }
+  let bean: FakeBean, sync: BeanSync, id: Int64, chunks: URL
+  init(_ bean: FakeBean, _ sync: BeanSync, _ id: Int64, _ chunks: URL) { self.bean = bean; self.sync = sync; self.id = id; self.chunks = chunks }
   var f: BeanSync.F { sync.files[id]! }
   var have: [[Int64]] { f.have.map { [$0.0, $0.1] } }
   var reasons: [String] { bean.logFields.compactMap { $0["reason"] as? String } }
 }
-func rec(_ s: Int64, _ have: [(Int64, Int64)], watched: Bool, units: Int = 600, total: Int64 = -1) -> Rec {
+func rec(_ s: Int64, _ have: [(Int64, Int64)], watched: Bool, units: Int = 600, total: Int64 = -1, anchors: [(Int64, Int64)] = []) -> Rec {
   let dir = tmp(), state = dir.appendingPathComponent("state.json")
   let bean = FakeBean(t0)
   bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.list(bean.open, 0)
   bean.pageOpen = watched
   if !have.isEmpty {
-    try! "{\"\(bean.open)\":{\"a\":\(bean.openAt),\"t\":\(total),\"r\":0,\"h\":[\(have.map { "[\($0.0),\($0.1)]" }.joined(separator: ","))]}}"
+    func pairs(_ l: [(Int64, Int64)]) -> String { "[" + l.map { "[\($0.0),\($0.1)]" }.joined(separator: ",") + "]" }
+    try! "{\"\(bean.open)\":{\"a\":\(bean.openAt),\"t\":\(total),\"r\":0,\"h\":\(pairs(have)),\"p\":\(pairs(anchors))}}"
       .write(to: state, atomically: true, encoding: .utf8)
   }
   bean.onTransfer = { file, from, realtime in bean.answer(file, from, realtime); bean.more(units) }
-  return Rec(bean, BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean), bean.open)
+  let chunks = dir.appendingPathComponent("chunks")
+  return Rec(bean, BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean), bean.open, chunks)
 }
 /// Only the five reads went out: no start (recording), no delete (the file is open).
 func onlyReads(_ bean: FakeBean, line: Int = #line) {
@@ -911,6 +916,65 @@ do {
   check(bean.ends, [anchor + 5699 * 20], "the end, once")
   check(bean.transfers.count, 3)
   check(bean.deleted, [c])
+}
+
+/// The pieces in the queue: start, first seq, units.
+func piecesIn(_ chunks: URL) -> [(start: Int64, seq: Int64, n: Int64)] {
+  queue(chunks).map { f in let a = packets(f).dropFirst(2); return (startMs(f), seqOf(a.first!), Int64(a.count)) }
+}
+
+/// #233: a bean whose units take 20.015 ms by the phone's clock (750 ppm slow, as one was for half an hour on 11-05),
+/// live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file), with each
+/// slice the app uses (1 s in front, 20 s iOS in the background, 60 s Android with the screen off): each live piece
+/// within 60 ms of when its first unit was recorded, those read on return (the 2 min and the catch-up) by the anchor
+/// from before, off by what the bean drifted meanwhile (by seq × 20 ms alone the last were 1.5 s early); each piece
+/// within 10 ms of where the one before ends, so the server's decoder goes on from it (audio.before()); bean_clock
+/// at most once in 10 min.
+for slice in [50, 1000, 3000] {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks"), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  bean.slice = slice
+  bean.unitUs = 20_015; bean.openAt = t0 - 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.list(bean.open, 0)
+  var n = 90_000
+  bean.onTransfer = { file, from, realtime in bean.answer(file, from, realtime); bean.more(n) }
+  let one = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
+  _ = error(BeanSync.Gone.self) { try one.session(since: 0, steps: "") }
+  let moves = one.files[bean.open]!.anchors.count
+  check((100...300).contains(moves), true, "1.35 s in steps of 5–9 ms: \(moves)")
+  check((1...3).contains(bean.logs.filter { $0.0 == "bean_clock" }.count), true, "bean_clock \(bean.logs.filter { $0.0 == "bean_clock" }.count)")
+  bean.t += 120_000; n = 12_000
+  let again = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
+  check(again.files[bean.open]!.anchors.map { [$0.0, $0.1] }, one.files[bean.open]!.anchors.map { [$0.0, $0.1] }, "kept in the state file")
+  _ = error(BeanSync.Gone.self) { try again.session(since: 0, steps: "") }
+  check(bean.transfers, [[bean.open, 0, 0], [bean.open, 90_000, 0]])
+  let ps = piecesIn(chunks)
+  check(ps.reduce(Int64(0)) { $0 + $1.n }, 102_000, "each unit once")
+  var worst: Int64 = 0, back: Int64 = 0, end: Int64 = 0
+  for p in ps {
+    let off = abs(p.start - (bean.openAt + p.seq * bean.unitUs / 1000))
+    if (90_000..<102_000).contains(p.seq) { back = max(back, off) } else { worst = max(worst, off) }
+    check(end == 0 || abs(p.start - end) < 10, true, "slice \(slice): piece at \(p.seq) \(p.start - end) ms after the one before")
+    end = p.start + p.n * 20
+  }
+  check(worst <= 60, true, "slice \(slice): live pieces within 60 ms (a minute of 750 ppm) of their time: \(worst) ms")
+  check(back <= 250, true, "slice \(slice): read on return within 0.25 s: \(back) ms")
+  print("drift check, slice \(slice / 50) s: live \(worst) ms, on return \(back) ms, \(ps.count) pieces")
+}
+
+/// A hole of the file being recorded filled later (#230, #187) is dated by the anchors in force at its units, not the
+/// latest: each piece by one of them.
+do {
+  let a = t0 - 80_000
+  let r = rec(80, [(0, 1000), (2000, 4000)], watched: false, units: 1500, anchors: [(1525, a + 300), (2500, a + 900)])
+  _ = session(r, BeanSync.Again.self)
+  check(r.have, [[0, 4000]])
+  let ps = piecesIn(r.chunks)
+  check(ps.reduce(Int64(0)) { $0 + $1.n }, 1000)
+  for p in ps {
+    check(p.start, (p.seq < 1525 ? a : a + 300) + p.seq * 20, "unit \(p.seq)")  // 1525: inside a 50-unit slice
+    check(p.seq < 1525 && p.seq + p.n > 1525, false, "a piece across 1525")
+  }
+  check(r.f.at(2600), a + 900 + 2600 * 20)
 }
 
 print("bean check: all passed")

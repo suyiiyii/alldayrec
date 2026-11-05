@@ -275,7 +275,8 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertEquals(listOf(Triple(t0 / 1000, 0L, false)), bean.transfers)
         val lags = bean.reports.drop(1).map { it["live_lag_s"] }
-        assertEquals("filling the tail at the first two, caught up at the next two", listOf(null, null, 9L, 9L), lags)
+        // units that keep coming as recorded 9 s after their seq says date the file anew (reanchor()): the lag goes
+        assertEquals("filling the tail at the first two, caught up, then dated anew", listOf(null, null, 9L, 0L), lags)
         assertEquals(0, bean.logs.count { it.first == "bean_lag" })
     }
 
@@ -992,20 +993,23 @@ class BeanTest {
 
     /** The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found
      *  it (FakeBean.answer): `units` of it a 1A/07, then the link goes. */
-    private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long) {
+    private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long, val chunks: File) {
         val f get() = sync.files[id]!!
         val reasons get() = bean.logFields.mapNotNull { it["reason"] }
     }
-    private fun rec(s: Long, have: List<Pair<Long, Long>>, watched: Boolean, units: Int = 600, total: Long = -1): Rec {
+    private fun rec(s: Long, have: List<Pair<Long, Long>>, watched: Boolean, units: Int = 600, total: Long = -1,
+                    anchors: List<Pair<Long, Long>> = emptyList()): Rec {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
         val bean = FakeBean(t0)
         bean.openAt = t0 - s * 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.listed[bean.open] = 0
         bean.watched = watched
         val state = File(dir, "state.json")
-        if (have.isNotEmpty()) state.writeText("""{"${bean.open}":{"a":${bean.openAt},"t":$total,"r":0,"h":[${have.joinToString(",") { "[${it.first},${it.second}]" }}]}}""")
+        fun pairs(l: List<Pair<Long, Long>>) = l.joinToString(",", "[", "]") { "[${it.first},${it.second}]" }
+        if (have.isNotEmpty()) state.writeText("""{"${bean.open}":{"a":${bean.openAt},"t":$total,"r":0,"h":${pairs(have)},"p":${pairs(anchors)}}}""")
         bean.onTransfer = { file, from, realtime -> bean.answer(file, from, realtime); bean.more(units) }
-        return Rec(bean, BeanSync("D3200-0A0B", state, File(dir, "chunks"), bean), bean.open)
+        val chunks = File(dir, "chunks")
+        return Rec(bean, BeanSync("D3200-0A0B", state, chunks, bean), bean.open, chunks)
     }
     /** Only the five reads went out: no start (recording), no delete (the file is open). */
     private fun onlyReads(bean: FakeBean) {
@@ -1209,6 +1213,69 @@ class BeanTest {
         assertEquals(400L, r.sync.gap(r.f))
     }
 
+    /** The pieces in the queue: start, first seq, units. */
+    private fun piecesIn(chunks: File) = Uploader.queue(chunks).map { f ->
+        val a = packets(f).drop(2)
+        Triple(Uploader.startMs(f), ByteBuffer.wrap(a.first(), 1, 4).int.toLong(), a.size.toLong())
+    }
+
+    /** #233: a bean whose units take 20.015 ms by the phone's clock (750 ppm slow, as one was for half an hour on
+     *  11-05), live 30 min, the link gone 2 min, then back (the app restarted: the file's anchors from the state file),
+     *  with each slice the app uses (1 s in front, 20 s iOS in the background, 60 s Android with the screen off): each
+     *  live piece within 60 ms of when its first unit was recorded, those read on return (the 2 min and the
+     *  catch-up) by the anchor from before, off by what the bean drifted meanwhile (by seq × 20 ms alone the last were
+     *  1.5 s early); each piece within 10 ms of where the one before ends, so the server's decoder goes on from it
+     *  (audio.before()); bean_clock at most once in 10 min. */
+    @Test fun driftingBeanIsDatedAnew() { for (slice in listOf(50, 1000, 3000)) drifting(slice) }
+    private fun drifting(slice: Int) {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val chunks = File(dir, "chunks"); val state = File(dir, "state.json")
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        bean.slice = slice
+        bean.unitUs = 20_015; bean.openAt = t0 - 1000; bean.open = bean.openAt / 1000; bean.recording = true; bean.listed[bean.open] = 0
+        var n = 90_000
+        bean.onTransfer = { file, from, realtime -> bean.answer(file, from, realtime); bean.more(n) }
+        val one = BeanSync("D3200-0A0B", state, chunks, bean)
+        assertThrows(IOException::class.java) { one.session(0, "") }
+        val moves = one.files[bean.open]!!.anchors.size
+        assertTrue("1.35 s in steps of 5–9 ms: $moves", moves in 100..300)
+        val said = bean.logs.count { it.first == "bean_clock" }
+        assertTrue("bean_clock $said", said in 1..3)
+        bean.now += 120_000; n = 12_000
+        val again = BeanSync("D3200-0A0B", state, chunks, bean)
+        assertEquals("kept in the state file", one.files[bean.open]!!.anchors.map { it.toList() }, again.files[bean.open]!!.anchors.map { it.toList() })
+        assertThrows(IOException::class.java) { again.session(0, "") }
+        assertEquals(listOf(Triple(bean.open, 0L, false), Triple(bean.open, 90_000L, false)), bean.transfers)
+        val ps = piecesIn(chunks)
+        assertEquals("each unit once", 102_000L, ps.sumOf { it.third })
+        var worst = 0L; var back = 0L; var end = 0L
+        for ((start, seq, units) in ps) {
+            val off = kotlin.math.abs(start - (bean.openAt + seq * bean.unitUs / 1000))
+            if (seq in 90_000L until 102_000L) back = maxOf(back, off) else worst = maxOf(worst, off)
+            assertTrue("slice $slice: piece at $seq ${start - end} ms after the one before", end == 0L || kotlin.math.abs(start - end) < 10)
+            end = start + units * 20
+        }
+        assertTrue("slice $slice: live pieces within 60 ms (a minute of 750 ppm) of their time: $worst ms", worst <= 60)
+        assertTrue("slice $slice: read on return within 0.25 s: $back ms", back <= 250)
+    }
+
+    /** A hole of the file being recorded filled later (#230, #187) is dated by the anchors in force at its units, not
+     *  the latest: each piece by one of them. */
+    @Test fun filledHoleKeepsItsAnchor() {
+        val a = 1_793_000_000_000L - 80_000
+        val r = rec(80, listOf(0L to 1000L, 2000L to 4000L), watched = false, units = 1500, anchors = listOf(1525L to a + 300, 2500L to a + 900))
+        assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }
+        assertEquals(listOf(0L, 4000L), r.f.have.single().toList())
+        val ps = piecesIn(r.chunks)
+        assertEquals(1000L, ps.sumOf { it.third })
+        for ((start, seq, units) in ps) {
+            assertEquals("unit $seq", (if (seq < 1525) a else a + 300) + seq * 20, start)  // 1525: inside a 50-unit slice
+            assertFalse("a piece across 1525", seq < 1525 && seq + units > 1525)
+        }
+        assertEquals(a + 900 + 2600 * 20, r.f.at(2600))
+    }
+
     private fun packets(f: File): List<ByteArray> {
         val b = f.readBytes(); val out = mutableListOf<ByteArray>(); var cur = ByteArrayOutputStream(); var p = 0
         while (p < b.size) {
@@ -1301,7 +1368,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
     }
 
     override fun now() = now
-    override fun liveUnits() = 50
+    var slice = 50  // live units a piece (the app's slice)
+    override fun liveUnits() = slice
     override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text; logFields += fields }
     override fun watched() = watched
     val reports = mutableListOf<Map<String, Any?>>()
@@ -1349,16 +1417,17 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var openAt = 0L
     private var next = 0L    // its next unit on the way
     private var nextAt = 0L  // when the last went
+    var unitUs = 20_000L  // how long a unit takes the bean to record by the phone's clock (#233: up to 20.015 ms)
     fun answer(file: Long, from: Long, realtime: Boolean) {
         header(open, 0xFFFFFFFFL)
-        next = if (file != open) 0 else if (realtime) (now - openAt) / Bean.FRAME_MS else from
+        next = if (file != open) 0 else if (realtime) (now - openAt) * 1000 / unitUs else from
         nextAt = now
     }
     /** `n` more of those units, three to a frame. */
     fun more(n: Int) {
         nextAt = maxOf(nextAt, now)
         for (c in (next until next + n).chunked(3)) {
-            val at = maxOf(nextAt + 8L * c.size, openAt + (c.last() + 1) * Bean.FRAME_MS)
+            val at = maxOf(nextAt + 8L * c.size, openAt + (c.last() + 1) * unitUs / 1000)
             units(open, c, wait = at - nextAt, ms = 0)
             nextAt = at
         }
