@@ -381,6 +381,22 @@ def test_two_pipelines_first_one_gone(tmp_path, monkeypatch):
     assert not T().devices[X].standby and not T().devices[Y].standby
 
 
+def test_conversation_lists_who_stood_by_short(store):
+    """A 20 s conversation whose 20 s alone do not correlate (each its own noise in a quiet moment): judged on the
+    WINDOW_S around it, as decide() did."""
+    from alldayrec import routes_api
+    room = walk(23, 1200)
+    put(X, room)
+    put(Y, np.r_[room[:600], walk(24, 40) - 25, room[640:]])
+    c = dict(id="c2", start=core.iso(dt.datetime.fromtimestamp(at(300) / 1000)), end=core.iso(dt.datetime.fromtimestamp(at(320) / 1000)),
+             participants=[], sentences=0, speech_s=0, device=X)
+    with db.tx() as t:
+        db.insert_conversation(t, c)
+        db.record_processed(t, Y, [[at(300), at(320)]], "standby")
+    assert (colocate.correlation(X, Y, at(300), at(320)) or 0) < colocate.R_TOGETHER
+    assert anyio.run(routes_api.conversation, "c2")["standby"] == [Y]
+
+
 def test_conversation_lists_who_stood_by(store):
     from alldayrec import routes_api
     put(X, walk(17, 1200))
