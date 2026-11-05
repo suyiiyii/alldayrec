@@ -81,12 +81,23 @@ async function load() {
     }
     missing.value = false;
     failed.value = null;
-    trackOpen(Date.parse(x.start), Date.parse(x.end), x.device ?? x.rows.find((r) => r.source)?.source ?? "");
+    trackOpen(Date.parse(x.start), Date.parse(x.end), source.value || own.value);
   } catch (e) {
     if (id !== props.id) return;
     if (e instanceof ApiError && e.status === 404) missing.value = true;
     else if (!c.value) failed.value = { msg: (e as Error).message, title: errorTitle(e) };
   }
+}
+
+// the device whose audio the player plays: its own, or one that stood by in the same place (colocate.py: its audio
+// is kept, not transcribed), from where the player is
+const own = computed(() => c.value?.device ?? c.value?.rows.find((r) => r.source)?.source ?? "");
+const source = ref("");
+function playOf(d: string) {
+  const at = track.at;
+  source.value = d === own.value ? "" : d;
+  trackOpen(track.from, track.to, d);
+  trackSeek(at, true);
 }
 
 // 让 AI 做的事 folds to its heading. The summary's topics ("s<i>") show their points until a tap folds them, the live
@@ -204,6 +215,7 @@ watch(
     missing.value = false;
     failed.value = null;
     jumped.value = false;
+    source.value = "";
     aiOpen.value = false;
     flipped.clear();
     sug.value = null;
@@ -650,6 +662,14 @@ async function alias(name: string, of: string) {
       </template>
 
       <template v-else>
+        <div v-for="d in c.standby" :key="d" class="other">
+          <span>{{ t(source === d ? "conv.otherNow" : "conv.other", { d }) }}</span>
+          <button class="btn" @click="playOf(source === d ? own : d)">
+            <Icon name="smartphone" :size="16" />{{
+              source === d ? t("conv.otherBack", { d: own }) : t("conv.otherListen", { d })
+            }}
+          </button>
+        </div>
         <div v-if="share.length" class="card share">
           <div class="bar" aria-hidden="true">
             <span
@@ -1027,6 +1047,21 @@ h3 .fold {
   font-weight: 400;
   font-size: var(--fs-xs);
   color: var(--muted);
+}
+.other {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--fg-2);
+}
+.other .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .share .bar {
   display: flex;

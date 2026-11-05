@@ -168,6 +168,10 @@
     "linkDraining": "Link revoked. A call already in progress may finish; new calls are blocked."
   },
   "conv": {
+    "otherNow": "Playing {d}'s recording",
+    "otherBack": "Back to {d}",
+    "otherListen": "Listen to {d}",
+    "other": "{d} recorded this too",
     "regenerating": "Regenerating the summary",
     "made": "AI summary · {at}, by {model}",
     "madeLive": "AI summary · {at}, by {model}, written by the live analysis",
@@ -307,6 +311,8 @@
     "noEvents": "No events in this period"
   },
   "deviceCard": {
+    "standbyOf": "With {d}: {d} transcribes, this one keeps the audio",
+    "standby": "Standby",
     "behind": "{n} min behind",
     "caughtUp": "Caught up",
     "offline": "Offline",

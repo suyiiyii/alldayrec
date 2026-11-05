@@ -19,7 +19,7 @@ import time
 import numpy as np
 
 from alldayrec import db, late_store
-from alldayrec.audio import ENV_MS
+from alldayrec.audio import ENV_MS, devices
 from alldayrec.late_store import subtract, union
 
 log = logging.getLogger("live")
@@ -228,3 +228,9 @@ def left(device: str, ranges: list) -> list:
                     out += meet([[lo, hi]], done(y, lo, hi))
                     break
     return out
+
+
+def stood_by(device: str, start: str, end: str) -> list[str]:
+    """Recorders other than device that stood by somewhere in [start, end] (iso): their audio of it is kept, to listen to."""
+    a, b = (ms(dt.datetime.fromisoformat(x)) for x in (start, end))
+    return [d for d in devices() if d != device and db.processed(d, a, b, "standby")]

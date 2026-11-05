@@ -379,3 +379,18 @@ def test_two_pipelines_first_one_gone(tmp_path, monkeypatch):
     assert ALL[15:] == [t for t in a if int(t) >= 15], ("X from where Y's audio ended", a)
     assert b and set(b) <= set(ALL[:15]), ("Y: what X stood by for (a final piece is up to 5 min: from the first)", b)
     assert not T().devices[X].standby and not T().devices[Y].standby
+
+
+def test_conversation_lists_who_stood_by(store):
+    from alldayrec import routes_api
+    put(X, walk(17, 1200))
+    put(Y, walk(17, 1200))
+    c = dict(id="c1", start=core.iso(dt.datetime.fromtimestamp(at(100) / 1000)), end=core.iso(dt.datetime.fromtimestamp(at(400) / 1000)),
+             participants=[], sentences=0, speech_s=0, device=X)
+    with db.tx() as t:
+        db.insert_conversation(t, c)
+        db.record_processed(t, Y, [[at(300), at(500)]], "standby")
+    assert anyio.run(routes_api.conversation, "c1")["standby"] == [Y]
+    with db.tx() as t:
+        db.record_processed(t, X, [[at(100), at(400)]], "standby")  # its own does not count
+    assert anyio.run(routes_api.conversation, "c1")["standby"] == [Y]
