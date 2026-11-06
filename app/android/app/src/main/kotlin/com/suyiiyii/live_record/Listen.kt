@@ -14,6 +14,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /** Listening on the phone: the recorder's LIVE records decoded and played here as they come, a few tenths of a second
@@ -165,6 +166,31 @@ class Jitter {
     }
 }
 
+/** The recorder as it is heard: `db` louder, as the server plays it (PLAY_GAIN_DB in server/alldayrec/audio.py, the same
+ *  12 dB: it comes out 11-13 dB quieter than a bean or a phone; this app cannot read the server's setting). Lower only
+ *  where a frame's peaks or its neighbours' would pass -1 dBFS, ramped across each frame: no hard clip, no click; never
+ *  below the frame (squeeze.louder's limiter, a frame at a time; Louder in Listen.swift). A frame waits for the next
+ *  one's peaks: 10 ms later. The line a second (Listener.stats) stays on the frames as they came: it measures the
+ *  recorder. */
+class Louder(db: Double = DB) {
+    companion object {
+        const val DB = 12.0
+        const val PEAK = 0.89 * 32768
+    }
+    private val up = 10.0.pow(db / 20)
+    private var held = ShortArray(0); private var before = 0.0; private var last = 0.0; private var g = 1.0  // the frame held; the peaks of the one before it and its own; the gain at its start
+
+    /** A decoded frame in; the frame before it out, louder. */
+    fun put(x: ShortArray): ShortArray {
+        val p = (x.maxOfOrNull { abs(it.toInt()) } ?: 0).toDouble()
+        val end = (PEAK / maxOf(before, last, p, 1.0)).coerceAtMost(up).coerceAtLeast(1.0)  // the held frame's gain at its end
+        val n = held.size.toDouble()
+        val out = ShortArray(held.size) { i -> (held[i] * (g + (end - g) * (i + 1) / n)).roundToInt().coerceIn(-32768, 32767).toShort() }
+        held = x; before = last; last = p; g = end
+        return out
+    }
+}
+
 /** The system's Opus decoder (MediaCodec audio/opus) for the recorder's frames, one at a time. AOSP's gives 48 kHz:
  *  back to 16 kHz by keeping every third sample (the stream holds nothing above 8 kHz). */
 class OpusDecoder {
@@ -207,6 +233,7 @@ class OpusDecoder {
 class Listen {
     @Volatile var lines: List<Map<String, Any>> = emptyList()  // the last 20 s
     private val jitter = Jitter()
+    private val louder = Louder()
     private val dec = OpusDecoder()
     private val exec = Executors.newSingleThreadExecutor()
     private val track = AudioTrack.Builder()
@@ -224,7 +251,10 @@ class Listen {
             written += b.size
         }
     }
-    private val listener = Listener(dec::decode, { jitter.put(it) + out() }, { lines = (lines + it).takeLast(20); android.util.Log.i("live-record", "listen $it") })
+    private val listener = Listener(dec::decode, { x ->  // the frame goes in after the one Louder held: heard that much later
+        val y = louder.put(x)
+        jitter.put(y) + y.size.toDouble() / Listener.RATE + out()
+    }, { lines = (lines + it).takeLast(20); android.util.Log.i("live-record", "listen $it") })
 
     init {
         track.play()

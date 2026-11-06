@@ -147,6 +147,29 @@ final class Jitter {
   }
 }
 
+/// The recorder as it is heard: `db` louder, as the server plays it (PLAY_GAIN_DB in server/alldayrec/audio.py, the same
+/// 12 dB: it comes out 11-13 dB quieter than a bean or a phone; this app cannot read the server's setting). Lower only
+/// where a frame's peaks or its neighbours' would pass -1 dBFS, ramped across each frame: no hard clip, no click; never
+/// below the frame (squeeze.louder's limiter, a frame at a time). A frame waits for the next one's peaks: 10 ms later.
+/// The line a second (Listener.stats) stays on the frames as they came: it measures the recorder.
+final class Louder {
+  static let db = 12.0, peak = 0.89 * 32768
+  private let up: Double
+  private var held: [Int16] = [], before = 0.0, last = 0.0, g = 1.0  // the frame held; the peaks of the one before it and its own; the gain at its start
+
+  init(db: Double = Louder.db) { up = pow(10, db / 20) }
+
+  /// A decoded frame in; the frame before it out, louder.
+  func put(_ x: [Int16]) -> [Int16] {
+    let p = Double(x.lazy.map { abs(Int($0)) }.max() ?? 0)
+    let end = max(1, min(up, Louder.peak / max(before, last, p, 1)))  // the held frame's gain at its end
+    let n = Double(held.count)
+    let out = held.enumerated().map { i, v in Int16(clamping: Int((Double(v) * (g + (end - g) * Double(i + 1) / n)).rounded())) }
+    held = x; before = last; last = p; g = end
+    return out
+  }
+}
+
 #if canImport(AVFoundation)
 import AVFoundation
 
@@ -203,7 +226,7 @@ final class Listen {
     try session.setCategory(.playback, options: [.mixWithOthers])
     try session.setActive(true)
     let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: Double(Listener.rate), channels: 1, interleaved: false)!
-    let jitter = jitter
+    let jitter = jitter, louder = Louder()
     let src = AVAudioSourceNode(format: fmt) { _, _, n, abl in
       jitter.take(UnsafeMutableAudioBufferListPointer(abl)[0].mData!.assumingMemoryBound(to: Float.self), Int(n))
       return noErr
@@ -215,7 +238,10 @@ final class Listen {
     observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
       try? self?.engine.start()
     }
-    listener = Listener(decode: dec.decode, play: { jitter.put($0) + session.outputLatency + session.ioBufferDuration },
+    listener = Listener(decode: dec.decode, play: {  // the frame goes in after the one Louder held: heard that much later
+                          let y = louder.put($0)
+                          return jitter.put(y) + Double(y.count) / Double(Listener.rate) + session.outputLatency + session.ioBufferDuration
+                        },
                         say: { [weak self] l in
                           Ble.log("listen \(l)")
                           if let self { self.lines = Array((self.lines + [l]).suffix(20)) }
