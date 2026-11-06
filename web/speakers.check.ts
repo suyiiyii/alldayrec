@@ -91,7 +91,7 @@ for (const lang of ["zh", "en"] as const) {
 const hint = (who: string, canon: string, at: string) =>
   ({ who, canon, at, name: canon, kind: "addressed", by: "我", quote: "" }) as const;
 const sug = {
-  names: [hint("S2", "小王", "t1"), hint("S2", "小李", "t2"), hint("S2", "小李", "t3"), hint("S3", "小赵", "t4")],
+  names: [hint("S2", "小王", "t1"), hint("S2", "小李", "t2"), hint("S2", "小李", "t3"), hint("S3", "小赵", "t4"), hint("小王", "王总", "t5")],
   like: [{ who: "S2", name: "小王", score: 0.8 }, { who: "S2", name: "阿杰", score: 0.6 }],
   elsewhere: [{ who: "S2", name: "阿明", convs: 2 }, { who: "S2", name: "阿强", convs: 5 }],
 };

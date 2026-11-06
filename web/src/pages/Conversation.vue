@@ -209,6 +209,8 @@ function open(p: typeof panel.value) {
   panel.value = p;
 }
 
+const sheet = useTemplateRef<HTMLDialogElement>("sheet"); // a speaker's sheet (below)
+
 watch(
   () => props.id,
   async () => {
@@ -222,6 +224,7 @@ watch(
     sug.value = null;
     allMerges.value = false;
     panel.value = "";
+    sheet.value?.close();
     void loadSug();
     await load();
     await nextTick();
@@ -278,7 +281,6 @@ async function sendNote() {
 // renaming one speaker of this conversation, or merging it into another one; either can be undone for 10 s (the
 // server keeps what it changed: POST /api/speakers/undo). In a sheet (a modal <dialog>: Escape or a tap on the dim
 // backdrop closes it), for the label tapped (editing), or "" for the list ⋯ 改名 opens
-const sheet = useTemplateRef<HTMLDialogElement>("sheet");
 const editing = ref(""),
   newName = ref(""),
   names = ref<string[]>([]);
@@ -298,11 +300,15 @@ const labels = computed(() =>
 );
 const canEdit = (p?: string | null) => !!p && labels.value.includes(p);
 async function edit(label: string) {
+  if (label && !canEdit(label)) return; // a sentence's speaker not yet among the participants (still recording)
   menu.value = false;
   editing.value = label;
   newName.value = "";
   error.value = "";
-  if (!sheet.value?.open) sheet.value?.showModal();
+  if (!sheet.value?.open) {
+    sheet.value?.showModal();
+    sheet.value?.focus(); // the sheet, not its ✕ (no focus ring) nor the name box (no keyboard)
+  }
   if (label) names.value = (await get<string[]>("/api/names")).slice(0, 12);
 }
 // 可能是: the names it may have (guesses), a name said here with its sentence to hear
@@ -319,7 +325,7 @@ async function rename(from: string, to: string) {
       `/api/conversation/${props.id}/rename`,
       { from, to },
     );
-    sheet.value?.close();
+    if (editing.value === from) sheet.value?.close(); // not another speaker's sheet opened meanwhile
     toast(
       to === "我"
         ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
@@ -690,6 +696,7 @@ async function alias(name: string, of: string) {
         ref="sheet"
         class="sheet"
         aria-labelledby="sheet-who"
+        tabindex="-1"
         @click.self="sheet?.close()"
       >
         <div class="in">
@@ -738,7 +745,8 @@ async function alias(name: string, of: string) {
               <input
                 v-model="newName"
                 enterkeyhint="done"
-                :placeholder="t('conv.whoIs', { who: speakerLabel(editing) })"
+                maxlength="20"
+                :placeholder="named(editing) ? t('rowMenu.newName') : t('conv.whoIs', { who: speakerLabel(editing) })"
               />
               <button class="btn-primary" :disabled="saving || !newName.trim()">{{ t("conv.save") }}</button>
             </form>
@@ -901,6 +909,7 @@ button.person,
   margin: auto 0 0;
   padding: 0;
   border: 0;
+  outline: none; /* focused as it opens */
   border-radius: 16px 16px 0 0;
   background: var(--surface);
   color: var(--fg);
