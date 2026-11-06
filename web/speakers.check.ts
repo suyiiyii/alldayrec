@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { i18n } from "./src/i18n.ts";
 import {
+  guesses,
   initial,
   labelText,
   likeness,
@@ -84,3 +85,17 @@ for (const lang of ["zh", "en"] as const) {
   );
   assert.deepEqual(rendered.slice(1), requests.slice(1));
 }
+
+// guesses: names said here (most hints first), then the voice it is near, then names from other conversations; one
+// per name, three at most, none for a named label
+const hint = (who: string, canon: string, at: string) =>
+  ({ who, canon, at, name: canon, kind: "addressed", by: "我", quote: "" }) as const;
+const sug = {
+  names: [hint("S2", "小王", "t1"), hint("S2", "小李", "t2"), hint("S2", "小李", "t3"), hint("S3", "小赵", "t4")],
+  like: [{ who: "S2", name: "小王", score: 0.8 }, { who: "S2", name: "阿杰", score: 0.6 }],
+  elsewhere: [{ who: "S2", name: "阿明", convs: 2 }, { who: "S2", name: "阿强", convs: 5 }],
+};
+assert.deepEqual(guesses(sug, "S2"), [{ name: "小李", at: "t2" }, { name: "小王", at: "t1" }, { name: "阿杰" }]);
+assert.deepEqual(guesses({ ...sug, names: [], like: [] }, "S2"), [{ name: "阿强" }, { name: "阿明" }]);
+assert.deepEqual(guesses(sug, "小王"), []);
+assert.deepEqual(guesses(null, "S2"), []);
