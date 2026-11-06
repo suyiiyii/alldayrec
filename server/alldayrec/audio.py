@@ -33,6 +33,7 @@ import numpy as np
 from alldayrec import db
 from alldayrec import late_store
 from alldayrec import perf
+from alldayrec import squeeze
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.tenant import T
@@ -45,6 +46,20 @@ HOLD_MAX_S = 12 * 3600  # total life of one hold boundary, including silence, re
 HOLD_STALE_S = int(os.environ.get("HOLD_STALE_S", "1200"))  # no older audio arriving while the phone keeps saying hold
 _holds = threading.RLock()  # a hold refresh, older-piece arrival and expiry must preserve each other's persisted state
 _append = threading.Lock()  # uploads are saved in threads (threads.MEDIA): one append (and its index row) at a time
+
+
+# Played louder: our recorders (LR-*) come out 11-13 dB quieter than a bean or a phone at the same distance (11-06,
+# the same speech side by side: a fixed gain, not their floor). Their mic gain stays where it is (its full scale is the
+# mic's own overload point: more gain clips in the PDM first) and what is kept and transcribed is as it came; only what
+# is played to someone (/api/audio's WAV, /api/listen) is raised, by louder()'s limiter. 0: as it came
+PLAY_GAIN_DB = float(os.environ.get("PLAY_GAIN_DB", "12"))
+
+
+def played(x: np.ndarray, device: str) -> np.ndarray:
+    """A device's audio as it is played: a recorder's PLAY_GAIN_DB louder, held under -1 dBFS (squeeze.louder); a
+    phone's, a bean's or an import's as it came. One gain, not a level target: the conversation player plays back to
+    back 110 s cuts and the live page 1 s polls, and a gain set by each one's level would jump between them."""
+    return squeeze.louder(x, PLAY_GAIN_DB) if device.startswith("LR-") else x
 
 
 AAC_DELAY = 2112  # samples an AAC encoder puts before the audio (at the iPhone's 16 kHz: 132 ms)
@@ -824,13 +839,13 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> bytes | None:
-    """[a, b] (+0.2 s each side) of one device (any when None) as `fmt` (wav, s16le), or None when no stored audio
-    covers it."""
+    """[a, b] (+0.2 s each side) of one device (any when None) as `fmt`, or None when no stored audio covers it: wav
+    to be played (played(): a recorder's louder), s16le as stored (voiceprints)."""
     a_ms, b_ms = int(a.timestamp() * 1000), int(b.timestamp() * 1000)
     pieces = db.conn().execute(
         "SELECT * FROM pieces WHERE start_ms <= ? AND start_ms + seconds * 1000 >= ? AND (? IS NULL OR device = ?) ORDER BY start_ms",
         (b_ms, a_ms, device, device)).fetchall()
-    xs, end, drop = [], {}, None
+    xs, ds, end, drop = [], [], {}, None
     need = int(((b - a).total_seconds() + 0.4) * SR)
     for p in pieces:
         previous = end.get(p["device"], 0.0)
@@ -862,6 +877,7 @@ def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> 
             if windowed:
                 end[p["device"]] = start + (drop + len(x)) * 1000 / SR
             xs.append(x)
+            ds.append(p["device"])
             need -= len(x)
         drop = 0
         if need <= 0:
@@ -872,7 +888,11 @@ def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> 
     x = np.concatenate(xs)
     if not len(x):
         return None
-    return x.tobytes() if fmt == "s16le" else wav(x)
+    if fmt == "s16le":
+        return x.tobytes()
+    if len(set(ds)) > 1:  # no device asked for and two answered: each piece at its own device's gain
+        return wav(np.concatenate([played(y, d) for y, d in zip(xs, ds)]))
+    return wav(played(x, ds[0]))
 
 
 def wav(x: np.ndarray) -> bytes:
@@ -890,9 +910,9 @@ LISTEN_BACK_S = 30  # a listener asking from further back than this before a dev
 
 def newer(device: str, after: int | None) -> tuple[int, int, np.ndarray] | None:
     """For listening in on a device: its pieces starting after `after` (unix ms; None: its newest piece only), within
-    LISTEN_BACK_S of its newest audio (a page back from the background, a backlog arriving), back to back; with the
-    first one's start and the last one's (the next `after`); each moment once (fresh), also across calls: what the
-    pieces up to `after` covered is not sent again. None when there is none."""
+    LISTEN_BACK_S of its newest audio (a page back from the background, a backlog arriving), back to back and played();
+    with the first one's start and the last one's (the next `after`); each moment once (fresh), also across calls: what
+    the pieces up to `after` covered is not sent again. None when there is none."""
     last = db.conn().execute("SELECT start_ms, seconds FROM pieces WHERE device = ? ORDER BY start_ms DESC LIMIT 1", (device,)).fetchone()
     if last is None:
         return None
@@ -904,7 +924,7 @@ def newer(device: str, after: int | None) -> tuple[int, int, np.ndarray] | None:
         if got := fresh(p, end):
             end = got[0] + len(got[1]) * 1000 / SR
             xs.append(got)
-    return (round(xs[0][0]), ps[-1]["start_ms"], np.concatenate([x for _, x in xs])) if xs else None
+    return (round(xs[0][0]), ps[-1]["start_ms"], played(np.concatenate([x for _, x in xs]), device)) if xs else None
 
 
 if __name__ == "__main__":  # the stream's order, resume point and late pieces, on synthetic tones
@@ -977,6 +997,20 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
     assert len(cut(dt.datetime(2026, 10, 2, 10, 0, 59), dt.datetime(2026, 10, 2, 10, 1, 1), "s16le")) > 2 * SR * 2
     with wave.open(io.BytesIO(cut(dt.datetime(2026, 10, 2, 10, 0, 59), dt.datetime(2026, 10, 2, 10, 1, 1), "wav", "phone"))) as w:
         assert w.getframerate() == SR and abs(w.getnframes() - 2.4 * SR) < 2, w.getnframes()
+    # played louder: a recorder's WAV PLAY_GAIN_DB up, its s16le (voiceprints) and samples() (the pipeline) as stored
+    for d in ("LR-P3-TEST", "D3200-TEST"):
+        assert save(d, M(30), tone(10), "audio/ogg") > 9
+    a_, b_ = dt.datetime(2026, 10, 2, 10, 30, 2), dt.datetime(2026, 10, 2, 10, 30, 6)
+    rms = lambda y: 20 * np.log10(np.sqrt((y.astype(float) ** 2).mean()))
+    for d, up in (("LR-P3-TEST", PLAY_GAIN_DB), ("D3200-TEST", 0)):
+        raw = np.frombuffer(cut(a_, b_, "s16le", d), np.int16)
+        with wave.open(io.BytesIO(cut(a_, b_, "wav", d))) as w:
+            y = np.frombuffer(w.readframes(w.getnframes()), np.int16)
+        assert len(y) == len(raw) and abs(rms(y) - rms(raw) - up) < 0.05, (d, rms(y) - rms(raw))
+        p = db.conn().execute("SELECT * FROM pieces WHERE device = ?", (d,)).fetchone()
+        assert np.array_equal(raw, samples(p)[round(1.8 * SR):round(1.8 * SR) + len(raw)]), "s16le: the stored samples"
+        assert abs(rms(newer(d, None)[2]) - rms(samples(p)) - up) < 0.05, "listening: the same gain"
+    db.conn().execute("DELETE FROM pieces WHERE start_ms = ?", (M(30),))
 
     async def pieces(after, got):  # the stream's pieces into got, one at a time as it hands them out
         s = stream("phone", after)
