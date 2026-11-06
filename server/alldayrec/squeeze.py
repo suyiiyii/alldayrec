@@ -67,22 +67,29 @@ def lift(x: np.ndarray) -> np.ndarray:
     a lecture minute at -47 and -53 dBFS (90th percentile of the frame levels), 218 and 209 with 16 dB more; on the
     GT cases a quiet phone recording went from 42.7 to 35.6 % CER, the others stayed. One gain for all of x (the
     90th percentile of its 10 ms block levels to LIFT_TARGET_DB, 0 to LIFT_MAX_DB): a gain that followed the level
-    every 10 s lifted the quiet stretches of a loud conversation too, CER 8.8 -> 14.2 %. Lower only where a block's
-    peaks or its neighbours' would pass -1 dBFS, ramped from block to block; never below x, the same length: times do
-    not move. x itself when nothing is lifted."""
+    every 10 s lifted the quiet stretches of a loud conversation too, CER 8.8 -> 14.2 %. Raised by louder(): lower at
+    the peaks, never below x, the same length (times do not move)."""
     n = len(x) // BLOCK
     if n == 0 or LIFT_MAX_DB <= 0:
         return x
-    b = x[:n * BLOCK].astype(np.float64).reshape(n, BLOCK)
-    g = np.clip(LIFT_TARGET_DB - np.percentile(10 * np.log10((b * b).mean(1) / 32768 ** 2 + 1e-12), 90), 0, LIFT_MAX_DB)
-    peak = np.abs(b).max(1)
+    b = x[:n * BLOCK].astype(np.float64)
+    return louder(x, np.clip(LIFT_TARGET_DB - np.percentile(10 * np.log10((b * b).reshape(n, BLOCK).mean(1) / 32768 ** 2 + 1e-12), 90), 0, LIFT_MAX_DB))
+
+
+def louder(x: np.ndarray, db: float) -> np.ndarray:
+    """x raised by db (int16 PCM, the same length), lower only where a 10 ms block's peaks or its neighbours' would
+    pass -1 dBFS (LIFT_PEAK), ramped from block to block: no hard clip, no click; never below x. x itself when nothing
+    is raised (db <= 0, under 10 ms, or loud throughout)."""
+    n = len(x) // BLOCK
+    if n == 0 or db <= 0:
+        return x
+    peak = np.abs(x[:n * BLOCK].astype(np.float64).reshape(n, BLOCK)).max(1)
     peak = np.maximum(peak, np.maximum(np.r_[peak[1:], 0], np.r_[0, peak[:-1]]))
-    g = np.clip(np.minimum(g, 20 * np.log10(LIFT_PEAK / np.maximum(peak, 1))), 0, None)
+    g = np.clip(np.minimum(db, 20 * np.log10(LIFT_PEAK / np.maximum(peak, 1))), 0, None)
     if not g.any():
         return x
     ramp = np.interp(np.arange(len(x)), np.arange(n) * BLOCK + BLOCK / 2, 10 ** (g / 20))
     return np.clip(np.round(x * ramp), -32768, 32767).astype(np.int16)
-
 
 def check():
     rng = np.random.default_rng(0)
@@ -136,6 +143,21 @@ def check():
     assert np.abs(lift(clicks).astype(int)).max() <= LIFT_PEAK + 1
     short = talk(-55, 1)
     assert len(lift(short)) == len(short) and lift(short[:100]) is not None
+
+    level = lambda y: 20 * np.log10(np.sqrt((y.astype(float) ** 2).mean()) / 32768)
+    sine = lambda db: np.round(np.sin(2 * np.pi * 440 * np.arange(5 * SR) / SR) * 32767 * 10 ** (db / 20)).astype(np.int16)
+    full = sine(0)
+    assert np.array_equal(louder(full, 12), full), "full scale: no louder, not clipped further"
+    y = louder(sine(-6), 12)
+    assert np.abs(y.astype(int)).max() <= LIFT_PEAK + 1 and np.abs(y.astype(int)).max() >= LIFT_PEAK - 200, "-6 dBFS: up to -1 dBFS, no more"
+    for db in (-40, -60):  # quiet speech and a quiet room's floor: exactly 12 dB up, the floor no more than that
+        x = sine(db) if db == -40 else (rng.normal(size=5 * SR) * 32768 * 10 ** (db / 20)).astype(np.int16)
+        assert abs(level(louder(x, 12)) - level(x) - 12) < 0.05, db
+    burst = sine(-40)
+    burst[2 * SR:2 * SR + 800] = sine(-3)[:800]  # a shout in it: held under -1 dBFS, the rest stays 12 dB up
+    y = louder(burst, 12)
+    assert np.abs(y.astype(int)).max() <= LIFT_PEAK + 1 and abs(level(y[3 * SR:]) - level(burst[3 * SR:]) - 12) < 0.05
+    assert louder(burst, 0) is burst and louder(burst[:100], 12) is not None
 
 
 if __name__ == "__main__":

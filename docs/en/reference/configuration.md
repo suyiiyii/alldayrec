@@ -118,6 +118,7 @@ The server also reads the variables below, which `.env.example` doesn't list. Th
 | `VAD_GAIN_MAX_DB` | `16` | The most dB the VAD's features are raised (this affects only speech detection, not the audio sent to the engine or played back); 0 turns it off | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | The most dB the audio sent to the engine is raised; 0 sends it as is | `squeeze.py` |
 | `DEHUM` | `1` | Removes the recorder's 10 ms periodic hum when its audio is read; 0 turns it off | `audio.py` |
+| `PLAY_GAIN_DB` | `12` | How many dB louder our recorders' audio (devices named `LR-…`) plays on the web and when listening in, held under −1 dBFS (no clipping); phones, beans and imports play as they came. Playback only: storage, transcription and voiceprints are unchanged; 0 turns it off | `audio.py` |
 | `SPEAKER_LINK`, `SPEAKER_SUGGEST`, `MERGE_SUGGEST` | `0.5`, `0.6`, `0.45` | Voiceprint similarity thresholds of the 人物 (People) page: join an anonymous group, suggest a name, suggest merging two labels in the same conversation | `routes_speakers.py` |
 | `DIAR_TH`, `DIAR_JOIN`, `DIAR_GUARD`, `PEOPLE_MIN` | `0.5`, `0.35`, `0.6`, `0.7` | Thresholds for telling speakers apart within a conversation | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | The probability the top candidate needs before the 「哪个是你？」 (Which one is you?) card pops up by itself | `selfvoice.py` |

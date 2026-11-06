@@ -118,6 +118,7 @@ type: reference
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
+| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭 | `audio.py` |
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `DIAR_TH`、`DIAR_JOIN`、`DIAR_GUARD`、`PEOPLE_MIN` | `0.5`、`0.35`、`0.6`、`0.7` | 一段对话内区分说话人的阈值 | `diarist.py` |
 | `SELFVOICE_POP_P` | `0.95` | 「哪个是你？」卡片自动弹出前，第一个候选需要达到的概率 | `selfvoice.py` |
