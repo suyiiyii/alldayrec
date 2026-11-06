@@ -8,6 +8,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.log10
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -100,5 +102,26 @@ class ListenTest {
         j.put(shortArrayOf(7))
         j.take(two)
         assertEquals("ran dry: waits for 0.15 s again", 0, two[0].toInt())
+    }
+
+    /** Heard louder (Louder): 12 dB up a frame later, held under -1 dBFS where it is loud, full scale left as it is. */
+    @Test fun louder() {
+        fun sine(db: Double, k: Int) = ShortArray(160) { i -> (sin(2 * PI * 440 * (k * 160 + i) / 16000) * 32767 * 10.0.pow(db / 20)).roundToInt().toShort() }
+        fun rms(x: ShortArray) = 10 * log10(x.sumOf { it.toDouble() * it } / x.size / (32768.0 * 32768))
+        fun run(frames: List<ShortArray>): ShortArray { val l = Louder(); return (frames + listOf(ShortArray(0))).map(l::put).reduce { a, b -> a + b } }
+        fun join(frames: List<ShortArray>) = frames.reduce { a, b -> a + b }
+        val quiet = (0 until 100).map { sine(-40.0, it) }
+        val y = run(quiet)
+        assertEquals("every frame out, a frame later", 100 * 160, y.size)
+        assertEquals("-40 dBFS: 12 dB up (the first frame ramps up)", 12.0, rms(y.copyOfRange(160, y.size)) - rms(join(quiet.drop(1))), 0.05)
+        val shout = quiet.toMutableList().also { it[50] = sine(-3.0, 50) }  // a shout in it: held under -1 dBFS, the rest 12 dB up
+        val z = run(shout)
+        assertTrue("under -1 dBFS: ${z.maxOf { abs(it.toInt()) }}", z.maxOf { abs(it.toInt()) } <= Louder.PEAK + 1)
+        assertEquals("after it: 12 dB up again", 12.0, rms(z.copyOfRange(60 * 160, z.size)) - rms(join(shout.drop(60))), 0.05)
+        val full = (0 until 20).map { sine(0.0, it) }
+        assertArrayEquals("full scale: as it came, not clipped further", join(full), run(full))
+        assertArrayEquals("short and empty frames: 12 dB up", shortArrayOf(20, -20), run(listOf(ShortArray(0), shortArrayOf(5, -5), ShortArray(0))))
+        val off = Louder(0.0)
+        assertArrayEquals("0 dB: as it came", shortArrayOf(100), off.put(shortArrayOf(100)) + off.put(ShortArray(0)))
     }
 }

@@ -466,6 +466,28 @@ do {
   out.deallocate()
 }
 
+// heard louder (Louder): 12 dB up a frame later, held under -1 dBFS where it is loud, full scale left as it is
+do {
+  let sine = { (db: Double, k: Int) in (0..<160).map { i in Int16((sin(2 * .pi * 440 * Double(k * 160 + i) / 16000) * 32767 * pow(10, db / 20)).rounded()) } }
+  let rms = { (x: [Int16]) in 10 * log10(x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(x.count) / (32768.0 * 32768)) }
+  let peak = { (x: [Int16]) in x.map { abs(Int($0)) }.max() ?? 0 }
+  let run = { (frames: [[Int16]]) -> [Int16] in let l = Louder(); return (frames + [[]]).flatMap(l.put) }
+  let quiet = (0..<100).map { sine(-40, $0) }
+  let y = run(quiet)
+  check(y.count, 100 * 160, "every frame out, a frame later")
+  check(abs(rms(Array(y[160...])) - rms(Array(quiet.dropFirst().joined())) - 12) < 0.05, true, "-40 dBFS: 12 dB up (the first frame ramps up)")
+  var shout = quiet
+  shout[50] = sine(-3, 50)  // a shout in it: held under -1 dBFS, the rest 12 dB up
+  let z = run(shout)
+  check(Double(peak(z)) <= Louder.peak + 1, true, "under -1 dBFS: \(peak(z))")
+  check(abs(rms(Array(z[(60 * 160)...])) - rms(Array(shout[60...].joined())) - 12) < 0.05, true, "after it: 12 dB up again")
+  let full = (0..<20).map { sine(0, $0) }
+  check(run(full) == Array(full.joined()), true, "full scale: as it came, not clipped further")
+  check(run([[], [5, -5], []]), [20, -20], "short and empty frames: 12 dB up")
+  let off = Louder(db: 0)
+  check(off.put([100]) + off.put([]), [100], "0 dB: as it came")
+}
+
 #if canImport(AVFoundation)
 // the decoder (Listen.swift's OpusDecoder, iOS's AudioToolbox; on a Mac the same): 1 kHz at -15 dBFS RMS in 10 ms
 // Opus frames from AudioToolbox's encoder (SILK: it filters out the hum above), decoded a frame at a time, at the level
