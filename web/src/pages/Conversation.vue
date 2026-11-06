@@ -5,8 +5,10 @@
 // like the header's (labelText); ▶ on them plays about 10 s of the sentence they cite, its time opens 原文 there
 // (QuoteAt). 原文: who spoke how much, the sentences, a player at the bottom that keeps the sentence playing lit and in
 // view. The tab is in the query (?tab=transcript) so back and forward step through it; ?at=<time> or #<time> from
-// another page opens 原文 there. Renaming, the speaker suggestions, a new summary and a correction are in the ⋯ menu;
-// a long press on a sentence copies it, stars it or fixes its speaker (RowMenu)
+// another page opens 原文 there. A tap on a speaker's name (the header, 各人要点, a sentence's) opens their sheet: who
+// they may be, a bit of their voice, a name to give them; ⋯ 改名 opens it from a list of them. The speaker
+// suggestions, a new summary and a correction are in the ⋯ menu; a long press on a sentence copies it, stars it or
+// fixes its speaker (RowMenu)
 import {
   computed,
   nextTick,
@@ -45,12 +47,12 @@ import {
   type LiveState,
   type Row,
 } from "../lib/api";
-import { play, player, track, trackClose, trackOpen, trackSeek } from "../lib/audio";
+import { play, player, toggle, track, trackClose, trackOpen, trackSeek } from "../lib/audio";
 import { dayLabel } from "../lib/calendar";
 import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
-import { labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
+import { guesses, labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 import { toast } from "../lib/toast";
 import { markOf } from "../lib/todos";
@@ -200,13 +202,14 @@ const sugCount = computed(() =>
 
 // the ⋯ menu and the panel it opened
 const menu = ref(false),
-  panel = ref<"" | "rename" | "sug" | "note">("");
+  panel = ref<"" | "sug" | "note">("");
 useDismiss(menu, useTemplateRef("more"));
 function open(p: typeof panel.value) {
   menu.value = false;
   panel.value = p;
-  editing.value = "";
 }
+
+const sheet = useTemplateRef<HTMLDialogElement>("sheet"); // a speaker's sheet (below)
 
 watch(
   () => props.id,
@@ -221,6 +224,7 @@ watch(
     sug.value = null;
     allMerges.value = false;
     panel.value = "";
+    sheet.value?.close();
     void loadSug();
     await load();
     await nextTick();
@@ -275,7 +279,8 @@ async function sendNote() {
 }
 
 // renaming one speaker of this conversation, or merging it into another one; either can be undone for 10 s (the
-// server keeps what it changed: POST /api/speakers/undo)
+// server keeps what it changed: POST /api/speakers/undo). In a sheet (a modal <dialog>: Escape or a tap on the dim
+// backdrop closes it), for the label tapped (editing), or "" for the list ⋯ 改名 opens
 const editing = ref(""),
   newName = ref(""),
   names = ref<string[]>([]);
@@ -293,12 +298,26 @@ const people = computed(() => {
 const labels = computed(() =>
   (c.value?.participants ?? []).filter((p) => p !== "我" && p !== "S?"),
 );
+const canEdit = (p?: string | null) => !!p && labels.value.includes(p);
 async function edit(label: string) {
+  if (label && !canEdit(label)) return; // a sentence's speaker not yet among the participants (still recording)
+  menu.value = false;
   editing.value = label;
   newName.value = "";
   error.value = "";
-  names.value = (await get<string[]>("/api/names")).slice(0, 12);
+  if (!sheet.value?.open) {
+    sheet.value?.showModal();
+    sheet.value?.focus(); // the sheet, not its ✕ (no focus ring) nor the name box (no keyboard)
+  }
+  if (label) names.value = (await get<string[]>("/api/names")).slice(0, 12);
 }
+// 可能是: the names it may have (guesses), a name said here with its sentence to hear
+const maybe = computed(() =>
+  guesses(sug.value, editing.value).map((g) => ({
+    ...g,
+    row: g.at ? c.value?.rows[rowAt(starts.value, Date.parse(g.at))] : undefined,
+  })),
+);
 async function rename(from: string, to: string) {
   const merge = !!c.value && (c.value.participants.includes(to) || c.value.rows.some((r) => r.speaker === to));
   await runSpeaker(async () => {
@@ -306,7 +325,7 @@ async function rename(from: string, to: string) {
       `/api/conversation/${props.id}/rename`,
       { from, to },
     );
-    editing.value = "";
+    if (editing.value === from) sheet.value?.close(); // not another speaker's sheet opened meanwhile
     toast(
       to === "我"
         ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
@@ -358,7 +377,7 @@ async function alias(name: string, of: string) {
           <Icon name="more-horizontal" />
         </button>
         <div v-if="menu" class="menu" role="menu">
-          <button role="menuitem" :disabled="!labels.length" @click="open('rename')">
+          <button role="menuitem" :disabled="!labels.length" @click="edit('')">
             <Icon name="user" :size="18" />{{ t("conv.rename") }}
           </button>
           <button role="menuitem" :disabled="!sugCount" @click="open('sug')">
@@ -388,9 +407,9 @@ async function alias(name: string, of: string) {
       </div>
       <div v-if="c.participants.length" class="people">
         <template v-for="p in people.shown" :key="p">
-          <RouterLink v-if="named(p)" class="person" :to="`/p/${encodeURIComponent(p)}`"
-            ><Avatar :name="p" :size="32" />{{ p }}</RouterLink
-          >
+          <button v-if="canEdit(p)" class="person" :class="{ named: named(p) }" @click="edit(p)">
+            <Avatar :name="p" :size="32" />{{ speakerLabel(p) }}
+          </button>
           <span v-else class="person"><Avatar :name="p" :size="32" />{{ speakerLabel(p) }}</span>
         </template>
         <button v-if="people.more" class="btn-ghost more" @click="allPeople = true">
@@ -409,33 +428,6 @@ async function alias(name: string, of: string) {
           >{{ t }}</RouterLink
         >
       </div>
-
-      <section v-if="panel === 'rename'" class="card panel">
-        <div class="phead">
-          <h3>{{ t("conv.rename") }}</h3>
-          <button class="btn-ghost x" :aria-label="t('conv.close')" @click="panel = ''"><Icon name="x" /></button>
-        </div>
-        <div class="rename">
-          <template v-if="!editing">
-            <span class="muted">{{ t("conv.renameWho") }}</span>
-            <button v-for="l in labels" :key="l" class="chip" @click="edit(l)">{{ speakerLabel(l) }}</button>
-          </template>
-          <template v-else>
-            <button v-if="anon(editing)" :disabled="saving" @click="rename(editing, '我')">
-              {{ t("speaker.isMe") }}
-            </button>
-            <input
-              v-model="newName"
-              :placeholder="t('conv.whoIs', { who: speakerLabel(editing) })"
-              autofocus
-              @keydown.enter="save"
-            />
-            <button :disabled="saving || !newName.trim()" @click="save">{{ t("conv.save") }}</button>
-            <button class="btn-ghost" @click="editing = ''">{{ t("conv.cancel") }}</button>
-            <button v-for="n in names" :key="n" class="chip" @click="newName = n">{{ n }}</button>
-          </template>
-        </div>
-      </section>
 
       <section v-if="panel === 'sug' && sug" class="card panel sug">
         <div class="phead">
@@ -610,7 +602,8 @@ async function alias(name: string, of: string) {
             <div v-for="p in s.people" :key="p.who" class="points-of">
               <div class="who">
                 <Avatar :name="p.who" />
-                <RouterLink v-if="named(p.who)" :to="`/p/${encodeURIComponent(p.who)}`">{{ p.who }}</RouterLink>
+                <button v-if="canEdit(p.who)" class="name" @click="edit(p.who)">{{ speakerLabel(p.who) }}</button>
+                <RouterLink v-else-if="named(p.who)" :to="`/p/${encodeURIComponent(p.who)}`">{{ p.who }}</RouterLink>
                 <span v-else>{{ speakerLabel(p.who) }}</span>
               </div>
               <ul class="points">
@@ -693,11 +686,79 @@ async function alias(name: string, of: string) {
               :hit="hit === g.r.start"
               :seek="seekRow"
               :menu="press"
+              :who="edit"
             />
-            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" />
+            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" :who="edit" />
           </template>
         </div>
       </template>
+      <dialog
+        ref="sheet"
+        class="sheet"
+        aria-labelledby="sheet-who"
+        tabindex="-1"
+        @click.self="sheet?.close()"
+      >
+        <div class="in">
+          <div class="phead">
+            <h3 id="sheet-who">
+              <template v-if="editing"><Avatar :name="editing" :size="40" />{{ speakerLabel(editing) }}</template>
+              <template v-else>{{ t("conv.rename") }}</template>
+            </h3>
+            <button class="btn-ghost x" :aria-label="t('conv.close')" @click="sheet?.close()"><Icon name="x" /></button>
+          </div>
+          <div v-if="!editing" class="line">
+            <span class="muted">{{ t("conv.renameWho") }}</span>
+            <button v-for="l in labels" :key="l" class="chip" @click="edit(l)">
+              <Avatar :name="l" :size="20" />{{ speakerLabel(l) }}
+            </button>
+          </div>
+          <template v-else>
+            <div v-if="maybe.length" class="line">
+              <span class="muted">{{ t("conv.maybe") }}</span>
+              <span v-for="g in maybe" :key="g.name" class="guess">
+                <button :disabled="saving" @click="rename(editing, g.name)">{{ g.name }}</button>
+                <button
+                  v-if="g.row"
+                  class="btn-ghost at"
+                  :title="t('conv.hear')"
+                  @click="toggle(g.row)"
+                >
+                  <Icon :name="player.playing === g.row.id ? 'square' : 'play'" :size="12" />{{ hhmmss(g.row.start) }}
+                </button>
+              </span>
+            </div>
+            <div class="line">
+              <button v-if="sug?.clips[editing]" class="btn" @click="hear(editing)">
+                <Icon :name="player.playing === `${id}|${editing}` ? 'square' : 'play'" :size="14" />{{
+                  player.playing === `${id}|${editing}` ? t("conv.stop") : t("conv.hearSome")
+                }}
+              </button>
+              <button v-if="anon(editing)" :disabled="saving" @click="rename(editing, '我')">
+                {{ t("speaker.isMe") }}
+              </button>
+              <RouterLink v-if="named(editing)" class="btn" :to="`/p/${encodeURIComponent(editing)}`">
+                {{ t("conv.profile") }}
+              </RouterLink>
+            </div>
+            <form class="line" @submit.prevent="newName.trim() && save()">
+              <input
+                v-model="newName"
+                enterkeyhint="done"
+                maxlength="20"
+                :placeholder="named(editing) ? t('rowMenu.newName') : t('conv.whoIs', { who: speakerLabel(editing) })"
+              />
+              <button class="btn-primary" :disabled="saving || !newName.trim()">{{ t("conv.save") }}</button>
+            </form>
+            <div v-if="names.length" class="line">
+              <template v-for="n in names" :key="n">
+                <button v-if="n !== editing" class="chip" @click="newName = n">{{ n }}</button>
+              </template>
+            </div>
+            <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
+          </template>
+        </div>
+      </dialog>
       <!-- on 摘要 too: a fix's 撤销, tapped after a switch to it, still reloads the page -->
       <RowMenu ref="rowMenu" @changed="reload" />
       <!-- on 摘要 too while it plays: what plays can always be stopped -->
@@ -791,7 +852,21 @@ h1 {
   font-size: var(--fs-sm);
   color: var(--fg-2);
 }
-a.person {
+/* a name: a button that reads as the name (a tap opens their sheet) */
+button.person,
+.points-of .name {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+.points-of .name {
+  color: inherit;
+}
+.person.named {
   color: var(--fg);
 }
 .people .more {
@@ -826,18 +901,81 @@ a.person {
   padding: 0;
   color: var(--muted);
 }
-.rename {
+/* a speaker's sheet: from the bottom edge on a phone, a card in the middle on a wide screen; .in fills the dialog, so
+   a tap on the dialog itself is one on the backdrop */
+.sheet {
+  width: 100%;
+  max-width: none;
+  margin: auto 0 0;
+  padding: 0;
+  border: 0;
+  outline: none; /* focused as it opens */
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  color: var(--fg);
+}
+@media (min-width: 601px) {
+  .sheet {
+    max-width: 420px;
+    margin: auto;
+    border-radius: 16px;
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
+  .sheet[open] {
+    animation: up 0.2s ease-out;
+  }
+}
+@keyframes up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet::backdrop {
+  background: rgb(0 0 0 / 0.4);
+}
+.sheet .in {
+  padding: var(--space-4) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
+}
+.sheet h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
   font-size: var(--fs-sm);
 }
-.rename input {
-  border-color: var(--accent);
-  min-height: 36px;
+.line + .line {
+  margin-top: var(--space-3);
+}
+.line .chip {
+  gap: 6px;
+}
+.guess {
+  display: inline-flex;
+  align-items: center;
+}
+.line .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.line input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
   padding: 0 10px;
-  width: 9em;
+}
+.line input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.sheet .bad {
+  margin: var(--space-3) 0 0;
 }
 .note textarea {
   display: block;

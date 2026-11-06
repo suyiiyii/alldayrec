@@ -12,8 +12,9 @@ import Icon from "./Icon.vue";
 // the row play from this sentence on; without it ▶ plays the sentence alone. caption: the live page's large text under
 // the speaker; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
 // long press or a right click on the row opens the page's RowMenu there; on a touch screen the row's text is not
-// selectable (no callout, no loupe: its 复制 copies it), with a mouse it still is
-const { row, seek, menu } = defineProps<{
+// selectable (no callout, no loupe: its 复制 copies it), with a mouse it still is. who: a tap on the speaker (not 我,
+// not 未识别) opens the page's sheet for them
+const { row, seek, menu, who } = defineProps<{
   row: Row;
   hit?: boolean;
   media?: boolean;
@@ -21,6 +22,7 @@ const { row, seek, menu } = defineProps<{
   caption?: boolean;
   now?: boolean;
   menu?: (r: Row, x: number, y: number) => void;
+  who?: (speaker: string) => void;
 }>();
 // a tap, not the end of selecting text to copy
 const tap = () => seek && !getSelection()?.toString() && seek(row);
@@ -62,6 +64,13 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
     </div>
     <div class="spk" :class="{ me: row.speaker === '我' }">
       <template v-if="now && !row.speaker">{{ t("transcriptRow.speaking") }}</template>
+      <button
+        v-else-if="who && row.speaker && row.speaker !== '我' && row.speaker !== 'S?'"
+        class="name"
+        @click.stop="who(row.speaker)"
+      >
+        <Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}
+      </button>
       <template v-else><Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}</template>
     </div>
     <div v-if="row.error" class="text err" :title="row.error">{{ t("transcriptRow.noText") }}</div>
@@ -127,6 +136,18 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
   min-height: 26px;
   font-size: var(--fs-sm);
   color: var(--fg-2);
+}
+.spk .name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
 }
 .spk.me {
   color: var(--accent);
