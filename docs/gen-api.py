@@ -92,6 +92,7 @@ type: reference
 - 请求体是原始字节、不在 OpenAPI 里的：`POST /api/chunks` 的请求体是一个完整的音频文件，`POST /api/firmware` 的请求体是一个固件包。
 - 返回的内容：表里只有请求。上传录音时用到的两个：`POST /api/chunks` 返回 `{{"seconds": 这块的秒数, "slice": {{…}}}}`，`GET /api/client-config` 返回 `{{"slice": {{…}}}}`。`slice` 是 App 现在每块音频该切的秒数（`foreground`、`background`、`screenOff`）；实时页 `/live` 开着时，`background` 和 `screenOff` 不超过 `SLICE_WATCHED_S`（见[配置](./configuration.md)）。
 - `GET /ws`：WebSocket，服务器向网页推送这个租户的更新。
+- `GET /api/ask/voice/ws`：WebSocket，说出的问题边说边识别。网页发二进制消息（16 kHz 单声道 int16 PCM，小端，约每 0.1 秒一块），松手时发 `{{"type": "end"}}`，要取消就直接关掉连接；服务器推回 `{{"type": "partial", "text"}}`（到目前为止听到的字），最后一条 `{{"type": "final", "text"}}`（没听到字时为空）或 `{{"type": "error", "error"}}`，然后关闭。最多 60 秒音频。
 - 网页本身的路由（`/`、`/live`、`/conversations` 等）和 `/assets/*`，见[网页与 App](./web-and-app.md)。
 
 ## 接口
@@ -125,6 +126,7 @@ the server's OpenAPI. Each description is the first sentence of the endpoint fun
 - Bodies of raw bytes, which OpenAPI does not describe: the body of `POST /api/chunks` is one whole audio file, the body of `POST /api/firmware` a firmware package.
 - What the endpoints answer: the tables give only the requests. The two used when uploading audio: `POST /api/chunks` answers `{{"seconds": the piece's seconds, "slice": {{…}}}}`, `GET /api/client-config` answers `{{"slice": {{…}}}}`. `slice` holds the seconds per piece the apps cut now (`foreground`, `background`, `screenOff`); while the 实时 (Live) page `/live` is open, `background` and `screenOff` are at most `SLICE_WATCHED_S` (see [Configuration](./configuration.md)).
 - `GET /ws`: a WebSocket on which the server pushes the tenant's updates to the web pages.
+- `GET /api/ask/voice/ws`: a WebSocket that hears a spoken question while it is said. The page sends binary messages (16 kHz mono int16 PCM, little-endian, a block about every 0.1 s) and `{{"type": "end"}}` when the user lets go, or just closes the socket to drop it; the server pushes `{{"type": "partial", "text"}}` (the words so far), then one `{{"type": "final", "text"}}` (empty when nothing was heard) or `{{"type": "error", "error"}}`, and closes. 60 seconds of audio at most.
 - The web app's own routes (`/`, `/live`, `/conversations` and so on) and `/assets/*`: see [Web pages and app settings](./web-and-app.md).
 
 ## Endpoints

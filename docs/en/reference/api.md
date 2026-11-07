@@ -22,6 +22,7 @@ the server's OpenAPI. Each description is the first sentence of the endpoint fun
 - Bodies of raw bytes, which OpenAPI does not describe: the body of `POST /api/chunks` is one whole audio file, the body of `POST /api/firmware` a firmware package.
 - What the endpoints answer: the tables give only the requests. The two used when uploading audio: `POST /api/chunks` answers `{"seconds": the piece's seconds, "slice": {…}}`, `GET /api/client-config` answers `{"slice": {…}}`. `slice` holds the seconds per piece the apps cut now (`foreground`, `background`, `screenOff`); while the 实时 (Live) page `/live` is open, `background` and `screenOff` are at most `SLICE_WATCHED_S` (see [Configuration](./configuration.md)).
 - `GET /ws`: a WebSocket on which the server pushes the tenant's updates to the web pages.
+- `GET /api/ask/voice/ws`: a WebSocket that hears a spoken question while it is said. The page sends binary messages (16 kHz mono int16 PCM, little-endian, a block about every 0.1 s) and `{"type": "end"}` when the user lets go, or just closes the socket to drop it; the server pushes `{"type": "partial", "text"}` (the words so far), then one `{"type": "final", "text"}` (empty when nothing was heard) or `{"type": "error", "error"}`, and closes. 60 seconds of audio at most.
 - The web app's own routes (`/`, `/live`, `/conversations` and so on) and `/assets/*`: see [Web pages and app settings](./web-and-app.md).
 
 ## Endpoints
@@ -211,11 +212,17 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `POST` | A question about my own past answered from this app's data (ask.py), in 10-30 s: {answer, sources, calls, usage}. | body: JSON object |
 
+### `/api/ask/live/{device}`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | A question said to the device (its button held, then let go) between `start` and `end`, unix ms on the clock of its /api/chunks pieces: {id} at once; its words are taken from the device's live transcript, the answer streamed on /ws as type `ask` (ask.live). | `device` (path, string)<br>body: JSON object |
+
 ### `/api/ask/voice`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. | — |
+| `POST` | Deprecated: the page streams its PCM on the WebSocket /api/ask/voice/ws since 2026-11; kept for pages cached before. | — |
 
 ### `/mcp`
 

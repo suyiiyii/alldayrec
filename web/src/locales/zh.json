@@ -50,6 +50,7 @@
       "no_open_conversation": "没有进行中的对话",
       "no_new_speech": "没有新的语音",
       "bad_audio": "没录到能听的声音，再说一次",
+      "asr_failed": "语音识别失败，再说一次",
       "mcp_link_limit": "最多保留 20 条 AI 连接网址，请先作废一条旧网址"
     }
   },
@@ -933,6 +934,8 @@
     "tooShort": "说话时间太短",
     "notHeard": "没听清，再说一次",
     "noMic": "用不了麦克风，先打字吧",
+    "netLost": "网络断了，没发出去，再说一次",
+    "micDenied": "没有麦克风权限：在系统设置里允许后再试，或者先打字",
     "typeInstead": "打字",
     "talkInstead": "说话",
     "askByVoice": "说出问题",

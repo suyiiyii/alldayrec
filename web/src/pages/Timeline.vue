@@ -145,11 +145,12 @@ function ask(text: string) {
 // stays. No microphone (a page over plain http, an old WebView), or the online demo (src/demo.ts): the text box alone
 const canTalk =
   import.meta.env.MODE !== "demo" &&
-  typeof MediaRecorder !== "undefined" &&
+  typeof AudioContext !== "undefined" &&
   !!navigator.mediaDevices?.getUserMedia;
 const mode = localStorage.askMode ?? (matchMedia("(pointer: coarse)").matches ? "voice" : "text");
 const talk = ref(canTalk && mode === "voice"),
-  hint = ref("");
+  hint = ref(""),
+  said = ref(""); // the words heard so far: the search box's placeholder, the sheet's top line
 // focus inside the tap itself: iOS raises the keyboard only for a focus() in the user's gesture
 function openSheet() {
   hint.value = "";
@@ -401,10 +402,11 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <RouterLink class="cal" to="/calendar">{{ t("title.calendar") }}</RouterLink>
         </DayPicker>
         <div class="q">
-          <input v-model.trim="q" type="search" :placeholder="t('timeline.search')" />
+          <input v-model.trim="q" type="search" :placeholder="said || t('timeline.search')" />
           <AskVoice
             v-if="canTalk"
             toggle
+            @said="(s) => (said = s)"
             @heard="(s) => (s ? askAI(s) : ((question = ''), (askErr = t('timeline.notHeard'))))"
             @fail="(why) => ((question = ''), (askErr = why))"
           />
@@ -515,13 +517,20 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         @close="fab?.focus()"
       >
         <form @submit.prevent="ask(sq)">
+          <p v-if="said" class="said">{{ said }}</p>
           <div class="chips">
             <button v-for="s in SUGGEST" :key="s" type="button" class="chip" @click="ask(s)">
               {{ s }}
             </button>
           </div>
           <div class="row">
-            <AskVoice v-if="talk" @heard="heard" @fail="talkFailed" @pointerdown="hint = ''" />
+            <AskVoice
+              v-if="talk"
+              @heard="heard"
+              @said="(s) => (said = s)"
+              @fail="talkFailed"
+              @pointerdown="hint = ''"
+            />
             <input
               v-show="!talk"
               ref="input"
@@ -784,6 +793,10 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 }
 .sheet form:has(.rec) .chips {
   visibility: hidden; /* under 松手发送，上移取消 */
+}
+/* the words heard so far while it is said: the question's bubble, the sheet growing upward with them */
+.sheet .said {
+  font-size: var(--fs-lg);
 }
 .sheet .hint {
   margin: var(--space-2) 0 0;

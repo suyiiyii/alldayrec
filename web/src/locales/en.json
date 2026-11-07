@@ -50,6 +50,7 @@
       "no_open_conversation": "No conversation is going on",
       "no_new_speech": "No new speech yet",
       "bad_audio": "That recording could not be played. Say it again",
+      "asr_failed": "Speech recognition failed. Say it again",
       "mcp_link_limit": "You can keep 20 AI connection links. Revoke an old link first"
     }
   },
@@ -933,6 +934,8 @@
     "tooShort": "Too short",
     "notHeard": "Didn't catch that. Say it again",
     "noMic": "No microphone here. Type instead",
+    "netLost": "Connection lost, nothing was sent. Say it again",
+    "micDenied": "No permission to use the microphone: allow it in Settings and try again, or type instead",
     "typeInstead": "Type",
     "talkInstead": "Talk",
     "askByVoice": "Ask by voice",

@@ -194,7 +194,7 @@ def routes() -> set[tuple[str, str]]:
 
 
 def test_every_route():
-    missing = [r for r in routes() if r not in REQUESTS and r[1] not in SHARED and r != ("WS", "/ws")]
+    missing = [r for r in routes() if r not in REQUESTS and r[1] not in SHARED and r not in (("WS", "/ws"), ("WS", "/api/ask/voice/ws"))]  # test_websocket
     assert not missing, f"routes without an isolation check (REQUESTS) or a reason (SHARED): {sorted(missing)}"
 
 
@@ -285,8 +285,8 @@ def test_health(two):
     assert c.get("/api/status").status_code == 401
 
 
-def test_websocket(two):
-    """Each page gets its own tenant's pushes; a watch is its tenant's."""
+def test_websocket(two, monkeypatch):
+    """Each page gets its own tenant's pushes; a watch is its tenant's; a question said aloud is its tenant's call."""
     a, b = two
     c = TestClient(server.app)  # no `with`: the lifespan (the tenants' loops) does not start
     with c.websocket_connect("/ws", headers={"Authorization": "Bearer ta"}) as wa, \
@@ -302,6 +302,17 @@ def test_websocket(two):
         assert wb.receive_json() == {"type": "event", "text": "MARKb"}
     assert a.watch_until > 0 and a.wake_at > 0 and b.watch_until == 0 and b.wake_at == 0
     assert not a.clients and not b.clients, "gone when they close"
+    monkeypatch.setattr(asr, "ENGINE", "local")  # a question said aloud: heard whole (no stream), in its tenant's calls table
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "fake")
+    async def engine(x, partial=None):
+        return [{"start_ms": 0, "end_ms": 1, "text": "嗯"}]
+    monkeypatch.setitem(asr.PROVIDERS, "fake", engine)
+    with c.websocket_connect("/api/ask/voice/ws", headers={"Cookie": "token=tb"}) as w:
+        w.send_bytes(bytes(3200))
+        w.send_json({"type": "end"})
+        assert w.receive_json() == {"type": "final", "text": "嗯"}
+    voice = lambda t: tenant.call(t, lambda: db.conn().execute("SELECT count(*) FROM calls WHERE engine = 'fake'").fetchone()[0])
+    assert (voice(a), voice(b)) == (0, 1)
     with pytest.raises(Exception):
         with c.websocket_connect("/ws", headers={"Authorization": "Bearer nobody"}):
             pass
