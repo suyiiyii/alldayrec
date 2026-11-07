@@ -6,6 +6,7 @@ import DeviceCard from "../components/DeviceCard.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
 import { lang, setLang, t, type Lang } from "../i18n";
 import { engines, get, hhmm, post, type Due, type Recorder, type Status } from "../lib/api";
+import { inApp } from "../lib/app";
 import { dayLabel } from "../lib/calendar";
 import { useSocket } from "../lib/socket";
 import { speakerLabel } from "../lib/speakers";
@@ -57,9 +58,12 @@ const LINKS = computed(() => {
     { to: "/import", icon: "upload", title: t("me.import"), sub: t("me.importSub") },
   ];
   // the online demo (src/demo.ts) has no phone, AI service or recorder to connect and takes no uploads: 待办 and 处理进度 only
+  // in the app the phone is connected already: 连接手机 is for another one, from a browser
   return import.meta.env.MODE === "demo"
     ? all.filter((l) => l.to === "/todos" || l.to === "/progress")
-    : all;
+    : inApp
+      ? all.filter((l) => l.to !== "/connect")
+      : all;
 });
 
 // the page's language, kept in this browser; the server's too: the models write summaries, recaps and answers in it

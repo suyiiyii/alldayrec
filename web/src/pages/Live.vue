@@ -20,6 +20,7 @@ import {
   type Row,
 } from "../lib/api";
 import { t } from "../i18n";
+import { hasNative, inApp, openNative } from "../lib/app";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
@@ -294,7 +295,15 @@ function jump(start: string) {
           <div>
             <b>{{ t("live.idle") }}</b>
             <div class="muted">
-              {{ t(status?.recorders?.length ? "live.idleWear" : "live.idleConnect") }}
+              {{
+                t(
+                  status?.recorders?.length
+                    ? "live.idleWear"
+                    : inApp
+                      ? "live.idleStart"
+                      : "live.idleConnect",
+                )
+              }}
             </div>
           </div>
         </div>
@@ -303,18 +312,29 @@ function jump(start: string) {
           <b>{{ convLink(last) }}</b>
           <Icon name="chevron-right" :size="18" />
         </RouterLink>
-        <!-- the app records from its own top bar: no page recorder inside it; nor inside /record's captions (a frame) -->
-        <template v-if="!framed">
+        <!-- the app records with its own recorder, through its channel (lib/app.ts); an older app from its top bar (the
+             hint): no page recorder inside it; nor inside /record's captions (a frame) -->
+        <button v-if="hasNative() && !framed" class="btn btn-primary" @click="openNative('record')">
+          <Icon name="mic" :size="18" />{{ t("live.recordHere") }}
+        </button>
+        <template v-else-if="!framed">
           <RouterLink class="btn btn-primary rec" to="/record"
             ><Icon name="mic" :size="18" />{{ t("live.recordHere") }}</RouterLink
           >
           <p class="in-app-hint muted">{{ t("live.inAppHint") }}</p>
         </template>
-        <RouterLink v-if="!status?.recorders?.length" class="card last" to="/connect">
-          <Icon name="smartphone" :size="20" />
-          <b>{{ t("live.connectRecorder") }}</b>
-          <Icon name="chevron-right" :size="18" />
-        </RouterLink>
+        <template v-if="!status?.recorders?.length">
+          <button v-if="hasNative()" class="card last" @click="openNative('add-recorder')">
+            <Icon name="link" :size="20" />
+            <b>{{ t("timeline.addRecorder") }}</b>
+            <Icon name="chevron-right" :size="18" />
+          </button>
+          <RouterLink v-else-if="!inApp" class="card last" to="/connect">
+            <Icon name="smartphone" :size="20" />
+            <b>{{ t("live.connectRecorder") }}</b>
+            <Icon name="chevron-right" :size="18" />
+          </RouterLink>
+        </template>
       </section>
       <div v-else-if="ready && !rows.length && !live" class="empty">
         <Icon name="calendar" :size="48" />{{ t("live.empty") }}
@@ -418,6 +438,12 @@ function jump(start: string) {
   align-items: center;
   gap: var(--space-2);
   color: var(--fg);
+}
+button.last {
+  width: 100%;
+  border: 0;
+  font-size: inherit;
+  text-align: start;
 }
 .last b {
   flex: 1;

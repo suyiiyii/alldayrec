@@ -56,7 +56,7 @@ const monthLabel = (m: string) =>
     <div v-else-if="!months.length" class="empty">
       <Icon name="calendar" :size="48" />
       <div>{{ t("calendar.none") }}</div>
-      <RouterLink class="btn btn-primary" to="/connect">{{ t("title.connect") }}</RouterLink>
+      <RouterLink class="btn btn-primary" to="/">{{ t("timeline.getStarted") }}</RouterLink>
     </div>
   </main>
 </template>
