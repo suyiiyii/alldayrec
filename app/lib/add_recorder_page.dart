@@ -123,11 +123,24 @@ class _AddRecorderPageState extends State<AddRecorderPage> {
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 32), children: [
         if (perms['bluetoothOn'] == false)
           Padding(padding: const EdgeInsets.only(top: 12), child: Text(l.bluetoothOff, style: TextStyle(color: cs.error))),
-        if (['bluetooth', 'notifications', 'battery'].any((k) => perms.isNotEmpty && perms[k] != true))
+        if (['bluetooth', 'notifications', 'battery'].any((k) => perms.isNotEmpty && perms[k] != true) || perms['xiaomi'] == false)
           sectionCard(context, l.permissions, Column(children: [
             perm('bluetooth', Platform.isIOS ? l.permBluetooth : l.permNearbyDevices, l.permBluetoothWhy),
             perm('notifications', l.permNotifications, l.permNotificationsWhy),
             perm('battery', l.permBackground, l.permBackgroundWhy),
+            // a Xiaomi phone's cleanup force-stops the app: nothing tells whether it is locked, the person says so
+            if (perms['xiaomi'] == false) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.error_outline_rounded, color: cs.error),
+                title: Text(l.permXiaomi),
+                subtitle: Text(l.xiaomiLockHow),
+              ),
+              Align(alignment: AlignmentDirectional.centerEnd, child: Wrap(spacing: 8, children: [
+                xiaomiButtons(l),
+                TextButton(onPressed: () => Recorder.askPermission('xiaomi').then((_) => _tick()), child: Text(l.xiaomiDone)),
+              ])),
+            ],
           ])),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
