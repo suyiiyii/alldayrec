@@ -197,7 +197,7 @@ async def ask_voice_ws(ws: WebSocket):
     received. Nothing kept."""
     await ws.accept()
     cap = VOICE_MAX_S * audio.SR * 2
-    pcm, said, out = bytearray(), {}, {}
+    pcm, said, out = bytearray(), [""], {}  # the sentences ended, then the one being said
     streams = bool({asr.ENGINE, asr.DRAFT_ENGINE, asr.ENGINE_FALLBACK} & {"qwen", "qwen-stream"})
     tx, rx = anyio.create_memory_object_stream(float("inf"))  # bounded by cap: what the page sends, to the stream
     done = anyio.Event()
@@ -213,7 +213,9 @@ async def ask_voice_ws(ws: WebSocket):
                     await s.finish()
                 tg.start_soon(feed)
                 async for g in s.results():
-                    said[g["start_ms"]] = g["text"]
+                    said[-1] = g["text"]  # a sentence's begin_time moves as it grows: not a key
+                    if g["final"]:
+                        said.append("")
                     await ws.send_json({"type": "partial", "text": joined()})
                 tg.cancel_scope.cancel()
             out["text"] = joined()
@@ -224,7 +226,7 @@ async def ask_voice_ws(ws: WebSocket):
             rx.close()  # a failed stream takes no more audio
             done.set()
 
-    joined = lambda: local_asr.text([" " + said[k] for k in sorted(said)])  # sentences as words: CJK joined, English spaced
+    joined = lambda: local_asr.text([" " + x for x in said if x])  # sentences as words: CJK joined, English spaced
     async with anyio.create_task_group() as tg:
         if streams:
             tg.start_soon(stream)

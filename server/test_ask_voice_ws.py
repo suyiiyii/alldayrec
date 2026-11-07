@@ -23,8 +23,8 @@ CHUNK = np.full(SR // 10, 3000, np.int16).tobytes()  # 0.1 s, as the page sends 
 
 
 class Fake:
-    """qwen_stream.Session's interface: a partial per send, two sentences once finished; `mode` fail: fails after the
-    first audio; hang: never finishes."""
+    """qwen_stream.Session's interface: a partial per send, two sentences once finished; the first sentence's begin_time
+    moves as it grows, as Bailian's does; `mode` fail: fails after the first audio; hang: never finishes."""
     mode = "ok"
     opened: list["Fake"] = []
 
@@ -40,7 +40,8 @@ class Fake:
         self.got += len(pcm)
         if Fake.mode == "fail":
             raise RuntimeError("qwen stream: InternalError")
-        await self.tx.send({"start_ms": 0, "end_ms": 0, "text": "你好" if self.got < 6 * len(CHUNK) else "你好，我", "final": False})
+        early = self.got < 6 * len(CHUNK)
+        await self.tx.send({"start_ms": 80 if early else 120, "end_ms": 0, "text": "你好" if early else "你好，我", "final": False})
 
     async def finish(self):
         if Fake.mode != "hang":
@@ -95,10 +96,12 @@ def calls(c) -> list[tuple]:
 
 
 def test_stream(c):
-    """Words as they grow, then the whole text; the session closed; one call, 2 s received."""
+    """Words as they grow, each sentence once though its begin_time moved, then the whole text; the session closed; one
+    call, 2 s received."""
     got = say(c, 20)
     partials = [m["text"] for m in got if m["type"] == "partial"]
     assert partials[0] == "你好" and "你好，我" in partials, "the words grow while it is said"
+    assert not any("你好你好" in p for p in partials), "a sentence said once is shown once"
     assert got[-1] == {"type": "final", "text": "你好，我。 Bob 呢？"}
     assert len(Fake.opened) == 1 and Fake.opened[0].got == 20 * len(CHUNK) and Fake.opened[0].closed
     assert calls(c) == [("voice", "qwen-stream", None, 2.0)] and not c.heard
