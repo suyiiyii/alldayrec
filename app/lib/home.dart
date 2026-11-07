@@ -123,6 +123,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       _slices();
     });
     Recorder.version().then((v) => mounted ? setState(() => version = v) : null);
+    if (defaultTargetPlatform == TargetPlatform.android) Recorder.cleaned().then((at) => at != null && mounted ? _cleaned(at) : null);
     ticker = Timer.periodic(const Duration(seconds: 2), (_) async {  // the service may be running from before this UI opened
       if (fakeStatus.isNotEmpty) return setState(() => status = cannedStatus(fakeStatus));
       if (++ticks % 150 == 0) _slices();  // every 5 min: the server may have changed the lengths
@@ -450,6 +451,23 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           version),
     ]);
   }
+
+  /// Xiaomi's cleanup force-stopped the app, and the link with it, until it was opened now: told once, with how to keep
+  /// it from happening again.
+  void _cleaned(int at) => showDialog(context: context, builder: (c) {
+        final l = AppLocalizations.of(c);
+        return AlertDialog(
+          title: Text(l.cleanedTitle),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(l.cleanedBody(TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(at)).format(c))),
+            const SizedBox(height: 12),
+            Text(l.xiaomiLockHow),
+            const SizedBox(height: 16),
+            xiaomiButtons(l),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(c), child: Text(l.gotIt))],
+        );
+      });
 
   /// The recording's status panel, from the top bar's chip: what goes on in words, the recorder's battery, what is
   /// left to catch up and its signal, pause or start/stop, and the recorder page.

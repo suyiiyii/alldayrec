@@ -1154,6 +1154,54 @@ abstract class AppLocalizations {
   /// **'不受电池优化限制，录音设备才能整天连着'**
   String get permBackgroundWhy;
 
+  /// No description provided for @permXiaomi.
+  ///
+  /// In zh, this message translates to:
+  /// **'小米：锁定 App'**
+  String get permXiaomi;
+
+  /// No description provided for @xiaomiLockHow.
+  ///
+  /// In zh, this message translates to:
+  /// **'在最近任务里长按 AllDayRec → 锁定，一键清理和上滑清理就不会关掉它。再打开自启动，省电策略设为「无限制」。'**
+  String get xiaomiLockHow;
+
+  /// No description provided for @xiaomiAutostart.
+  ///
+  /// In zh, this message translates to:
+  /// **'自启动'**
+  String get xiaomiAutostart;
+
+  /// No description provided for @xiaomiPowerSaver.
+  ///
+  /// In zh, this message translates to:
+  /// **'省电策略'**
+  String get xiaomiPowerSaver;
+
+  /// No description provided for @xiaomiDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'我已设置'**
+  String get xiaomiDone;
+
+  /// No description provided for @cleanedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'刚才被系统清理关掉了'**
+  String get cleanedTitle;
+
+  /// No description provided for @cleanedBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'{time} 小米的清理把 AllDayRec 停了，断开的这段没录上。'**
+  String cleanedBody(Object time);
+
+  /// No description provided for @gotIt.
+  ///
+  /// In zh, this message translates to:
+  /// **'知道了'**
+  String get gotIt;
+
   /// No description provided for @addRecorderHelp.
   ///
   /// In zh, this message translates to:

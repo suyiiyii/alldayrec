@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:live_record/main.dart' as app;
 import 'package:live_record/home.dart';
+import 'package:live_record/l10n/app_localizations.dart';
 import 'package:live_record/settings_page.dart';
 import 'package:live_record/upload_page.dart';
 import 'package:live_record/recorder_page.dart';
@@ -66,5 +67,31 @@ void main() {
     FlutterError.onError = handler;
     tester.binding.platformDispatcher.onError = platformHandler;
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a stop by Xiaomi\'s cleanup is told once on opening', (tester) async {
+    SharedPreferences.setMockInitialValues({'server': 'http://127.0.0.1:1'});
+    int? cleaned = DateTime(2026, 1, 2, 3, 4).millisecondsSinceEpoch;
+    final asked = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(const MethodChannel('live_record/recorder'), (call) async {
+      if (call.method == 'cleaned') return [cleaned, cleaned = null].first;  // once, as MainActivity
+      if (call.method == 'askPermission') asked.add(call.arguments['which']);
+      if (call.method == 'version' || call.method == 'deviceName') return 'x';
+      if (call.method == 'status' || call.method == 'recorder' || call.method == 'permissions') return <String, Object>{};
+      return null;
+    });
+    await tester.pumpWidget(const MaterialApp(home: Home(), localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales, locale: Locale('en')));
+    await tester.pumpAndSettle();
+    expect(find.text("Closed by the system's cleanup"), findsOneWidget);
+    expect(find.textContaining('3:04 AM'), findsOneWidget);
+    await tester.tap(find.text('Autostart'));
+    await tester.tap(find.text('Battery saver'));
+    expect(asked, ['autostart', 'powerSaver']);
+    await tester.tap(find.text('Got it'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
   });
 }

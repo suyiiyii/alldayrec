@@ -642,6 +642,33 @@ class AppLocalizationsEn extends AppLocalizations {
       'Exempt from battery optimization, so the recorder stays connected all day';
 
   @override
+  String get permXiaomi => 'Xiaomi: lock the app';
+
+  @override
+  String get xiaomiLockHow =>
+      'In recent apps, long-press AllDayRec → Lock, so cleaning up or swiping it away no longer closes it. Then turn on Autostart and set Battery saver to “No restrictions”.';
+
+  @override
+  String get xiaomiAutostart => 'Autostart';
+
+  @override
+  String get xiaomiPowerSaver => 'Battery saver';
+
+  @override
+  String get xiaomiDone => 'Done';
+
+  @override
+  String get cleanedTitle => 'Closed by the system\'s cleanup';
+
+  @override
+  String cleanedBody(Object time) {
+    return 'Xiaomi\'s cleanup stopped AllDayRec at $time; nothing was recorded while it was off.';
+  }
+
+  @override
+  String get gotIt => 'Got it';
+
+  @override
   String get addRecorderHelp =>
       'Turn the recorder on (plugging in the charging cable is enough). An unbound recorder blinks blue slowly; its name is printed on it, or take the one marked “Nearest”.';
 

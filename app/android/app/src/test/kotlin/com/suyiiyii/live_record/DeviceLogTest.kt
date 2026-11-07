@@ -85,4 +85,15 @@ class DeviceLogTest {
         assertTrue(t, " ← java.io.IOException DeviceLogTest.trace:" in t)
         assertTrue(t, "secret" !in t)
     }
+
+    /** Xiaomi's cleanup, as its phones record it (ApplicationExitInfo reason 10, REASON_USER_REQUESTED). */
+    @Test fun cleaned() {
+        val pkg = "com.suyiiyii.live_record"
+        for (how in listOf("SwipeUpClean", "OneKeyClean", "GarbageClean"))
+            assertTrue(how, DeviceLog.cleaned(10, "[FORCE STOP] stop $pkg due to $how", xiaomi = true))
+        assertEquals(false, DeviceLog.cleaned(10, "[FORCE STOP] stop $pkg due to SwipeUpClean", xiaomi = false))  // another make
+        assertEquals(false, DeviceLog.cleaned(3, "[FORCE STOP] stop $pkg due to OneKeyClean", xiaomi = true))  // low memory
+        assertEquals(false, DeviceLog.cleaned(10, "stop $pkg due to from pid 4451", xiaomi = true))  // adb am force-stop (AOSP)
+        assertEquals(false, DeviceLog.cleaned(10, null, xiaomi = true))
+    }
 }

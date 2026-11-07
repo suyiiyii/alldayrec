@@ -133,15 +133,28 @@ class MainActivity : FlutterActivity() {
                     "bluetooth" to Ble.permissions.all(::granted),
                     "notifications" to (Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS)),
                     "battery" to getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName),
-                    "bluetoothOn" to getSystemService(BluetoothManager::class.java).adapter.isEnabled))
+                    "bluetoothOn" to getSystemService(BluetoothManager::class.java).adapter.isEnabled,
+                    // locked in recents, autostart, no power saving: none of it can be read, the person says it is done
+                    "xiaomi" to (!DeviceLog.xiaomi || getSharedPreferences("recorder", MODE_PRIVATE).getBoolean("xiaomiDone", false))))
                 "askPermission" -> {
                     when (call.argument<String>("which")) {
                         "bluetooth" -> requestPermissions(Ble.permissions.toTypedArray(), 2)
                         "notifications" -> if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
                         // the link lives in the background all day: without this, the system stops it
                         "battery" -> startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+                        // Xiaomi's own pages: without autostart the system may not start the service again, a power saving
+                        // other than 无限制 stops it in the background; a system without them gets the app's details
+                        "autostart" -> xiaomiPage(Intent().setClassName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"))
+                        "powerSaver" -> xiaomiPage(Intent().setClassName("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
+                            .putExtra("package_name", packageName).putExtra("package_label", applicationInfo.loadLabel(packageManager)))
+                        "xiaomi" -> getSharedPreferences("recorder", MODE_PRIVATE).edit().putBoolean("xiaomiDone", true).apply()
                     }
                     result.success(null)
+                }
+                "cleaned" -> {  // when Xiaomi's cleanup last stopped the app (DeviceLog.exits), once; null: not since
+                    val p = getSharedPreferences("recorder", MODE_PRIVATE)
+                    result.success(p.getLong("cleanedAt", 0).takeIf { it > 0 })
+                    p.edit().remove("cleanedAt").apply()
                 }
                 "scan" -> {  // the add-recorder page opens (true) or closes
                     nearby?.stop(); nearby = null
@@ -250,6 +263,11 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun xiaomiPage(i: Intent) = try { startActivity(i) } catch (e: Exception) {  // not found, or not exported to us
+        Log.w("live-record", "xiaomi page: $e")
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

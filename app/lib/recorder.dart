@@ -27,6 +27,8 @@ class Recorder {
   static Future<bool> unbind() async => (await _ch.invokeMethod('unbind')) as bool;
   static Future<Map> permissions() async => (await _ch.invokeMethod('permissions')) as Map;
   static Future<void> askPermission(String which) => _ch.invokeMethod('askPermission', {'which': which});
+  /// Android: when Xiaomi's cleanup last force-stopped the app, told once; null when it has not since.
+  static Future<int?> cleaned() async => (await _ch.invokeMethod('cleaned')) as int?;
   static Future<void> scan(bool on) => _ch.invokeMethod('scan', {'on': on});  // the add-recorder page's list
   static Future<List> nearby() async => (await _ch.invokeMethod('nearby')) as List;
   static Future<void> bind(String name, String address, bool force) =>

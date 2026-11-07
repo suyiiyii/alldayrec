@@ -178,7 +178,23 @@ object DeviceLog {
                 mapOf("reason" to x.reason, "importance" to x.importance, "pss_kb" to x.pss, "rss_kb" to x.rss), at = x.timestamp)
         }
         got.lastOrNull()?.let { prefs.edit().putLong("exitSeen", it.timestamp).apply() }
+        // the home page tells of it once (MainActivity "cleaned"): the link was down from then until the app was opened
+        got.lastOrNull { cleaned(it.reason, it.description, xiaomi) }?.let { prefs.edit().putLong("cleanedAt", it.timestamp).apply() }
     }
+
+    /** A Xiaomi phone (Xiaomi, Redmi, POCO; MIUI or HyperOS): its cleanup force-stops an app not locked in recents. */
+    val xiaomi by lazy {
+        listOf(Build.MANUFACTURER, Build.BRAND).any { it.lowercase() in setOf("xiaomi", "redmi", "poco") } ||
+            listOf("ro.mi.os.version.name", "ro.miui.ui.version.name").any { k ->
+                runCatching { Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, k) as String }
+                    .getOrDefault("").isNotEmpty()
+            }
+    }
+
+    /** A force stop by Xiaomi's cleanup: REASON_USER_REQUESTED, "[FORCE STOP] stop <package> due to SwipeUpClean" (a
+     *  swipe up in recents; OneKeyClean, GarbageClean). The foreground service and the link stay down until the app is
+     *  opened again. */
+    fun cleaned(reason: Int, description: String?, xiaomi: Boolean) = xiaomi && reason == 10 && description?.contains("Clean") == true
 
     private val EXITS = mapOf(  // ApplicationExitInfo.REASON_*: what it says, how bad
         1 to ("自己退出" to null), 2 to ("被信号结束" to "warn"), 3 to ("内存不足，被系统结束" to "error"), 4 to ("崩溃" to "error"),

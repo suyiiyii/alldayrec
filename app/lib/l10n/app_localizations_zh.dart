@@ -624,6 +624,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get permBackgroundWhy => '不受电池优化限制，录音设备才能整天连着';
 
   @override
+  String get permXiaomi => '小米：锁定 App';
+
+  @override
+  String get xiaomiLockHow =>
+      '在最近任务里长按 AllDayRec → 锁定，一键清理和上滑清理就不会关掉它。再打开自启动，省电策略设为「无限制」。';
+
+  @override
+  String get xiaomiAutostart => '自启动';
+
+  @override
+  String get xiaomiPowerSaver => '省电策略';
+
+  @override
+  String get xiaomiDone => '我已设置';
+
+  @override
+  String get cleanedTitle => '刚才被系统清理关掉了';
+
+  @override
+  String cleanedBody(Object time) {
+    return '$time 小米的清理把 AllDayRec 停了，断开的这段没录上。';
+  }
+
+  @override
+  String get gotIt => '知道了';
+
+  @override
   String get addRecorderHelp =>
       '打开录音设备（插上充电线即可）。没绑定的录音设备蓝灯慢闪，名字印在它身上，或看标着「最近」的那台。';
 

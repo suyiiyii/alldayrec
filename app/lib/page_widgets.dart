@@ -1,6 +1,9 @@
 // Shared visual components for native status pages.
 import 'package:flutter/material.dart';
 
+import 'l10n/app_localizations.dart';
+import 'recorder.dart';
+
 /// A titled block of a native page (recorder, upload).
 Widget sectionCard(BuildContext context, String title, Widget child) {
   final t = Theme.of(context), cs = t.colorScheme;
@@ -79,3 +82,9 @@ Widget stateChip(String label, Color color, IconData icon) => Chip(
       visualDensity: VisualDensity.compact,
       side: BorderSide(color: color.withValues(alpha: 0.5)),
     );
+
+/// Xiaomi's own settings pages for the app (MainActivity "autostart", "powerSaver"; the app's details where missing).
+Widget xiaomiButtons(AppLocalizations l) => Wrap(spacing: 8, children: [
+      OutlinedButton(onPressed: () => Recorder.askPermission('autostart'), child: Text(l.xiaomiAutostart)),
+      OutlinedButton(onPressed: () => Recorder.askPermission('powerSaver'), child: Text(l.xiaomiPowerSaver)),
+    ]);
