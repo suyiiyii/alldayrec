@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from "vue";
 import { t } from "../i18n";
-import { blocks, resampler } from "../lib/pcm";
+import { blocks, micContext, resampler } from "../lib/pcm";
 import Icon from "./Icon.vue";
 
 // 问 AI said aloud, as 豆包 does it: hold the bar and speak, the words show as they are heard, let go and the question
@@ -41,6 +41,7 @@ let ctx: AudioContext | null = null,
 // can watch. frames / held_ms is the rate the samples really came at, against `rate`, the one the resampler took.
 interface Diag {
   held_ms: number;
+  asked_rate?: number; // the rate the AudioContext was made at, the microphone's (lib/pcm.ts micContext); none: its own
   rate: number; // AudioContext.sampleRate
   track_rate?: number; // what the microphone says it captures at
   states: string; // AudioContext.state at the start, then each change ("running", "interrupted" on iOS, ...)
@@ -90,12 +91,15 @@ async function start() {
   }
   if (!down || my !== run) return stream.getTracks().forEach((x) => x.stop()); // let go already: drop() went before
   mic = stream;
-  const c = (ctx = new AudioContext());
+  const trackRate = stream.getAudioTracks()[0]?.getSettings().sampleRate,
+    { ctx: c, asked } = micContext(trackRate);
+  ctx = c;
   void c.resume();
   const d: Diag = (diag = {
     held_ms: 0,
+    asked_rate: asked,
     rate: c.sampleRate,
-    track_rate: stream.getAudioTracks()[0]?.getSettings().sampleRate,
+    track_rate: trackRate,
     states: c.state,
     via: "worklet",
     quantum: 0,
@@ -135,7 +139,7 @@ async function start() {
     };
   });
   const src = c.createMediaStreamSource(stream),
-    r = resampler(c.sampleRate), // 48 kHz on iPhones, whatever it asks for
+    r = resampler(c.sampleRate), // the microphone's rate, mostly 48 kHz
     o = (out = blocks(put));
   const take = (x: Float32Array) => {
     let s = 0;
