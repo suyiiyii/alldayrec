@@ -252,7 +252,7 @@ async function detach(g: Speaker, v: Voice) {
     <div v-else-if="!groups.length && !othersN" class="empty">
       <Icon name="users" :size="48" />
       <div>{{ t("speakers.none") }}</div>
-      <RouterLink class="btn btn-primary" to="/connect">{{ t("title.connect") }}</RouterLink>
+      <RouterLink class="btn btn-primary" to="/">{{ t("timeline.getStarted") }}</RouterLink>
     </div>
     <p v-else-if="!list.length && !othersN" class="empty">{{ t("speakers.allNamed") }}</p>
 

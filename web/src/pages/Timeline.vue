@@ -22,6 +22,7 @@ import {
   type Recap,
   type Status,
 } from "../lib/api";
+import { hasNative, inApp, openNative, stage } from "../lib/app";
 import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useSocket, useWatch } from "../lib/socket";
@@ -31,8 +32,8 @@ import { toast } from "../lib/toast";
 // one tag filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
 // Pinned on top while it shows today unfiltered: the conversation going on (the live card) and what is due. Each past
 // day opens with its recap, yesterday's unfolded. Without words or a tag, a day's fragments (too little speech for a
-// summary) fold into one line under its recap, a tap shows them in their places. A brand-new instance gets the three
-// steps to start instead.
+// summary) fold into one line under its recap, a tap shows them in their places. Until the first conversation, the
+// steps to it from where the user is (next) instead.
 const PAGE = 30;
 const route = useRoute(),
   router = useRouter();
@@ -60,13 +61,15 @@ let seq = 0;
 // today unfiltered: the pinned cards; no words or tag: the recaps
 const top = computed(() => !q.value && !tag.value && !day.value);
 const going = computed(() => !!status.value?.devices?.some((d) => d.recording && d.conversation));
-const empty = computed(
-  () =>
-    ready.value &&
-    !failed.value &&
-    !items.value.length &&
-    !Object.keys(calendar.value).length &&
-    !status.value?.recorders?.length,
+// a new user's next steps instead of the feed (lib/app.ts stage), until the first conversation; not while one goes on
+const next = computed(() =>
+  ready.value && !failed.value && !going.value
+    ? stage(
+        !!items.value.length || !!Object.keys(calendar.value).length,
+        status.value?.recorders?.length ?? 0,
+        !!inApp,
+      )
+    : null,
 );
 const yesterday = shiftDay(today(), -1);
 
@@ -372,7 +375,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   <AppHeader />
   <main>
     <Skeleton v-if="!ready" />
-    <div v-else-if="empty" class="card start">
+    <div v-else-if="next === 'connect'" class="card start">
       <h2>{{ t("timeline.start") }}</h2>
       <ol>
         <li>
@@ -389,6 +392,32 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         </li>
       </ol>
       <RouterLink class="btn btn-primary" to="/connect">{{ t("timeline.goConnect") }}</RouterLink>
+    </div>
+    <!-- in the app: it is installed and signed in, the recorder comes next -->
+    <div v-else-if="next === 'record'" class="card start">
+      <h2>{{ t("timeline.startRecord") }}</h2>
+      <ol>
+        <li>
+          <b>{{ t("timeline.addRecorder") }}</b
+          ><span class="muted">{{ t("timeline.addRecorderSub") }}</span>
+        </li>
+        <li>
+          <b>{{ t("timeline.wear") }}</b
+          ><span class="muted">{{ t("timeline.wearSub") }}</span>
+        </li>
+      </ol>
+      <div v-if="hasNative()" class="acts">
+        <button class="btn btn-primary" @click="openNative('add-recorder')">
+          {{ t("timeline.addRecorder") }}
+        </button>
+        <button class="btn" @click="openNative('record')">{{ t("timeline.phoneRecord") }}</button>
+      </div>
+      <p v-else class="muted">{{ t("timeline.whereInApp") }}</p>
+    </div>
+    <div v-else-if="next === 'speak'" class="card start">
+      <h2>{{ t("timeline.startSpeak") }}</h2>
+      <p class="muted">{{ t("timeline.speakSub") }}</p>
+      <RouterLink class="btn btn-primary" to="/live">{{ t("timeline.goLive") }}</RouterLink>
     </div>
     <template v-else>
       <template v-if="top">
@@ -693,6 +722,13 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
 }
 .start h2 {
   margin: 0 0 var(--space-3);
+}
+.start p {
+  margin: 0 0 var(--space-4);
+}
+.start .acts {
+  display: grid;
+  gap: var(--space-2);
 }
 .start ol {
   list-style: none;

@@ -11,6 +11,7 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import 'l10n/app_localizations.dart';
 import 'page_widgets.dart';
+import 'add_recorder_page.dart';
 import 'pause_button.dart';
 import 'recorder.dart';
 import 'recorder_page.dart';
@@ -110,6 +111,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Timer? ticker;
   int ticks = 0;
   String version = '';
+  // the WebViews' user agent: the system's with AllDayRecApp/<version> (android|ios), so a page knows it is in the app
+  // (web lib/app.ts; iOS's WebView says nothing of it by itself); set before their first load (_loadWeb)
+  String? ua;
 
   static const paths = ['/', '/live', '/speakers'];
 
@@ -241,10 +245,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     }
     if (p is WebKitWebViewController) p.setInspectable(true);  // Safari's Develop menu on a Mac the phone trusts
     if (p is WebKitWebViewController) p.setAllowsBackForwardNavigationGestures(true);  // iOS: swipe from the left edge = back
+    if (ua != null) c.setUserAgent(ua);
     return c
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..clearCache()  // the page changes with server deploys
-      // the web page hides its own navigation in the app: Android's WebView says so in its user agent, iOS's does not
+      // the app's own pages from a page's button (web lib/app.ts openNative)
+      ..addJavaScriptChannel('AllDayRec', onMessageReceived: (m) => _native(m.message))
+      // the web page hides its own navigation in the app: it reads ua; an older server's page only Android's own mark
       ..setNavigationDelegate(NavigationDelegate(
           onPageStarted: tab == null ? null : (_) => loads[tab].started(),
           onPageFinished: (_) {
@@ -266,12 +273,35 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   Uri _url(String path) => Uri.parse('${settings!.server}$path?token=${settings!.token}');  // ?token= sets the cookie
 
-  void _loadWeb() {
+  Future<void> _loadWeb() async {
     if (settings!.token.isEmpty) return;
+    if (ua == null) {
+      // the system's own (iOS reads it from a script in the page): without it, no mark rather than tabs that never load
+      final base = await (webs[0] ??= _web(tab: 0)).getUserAgent().timeout(const Duration(seconds: 3)).catchError((_) => null);
+      if (base != null && base.isNotEmpty) {
+        ua = '$base AllDayRecApp/${await Recorder.version()} (${defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android'})';
+      }
+    }
     for (var i = 0; i < webs.length; i++) {
       loads[i].timer?.cancel();
       loads[i] = WebLoad();  // another server or token: what loaded before says nothing
-      (webs[i] ??= _web(tab: i)).loadRequest(_url(paths[i]));
+      final w = webs[i] ??= _web(tab: i);
+      if (ua != null) w.setUserAgent(ua);
+      w.loadRequest(_url(paths[i]));
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// A page's button for one of the app's own pages (web lib/app.ts openNative): add-recorder, or record (this phone's
+  /// microphone starts, if it is the source, and the status panel opens on it).
+  Future<void> _native(String page) async {
+    if (!mounted || settings == null) return;
+    if (page == 'add-recorder') {
+      final bound = await Navigator.push<bool>(context, MaterialPageRoute(builder: (_) => const AddRecorderPage()));
+      if (bound == true) await _setSource('ble');
+    } else if (page == 'record') {
+      if (!ble && !running) await _start();
+      if (mounted) _statusSheet();
     }
   }
 

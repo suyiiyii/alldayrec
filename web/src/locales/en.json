@@ -106,7 +106,7 @@
   },
   "calendar": {
     "convs": "{n} conversation | {n} conversations",
-    "none": "Nothing recorded yet. Once a phone and a recorder are connected, each day's recordings show up here"
+    "none": "Nothing recorded yet. Once you record, each day's recordings show up here"
   },
   "connect": {
     "here": "This page's address",
@@ -364,6 +364,7 @@
     "idle": "No conversation going on",
     "idleWear": "Wear the recorder and start talking: captions show up here as you speak",
     "idleConnect": "Connect a phone and a recorder, and what's said shows up here live",
+    "idleStart": "Add a recorder or record with this phone, and what's said shows up here live",
     "last": "Last conversation, ended {at} ·",
     "recordHere": "Record with this phone",
     "inAppHint": "Tap the recording status in the top bar to start",
@@ -913,6 +914,15 @@
     "wear": "Wear the recorder",
     "wearSub": "Turn the recorder on and wear it: what's said shows up live, and each talk becomes a conversation",
     "goConnect": "Connect a phone",
+    "startRecord": "Get started in two steps",
+    "addRecorder": "Add a recorder",
+    "addRecorderSub": "Turn the recorder on and pair it with this phone",
+    "phoneRecord": "Record with this phone first",
+    "whereInApp": "Add one in Me › Recorder. No recorder? Tap the recording status in the top bar to record with this phone",
+    "startSpeak": "Say something",
+    "speakSub": "Wear the device and say a sentence: it shows up in Live within seconds, and when the talk ends it becomes a conversation here",
+    "goLive": "Open live captions",
+    "getStarted": "How to start",
     "search": "Search titles, summaries, to-dos, transcripts",
     "ask": "Ask AI",
     "askStats": "{n} lookup · {s} s | {n} lookups · {s} s",
