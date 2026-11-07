@@ -33,41 +33,95 @@ let ctx: AudioContext | null = null,
   t0 = 0,
   y0 = 0,
   peak = 0, // the loudest block's mean square since the last bar
-  down = false; // held (or clicked on) still: a release while the microphone was being opened drops it
+  run = 0, // the press being set up: an older one whose microphone opens late finds a newer number and gives it back
+  down = false, // held (or clicked on) still: a release while the microphone was being opened drops it
+  diag: Diag | null = null;
 
-// The audio thread's blocks of samples to the page, 2048 at a time (43 ms at 48 kHz), as they come
+// How the microphone went, sent with the end (never the sound): enough to tell which step broke on a phone nobody
+// can watch. frames / held_ms is the rate the samples really came at, against `rate`, the one the resampler took.
+interface Diag {
+  held_ms: number;
+  rate: number; // AudioContext.sampleRate
+  track_rate?: number; // what the microphone says it captures at
+  states: string; // AudioContext.state at the start, then each change ("running", "interrupted" on iOS, ...)
+  via: "worklet" | "scriptprocessor";
+  quantum: number; // frames per process() call: 128 by the spec, 960 on iOS while capturing (WebKit bug 251091)
+  empty: number; // process() calls with no input after the first that had some
+  frames: number; // input frames that reached the page
+  sent: number; // 16 kHz samples sent
+  peak_db: number; // the loudest sample, dBFS
+  mean_db: number; // RMS of all, dBFS
+  ua: string;
+}
+const dbfs = (x: number) => Math.round(10 * Math.log10(x + 1e-10));
+
+// The audio thread's samples to the page, 2048 or a little more at a time (43 ms at 48 kHz), whatever block size it
+// runs at (WebKit's is 960 while it captures, which does not divide 2048), with its block size and how many blocks
+// since the first sample came with no input (the microphone not keeping up)
 const WORKLET = `registerProcessor("pcm", class extends AudioWorkletProcessor {
-  b = new Float32Array(2048); n = 0;
+  q = []; n = 0; k = 0; e = 0;
   process([[x]]) {
-    if (x) { this.b.set(x, this.n); this.n += x.length; }
-    if (this.n === this.b.length) { this.port.postMessage(this.b, [this.b.buffer]); this.b = new Float32Array(2048); this.n = 0; }
+    if (!x) return (this.e += this.k ? 1 : 0), true;
+    this.k = x.length; this.q.push(x.slice()); this.n += x.length;
+    if (this.n >= 2048) {
+      const b = new Float32Array(this.n); let i = 0;
+      for (const y of this.q) { b.set(y, i); i += y.length; }
+      this.port.postMessage({ b, k: this.k, e: this.e }, [b.buffer]); this.q = []; this.n = 0;
+    }
     return true;
   }
 });`;
 let workletUrl = "";
 
-// in the press or the click itself: iOS lets an AudioContext run only when it starts in the user's gesture
+// in the press or the click itself. The AudioContext once the microphone is open: iOS switches its audio session to
+// recording then, and a context made before may be interrupted or run at a rate it no longer reports; WebKit lets a
+// page that captures start one without a gesture (shouldDocumentAllowWebAudioToAutoPlay), Chrome after any tap
 async function start() {
   down = true;
-  const c = (ctx = new AudioContext());
-  void c.resume();
+  const my = ++run;
   let stream: MediaStream;
   try {
     // the browser's own echo, noise and level care, as it has them by default: a voice up close
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    if (ctx === c) drop();
-    down = false;
+    if (my === run) down = false;
     const denied = (e as Error).name === "NotAllowedError";
     return emit("fail", t(denied ? "timeline.micDenied" : "timeline.noMic"), true);
   }
-  if (!down || ctx !== c) return stream.getTracks().forEach((x) => x.stop()); // let go already: drop() went before
+  if (!down || my !== run) return stream.getTracks().forEach((x) => x.stop()); // let go already: drop() went before
+  mic = stream;
+  const c = (ctx = new AudioContext());
+  void c.resume();
+  const d: Diag = (diag = {
+    held_ms: 0,
+    rate: c.sampleRate,
+    track_rate: stream.getAudioTracks()[0]?.getSettings().sampleRate,
+    states: c.state,
+    via: "worklet",
+    quantum: 0,
+    empty: 0,
+    frames: 0,
+    sent: 0,
+    peak_db: 0,
+    mean_db: 0,
+    ua: navigator.userAgent,
+  });
+  let sq = 0,
+    top = 0;
+  c.onstatechange = () => {
+    d.states += " " + c.state;
+    if (c.state !== "running" && c.state !== "closed") void c.resume(); // interrupted (iOS) or suspended: back on
+  };
   // the socket once there is a microphone (no listening opened for nothing); what comes before it opens waits
   const w = (ws = new WebSocket(
       `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ask/voice/ws`,
     )),
     queue: (Int16Array<ArrayBuffer> | string)[] = [];
-  put = (x) => (w.readyState === WebSocket.OPEN ? w.send(x) : queue.push(x));
+  put = (x) => {
+    if (typeof x !== "string") d.sent += x.length;
+    if (w.readyState === WebSocket.OPEN) w.send(x);
+    else queue.push(x);
+  };
   w.onopen = () => queue.splice(0).forEach((x) => w.send(x));
   result = new Promise((ok) => {
     w.onmessage = (e) => {
@@ -80,22 +134,36 @@ async function start() {
       if (state.value === "rec") void finish(true); // the network went while it was said: say so at once
     };
   });
-  mic = stream;
   const src = c.createMediaStreamSource(stream),
     r = resampler(c.sampleRate), // 48 kHz on iPhones, whatever it asks for
     o = (out = blocks(put));
   const take = (x: Float32Array) => {
-    peak = Math.max(peak, x.reduce((s, v) => s + v * v, 0) / x.length);
+    let s = 0;
+    for (const v of x) {
+      s += v * v;
+      top = Math.max(top, Math.abs(v));
+    }
+    sq += s;
+    d.frames += x.length;
+    d.peak_db = dbfs(top * top);
+    d.mean_db = dbfs(sq / d.frames);
+    peak = Math.max(peak, s / x.length);
     o.push(r(x));
   };
   try {
     workletUrl ||= URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
     await c.audioWorklet.addModule(workletUrl);
     const n = new AudioWorkletNode(c, "pcm");
-    n.port.onmessage = (e) => take(e.data);
+    n.port.onmessage = (e) => {
+      d.quantum = e.data.k;
+      d.empty = e.data.e;
+      take(e.data.b);
+    };
     src.connect(n).connect(c.destination); // pulled by the output (it writes silence), else it never runs
   } catch {
     // an older WebView without AudioWorklet: the deprecated main-thread node does the same
+    d.via = "scriptprocessor";
+    d.quantum = 2048;
     const n = c.createScriptProcessor(2048, 1, 1);
     n.onaudioprocess = (e) => {
       take(e.inputBuffer.getChannelData(0));
@@ -103,7 +171,7 @@ async function start() {
     };
     src.connect(n).connect(c.destination);
   }
-  if (!down || ctx !== c) return; // let go while the worklet loaded: drop() went before
+  if (!down || my !== run) return; // let go while the worklet loaded: drop() went before
   t0 = performance.now();
   state.value = "rec";
   away.value = false;
@@ -133,27 +201,40 @@ function stopMic() {
   mic = ctx = out = null;
   wave.value = Array(BARS).fill(0);
 }
-function drop() {
+// why: the close reason the server logs for a question dropped (short, away, esc, pointercancel, early, unload); a
+// socket still connecting closes once open, else the server would see a reset and no reason
+function drop(why = "") {
   stopMic();
-  if (ws) ws.onopen = ws.onmessage = ws.onclose = null;
-  ws?.close(); // closed: the server stops listening at once and answers nothing
-  ws = result = null;
+  const w = ws;
+  if (w) {
+    w.onmessage = w.onclose = null;
+    const bye = () => (why ? w.close(4000, why) : w.close()); // closed: the server stops listening and answers nothing
+    if (w.readyState === WebSocket.CONNECTING) w.onopen = bye;
+    else {
+      w.onopen = null;
+      bye();
+    }
+  }
+  ws = result = diag = null;
   emit("said", "");
 }
 
-async function finish(send: boolean) {
+async function finish(send: boolean, why = "") {
   down = false;
-  if (state.value !== "rec") return void (state.value === "idle" && drop()); // let go while the microphone opened
+  if (state.value !== "rec") return void (state.value === "idle" && drop(why || "early")); // let go while the microphone opened
   const ms = performance.now() - t0,
-    r = result!;
+    r = result!,
+    d = diag!;
+  d.held_ms = Math.round(ms);
+  if (ctx) d.states += " " + ctx.state; // at the end
   out?.flush();
   stopMic();
   if (!send || ms < MIN_MS) {
-    drop();
+    drop(send ? `short ${d.held_ms}` : why);
     state.value = "idle";
     return void (send && emit("fail", t("timeline.tooShort"), false));
   }
-  put(JSON.stringify({ type: "end" }));
+  put(JSON.stringify({ type: "end", diag: d }));
   state.value = "hearing";
   const got = await r;
   drop();
@@ -161,7 +242,7 @@ async function finish(send: boolean) {
   if (got instanceof Error) emit("fail", got.message, false);
   else emit("heard", got);
 }
-const esc = (e: KeyboardEvent) => e.key === "Escape" && finish(false);
+const esc = (e: KeyboardEvent) => e.key === "Escape" && finish(false, "esc");
 
 // hold: the bar keeps the finger (pointer capture) wherever it goes until it lets go
 function press(e: PointerEvent) {
@@ -172,13 +253,13 @@ function press(e: PointerEvent) {
 }
 const move = (e: PointerEvent) => state.value === "rec" && (away.value = y0 - e.clientY > AWAY_PX);
 function release() {
-  void finish(state.value === "rec" && !away.value);
+  void finish(state.value === "rec" && !away.value, away.value ? "away" : "");
 }
 function click() {
   if (state.value === "idle" && !down) void start();
   else void finish(true);
 }
-onUnmounted(() => void finish(false));
+onUnmounted(() => void finish(false, "unload"));
 </script>
 
 <template>
@@ -208,7 +289,7 @@ onUnmounted(() => void finish(false));
     @pointerdown="press"
     @pointermove="move"
     @pointerup="release"
-    @pointercancel="finish(false)"
+    @pointercancel="finish(false, 'pointercancel')"
     @contextmenu.prevent
   >
     <template v-if="state === 'rec'">

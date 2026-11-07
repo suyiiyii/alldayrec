@@ -22,7 +22,7 @@ type: reference
 - 请求体是原始字节、不在 OpenAPI 里的：`POST /api/chunks` 的请求体是一个完整的音频文件，`POST /api/firmware` 的请求体是一个固件包。
 - 返回的内容：表里只有请求。上传录音时用到的两个：`POST /api/chunks` 返回 `{"seconds": 这块的秒数, "slice": {…}}`，`GET /api/client-config` 返回 `{"slice": {…}}`。`slice` 是 App 现在每块音频该切的秒数（`foreground`、`background`、`screenOff`）；实时页 `/live` 开着时，`background` 和 `screenOff` 不超过 `SLICE_WATCHED_S`（见[配置](./configuration.md)）。
 - `GET /ws`：WebSocket，服务器向网页推送这个租户的更新。
-- `GET /api/ask/voice/ws`：WebSocket，说出的问题边说边识别。网页发二进制消息（16 kHz 单声道 int16 PCM，小端，约每 0.1 秒一块），松手时发 `{"type": "end"}`，要取消就直接关掉连接；服务器推回 `{"type": "partial", "text"}`（到目前为止听到的字），最后一条 `{"type": "final", "text"}`（没听到字时为空）或 `{"type": "error", "error"}`，然后关闭。最多 60 秒音频。
+- `GET /api/ask/voice/ws`：WebSocket，说出的问题边说边识别。网页发二进制消息（16 kHz 单声道 int16 PCM，小端，约每 0.1 秒一块），松手时发 `{"type": "end"}`（可带 `diag`：麦克风的采样率、帧数、电平等，只进服务器日志，不含声音），要取消就直接关掉连接（关闭原因写进日志和调用记录）；服务器推回 `{"type": "partial", "text"}`（到目前为止听到的字），最后一条 `{"type": "final", "text"}`（没听到字时为空）或 `{"type": "error", "error"}`，然后关闭。最多 60 秒音频。
 - 网页本身的路由（`/`、`/live`、`/conversations` 等）和 `/assets/*`，见[网页与 App](./web-and-app.md)。
 
 ## 接口
