@@ -125,16 +125,39 @@ def test_stream_never_ends(c, monkeypatch):
 
 
 def test_dropped(c):
-    """The page closes the socket (slid up, Escape, gone): the session closed at once, no fallback, no answer."""
+    """The page closes the socket (slid up, Escape, gone): the session closed at once, no fallback, no answer; why, when
+    the page says it, in the table, else the close code."""
     with c.websocket_connect("/api/ask/voice/ws") as w:
         for _ in range(10):
             w.send_bytes(CHUNK)
         assert w.receive_json()["type"] == "partial"
-    t = time.time()
-    while not (Fake.opened and Fake.opened[0].closed) and time.time() - t < 5:
-        time.sleep(0.02)
+        w.close(4000, "short 230")
+    wait_closed()
     assert Fake.opened[0].closed and not c.heard
-    assert calls(c) == [("voice", "qwen-stream", "cancelled: the page went", 1.0)]
+    assert calls(c) == [("voice", "qwen-stream", "cancelled: short 230", 1.0)]
+    with c.websocket_connect("/api/ask/voice/ws"):
+        pass
+    wait_closed(1)
+    assert calls(c)[1] == ("voice", "qwen-stream", "cancelled: the page went (1000)", 0.0)
+
+
+def wait_closed(i=0):
+    t = time.time()
+    while not (len(Fake.opened) > i and Fake.opened[i].closed) and time.time() - t < 5:
+        time.sleep(0.02)
+
+
+def test_diag_logged(c, caplog):
+    """The page's diag with the end goes to the log as one line with the length of the text heard, never the text."""
+    caplog.set_level("INFO", "live")
+    with c.websocket_connect("/api/ask/voice/ws") as w:
+        w.send_bytes(CHUNK)
+        w.send_json({"type": "end", "diag": {"held_ms": 2100, "rate": 48000, "frames": 100800, "ua": "x\ny"}})
+        while w.receive_json()["type"] == "partial":
+            pass
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("ask voice: "))
+    assert '"held_ms": 2100' in line and '"frames": 100800' in line and "\n" not in line.replace("\\n", "")
+    assert f"heard {len('你好，我。 Bob 呢？')} chars by stream" in line and "Bob" not in line
 
 
 def test_a_minute_at_most(c, monkeypatch):

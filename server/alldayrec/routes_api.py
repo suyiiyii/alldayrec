@@ -190,6 +190,9 @@ async def ask_voice_ws(ws: WebSocket):
     messages, 16 kHz mono int16 PCM, little-endian, every 0.1 s or so, then {"type": "end"} once let go; it closes
     the socket to drop the question. Back come {"type": "partial", "text"} as the words grow, then one
     {"type": "final", "text"} ("" when nothing was heard) or {"type": "error", "error"}, and the server closes.
+    The end may carry `diag`, how the page's microphone went (held_ms, rate, frames, levels, ...: AskVoice.vue), and
+    a page that drops the question may say why in the close reason: both go to the log with the length of the text
+    heard (never the text), the reason to the calls table as the error ("cancelled: short 230").
     Heard by Bailian's streaming ASR (qwen_stream) when an engine of this server already sends audio there (qwen,
     qwen-stream), else, and whenever the stream fails or has not ended VOICE_END_S after the end, whole by
     voice_engine. At most VOICE_MAX_S of audio (the rest is dropped, and the question ends there) and VOICE_MAX_S + 5 s
@@ -202,6 +205,7 @@ async def ask_voice_ws(ws: WebSocket):
     tx, rx = anyio.create_memory_object_stream(float("inf"))  # bounded by cap: what the page sends, to the stream
     done = anyio.Event()
     t = time.perf_counter()
+    diag = None
 
     async def stream():
         try:
@@ -219,6 +223,8 @@ async def ask_voice_ws(ws: WebSocket):
                     await ws.send_json({"type": "partial", "text": joined()})
                 tg.cancel_scope.cancel()
             out["text"] = joined()
+        except WebSocketDisconnect:  # a partial to a page gone: the receive loop logs why
+            pass
         except Exception as e:
             out["error"] = threads.first(e)
             log.warning("ask voice stream failed after %.1f s: %r", time.perf_counter() - t, out["error"])
@@ -238,7 +244,7 @@ async def ask_voice_ws(ws: WebSocket):
                 while len(pcm) < cap:
                     m = await ws.receive()
                     if m["type"] == "websocket.disconnect":
-                        raise WebSocketDisconnect(m.get("code", 1000))
+                        raise WebSocketDisconnect(m.get("code", 1000), m.get("reason") or "")
                     if b := m.get("bytes"):
                         b = b[:min(len(b) & ~1, cap - len(pcm))]  # whole samples
                         pcm += b
@@ -246,12 +252,16 @@ async def ask_voice_ws(ws: WebSocket):
                             tx.send_nowait(b)
                         except (anyio.BrokenResourceError, anyio.ClosedResourceError):
                             pass  # the stream failed: the fallback hears it whole
-                    elif is_end(m.get("text")):
+                    elif (end := ended(m.get("text"))) is not None:
+                        diag = end.get("diag")
                         break
-        except WebSocketDisconnect:  # dropped (slid up, Escape) or the page went: no answer, no more audio sent
+        except WebSocketDisconnect as e:  # dropped (slid up, Escape, too short) or the page went: no answer, no more audio
             tg.cancel_scope.cancel()
+            why = f"cancelled: {e.reason[:60] or f'the page went ({e.code})'}"
+            log.info("ask voice %s after %.2f s of audio, %d ms", why, len(pcm) / 2 / audio.SR,
+                     round((time.perf_counter() - t) * 1000))
             if streams:
-                db.add_call("voice", "qwen-stream", None, round((time.perf_counter() - t) * 1000), "cancelled: the page went",
+                db.add_call("voice", "qwen-stream", None, round((time.perf_counter() - t) * 1000), why,
                             len(pcm) / 2 / audio.SR, len(pcm) / 2 / audio.SR)
             return
         tx.close()
@@ -272,6 +282,9 @@ async def ask_voice_ws(ws: WebSocket):
         except Exception as e:  # engine_segs: the last engine's error once the fallback failed too
             log.warning("ask voice failed: %r", e)
             reply = {"type": "error", "error": f"[asr_failed] 语音识别失败：{e!r}"[:300]}
+    log.info("ask voice: %.2f s of audio, heard %s chars by %s; page %s", secs,
+             len(reply["text"]) if "text" in reply else "no", "stream" if "text" in out else "whole",
+             json.dumps(diag, ensure_ascii=False)[:800])  # the page's word, quoted: one line whatever it sent
     try:
         await ws.send_json(reply)
         await ws.close()
@@ -279,11 +292,13 @@ async def ask_voice_ws(ws: WebSocket):
         pass
 
 
-def is_end(text: str | None) -> bool:
+def ended(text: str | None) -> dict | None:
+    """The page's {"type": "end", ...}, else None."""
     try:
-        return json.loads(text or "null").get("type") == "end"
+        m = json.loads(text or "null")
+        return m if m.get("type") == "end" else None
     except (ValueError, AttributeError):
-        return False
+        return None
 
 
 @router.post("/mcp")
