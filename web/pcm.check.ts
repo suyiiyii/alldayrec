@@ -1,7 +1,8 @@
 // node --experimental-strip-types web/pcm.check.ts: the microphone to the voice socket's PCM (src/lib/pcm.ts): 48 and
-// 44.1 kHz to 16 kHz keep the length and the level across any split into calls; blocks of 0.1 s, the rest on flush.
+// 44.1 kHz to 16 kHz keep the length and the level across any split into calls; blocks of 0.1 s, the rest on flush;
+// the AudioContext at the microphone's rate.
 import assert from "node:assert/strict";
-import { BLOCK, RATE, blocks, resampler } from "./src/lib/pcm.ts";
+import { BLOCK, RATE, blocks, micContext, resampler } from "./src/lib/pcm.ts";
 
 const sine = (rate: number, s: number, f = 440, a = 0.5) =>
   Float32Array.from({ length: rate * s }, (_, i) => a * Math.sin((2 * Math.PI * f * i) / rate));
@@ -46,4 +47,17 @@ assert.deepEqual(
 );
 b.flush();
 assert.equal(sent.length, 4, "nothing left: nothing sent");
+// the AudioContext at the microphone's rate; none known, or one refused: the browser's own
+const made: (number | undefined)[] = [],
+  make = (o?: AudioContextOptions) => {
+    if (o?.sampleRate === 1)
+      throw new DOMException("sampleRate is not in range", "NotSupportedError");
+    made.push(o?.sampleRate);
+    return { sampleRate: o?.sampleRate ?? 24000 } as AudioContext;
+  };
+assert.equal(micContext(48000, make).asked, 48000);
+assert.equal(micContext(48000, make).ctx.sampleRate, 48000);
+assert.equal(micContext(undefined, make).asked, undefined);
+assert.equal(micContext(1, make).asked, undefined, "refused: asked for nothing");
+assert.deepEqual(made, [48000, 48000, undefined, undefined]);
 console.log("pcm ok");
