@@ -295,6 +295,7 @@ final class BeanSync {
     var units = 0, dupes = 0
     var lost: Int64 = 0, at: Int64 = 0
     var seen: Int64 = 0  // when its last unit came
+    var firstAt: Int64 = 0  // when its first unit came (pace)
     var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
     var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
     var clockSaid: Int64 = 0  // when bean_clock was last logged
@@ -309,6 +310,8 @@ final class BeanSync {
   @Shared var hw: [String: Any] = [:]  // free_kb stays at the last 01/01 reading while a transfer is live
   @Shared var syncDoneKb: Int64 = 0
   @Shared var syncTotalKb: Int64 = 0
+  /// What of the bean's recording this phone lacks, for the status and its reports (owe())
+  @Shared var owed: [String: Any] = [:]
   var recording: Bool {
     get { hw["recording"] as? Bool == true }
     set { var h = hw; h["recording"] = newValue; hw = h }
@@ -338,6 +341,7 @@ final class BeanSync {
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
   private var caught: Int64 = 0      // backlog units taken since the backlog began
   private var caughtSince: Int64 = 0
+  private var pace = 2.0  // a realtime=0 read's speed, times real time: the last one measured (10-27 probe: about 2)
   private var marked = false
   private var unknown: Set<Int> = []
   private var run: [Data] = []
@@ -395,7 +399,7 @@ final class BeanSync {
       }
       return try block()
     }
-    defer { flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0 }
+    defer { flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0; owed = [:] }
     do {
       let mine = Bean.keys()
       key = try step("encrypting", "密钥交换") { try Bean.session(mine, try ask(Bean.hello(Bean.pub(mine)), 0x2E01).payload) }
@@ -406,7 +410,8 @@ final class BeanSync {
       log("connect", "连上：\(t)；固件 \(hw["fw"] ?? "")，序列号 \(Bean.serial(p))，电量 \(hw["battery"] ?? "")%，" +
           (recording ? "在录音（文件 \(listing.open)）" : "没在录音") + "，豆子上 \(listing.files.count) 个文件",
           fields: hw.merging(["files": listing.files.count, "open": listing.open]) { $1 })
-      io.report(hw)
+      owe()
+      io.report(hw.merging(owed) { $1 })
       if !startDone { startDone = true; if !recording { try start() } }
       try loop()
     } catch let e as Gone {
@@ -478,10 +483,10 @@ final class BeanSync {
           if info["recording"] as? Bool == true && !recording { needList = true }
           hw = info
         }
-        if now - settled >= 5000 { settled = now; settle(); if xfer == nil && !recording { try prune() } }
+        if now - settled >= 5000 { settled = now; settle(); owe(); if xfer == nil && !recording { try prune() } }
         if now - reported >= 60_000 {
           reported = now
-          io.report(xfer?.lag.map { hw.merging(["live_lag_s": $0 / 1000]) { $1 } } ?? hw)
+          io.report(hw.merging(owed) { $1 }.merging(xfer?.lag.map { ["live_lag_s": $0 / 1000] } ?? [:]) { $1 })
         }
       }
     }
@@ -548,6 +553,13 @@ final class BeanSync {
     listing.files.filter { $0.id * 1000 >= since && $0.id != listing.open && (files[$0.id].map { !done($0) } ?? true) }.sorted { $0.id < $1.id }
   }
 
+  /// Units of these files the phone lacks.
+  private func lacking(_ p: [(id: Int64, ms: Int64)]) -> Int64 {
+    p.reduce(Int64(0)) { acc, e in
+      acc + (files[e.id].map { f in max(0, (f.total >= 0 ? f.total : e.ms / Bean.frameMs) - covered(f)) } ?? e.ms / Bean.frameMs)
+    }
+  }
+
   private func backlog() -> Xfer? {
     let p = pending()
     if p.isEmpty {
@@ -556,12 +568,37 @@ final class BeanSync {
       return nil
     }
     if caught == 0 { caughtSince = io.now() }
-    let left = p.reduce(Int64(0)) { acc, e in
-      acc + (files[e.id].map { f in max(0, (f.total >= 0 ? f.total : e.ms / Bean.frameMs) - covered(f)) } ?? e.ms / Bean.frameMs)
-    }
+    let left = lacking(p)
     syncTotalKb = (caught + left) * Int64(Bean.unit) / 1024; syncDoneKb = caught * Int64(Bean.unit) / 1024
     let id = p[0].id
     return Xfer(id, false, files[id].flatMap(gap) ?? 0)
+  }
+
+  /// What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
+  /// back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the measured
+  /// pace (`backlog_eta_s`; the file being recorded grows meanwhile) and why it waits (`backlog_held`: `live`, the live
+  /// page is open, plan()'s live_now; `recording`, it goes after the bean stops: files closed meanwhile, a file read
+  /// live only); none: being read. A minute or less behind is no backlog (watchedGapUnits: the live page's own line).
+  private func owe() {
+    let open = recording ? listing.open : 0
+    var now: Int64 = 0  // units of the file being recorded, begun since the bean was added here
+    if open != 0 && open * 1000 >= since { now = max(0, edge(open) - (files[open].map(covered) ?? 0)) }
+    if now <= BeanSync.watchedGapUnits { now = 0 }
+    let closed = lacking(pending())
+    owed = Self.owedFields(now: now, closed: recording ? closed : 0, idle: recording ? 0 : closed, watched: io.watched(),
+                           live: fills[open, default: 0] >= BeanSync.tries, pace: pace)
+  }
+
+  /// owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to
+  /// stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback).
+  static func owedFields(now: Int64, closed: Int64, idle: Int64, watched: Bool, live: Bool, pace: Double) -> [String: Any] {
+    let s = (now + closed + idle) * Bean.frameMs / 1000
+    guard s > 0 else { return [:] }
+    let held: String? = now > 0 ? (live ? "recording" : watched ? "live" : nil) : closed > 0 ? "recording" : nil
+    // the recorded file grows by real time while it is read: it comes nearer at pace - 1
+    let eta: Double? = held == "recording" ? nil : now > 0 ? (pace > 1.05 ? Double(now * Bean.frameMs) / 1000 / (pace - 1) : nil)
+      : Double(idle * Bean.frameMs) / 1000 / pace
+    return ["backlog_s": s, "backlog_eta_s": eta.map { Int64($0) } ?? NSNull(), "backlog_held": held ?? NSNull()]
   }
 
   /// The file being recorded, from where the phone lacks it (the owner, 10-27; Bean.kt's plan()). realtime=0 reads it
@@ -764,6 +801,10 @@ final class BeanSync {
           "之后的单元按序号排会早 \(late / 1000) s", "warn", ["file": x.file, "seq": s.seq, "late_ms": late])
     }
     x.units += 1; x.last = s.seq; x.seen = now
+    // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
+    if !x.realtime && x.lag == nil && s.seq - x.first >= BeanSync.restUnits && now > x.firstAt {
+      pace = Double((s.seq - x.first) * Bean.frameMs) / Double(now - x.firstAt)
+    }
     if x.live {
       liveSeen = now; liveStalled = false; busy = 0
       // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
@@ -831,7 +872,7 @@ final class BeanSync {
 
   /// A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop.
   private func first(_ x: Xfer, _ s: Bean.Slice, _ audio: [UInt8]) {
-    x.first = s.seq
+    x.first = s.seq; x.firstAt = io.now()
     if x.live && !x.realtime && s.seq == x.from { fills[x.file] = nil }  // the bean honoured the offset: misses start again
     let now = io.now(), byId = x.file * 1000, est = now - s.seq * Bean.frameMs
     if files[x.file] == nil {

@@ -1024,6 +1024,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(Triple(r.id, 7000L, false)), r.bean.transfers)
         assertEquals(listOf("tail_short"), r.reasons)
+        assertFalse("50 s behind is no backlog", "backlog_s" in r.bean.reports.first())
         assertEquals(2500L, r.bean.logFields.first { it["reason"] != null }["hole_units"])
         assertTrue(r.bean.logs.any { "首单元 7000（请求从 7000 起）" in it.second })
         assertEquals(listOf(0L, 13000L), r.f.have.single().toList())
@@ -1037,6 +1038,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(Triple(r.id, 7000L, true)), r.bean.transfers)
         assertEquals(listOf("live_now"), r.reasons)
+        assertEquals(listOf(100L, "live"), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"]) })
         assertEquals(listOf(listOf(0L, 7000L), listOf(12000L, 12300L)), r.f.have.map { it.toList() })
         onlyReads(r.bean)
     }
@@ -1065,8 +1067,28 @@ class BeanTest {
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(Triple(r.id, 100L, false), Triple(r.id, read, true)), r.bean.transfers)
         assertEquals(listOf("fill_tail", "watched_abort", "live_now"), r.reasons)
+        // being read at first (the 10-27 pace until one is measured: 200 s nearer at 1 s a second), then held by the page
+        assertEquals(listOf(200L, null, 200L), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"], it["backlog_eta_s"]) })
+        assertEquals("live", r.bean.reports.last()["backlog_held"])
         assertEquals("the hole stays", 2, r.f.have.size)
         onlyReads(r.bean)
+    }
+
+    /** What is lacking, why it waits and how long it takes (owe()): the recorded file comes nearer at pace - 1, a stopped
+     *  bean's files at pace; what waits for the bean to stop has no estimate. */
+    @Test fun owedFields() {
+        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, pace = 3.0))
+        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to "live"),
+            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, pace = 3.0))
+        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to null),
+            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, pace = 3.0))
+        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
+            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, pace = 3.0))
+        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
+            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, pace = 3.0))
+        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to 40L, "backlog_held" to null),
+            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, pace = 3.0))
+        assertNull("no faster than real time: no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 1.0)["backlog_eta_s"])
     }
 
     /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by

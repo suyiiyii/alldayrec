@@ -1123,4 +1123,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String errZip(Object detail) {
     return '固件包打不开：$detail';
   }
+
+  @override
+  String beanBehind(Object time) {
+    return '豆子上还有 $time没传到手机';
+  }
+
+  @override
+  String get beanHeldLive => '实时页开着，关掉后自动补';
+
+  @override
+  String get beanHeldRecording => '豆子停录后补';
+
+  @override
+  String beanEta(Object time) {
+    return '补完约 $time';
+  }
 }

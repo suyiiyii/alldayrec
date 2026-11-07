@@ -106,11 +106,28 @@ String durationText(AppLocalizations l, num s) {
             : (pausedMin > 0 ? l.statePausedAwaySince : l.stateAwaySince)(
                 TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(lastSeen)).format(context)));
   }
+  final owed = (hw['backlog_s'] as num?) ?? 0;
+  if (owed > 0) {  // a bean's recording not on the phone yet (beanOwed): being read, or held back (never 「Recording」 alone)
+    final held = hw['backlog_held'] != null;
+    return (icon: Icons.sync_rounded, color: held ? amber : cs.primary, battery: null, number: l.minutes((owed / 60).round()),
+        numberColor: cs.onSurfaceVariant, spin: !held, line: beanOwed(l, hw));
+  }
   if (link?['code'] == 'beanIdle') {  // a bean connected, not recording: its button stopped it, or the start did not take
     return (icon: Icons.bluetooth_connected_rounded, color: cs.outline, battery: glyph(), number: pct, numberColor: low, spin: false,
         line: l.linkBeanIdle);
   }
   return (icon: Icons.mic_rounded, color: recordingRed, battery: glyph(), number: pct, numberColor: low, spin: false, line: l.recordingNow);
+}
+
+/// What of a bean's recording the phone lacks (BeanSync.owe(): backlog_s, backlog_held, backlog_eta_s): how much, being
+/// read or why it waits, and how long it takes.
+String beanOwed(AppLocalizations l, Map hw) {
+  final eta = hw['backlog_eta_s'] as num?;
+  return [
+    l.beanBehind(durationText(l, hw['backlog_s'] as num)),
+    switch (hw['backlog_held']) { 'live' => l.beanHeldLive, 'recording' => l.beanHeldRecording, _ => l.catchingUp },
+    if (eta != null && eta > 0) l.beanEta(durationText(l, eta)),
+  ].join(' · ');
 }
 
 /// The top bar's chip (chipSpec): an icon, the battery's glyph when there is one, a number; an amber dot on the icon

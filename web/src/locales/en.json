@@ -97,7 +97,12 @@
     "holdStale": "No backfill progress for {minutes} min, so finals went on; older audio arriving later will be transcribed afterwards.",
     "view": "View",
     "summaryFailed": "Summary failed",
-    "summaryPending": "Writing summary…"
+    "summaryPending": "Writing summary…",
+    "beanBehind": {
+      "live": "{n} min of {device}'s audio is still only on the bean: while this page is open only live audio comes; close it to fetch the rest{eta}",
+      "recording": "{n} min of {device}'s audio is still only on the bean; fetched once it stops recording",
+      "reading": "{n} min of {device}'s audio is still only on the bean; fetching it{eta}"
+    }
   },
   "calendar": {
     "convs": "{n} conversation | {n} conversations",

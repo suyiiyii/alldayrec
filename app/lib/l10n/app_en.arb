@@ -316,5 +316,9 @@
   "errModel": "This firmware is for {want} and the recorder is {model}: it cannot go on",
   "errSame": "The recorder already runs {version}, no update needed",
   "errSha256": "The firmware download is incomplete, try again",
-  "errZip": "Cannot open the firmware package: {detail}"
+  "errZip": "Cannot open the firmware package: {detail}",
+  "beanBehind": "{time} still only on the bean",
+  "beanHeldLive": "the live page is open; fetched once it closes",
+  "beanHeldRecording": "fetched once the bean stops",
+  "beanEta": "about {time} to fetch"
 }

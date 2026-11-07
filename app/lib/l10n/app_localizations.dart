@@ -1999,6 +1999,30 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'固件包打不开：{detail}'**
   String errZip(Object detail);
+
+  /// No description provided for @beanBehind.
+  ///
+  /// In zh, this message translates to:
+  /// **'豆子上还有 {time}没传到手机'**
+  String beanBehind(Object time);
+
+  /// No description provided for @beanHeldLive.
+  ///
+  /// In zh, this message translates to:
+  /// **'实时页开着，关掉后自动补'**
+  String get beanHeldLive;
+
+  /// No description provided for @beanHeldRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'豆子停录后补'**
+  String get beanHeldRecording;
+
+  /// No description provided for @beanEta.
+  ///
+  /// In zh, this message translates to:
+  /// **'补完约 {time}'**
+  String beanEta(Object time);
 }
 
 class _AppLocalizationsDelegate
