@@ -9,6 +9,7 @@ import MediaFold from "../components/MediaFold.vue";
 import RowMenu from "../components/RowMenu.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
+  beanBehind,
   convLink,
   fold,
   inSpans,
@@ -94,6 +95,10 @@ const catchups = computed(() =>
     };
     return [{ s: from, it }];
   }),
+);
+// a bean with its recording not all on the phone: this page open is likely why it waits (the app reads only live then)
+const behind = computed(() =>
+  (live.value ? (status.value?.devices ?? []) : []).map((d) => beanBehind(d)).filter(Boolean),
 );
 const timeline = computed(() => {
   const ev = [
@@ -281,6 +286,7 @@ function jump(start: string) {
         <div v-else-if="it.k === 'catchup'" class="gap">{{ it.text }}</div>
         <div v-else class="gap">— {{ hhmm(it.at) }} —</div>
       </template>
+      <div v-for="b in behind" :key="b" class="gap">{{ b }}</div>
       <!-- nothing being said: where the next words will come up, under today's earlier ones -->
       <section v-if="idle" class="idle">
         <div class="none">

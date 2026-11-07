@@ -172,6 +172,8 @@ export interface RecorderStatus {
   total_kb?: number;
   backlog_kb?: number; // left on the card for the phone to read in the background
   backlog_eta_s?: number; // at the phone's own reading rate
+  backlog_s?: number; // a Feishu bean: seconds of its recording not on the phone yet (beanBehind)
+  backlog_held?: "live" | "recording" | null; // why they wait: a live page is open, until the bean stops; none: being read
   rssi?: number | null; // the link's signal, dBm
   case_battery?: number; // a Feishu bean's charging case (caseText)
   case_charging?: boolean; // that case on USB power
@@ -462,6 +464,19 @@ export const holdLeft = (d: DeviceStatus) =>
       ? t("api.holdLeft", { seen: hhmm(d.hold_seen), until: hhmm(d.hold_until ?? "") })
       : "";
 export const hhmmss = (iso: string) => iso.slice(11, 19);
+// a Feishu bean's recording not on its phone yet, as the phone last said (the app's BeanSync.owe()): held back by a
+// live page being open (this one, likely), until the bean stops, or being read; none once that is over 3 min old (the
+// phone says it each minute)
+export const beanBehind = (d: Pick<DeviceStatus, "device" | "hw">, now = Date.now()) => {
+  const h = d.hw;
+  if (!h?.backlog_s || now - Date.parse(h.at) > 180_000) return "";
+  const eta = h.backlog_eta_s ? t("live.catchup.eta", { n: Math.round(h.backlog_eta_s / 60) }) : "";
+  return t(`api.beanBehind.${h.backlog_held ?? "reading"}`, {
+    device: d.device,
+    n: Math.round(h.backlog_s / 60),
+    eta,
+  });
+};
 // a closed conversation's link text: its summary's title, or how the summary is going
 export const convLink = (c: Conversation) =>
   c.summary?.status === "done"

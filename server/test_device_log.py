@@ -64,6 +64,10 @@ def test_device_status():
     hist = anyio.run(device_log, "LR-X1-567E", lo)["status"]
     assert [h["battery"] for h in hist] == [80, 79] and hist[0]["at"] <= hist[1]["at"]
     assert db.device_status("LR-X1-567E") == hist[-1]
+    # a bean's recording not on its phone yet, as the app reports it (BeanSync.owe()): the live page reads it from here
+    owed = {"backlog_s": 2529, "backlog_eta_s": 1264, "backlog_held": "live"}
+    anyio.run(device_status_report, "D3200-0A0B", {"battery": 76, **owed})
+    assert {k: db.device_status("D3200-0A0B")[k] for k in owed} == owed
 
 
 def test_upgrades():

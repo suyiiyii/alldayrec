@@ -1158,4 +1158,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String errZip(Object detail) {
     return 'Cannot open the firmware package: $detail';
   }
+
+  @override
+  String beanBehind(Object time) {
+    return '$time still only on the bean';
+  }
+
+  @override
+  String get beanHeldLive => 'the live page is open; fetched once it closes';
+
+  @override
+  String get beanHeldRecording => 'fetched once the bean stops';
+
+  @override
+  String beanEta(Object time) {
+    return 'about $time to fetch';
+  }
 }

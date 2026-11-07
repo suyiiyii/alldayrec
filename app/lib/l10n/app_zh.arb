@@ -715,5 +715,19 @@
     "placeholders": {
       "detail": {}
     }
+  },
+  "beanBehind": "豆子上还有 {time}没传到手机",
+  "@beanBehind": {
+    "placeholders": {
+      "time": {}
+    }
+  },
+  "beanHeldLive": "实时页开着，关掉后自动补",
+  "beanHeldRecording": "豆子停录后补",
+  "beanEta": "补完约 {time}",
+  "@beanEta": {
+    "placeholders": {
+      "time": {}
+    }
   }
 }

@@ -97,7 +97,12 @@
     "holdStale": "补传等了 {minutes} 分钟没有进展，先定稿；之后到的更早录音会补转写",
     "view": "查看",
     "summaryFailed": "摘要生成失败",
-    "summaryPending": "摘要生成中…"
+    "summaryPending": "摘要生成中…",
+    "beanBehind": {
+      "live": "{device} 上还有 {n} 分钟录音没传到手机：此页开着时只传实时，关掉此页后开始补{eta}",
+      "recording": "{device} 上还有 {n} 分钟录音没传到手机，录音豆停录后补",
+      "reading": "{device} 上还有 {n} 分钟录音没传到手机，正在补{eta}"
+    }
   },
   "calendar": {
     "convs": "{n} 段对话",
