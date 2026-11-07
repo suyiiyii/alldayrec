@@ -6,8 +6,10 @@ import logging
 import time
 import uuid
 
+import anyio
 import anyio.to_thread
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+import numpy as np
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 
 from alldayrec import ask
@@ -19,6 +21,7 @@ from alldayrec import live
 from alldayrec import local_asr
 from alldayrec import mcp_server
 from alldayrec import mcp_links
+from alldayrec import qwen_stream
 from alldayrec import split
 from alldayrec import tenant
 from alldayrec import threads
@@ -31,6 +34,7 @@ from alldayrec.transcript import merge_drafts
 log = logging.getLogger("live")
 router = APIRouter()
 VOICE_MAX_S = 61  # a spoken question (the page stops at 60 s)
+VOICE_END_S = 10  # after the page let go, how long the stream has for its last words before the fallback hears it whole
 
 
 @router.get("/api/events")
@@ -155,8 +159,9 @@ async def ask_live(device: str, body: dict, tasks: BackgroundTasks):
 
 @router.post("/api/ask/voice")
 async def ask_voice(request: Request):
-    """A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as
-    text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. Decoded as an uploaded piece
+    """Deprecated: the page streams its PCM on the WebSocket /api/ask/voice/ws since 2026-11; kept for pages cached before.
+    A question said aloud (what the browser's MediaRecorder wrote, webm, ogg or mp4; iPhone's mp4 came out as its first
+    second alone) as text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. Decoded as an uploaded piece
     (audio.decode), heard by the draft layer's engine when it takes a whole window (fast, text alone; qwen-stream is a
     session), else the final layer's, ENGINE_FALLBACK as ever, each try in the calls table as `voice`. Nothing kept."""
     body = await request.body()
@@ -165,13 +170,118 @@ async def ask_voice(request: Request):
     x = await anyio.to_thread.run_sync(audio.decode, body, limiter=threads.MEDIA)
     if x is None or len(x) > VOICE_MAX_S * audio.SR:
         raise HTTPException(400, "[bad_audio] 不是一段能听的录音，或超过一分钟")
-    engine = asr.DRAFT_ENGINE if asr.DRAFT_ENGINE in asr.PROVIDERS else asr.ENGINE
     try:
-        segs = await asr.engine_segs(x, [], engine=engine, kind="voice")
+        segs = await asr.engine_segs(x, [], engine=voice_engine(), kind="voice")
     except Exception as e:  # engine_segs: the last engine's error once the fallback failed too
         log.warning("ask voice failed: %r", e)
         raise HTTPException(502, f"[asr_failed] 语音识别失败：{e!r}"[:300])
     return {"text": local_asr.text([" " + g["text"] for g in segs])}  # sentences as words: CJK joined, English spaced
+
+
+def voice_engine() -> str:
+    """Who hears a spoken question whole: the draft layer's engine when it takes a whole window (fast, text alone;
+    qwen-stream is a session), else the final layer's; ENGINE_FALLBACK after it as ever (engine_segs)."""
+    return asr.DRAFT_ENGINE if asr.DRAFT_ENGINE in asr.PROVIDERS else asr.ENGINE
+
+
+@router.websocket("/api/ask/voice/ws")
+async def ask_voice_ws(ws: WebSocket):
+    """A question said aloud as it is said (the ask sheet's hold-to-talk). The page sends its microphone as binary
+    messages, 16 kHz mono int16 PCM, little-endian, every 0.1 s or so, then {"type": "end"} once let go; it closes
+    the socket to drop the question. Back come {"type": "partial", "text"} as the words grow, then one
+    {"type": "final", "text"} ("" when nothing was heard) or {"type": "error", "error"}, and the server closes.
+    Heard by Bailian's streaming ASR (qwen_stream) when an engine of this server already sends audio there (qwen,
+    qwen-stream), else, and whenever the stream fails or has not ended VOICE_END_S after the end, whole by
+    voice_engine. At most VOICE_MAX_S of audio (the rest is dropped, and the question ends there) and VOICE_MAX_S + 5 s
+    of socket; a page gone closes the stream at once. Each try in the calls table as `voice`, audio_s the seconds
+    received. Nothing kept."""
+    await ws.accept()
+    cap = VOICE_MAX_S * audio.SR * 2
+    pcm, said, out = bytearray(), {}, {}
+    streams = bool({asr.ENGINE, asr.DRAFT_ENGINE, asr.ENGINE_FALLBACK} & {"qwen", "qwen-stream"})
+    tx, rx = anyio.create_memory_object_stream(float("inf"))  # bounded by cap: what the page sends, to the stream
+    done = anyio.Event()
+    t = time.perf_counter()
+
+    async def stream():
+        try:
+            async with qwen_stream.Session() as s, anyio.create_task_group() as tg:
+                async def feed():
+                    async with rx:
+                        async for b in rx:
+                            await s.send(b)
+                    await s.finish()
+                tg.start_soon(feed)
+                async for g in s.results():
+                    said[g["start_ms"]] = g["text"]
+                    await ws.send_json({"type": "partial", "text": joined()})
+                tg.cancel_scope.cancel()
+            out["text"] = joined()
+        except Exception as e:
+            out["error"] = threads.first(e)
+            log.warning("ask voice stream failed after %.1f s: %r", time.perf_counter() - t, out["error"])
+        finally:
+            rx.close()  # a failed stream takes no more audio
+            done.set()
+
+    joined = lambda: local_asr.text([" " + said[k] for k in sorted(said)])  # sentences as words: CJK joined, English spaced
+    async with anyio.create_task_group() as tg:
+        if streams:
+            tg.start_soon(stream)
+        else:
+            rx.close()
+            done.set()
+        try:
+            with anyio.move_on_after(VOICE_MAX_S + 5):  # a page that never says end: what it sent is the question
+                while len(pcm) < cap:
+                    m = await ws.receive()
+                    if m["type"] == "websocket.disconnect":
+                        raise WebSocketDisconnect(m.get("code", 1000))
+                    if b := m.get("bytes"):
+                        b = b[:min(len(b) & ~1, cap - len(pcm))]  # whole samples
+                        pcm += b
+                        try:
+                            tx.send_nowait(b)
+                        except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                            pass  # the stream failed: the fallback hears it whole
+                    elif is_end(m.get("text")):
+                        break
+        except WebSocketDisconnect:  # dropped (slid up, Escape) or the page went: no answer, no more audio sent
+            tg.cancel_scope.cancel()
+            if streams:
+                db.add_call("voice", "qwen-stream", None, round((time.perf_counter() - t) * 1000), "cancelled: the page went",
+                            len(pcm) / 2 / audio.SR, len(pcm) / 2 / audio.SR)
+            return
+        tx.close()
+        with anyio.move_on_after(VOICE_END_S):
+            await done.wait()
+        if not done.is_set():
+            out["error"] = TimeoutError(f"no end {VOICE_END_S} s after the last audio")
+            tg.cancel_scope.cancel()
+    secs = len(pcm) / 2 / audio.SR
+    if streams:
+        err = out.get("error")
+        db.add_call("voice", "qwen-stream", None, round((time.perf_counter() - t) * 1000), err and asr.failure(err), secs, secs)
+    reply = {"type": "final", "text": out.get("text", "")}
+    if "text" not in out and pcm:
+        try:
+            segs = await asr.engine_segs(np.frombuffer(bytes(pcm), np.int16), [], engine=voice_engine(), kind="voice")
+            reply["text"] = local_asr.text([" " + g["text"] for g in segs])
+        except Exception as e:  # engine_segs: the last engine's error once the fallback failed too
+            log.warning("ask voice failed: %r", e)
+            reply = {"type": "error", "error": f"[asr_failed] 语音识别失败：{e!r}"[:300]}
+    try:
+        await ws.send_json(reply)
+        await ws.close()
+    except Exception:  # the page went meanwhile
+        pass
+
+
+def is_end(text: str | None) -> bool:
+    try:
+        return json.loads(text or "null").get("type") == "end"
+    except (ValueError, AttributeError):
+        return False
 
 
 @router.post("/mcp")

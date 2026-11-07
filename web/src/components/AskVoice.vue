@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { onUnmounted, ref } from "vue";
 import { t } from "../i18n";
-import { call } from "../lib/api";
+import { blocks, resampler } from "../lib/pcm";
 import Icon from "./Icon.vue";
 
-// 问 AI said aloud, as 豆包 does it: hold the bar and speak, let go and the question goes, slide up first to drop it;
-// `toggle` (a mouse, beside the wide screen's search box): a click starts, a click sends, Escape drops it. What the
-// browser records (MediaRecorder: webm, ogg or mp4, as it likes) goes to POST /api/ask/voice, which answers the text
-// it heard ("" for nothing): `heard`. `fail`: why not, and whether the microphone itself is out of reach.
+// 问 AI said aloud, as 豆包 does it: hold the bar and speak, the words show as they are heard, let go and the question
+// goes, slide up first to drop it; `toggle` (a mouse, beside the wide screen's search box): a click starts, a click
+// sends, Escape drops it. The microphone goes as 16 kHz PCM (lib/pcm.ts), a block every 0.1 s, on the WebSocket
+// /api/ask/voice/ws, which answers the words so far (`said`, for the page to show; "" once done) and, once let go,
+// the text it heard ("" for nothing): `heard`. `fail`: why not, and whether the microphone itself is out of reach.
 const { toggle = false } = defineProps<{ toggle?: boolean }>();
-const emit = defineEmits<{ heard: [text: string]; fail: [why: string, mic: boolean] }>();
+const emit = defineEmits<{
+  heard: [text: string];
+  said: [text: string];
+  fail: [why: string, mic: boolean];
+}>();
 const MAX_S = 60, // the server takes a minute
   MIN_MS = 400, // a tap, not a question
   AWAY_PX = 60, // slid up this far: letting go drops it
@@ -18,48 +23,98 @@ const state = ref<"idle" | "rec" | "hearing">("idle"),
   away = ref(false),
   secs = ref(0),
   wave = ref<number[]>(Array(BARS).fill(0));
-let rec: MediaRecorder | null = null,
-  done: Promise<Blob> | null = null, // the recording, once rec stopped
-  ctx: AudioContext | null = null,
+let ctx: AudioContext | null = null,
+  mic: MediaStream | null = null,
+  ws: WebSocket | null = null,
+  put: (x: Int16Array<ArrayBuffer> | string) => void = () => {}, // to the socket, queued until it is open
+  out: ReturnType<typeof blocks> | null = null,
+  result: Promise<string | Error> | null = null, // the text heard, or why not
   frame = 0,
   t0 = 0,
   y0 = 0,
+  peak = 0, // the loudest block's mean square since the last bar
   down = false; // held (or clicked on) still: a release while the microphone was being opened drops it
 
+// The audio thread's blocks of samples to the page, 2048 at a time (43 ms at 48 kHz), as they come
+const WORKLET = `registerProcessor("pcm", class extends AudioWorkletProcessor {
+  b = new Float32Array(2048); n = 0;
+  process([[x]]) {
+    if (x) { this.b.set(x, this.n); this.n += x.length; }
+    if (this.n === this.b.length) { this.port.postMessage(this.b, [this.b.buffer]); this.b = new Float32Array(2048); this.n = 0; }
+    return true;
+  }
+});`;
+let workletUrl = "";
+
+// in the press or the click itself: iOS lets an AudioContext run only when it starts in the user's gesture
 async function start() {
+  down = true;
+  const c = (ctx = new AudioContext());
+  void c.resume();
   let stream: MediaStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // the browser's echo, noise and level care: a voice up close
-  } catch {
+    // the browser's own echo, noise and level care, as it has them by default: a voice up close
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    if (ctx === c) drop();
     down = false;
-    return emit("fail", t("timeline.noMic"), true);
+    const denied = (e as Error).name === "NotAllowedError";
+    return emit("fail", t(denied ? "timeline.micDenied" : "timeline.noMic"), true);
   }
-  if (!down) return stream.getTracks().forEach((x) => x.stop());
-  const parts: Blob[] = [],
-    r = (rec = new MediaRecorder(stream, { audioBitsPerSecond: 32000 }));
-  r.ondataavailable = (e) => e.data.size && parts.push(e.data);
-  done = new Promise((ok) => {
-    r.onstop = () => {
-      stream.getTracks().forEach((x) => x.stop());
-      ok(new Blob(parts, { type: r.mimeType }));
+  if (!down || ctx !== c) return stream.getTracks().forEach((x) => x.stop()); // let go already: drop() went before
+  // the socket once there is a microphone (no listening opened for nothing); what comes before it opens waits
+  const w = (ws = new WebSocket(
+      `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ask/voice/ws`,
+    )),
+    queue: (Int16Array<ArrayBuffer> | string)[] = [];
+  put = (x) => (w.readyState === WebSocket.OPEN ? w.send(x) : queue.push(x));
+  w.onopen = () => queue.splice(0).forEach((x) => w.send(x));
+  result = new Promise((ok) => {
+    w.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "partial") return emit("said", m.text);
+      ok(m.type === "final" ? m.text : new Error(t("err.code.asr_failed")));
+    };
+    w.onclose = () => {
+      ok(new Error(t("timeline.netLost")));
+      if (state.value === "rec") void finish(true); // the network went while it was said: say so at once
     };
   });
-  r.start();
+  mic = stream;
+  const src = c.createMediaStreamSource(stream),
+    r = resampler(c.sampleRate), // 48 kHz on iPhones, whatever it asks for
+    o = (out = blocks(put));
+  const take = (x: Float32Array) => {
+    peak = Math.max(peak, x.reduce((s, v) => s + v * v, 0) / x.length);
+    o.push(r(x));
+  };
+  try {
+    workletUrl ||= URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
+    await c.audioWorklet.addModule(workletUrl);
+    const n = new AudioWorkletNode(c, "pcm");
+    n.port.onmessage = (e) => take(e.data);
+    src.connect(n).connect(c.destination); // pulled by the output (it writes silence), else it never runs
+  } catch {
+    // an older WebView without AudioWorklet: the deprecated main-thread node does the same
+    const n = c.createScriptProcessor(2048, 1, 1);
+    n.onaudioprocess = (e) => {
+      take(e.inputBuffer.getChannelData(0));
+      e.outputBuffer.getChannelData(0).fill(0);
+    };
+    src.connect(n).connect(c.destination);
+  }
+  if (!down || ctx !== c) return; // let go while the worklet loaded: drop() went before
   t0 = performance.now();
   state.value = "rec";
   away.value = false;
   if (toggle) addEventListener("keydown", esc);
   // the level, a bar of it every 60 ms, scrolling from the right
-  ctx = new AudioContext();
-  const an = ctx.createAnalyser();
-  ctx.createMediaStreamSource(stream).connect(an);
-  const buf = new Float32Array(an.fftSize);
   let last = 0;
   const tick = (now: number) => {
-    an.getFloatTimeDomainData(buf);
-    const db = 10 * Math.log10(buf.reduce((s, v) => s + v * v, 0) / buf.length + 1e-10);
     if (now - last > 60) {
       last = now;
+      const db = 10 * Math.log10(peak + 1e-10);
+      peak = 0;
       wave.value = [...wave.value.slice(1), Math.min(1, Math.max(0, (db + 55) / 40))];
     }
     secs.value = Math.floor((now - t0) / 1000);
@@ -69,51 +124,59 @@ async function start() {
   frame = requestAnimationFrame(tick);
 }
 
-async function finish(send: boolean) {
-  down = false;
-  if (state.value !== "rec" || !rec) return;
+// the microphone off; the socket too unless it still has the answer to give
+function stopMic() {
   cancelAnimationFrame(frame);
   removeEventListener("keydown", esc);
-  const ms = performance.now() - t0;
-  rec.stop();
-  rec = null;
+  mic?.getTracks().forEach((x) => x.stop());
   void ctx?.close();
-  const blob = await done!;
+  mic = ctx = out = null;
   wave.value = Array(BARS).fill(0);
-  state.value = "idle";
-  if (!send) return;
-  if (ms < MIN_MS) return emit("fail", t("timeline.tooShort"), false);
-  state.value = "hearing";
-  try {
-    emit(
-      "heard",
-      (await call<{ text: string }>("/api/ask/voice", { method: "POST", body: blob })).text,
-    );
-  } catch (e) {
-    emit("fail", (e as Error).message, false);
+}
+function drop() {
+  stopMic();
+  if (ws) ws.onopen = ws.onmessage = ws.onclose = null;
+  ws?.close(); // closed: the server stops listening at once and answers nothing
+  ws = result = null;
+  emit("said", "");
+}
+
+async function finish(send: boolean) {
+  down = false;
+  if (state.value !== "rec") return void (state.value === "idle" && drop()); // let go while the microphone opened
+  const ms = performance.now() - t0,
+    r = result!;
+  out?.flush();
+  stopMic();
+  if (!send || ms < MIN_MS) {
+    drop();
+    state.value = "idle";
+    return void (send && emit("fail", t("timeline.tooShort"), false));
   }
+  put(JSON.stringify({ type: "end" }));
+  state.value = "hearing";
+  const got = await r;
+  drop();
   state.value = "idle";
+  if (got instanceof Error) emit("fail", got.message, false);
+  else emit("heard", got);
 }
 const esc = (e: KeyboardEvent) => e.key === "Escape" && finish(false);
 
 // hold: the bar keeps the finger (pointer capture) wherever it goes until it lets go
 function press(e: PointerEvent) {
-  if (state.value !== "idle") return;
+  if (state.value !== "idle" || down) return;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   y0 = e.clientY;
-  down = true;
   void start();
 }
 const move = (e: PointerEvent) => state.value === "rec" && (away.value = y0 - e.clientY > AWAY_PX);
 function release() {
-  if (state.value === "rec") void finish(!away.value);
-  down = false;
+  void finish(state.value === "rec" && !away.value);
 }
 function click() {
-  if (state.value === "idle") {
-    down = true;
-    void start();
-  } else void finish(true);
+  if (state.value === "idle" && !down) void start();
+  else void finish(true);
 }
 onUnmounted(() => void finish(false));
 </script>

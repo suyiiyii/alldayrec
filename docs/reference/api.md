@@ -22,6 +22,7 @@ type: reference
 - 请求体是原始字节、不在 OpenAPI 里的：`POST /api/chunks` 的请求体是一个完整的音频文件，`POST /api/firmware` 的请求体是一个固件包。
 - 返回的内容：表里只有请求。上传录音时用到的两个：`POST /api/chunks` 返回 `{"seconds": 这块的秒数, "slice": {…}}`，`GET /api/client-config` 返回 `{"slice": {…}}`。`slice` 是 App 现在每块音频该切的秒数（`foreground`、`background`、`screenOff`）；实时页 `/live` 开着时，`background` 和 `screenOff` 不超过 `SLICE_WATCHED_S`（见[配置](./configuration.md)）。
 - `GET /ws`：WebSocket，服务器向网页推送这个租户的更新。
+- `GET /api/ask/voice/ws`：WebSocket，说出的问题边说边识别。网页发二进制消息（16 kHz 单声道 int16 PCM，小端，约每 0.1 秒一块），松手时发 `{"type": "end"}`，要取消就直接关掉连接；服务器推回 `{"type": "partial", "text"}`（到目前为止听到的字），最后一条 `{"type": "final", "text"}`（没听到字时为空）或 `{"type": "error", "error"}`，然后关闭。最多 60 秒音频。
 - 网页本身的路由（`/`、`/live`、`/conversations` 等）和 `/assets/*`，见[网页与 App](./web-and-app.md)。
 
 ## 接口
@@ -211,11 +212,17 @@ type: reference
 |---|---|---|
 | `POST` | A question about my own past answered from this app's data (ask.py), in 10-30 s: {answer, sources, calls, usage}. | body: JSON object |
 
+### `/api/ask/live/{device}`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | A question said to the device (its button held, then let go) between `start` and `end`, unix ms on the clock of its /api/chunks pieces: {id} at once; its words are taken from the device's live transcript, the answer streamed on /ws as type `ask` (ask.live). | `device` (path, string)<br>body: JSON object |
+
 ### `/api/ask/voice`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | A question said aloud (the ask sheet's hold-to-talk: what the browser's MediaRecorder wrote, webm, ogg or mp4) as text, {text}, for the page to show and ask with /api/ask; "" when nothing was heard. | — |
+| `POST` | Deprecated: the page streams its PCM on the WebSocket /api/ask/voice/ws since 2026-11; kept for pages cached before. | — |
 
 ### `/mcp`
 
