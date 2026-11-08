@@ -1,6 +1,6 @@
 """A device's stored audio through the final layer again (device_pipeline.pipeline, as a backlog: no page watches, so
 no drafts and no live analysis; summaries are queued, never written) into a store of its own, and two such runs compared
-row by row: the check that a change to how pieces are finalized (#433: side by side) leaves every sentence, its time,
+row by row: the check that a change to how pieces are finalized (side by side) leaves every sentence, its time,
 speaker and conversation as they were. The engine's answers are kept in a cache keyed by the audio it was sent: the
 first run asks the engine, the next get the same answers (with the time the call took when --latency), so two runs
 differ only by the code. A piece no run before sent (a miss) means the pieces were cut differently. Each answer is a
@@ -10,7 +10,7 @@ line of the cache as it comes: a run stopped half way keeps what it paid for.
     python -I final_parity.py run <snap dir> <out dir> [--cache asr.jsonl] [--latency]          out dir/result.json
     python -I final_parity.py compare <a result.json> <b result.json>                          exit 1 on any difference
 
--I (no script dir on sys.path): `uv run python -I <this file>` in another checkout runs that checkout's alldayrec.
+-I (no script dir on sys.path): `uv run python -I <this file>` in another checkout (server/) runs that checkout's alldayrec.
 from/to: local times (2026-11-07T15:00). run reads ENGINE, MODELS_DIR, INFER_* as the server does.
 """
 import copy

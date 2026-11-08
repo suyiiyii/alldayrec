@@ -113,7 +113,7 @@ type: reference
 | `SUMMARY_WORKERS` | `4` | 同时写摘要的数量 | `summaries.py` |
 | `QWEN_ASR_MODEL` | `qwen-audio-3.1-asr-flash-filetrans` | `qwen` 引擎用的百炼模型 | `qwen_asr.py` |
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
-| `FINAL_ASR_CONCURRENCY`、`FINAL_EMBED_CONCURRENCY` | `4`、`2` | 一个设备积压时，同时送引擎的定稿块数，和其中同时算声纹的块数（每块仍占一个 `INFER_CALLS` 名额）。块照旧按时间顺序认人、切对话、写库，结果和逐块处理一样；不积压时始终只有一块，延迟不变 | `device_pipeline.py` |
+| `FINAL_ASR_CONCURRENCY`、`FINAL_EMBED_CONCURRENCY` | `4`、`2` | 按设备算：一个设备积压时，同时送引擎的定稿块数，和其中同时算声纹的块数。两个设备同时积压，各送各的，合计可到两倍；全进程的声纹计算仍共用 `INFER_CALLS` 名额。块照旧按时间顺序认人、切对话、写库，结果和逐块处理一样。不积压时始终只有一块，延迟不变；同一时段还有别的录音设备有音频，或本设备正给它当备用（同处备用）时，也是一块一块来 | `device_pipeline.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
 | `MUSIC_DETECT` | `1` | 定稿时听出是音乐（外放的歌、伴奏和人声差不多一样响）的句子不取声纹，说话人记为 `S?`，不会进人物页；仍然转写，转写行上有音符图标。把这句的说话人纠正成某个人，它就算人声：音符去掉，照常学声纹。0 关闭 | `music.py` |
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |

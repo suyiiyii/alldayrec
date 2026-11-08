@@ -753,11 +753,25 @@ def piece_in(device: str):
         st.piece_in = anyio.Event()
 
 
-async def wait_piece(device: str):
+@contextlib.contextmanager
+def idle(device: str, queue: bool):
+    """The device's queue reader (queue) hands out nothing more meanwhile: its final layer cuts from what it has
+    (PipelineState.read_idle)."""
+    st = T().devices.get(device) if queue else None
+    if st:
+        st.read_idle = True
+    try:
+        yield
+    finally:
+        if st:
+            st.read_idle = False
+
+
+async def wait_piece(device: str, queue: bool = False):
     """Until the device's next piece comes in, 1 s at most: an idle reader's poll (the edge reader picked up a
-    question's last piece up to 1 s late, the device's voice ask waiting for it)."""
+    question's last piece up to 1 s late, the device's voice ask waiting for it). queue: the device's queue reader."""
     st = T().devices.get(device)
-    with anyio.move_on_after(1):
+    with idle(device, queue), anyio.move_on_after(1):
         await (st.piece_in.wait() if st else anyio.sleep(1))
 
 
@@ -791,7 +805,7 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                  "AND start_ms + seconds * 1000 > ? ORDER BY start_ms LIMIT 1")
         p = db.conn().execute(query, (device, at, lo)).fetchone()
         if p is None or h is not None and p["start_ms"] >= h:
-            await wait_piece(device)
+            await wait_piece(device, edge_s is None)
             continue  # idle readers never take a write lock
         # Save's late predicate and selection's cursor advance are serialized by SQLite. An upload
         # cannot slip between the SELECT and advancing the reader and disappear behind it unregistered.
@@ -803,7 +817,7 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                 db.put_kv(f"read_to:{device}", p["start_ms"], t)
                 db.put_kv(f"read_end:{device}", round(p["start_ms"] + p["seconds"] * 1000), t)
         if p is None:
-            await wait_piece(device)
+            await wait_piece(device, edge_s is None)
             continue
         if p["seconds"] > WHOLE_S:
             # Keep both decode and each read off the loop. The context owns temporary files;
@@ -823,9 +837,11 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                             # Keep the piece queued, without skipping audio or letting
                             # lasting() restart the same failing decode forever. A server
                             # restart retries from finalized progress with a fresh budget.
-                            await anyio.sleep_forever()
+                            with idle(device, edge_s is None):
+                                await anyio.sleep_forever()
                         ws.note(f"{device}：音频解码{reason}，60 s 后重试（{decode_failures}/{DECODE_ATTEMPTS}）", "warn")
-                        await anyio.sleep(60)
+                        with idle(device, edge_s is None):
+                            await anyio.sleep(60)
                         continue
                     decode_failures = 0
                 for_block = lambda: next(blocks, None)
