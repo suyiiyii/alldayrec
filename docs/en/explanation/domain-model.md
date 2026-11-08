@@ -120,20 +120,42 @@ Sentences the late layer inserts carry `late = 1`. `replace_sentences` never del
 
 A rename writes no table of renames. Its undo is a snapshot of the 20 latest renames in memory (`UNDO_KEEP`), lost on a server restart. What persists is the sentences learnt in `enrolled`. `conversation_aliases` records merged conversations, not renames.
 
-### Diagram
+### Diagrams
 
-A solid line is a stored key. A dashed line is a lookup by device and time, with no key stored.
+In the three diagrams below, a solid line is a stored key. A dashed line is a lookup by device and time, with no key stored.
+
+#### Audio and text
 
 ```mermaid
 erDiagram
     pieces {
         text device PK
         int start_ms PK
-        real seconds
     }
     final_piece {
         text device
         time from_to "memory only"
+    }
+    late_spans {
+        int id PK
+        text status
+    }
+    drafts {
+        text source
+        text id
+    }
+    sentences {
+        text source
+        text id
+        text speaker
+    }
+    walls {
+        text device PK
+        text at PK
+    }
+    conversation_aliases {
+        text old PK
+        text new
     }
     processed_audio {
         text device PK
@@ -141,41 +163,46 @@ erDiagram
         int end_ms PK
         text layer PK
     }
-    late_spans {
-        int id PK
+    conversations {
+        text id PK
         text device
-        text status
+    }
+
+    pieces }o..o{ final_piece : "overlapping time"
+    final_piece ||..o{ processed_audio : "written at commit"
+    pieces }o..o{ late_spans : "the late parts"
+    final_piece ||..o{ sentences : "written at commit"
+    late_spans ||..o{ sentences : "late_job"
+    drafts }o..o{ sentences : "shown after finalized_to"
+    sentences }o..o| conversations : "same device, start within"
+    walls }o..|| conversations : "where it was split"
+    conversation_aliases }o--|| conversations : "new"
+```
+
+#### AI and references on a conversation
+
+```mermaid
+erDiagram
+    conversations {
+        text id PK
+        text device
+    }
+    summaries {
+        text conversation PK
     }
     sentences {
         text source
         text id
         text speaker
-        int late
-    }
-    drafts {
-        text source
-        text id
-    }
-    conversations {
-        text id PK
-        text device
-        text start
-        text end
-    }
-    conversation_aliases {
-        text old PK
-        text new
-    }
-    walls {
-        text device PK
-        text at PK
-    }
-    summaries {
-        text conversation PK
-        text status
     }
     timelines {
         text conversation PK
+    }
+    name_hints {
+        text conv PK
+    }
+    feedback {
+        text conv
     }
     todo_marks {
         text id PK
@@ -185,22 +212,40 @@ erDiagram
         text id PK
         text conv
     }
-    feedback {
-        text conv
-    }
-    name_hints {
-        text conv PK
+
+    conversations ||--o| summaries : "conversation"
+    conversations ||--o| timelines : "conversation"
+    conversations ||--o| name_hints : "conv"
+    conversations ||--o{ feedback : "conv"
+    summaries ||--o{ todo_marks : "todo id"
+    conversations ||--o{ stars : "conv"
+    sentences ||--o{ stars : "id"
+    sentences }o..o| conversations : "same device, start within"
+```
+
+#### People
+
+```mermaid
+erDiagram
+    conversations {
+        text id PK
+        text device
     }
     voices {
         text conv
         text label
     }
-    apart {
-        text voice PK
-        text grp PK
+    sentences {
+        text source
+        text id
+        text speaker
     }
     people {
         text name PK
+    }
+    apart {
+        text voice PK
+        text grp PK
     }
     enrolled {
         text name
@@ -214,27 +259,11 @@ erDiagram
         text name PK
     }
 
-    pieces }o..o{ final_piece : "overlapping time"
-    final_piece ||..o{ processed_audio : "written at commit"
-    pieces }o..o{ late_spans : "the late parts"
-    final_piece ||..o{ sentences : "written at commit"
-    late_spans ||..o{ sentences : "late_job"
-    sentences }o..o| conversations : "same device, start within"
-    drafts }o..o{ sentences : "shown after finalized_to"
-    walls }o..|| conversations : "where it was split"
-    conversation_aliases }o--|| conversations : "new"
-    conversations ||--o| summaries : "conversation"
-    conversations ||--o| timelines : "conversation"
-    conversations ||--o| name_hints : "conv"
-    conversations ||--o{ feedback : "conv"
-    summaries ||--o{ todo_marks : "todo id"
-    stars }o--|| sentences : "id"
-    stars }o--|| conversations : "conv"
     conversations ||--o{ voices : "conv"
     voices ||--o{ apart : "conv|label"
     sentences }o..o{ voices : "speaker = label"
+    sentences ||--o{ enrolled : "row = rowid"
     people ||--o{ enrolled : "name"
-    enrolled }o--|| sentences : "row = rowid"
     people ||--o{ aliases : "name"
     people ||--o| profiles : "name"
 ```
@@ -260,21 +289,19 @@ The final layer is not a state machine with fixed states. It is one cursor and o
 
 ```mermaid
 flowchart TD
-    A["A piece arrives in pieces"] --> B["audio.stream: the device's stream in time order<br/>nothing after a hold, without what the late layer processed"]
-    B --> C["Segmenter: VAD finds speech<br/>keeps at most 900 s of audio in memory"]
-    C --> D{"next_cut: a cut point<br/>after finalized_to?"}
+    A["A piece arrives<br/>in pieces"] --> B["audio.stream<br/>the device's stream in order<br/>nothing after a hold<br/>skips what the late<br/>layer processed"]
+    B --> C["Segmenter<br/>VAD finds speech<br/>at most 900 s in memory"]
+    C --> D{"next_cut<br/>a cut point after<br/>finalized_to?"}
+    D -- "yes" --> E{"speech<br/>in it?"}
+    E -- "no" --> T
     D -- "not yet" --> W["wait 2 s"] --> D
-    D -- "yes" --> E{"speech in it?"}
-    E -- "no" --> P["commit: move the cursor only"]
-    E -- "yes" --> F{"colocate.decide"}
+    E -- "yes" --> F{"colocate<br/>.decide"}
+    F -- "left to another<br/>device here" --> T
+    F -- "transcribe" --> G["engine<br/>voiceprint labels"]
     F -- "wait" --> W
-    F -- "left to another device here" --> S["commit: processed_audio standby"]
-    F -- "transcribe" --> G["engine + voiceprint labels"]
-    G -- "fails" --> R["take back the voiceprints, wait 10 s, cursor unchanged"] --> D
-    G -- "ok" --> H["Grouper: sentences into conversations,<br/>closed after a 300 s pause"]
-    H --> T["commit in one transaction"]
-    P --> D
-    S --> D
+    G -- "fails" --> R["take back voiceprints<br/>wait 10 s<br/>cursor unchanged"] --> W
+    G -- "ok" --> H["Grouper<br/>sentences into conversations<br/>closed after a 300 s pause"]
+    H --> T["commit in one transaction<br/>move finalized_to<br/>no speech: cursor only<br/>left to another: standby"]
     T --> D
 ```
 
@@ -334,17 +361,17 @@ Older audio that arrives after that is late audio.
 
 ```mermaid
 flowchart TD
-    U["A piece arrives"] --> L{"Starts before the final reader's piece,<br/>or before finalized_to?"}
-    L -- "no" --> Q["Into pieces; the final layer reads it in order"]
-    L -- "yes" --> N["Into pieces, for playback<br/>the parts no other piece covers (≥ 0.5 s) into late_spans"]
-    N --> J["Spans within 2 s join; each at most 30 minutes"]
-    J --> K{"Ready?<br/>no late audio for this span for 180 s, or the hold let go;<br/>and the final layer has passed it"}
+    U["A piece arrives"] --> L{"Before where the<br/>final layer has read?"}
+    L -- "no" --> Q["Into pieces<br/>the final layer<br/>reads it in order"]
+    L -- "yes" --> N["Into pieces for playback<br/>parts no other piece<br/>covers (≥ 0.5 s)<br/>into late_spans"]
+    N --> J["Spans within 2 s join<br/>each at most 30 minutes"]
+    J --> K{"Ready?<br/>nothing new for 180 s<br/>or the hold let go<br/>and the final layer<br/>has passed it"}
     K -- "no" --> K
-    K -- "yes" --> O{"A conversation going on<br/>within 300 s?"}
-    O -- "yes" --> DF["deferred: wait for it to close"] --> K
-    O -- "no" --> X["Parts another device here transcribed: standby;<br/>the rest cut with the same next_cut, transcribed, labelled"]
-    X --> Y["One transaction: insert sentences only (late = 1),<br/>into a neighbouring conversation or a new one;<br/>when late speech leaves no 300 s pause between two conversations,<br/>merge them and write conversation_aliases"]
-    Y --> Z["processed_audio late, span done,<br/>summaries of the conversations it changed written again"]
+    K -- "yes" --> O{"A conversation<br/>going on within<br/>300 s?"}
+    O -- "yes" --> DF["deferred<br/>wait for it to close"] --> K
+    O -- "no" --> X["Parts another device<br/>here transcribed: standby<br/>the rest cut by next_cut<br/>transcribed, labelled"]
+    X --> Y["One transaction<br/>insert sentences only<br/>late = 1, into a neighbour<br/>or a new conversation<br/>two conversations with<br/>no 300 s gap left merge<br/>conversation_aliases"]
+    Y --> Z["processed_audio late<br/>span done<br/>changed conversations<br/>summarized again"]
 ```
 
 The late layer only inserts sentences and never replaces any: it skips a sentence that overlaps an existing one or whose `id` exists. When two conversations merge, the later one's anonymous labels are matched to the earlier one's by voiceprint. The references in stars, feedback, todos and their marks, voices, enrolled sentences, name hints, the live timeline, profiles and recaps move in the same transaction (`late_merge.merge`). Conversations never merge across a wall.

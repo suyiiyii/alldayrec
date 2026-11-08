@@ -50,3 +50,19 @@ html:not(.dark) .only-dark,
 html.dark .only-light {
   display: none;
 }
+/* Mermaid diagrams (config.ts: useMaxWidth false): their own size on a phone, scrolling sideways; fit to the column
+   on a wider screen */
+.vp-doc .mermaid {
+  overflow-x: auto;
+}
+/* a label is a <p>: the page's paragraph spacing made it taller than the box mermaid measured, the last line cut */
+.vp-doc .mermaid p {
+  margin: 0;
+  line-height: 1.5;
+}
+@media (min-width: 640px) {
+  .vp-doc .mermaid svg {
+    max-width: 100%;
+    height: auto;
+  }
+}

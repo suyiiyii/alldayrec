@@ -122,18 +122,40 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 
 ### 关系图
 
-实线是存了对方的键；虚线是按设备和时间现查，没有存键。
+下面三张图里，实线是存了对方的键；虚线是按设备和时间现查，没有存键。
+
+#### 音频和文字
 
 ```mermaid
 erDiagram
     pieces {
         text device PK
         int start_ms PK
-        real seconds
     }
     final_piece {
         text device
         time from_to "只在内存"
+    }
+    late_spans {
+        int id PK
+        text status
+    }
+    drafts {
+        text source
+        text id
+    }
+    sentences {
+        text source
+        text id
+        text speaker
+    }
+    walls {
+        text device PK
+        text at PK
+    }
+    conversation_aliases {
+        text old PK
+        text new
     }
     processed_audio {
         text device PK
@@ -141,41 +163,46 @@ erDiagram
         int end_ms PK
         text layer PK
     }
-    late_spans {
-        int id PK
+    conversations {
+        text id PK
         text device
-        text status
+    }
+
+    pieces }o..o{ final_piece : "时间重叠"
+    final_piece ||..o{ processed_audio : "提交时写下"
+    pieces }o..o{ late_spans : "迟到的部分"
+    final_piece ||..o{ sentences : "提交时写下"
+    late_spans ||..o{ sentences : "late_job"
+    drafts }o..o{ sentences : "finalized_to 之后才显示"
+    sentences }o..o| conversations : "同设备、开始时刻在起止内"
+    walls }o..|| conversations : "切开的位置"
+    conversation_aliases }o--|| conversations : "new"
+```
+
+#### 对话上的 AI 和引用
+
+```mermaid
+erDiagram
+    conversations {
+        text id PK
+        text device
+    }
+    summaries {
+        text conversation PK
     }
     sentences {
         text source
         text id
         text speaker
-        int late
-    }
-    drafts {
-        text source
-        text id
-    }
-    conversations {
-        text id PK
-        text device
-        text start
-        text end
-    }
-    conversation_aliases {
-        text old PK
-        text new
-    }
-    walls {
-        text device PK
-        text at PK
-    }
-    summaries {
-        text conversation PK
-        text status
     }
     timelines {
         text conversation PK
+    }
+    name_hints {
+        text conv PK
+    }
+    feedback {
+        text conv
     }
     todo_marks {
         text id PK
@@ -185,22 +212,40 @@ erDiagram
         text id PK
         text conv
     }
-    feedback {
-        text conv
-    }
-    name_hints {
-        text conv PK
+
+    conversations ||--o| summaries : "conversation"
+    conversations ||--o| timelines : "conversation"
+    conversations ||--o| name_hints : "conv"
+    conversations ||--o{ feedback : "conv"
+    summaries ||--o{ todo_marks : "待办 id"
+    conversations ||--o{ stars : "conv"
+    sentences ||--o{ stars : "id"
+    sentences }o..o| conversations : "同设备、开始时刻在起止内"
+```
+
+#### 人
+
+```mermaid
+erDiagram
+    conversations {
+        text id PK
+        text device
     }
     voices {
         text conv
         text label
     }
-    apart {
-        text voice PK
-        text grp PK
+    sentences {
+        text source
+        text id
+        text speaker
     }
     people {
         text name PK
+    }
+    apart {
+        text voice PK
+        text grp PK
     }
     enrolled {
         text name
@@ -214,27 +259,11 @@ erDiagram
         text name PK
     }
 
-    pieces }o..o{ final_piece : "时间重叠"
-    final_piece ||..o{ processed_audio : "提交时写下"
-    pieces }o..o{ late_spans : "迟到的部分"
-    final_piece ||..o{ sentences : "提交时写下"
-    late_spans ||..o{ sentences : "late_job"
-    sentences }o..o| conversations : "同设备、开始时刻在起止内"
-    drafts }o..o{ sentences : "finalized_to 之后才显示"
-    walls }o..|| conversations : "切开的位置"
-    conversation_aliases }o--|| conversations : "new"
-    conversations ||--o| summaries : "conversation"
-    conversations ||--o| timelines : "conversation"
-    conversations ||--o| name_hints : "conv"
-    conversations ||--o{ feedback : "conv"
-    summaries ||--o{ todo_marks : "待办 id"
-    stars }o--|| sentences : "id"
-    stars }o--|| conversations : "conv"
     conversations ||--o{ voices : "conv"
     voices ||--o{ apart : "conv|label"
     sentences }o..o{ voices : "speaker = label"
+    sentences ||--o{ enrolled : "row = rowid"
     people ||--o{ enrolled : "name"
-    enrolled }o--|| sentences : "row = rowid"
     people ||--o{ aliases : "name"
     people ||--o| profiles : "name"
 ```
@@ -260,21 +289,19 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    A["上传块进 pieces"] --> B["audio.stream：按时间读这台设备的流<br/>hold 之后的不给，迟到层已处理的跳过"]
-    B --> C["Segmenter：VAD 找出说话的地方<br/>音频留在内存里，最多 900 秒"]
-    C --> D{"next_cut：从 finalized_to 往后<br/>有切点吗？"}
-    D -- "没有，等更多音频" --> W["等 2 秒"] --> D
-    D -- "有" --> E{"这段里有人说话？"}
-    E -- "没有" --> P["提交：只推进游标"]
-    E -- "有" --> F{"colocate.decide"}
+    A["上传块进 pieces"] --> B["audio.stream<br/>按时间读这台设备的流<br/>hold 之后的先不给<br/>迟到层处理过的跳过"]
+    B --> C["Segmenter<br/>VAD 找出说话的地方<br/>内存最多留 900 秒"]
+    C --> D{"next_cut<br/>finalized_to 之后<br/>有切点吗？"}
+    D -- "有" --> E{"这段有人说话？"}
+    E -- "没有" --> T
+    D -- "没有" --> W["等 2 秒"] --> D
+    E -- "有" --> F{"colocate<br/>.decide"}
+    F -- "交给同处<br/>另一台" --> T
+    F -- "自己转写" --> G["引擎识别<br/>声纹标说话人"]
     F -- "等一会" --> W
-    F -- "交给同处的另一台" --> S["提交：processed_audio 记 standby"]
-    F -- "自己转写" --> G["引擎识别 + 声纹标说话人"]
-    G -- "失败" --> R["撤回声纹状态，等 10 秒，游标不动"] --> D
-    G -- "成功" --> H["Grouper：句子归进对话，<br/>停顿满 300 秒就关闭"]
-    H --> T["一次事务提交"]
-    P --> D
-    S --> D
+    G -- "失败" --> R["撤回声纹<br/>等 10 秒<br/>游标不动"] --> W
+    G -- "成功" --> H["Grouper<br/>句子归进对话<br/>停顿满 300 秒关闭"]
+    H --> T["一次事务提交<br/>推进 finalized_to<br/>没人说话：只推进游标<br/>交给另一台：记 standby"]
     T --> D
 ```
 
@@ -334,17 +361,17 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    U["一个上传块到了"] --> L{"开始时刻在定稿层读取器之前，<br/>或早于 finalized_to？"}
-    L -- "否" --> Q["进 pieces，定稿层按顺序读到"]
-    L -- "是" --> N["进 pieces，供播放<br/>别的块没覆盖的部分（≥0.5 秒）记进 late_spans"]
-    N --> J["相距 2 秒内的合成一段，每段最多 30 分钟"]
-    J --> K{"可以处理了？<br/>这段 180 秒没再收到迟到音频，或 hold 已放开；<br/>并且定稿层已经过了这段"}
+    U["一个上传块到了"] --> L{"早于定稿层<br/>已读到的位置？"}
+    L -- "否" --> Q["进 pieces<br/>定稿层按顺序读"]
+    L -- "是" --> N["进 pieces 供播放<br/>没被别的块覆盖的<br/>部分（≥0.5 秒）<br/>记进 late_spans"]
+    N --> J["相距 2 秒内的合并<br/>每段最多 30 分钟"]
+    J --> K{"可以处理了？<br/>180 秒没再收到<br/>或 hold 已放开<br/>且定稿层已读过"}
     K -- "否" --> K
-    K -- "是" --> O{"附近 300 秒内<br/>有进行中的对话？"}
-    O -- "有" --> DF["deferred：等它关闭"] --> K
-    O -- "没有" --> X["同处另一台已经转写的部分记 standby；<br/>其余用同样的 next_cut 切段、识别、认人"]
-    X --> Y["一次事务：只插入句子（late = 1），<br/>归进相邻对话或新建；<br/>迟到的话把两段对话之间的空隙填到没有满 300 秒的停顿，<br/>就合并它们，写 conversation_aliases"]
-    Y --> Z["processed_audio 记 late，区间标 done，<br/>受影响的对话重写总结"]
+    K -- "是" --> O{"300 秒内有<br/>进行中的对话？"}
+    O -- "有" --> DF["deferred<br/>等它关闭"] --> K
+    O -- "没有" --> X["同处另一台转写过的<br/>记 standby<br/>其余用 next_cut 切段<br/>识别、认人"]
+    X --> Y["一次事务<br/>只插入句子 late = 1<br/>归进相邻对话或新建<br/>空隙不再满 300 秒的<br/>两段对话合并<br/>写 conversation_aliases"]
+    Y --> Z["processed_audio 记 late<br/>区间标 done<br/>改动的对话重写总结"]
 ```
 
 迟到层的句子只插入、不替换：和已有句子重叠的、`id` 已存在的都不插。合并对话时，后一段的匿名标签按声纹对到前一段的标签上；收藏、反馈、待办和标记、声音、声纹来源、称呼线索、实时分析时间线、人物卡片和回顾里的引用在同一个事务里改指向（`late_merge.merge`）。`walls` 两边永远不合并。
