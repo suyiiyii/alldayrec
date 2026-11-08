@@ -630,6 +630,7 @@ do {
   check(bean.transfers, [[a, 0, 1]])
   check(bean.logs.filter { $0.0 == "bean_clock" }.map { $0.1 }.filter { !$0.contains("起点") }, [], "no jump from the resend")
   check(sync.files[a]!.anchors.count, 0)
+  check(bean.logs.filter { $0.0 == "bean_gap_time" }.count, 0, "units sent again are not late")
   let late = piecesIn(chunks).filter { $0.seq >= 31_500 }.map { abs($0.start - (openAt + $0.seq * 20)) }.max() ?? -1
   check((0...100).contains(late), true, "dated by seq as before: \(late) ms off")
 }
