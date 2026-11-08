@@ -52,7 +52,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   /// What the link does, as a code the app words (recorder_status.dart): the session's while one runs.
   var state: [String: Any] { inSession ? sync.state : linkState }
   /// The session is up (its key exchange and first reads done): recording or not.
-  var connected: Bool { inSession && ["beanIdle", "joining", "connected"].contains(sync.state["code"] as? String ?? "") }
+  var connected: Bool { inSession && ["beanIdle", "joining", "connected"].contains(sync.state["code"] as? String ?? "") }  // beanWifi: BLE is down
   var hw: [String: Any] { sync.hw.merging(sync.owed) { $1 }.merging(["name": name]) { $1 } }
   var syncDoneKb: Int64 { sync.syncDoneKb }
   var syncTotalKb: Int64 { sync.syncTotalKb }

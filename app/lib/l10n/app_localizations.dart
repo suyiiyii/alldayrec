@@ -1682,6 +1682,12 @@ abstract class AppLocalizations {
   /// **'录音豆已连上 · 没在录音'**
   String get linkBeanIdle;
 
+  /// No description provided for @linkBeanWifi.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi-Fi 快传中'**
+  String get linkBeanWifi;
+
   /// No description provided for @beanFeishuBound.
   ///
   /// In zh, this message translates to:

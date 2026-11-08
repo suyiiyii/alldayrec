@@ -926,6 +926,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get linkBeanIdle => '录音豆已连上 · 没在录音';
 
   @override
+  String get linkBeanWifi => 'Wi-Fi 快传中';
+
+  @override
   String get beanFeishuBound => '已绑定飞书';
 
   @override

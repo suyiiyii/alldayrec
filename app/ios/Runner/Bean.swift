@@ -567,6 +567,12 @@ final class BeanSync {
         (recording ? "在录音（文件 \(listing.open)）" : "没在录音") + "，积压 \(owed["backlog_s"] ?? 0) s",
         fields: ["reason": "manual", "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
                  "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
+    if needList { listing = try list() }  // a file just closed: its length
+    owe()
+    if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
+      log("bean_wifi_skip", "没有积压，不开热点", fields: ["battery": battery ?? NSNull(), "recording": recording])
+      return
+    }
     if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
       log("bean_wifi_fail", "电量 \(battery)% 低于 30%，不开热点，接着用蓝牙", "warn", ["step": "battery", "battery": battery])
       return
@@ -594,6 +600,7 @@ final class BeanSync {
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
     overWifi = true; wifiUnits = 0
+    state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false
     do {
       try io.wifiJoin(ssid, password, a.payload)
@@ -607,9 +614,10 @@ final class BeanSync {
     wifiEnded = io.monotonicNow()
     let ms = max(1, wifiEnded - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
     let audio = Int64(wifiUnits) * Bean.frameMs, x = Double(audio) / Double(ms)
+    let q = queued().count  // what is still to go up: the bean gives faster than the phone uploads (11-08: 200× vs 40×)
     log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频），\(kb) KB，用时 \(ms / 1000) s，" +
-        String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x), wifiUnits == 0 ? "warn" : nil,
-        ["why": why, "units": wifiUnits, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x])
+        String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x) + "；上传队列还有 \(q) 块", wifiUnits == 0 ? "warn" : nil,
+        ["why": why, "units": wifiUnits, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x, "queued": q])
     throw Again(description: "Wi-Fi transfer over: \(why)", naturalRollover: rollover)
   }
 
@@ -619,6 +627,7 @@ final class BeanSync {
     var at = io.monotonicNow(), was = 0
     while true {
       let t = io.monotonicNow()
+      if io.wifiAsked() { log("bean_wifi_ask", "已在 Wi-Fi 快传，这次请求忽略") }  // not kept for after it (11-08)
       if t - at >= 10_000 {  // progress: what came in the last 10 s, and the upload queue (does it drain meanwhile?)
         let n = wifiUnits - was, kbps = Double(n * Bean.unit) / 1.024 / Double(t - at), x = Double(Int64(n) * Bean.frameMs) / Double(t - at)
         log("bean_wifi_progress", String(format: "Wi-Fi 快传：共 %d 个单元，近 10 s %.0f KB/s，%.1f 倍实时，", wifiUnits, kbps, x) +
@@ -663,7 +672,8 @@ final class BeanSync {
         fields: ["ms": back, "battery_before": wifiBattery, "battery": hw["battery"] ?? NSNull(), "recording": recording])
     do {
       let f = try ask(Bean.wifiOff(), 0x1A02, 5000)
-      log("bean_wifi_off", "关了热点（1A/02，回复 \(Bean.hex(f.payload))）", fields: ["reply": Bean.hex(f.payload), "status": f.status])
+      log("bean_wifi_off", "关了热点（1A/02，状态 \(f.status)，" + (f.payload.isEmpty ? "回复不带数据）" : "回复 \(Bean.hex(f.payload))）"),
+          fields: ["reply": Bean.hex(f.payload), "status": f.status])
     } catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn", ["error": "\(error)"]) }
   }
 
@@ -830,7 +840,7 @@ final class BeanSync {
   private func begin(_ x: Xfer) throws {
     xfer = x; x.at = io.now(); x.seen = x.at; marked = false
     if x.live && liveFile != x.file { liveFile = x.file; liveSeen = x.at }
-    state = ["code": x.live ? "joining" : "beanIdle"]
+    if !overWifi { state = ["code": x.live ? "joining" : "beanIdle"] }
     if x.live { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
     try send(overWifi ? Bean.wifiTransfer(x.file, x.from * Int64(Bean.unit)) : Bean.transfer(x.file, x.from * Int64(Bean.unit), x.realtime))
   }
@@ -1075,7 +1085,7 @@ final class BeanSync {
     let toc = Int(audio.first ?? 0)
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 开始：首单元 \(s.seq)（请求从 \(x.from) 起），Opus 配置 \(toc >> 3)",
         fields: ["file": x.file, "seq": s.seq, "from": x.from, "realtime": x.realtime, "toc": toc])
-    if x.live { state = ["code": "connected"] }
+    if x.live && !overWifi { state = ["code": "connected"] }
   }
 
   private func complete(_ x: Xfer, _ result: Int, _ why: String = "") {

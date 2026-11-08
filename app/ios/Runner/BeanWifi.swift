@@ -21,6 +21,7 @@ final class BeanWifi {
   private let inbox = Inbox<[UInt8]?>()  // nil: the socket went
   @Shared private var seen: String?  // the certificate's pin, as it came
   @Shared private(set) var bytes: Int64 = 0
+  @Shared private var trail = ""  // a try's states, for its log
   @Shared private var waitingWhy = ""  // why the socket's path is not there (localNetworkDenied: the permission refused)
   private var monitor: NWPathMonitor?
 
@@ -62,11 +63,13 @@ final class BeanWifi {
     let joined = BeanWifi.mono() - t0
     log("bean_wifi_join", "加入了豆子的热点（\(joined) ms\(failure != nil ? "，本来就连着" : "")）", nil, ["ms": joined])
     var tries = 0, why = ""
-    while BeanWifi.mono() - t0 < 45_000 + joined {
+    // up to 90 s: the hotspot's address coming up, and the first time iOS's local network question (21:25 11-08: three
+    // tries of 15 s went while it was unanswered, most likely)
+    while BeanWifi.mono() - t0 < 90_000 + joined {
       tries += 1
       do { try connect(); break } catch {
         why = "\(error)"
-        if tries == 1 || tries % 10 == 0 { log("bean_wifi_socket", "连豆子的 WebSocket 第 \(tries) 次没成：\(why)", "warn", ["tries": tries, "error": why, "path": waitingWhy]) }
+        log("bean_wifi_socket", "连豆子的 WebSocket 第 \(tries) 次没成：\(why)；状态 \(trail)", "warn", ["tries": tries, "error": why, "path": waitingWhy, "states": trail])
         if let s = seen, s != BeanWifi.pin {
           log("bean_wifi_fail", "豆子的证书不是认得的那张（\(s)）", "warn", ["step": "pin", "pin": s])
           throw Bean.Fail("certificate \(s)")
@@ -101,7 +104,10 @@ final class BeanWifi {
     let c = NWConnection(to: .url(URL(string: "wss://\(BeanWifi.host):\(BeanWifi.port)/")!), using: p)
     let ready = DispatchSemaphore(value: 0)
     var failure: Error?
+    trail = ""
+    let t0 = BeanWifi.mono()
     c.stateUpdateHandler = { [weak self, weak c] s in
+      if self?.ws == nil { self?.trail += (self?.trail.isEmpty ?? true ? "" : " → ") + "\(s) @\(BeanWifi.mono() - t0) ms" }  // each try's way
       switch s {
       case .ready: ready.signal()
       case .failed(let e): failure = e; ready.signal(); if self?.ws != nil { self?.inbox.put(nil) }
@@ -238,7 +244,8 @@ final class UploadPath: NSObject, URLSessionTaskDelegate {
   @Shared private var via = "?"
 
   func urlSession(_ s: URLSession, task: URLSessionTask, didFinishCollecting m: URLSessionTaskMetrics) {
-    via = m.transactionMetrics.last.map { $0.isCellular ? "cellular" : $0.isExpensive ? "expensive" : "wifi/other" } ?? "?"
+    // isCellular is false through a VPN's tunnel (11-08: Wi-Fi gone, the default route cellular, still false)
+    via = m.transactionMetrics.last.map { $0.isCellular ? "蜂窝" : $0.isExpensive ? "计流量接口" : "非蜂窝接口（VPN 隧道或 Wi-Fi）" } ?? "?"
   }
 
   /// The task's delegate while a transfer is on, else nil.

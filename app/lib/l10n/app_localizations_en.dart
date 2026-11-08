@@ -954,6 +954,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get linkBeanIdle => 'Bean connected · not recording';
 
   @override
+  String get linkBeanWifi => 'Fetching over the bean\'s Wi-Fi';
+
+  @override
   String get beanFeishuBound => 'Bound to Feishu';
 
   @override

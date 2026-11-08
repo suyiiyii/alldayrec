@@ -637,6 +637,7 @@ do {
   bean.onTransfer = { file, from, _ in
     bean.header(file, 0xFFFF_FFFF)
     if from == 0 { bean.units(file, Array(0..<31_200), ms: 1) }  // 20× real time: within 10 s of live at about unit 31053
+    if bean.onWifi { bean.wifiAsk = true }  // tapped again meanwhile (11-08): not another one after it
   }
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
@@ -655,7 +656,21 @@ do {
   let n = bean.sent.count
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }.prefix(4), [0x2E01, 0x0101, 0x01A6, 0x1A02])
+  check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x05 }.count, 1, "the tap during it dropped")
+  check(bean.logs.contains { $0.0 == "bean_wifi_ask" }, true)
   check(bean.transfers.count, 2); check(bean.transfers[1][0], a); check(bean.transfers[1][1], Int64(got.count)); check(bean.transfers[1][2], 0)
+}
+
+/// Nothing lacking (a file begun just now): no hotspot.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  bean.recording = true; bean.open = t0 / 1000; bean.list(bean.open, 0); bean.wifiAsk = true
+  bean.onTransfer = { file, _, _ in bean.header(file, 0xFFFF_FFFF) }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  for _ in 0..<2 { do { try sync.session(since: t0 - 3_600_000, steps: "") } catch {} }
+  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x05 }, false, "no hotspot for nothing")
+  check(bean.logs.contains { $0.0 == "bean_wifi_skip" }, true)
 }
 
 /// A stop by hand holds across the fast transfer's reconnect (#324: a new connection starts the bean, the app's own
@@ -667,7 +682,8 @@ for dropFirst in [false, true] {
   let a = (t0 - 60_000) / 1000
   bean.recording = true; bean.open = a; bean.list(a, 0); bean.startable = true
   bean.onTransfer = { file, from, _ in
-    if !bean.onWifi { bean.header(file, 0xFFFF_FFFF); return }  // live over BLE: nothing until the stop
+    // live over BLE: nothing until the stop; then busy (code 4), the file left for Wi-Fi
+    if !bean.onWifi { bean.header(file, 0xFFFF_FFFF, code: bean.recording ? 0 : 4); return }
     bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
   }
   bean.script = [
