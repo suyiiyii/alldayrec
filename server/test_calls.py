@@ -70,3 +70,56 @@ def test_balance():
     assert (b["cny"], b["per_day"], b["days_left"]) == (42.0, 4.0, 10.5), b  # ¥8 in 2 days, the top-up left out
     db.conn().execute("DELETE FROM balances WHERE at < ?", ((now - dt.timedelta(hours=1)).isoformat(),))
     assert db.balance("stepfun")["per_day"] is None, "one reading: no rate yet"
+
+
+def test_llm_fallback(monkeypatch):
+    """LLM_FALLBACK_* set: a timeout, 429 or 5xx goes once to the backup, each try its own calls row (the backup's engine
+    fallback:<model>); a 4xx does not, nor anything with the backup unset, nor a stream that has begun."""
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    hosts, answers = [], []
+    def answer(req):
+        hosts.append(req.url.host)
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
+    monkeypatch.setattr(net, "TRANSPORT", httpx2.MockTransport(answer))
+    for k, v in {"LLM_MODEL": "m", "LLM_BASE_URL": "http://relay", "LLM_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    ok = lambda: httpx2.Response(200, json={"choices": [{"message": {"content": "{}"}}], "usage": {"prompt_tokens": 9, "completion_tokens": 1}})
+    run = lambda **k: anyio.run(functools.partial(summary.complete, [{"role": "user", "content": "x"}], kind="recap", **k))
+
+    answers[:] = [httpx2.Response(503)]
+    with pytest.raises(urllib.error.HTTPError):
+        run()  # off: no backup
+    for k, v in {"LLM_FALLBACK_MODEL": "m2", "LLM_FALLBACK_BASE_URL": "http://backup", "LLM_FALLBACK_API_KEY": "k2"}.items():
+        monkeypatch.setenv(k, v)
+    for first in (httpx2.Response(503), httpx2.Response(429), httpx2.ReadTimeout("slow"), httpx2.ConnectError("down")):
+        hosts.clear()
+        answers[:] = [first, ok()]
+        assert run()[0] == {} and hosts == ["relay", "backup"], first
+    hosts.clear()
+    answers[:] = [httpx2.Response(400)]
+    with pytest.raises(urllib.error.HTTPError, match="400"):
+        run()  # the request itself is wrong: the backup would say the same
+    assert hosts == ["relay"]
+    answers[:] = [httpx2.Response(502), httpx2.Response(502)]
+    with pytest.raises(urllib.error.HTTPError, match="502"):
+        run()  # once, no further
+    rows = [(r["engine"], (r["error"] or "")[:20]) for r in db.conn().execute("SELECT * FROM calls ORDER BY rowid")]
+    assert [e for e, _ in rows] == ["m"] + ["m", "fallback:m2"] * 4 + ["m"] + ["m", "fallback:m2"], rows
+    assert [bool(err) for _, err in rows] == [True] + [True, False] * 4 + [True, True, True]
+
+    pieces = []
+    async def on(t):
+        pieces.append(t)
+    stream = "data: " + json.dumps({"choices": [{"delta": {"content": "半"}}]}) + "\n\n"
+    class Cut(httpx2.AsyncByteStream):  # one piece, then the connection stalls
+        async def __aiter__(self):
+            yield stream.encode()
+            raise httpx2.ReadTimeout("stalled")
+    answers[:] = [httpx2.Response(200, stream=Cut()), ok()]
+    hosts.clear()
+    with pytest.raises(TimeoutError):
+        anyio.run(functools.partial(summary.call, [{"role": "user", "content": "x"}], kind="ask", on_delta=on))
+    assert pieces == ["半"] and hosts == ["relay"], "begun: no second reply after the first one's pieces"

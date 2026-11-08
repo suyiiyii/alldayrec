@@ -3,6 +3,8 @@
     LLM_BASE_URL, LLM_API_KEY, LLM_MODEL   any OpenAI-compatible /chat/completions endpoint
     ASK_LLM_BASE_URL, ASK_LLM_API_KEY, ASK_LLM_MODEL   the questions' (kind ask, ask.py) instead, each unset: LLM_*'s
     ASK_LLM_EXTRA   a JSON object of more request fields for those, e.g. {"thinking": {"type": "disabled"}}
+    LLM_FALLBACK_BASE_URL, LLM_FALLBACK_API_KEY, LLM_FALLBACK_MODEL   a backup endpoint, all three set or none (off):
+        any call above (every kind) that times out, gets a 429 or a 5xx, or cannot connect is sent there once
 
 A conversation with less than MIN_SPEECH_S of speech gets no call: its title is its first sentence.
 """
@@ -11,6 +13,7 @@ import json
 import logging
 import os
 import time
+import urllib.error
 
 from alldayrec import db
 from alldayrec import net
@@ -86,18 +89,45 @@ def transcript(rows: list[dict]) -> str:
     return "\n".join(f'[{r["start"][11:19]}] {r.get("speaker") or "S?"}: {r["text"]}' for r in rows if r.get("text"))
 
 
+def failover(e: Exception) -> bool:
+    """Worth the backup provider: a timeout, a 429, a 5xx, no connection; not a 4xx (the request itself is wrong)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return e.code == 429 or e.code >= 500
+    return isinstance(e, (TimeoutError, urllib.error.URLError))
+
+
 async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", on_delta=None, **extra) -> dict:
     """One chat call, extra fields as they are (tools, response_format): the raw response; raises on HTTP errors. Kept
     in the calls table as `kind` (summary, split, hints, profile, recap, live, ask): time, tokens, the error, never the text;
     a call cut off (the task cancelled) too, as CancelledError. on_delta: streamed (stream: true), each piece of the
-    reply's text awaited as on_delta(text) as it comes, the response put together as a whole one (stream_reply)."""
+    reply's text awaited as on_delta(text) as it comes, the response put together as a whole one (stream_reply).
+    A failure worth it (failover) goes once to LLM_FALLBACK_* when set, its row's engine `fallback:<model>`; not once
+    a streamed reply has begun (its pieces are out)."""
     env = lambda k: kind == "ask" and os.environ.get("ASK_" + k) or os.environ[k]
-    req = {"model": env("LLM_MODEL"), "messages": messages, **(json.loads(os.environ.get("ASK_LLM_EXTRA") or "{}") if kind == "ask" else {}), **extra}
+    more = json.loads(os.environ.get("ASK_LLM_EXTRA") or "{}") if kind == "ask" else {}  # the ask endpoint's own fields
+    started = False
+    async def piece(text):
+        nonlocal started
+        started = True
+        await on_delta(text)
+    try:
+        return await _call(env("LLM_BASE_URL"), env("LLM_API_KEY"), env("LLM_MODEL"), "", messages, timeout, kind, on_delta and piece, {**more, **extra})
+    except Exception as e:
+        fb = [os.environ.get(f"LLM_FALLBACK_{k}") for k in ("BASE_URL", "API_KEY", "MODEL")]
+        if not all(fb) or started or not failover(e):
+            raise
+        log.warning("llm %s: %s, once more on the fallback provider", kind, type(e).__name__)
+        return await _call(*fb, "fallback:", messages, timeout, kind, on_delta, extra)
+
+
+async def _call(base: str, key: str, model: str, mark: str, messages, timeout, kind, on_delta, extra) -> dict:
+    """One endpoint's chat call (call), its calls row's engine mark + model."""
+    req = {"model": model, "messages": messages, **extra}
     if on_delta:
         req |= {"stream": True, "stream_options": {"include_usage": True}}
     t, usage, err = time.perf_counter(), {}, None
-    url, body = env("LLM_BASE_URL").rstrip("/") + "/chat/completions", json.dumps(req).encode()
-    headers = {"Authorization": f'Bearer {env("LLM_API_KEY")}', "Content-Type": "application/json"}
+    url, body = base.rstrip("/") + "/chat/completions", json.dumps(req).encode()
+    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     try:
         if on_delta:
             out = await stream_reply(net.lines("POST", url, timeout, content=body, headers=headers), on_delta)
@@ -109,7 +139,7 @@ async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", 
         err = f"{type(e).__name__}: {e}"[:120]
         raise
     finally:
-        db.add_call(kind, req["model"], None, round((time.perf_counter() - t) * 1000), err,
+        db.add_call(kind, mark + model, None, round((time.perf_counter() - t) * 1000), err,
                     prompt_tokens=usage.get("prompt_tokens"), completion_tokens=usage.get("completion_tokens"))
 
 
