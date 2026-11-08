@@ -321,6 +321,7 @@ final class BeanSync {
     var first: Int64 = -1, last: Int64 = -1
     var units = 0, dupes = 0
     var lost: Int64 = 0, at: Int64 = 0
+    var asked = 1  // over Wi-Fi: how often its 1A/07 went (the bean may ignore the first on a fresh socket, ws/soundcore)
     var seen: Int64 = 0  // when its last unit came
     var firstAt: Int64 = 0  // when its first unit came (pace)
     var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
@@ -380,6 +381,7 @@ final class BeanSync {
   private var wifiNext = false  // asked for: before the next transfer
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiUnits = 0
+  private var wifiOpenMute = false  // this pass: the open file got no answer over Wi-Fi
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
@@ -599,7 +601,7 @@ final class BeanSync {
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
-    overWifi = true; wifiUnits = 0
+    overWifi = true; wifiUnits = 0; wifiOpenMute = false
     state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false
     do {
@@ -644,7 +646,9 @@ final class BeanSync {
           // the file being recorded from its first hole, whatever plan() would do over BLE (a read that could not catch
           // up there, too_slow: realtime from now on; over Wi-Fi it can), on to live
           if recording && (open == 0 || open * 1000 < since) { return open == 0 ? "都取到了" : "正在录的文件不是这台手机的" }
-          guard let x = recording ? Xfer(open, true, files[open].flatMap(gap) ?? 0) : backlog() else { return "都取到了" }
+          // the open file unanswered (11-08 22:36, 23:41: both while recording; 21:26, stopped, all came): the closed ones
+          let x = recording && !wifiOpenMute ? Xfer(open, true, files[open].flatMap(gap) ?? 0) : backlog()
+          guard let x else { return wifiOpenMute ? "录音中豆子不回正在录的文件" : "都取到了" }
           if x.live {
             let behind = edge(open) - x.from
             log("bean_xfer", "Wi-Fi 快传实时文件 \(open) 从单元 \(x.from) 起，离实时 \(behind * Bean.frameMs / 1000) s", fields: ["file": open,
@@ -656,7 +660,18 @@ final class BeanSync {
         guard let x = xfer else { return nil }
         let now = io.now()
         if x.live && x.lag != nil { complete(x, 0, "；追上实时，回蓝牙接着实时"); return "追上实时" }
-        if x.key == nil && now - x.at > 15_000 { failed(x, "Wi-Fi 上没回音"); return "豆子没回音" }
+        if x.key == nil && now - x.at > 8000 {  // ws/soundcore: 3 asks 8 s apart
+          if x.asked < 3 {
+            x.asked += 1; x.at = now
+            log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) Wi-Fi 上 8 s 没回音，第 \(x.asked) 次再要", "warn",
+                ["file": x.file, "from": x.from, "asked": x.asked, "recording": recording])
+            try send(Bean.wifiTransfer(x.file, x.from * Int64(Bean.unit)))
+            return nil
+          }
+          failed(x, "Wi-Fi 上要了 3 次都没回音（\(recording ? "在录音" : "没在录音")）")
+          if x.live { wifiOpenMute = true; return nil }  // the closed files next, if any
+          return "豆子没回音"
+        }
         if now - x.seen > 30_000 { complete(x, -1, "；30 s 没收到单元"); return "30 s 没收到单元" }
         return nil
       }
@@ -965,7 +980,8 @@ final class BeanSync {
 
   private func failed(_ x: Xfer, _ why: String) {
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 没开始：\(why)", "warn", ["file": x.file, "from": x.from, "realtime": x.realtime])
-    if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
+    if overWifi { if !x.live { file(x.file, x.file * 1000).tries += 1 } }  // a Wi-Fi miss says nothing of BLE's reads
+    else if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
     xfer = nil
     save()
   }

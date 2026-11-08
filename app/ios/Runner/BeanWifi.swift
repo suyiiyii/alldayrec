@@ -168,7 +168,7 @@ final class BeanWifi {
     u.start(queue: q)
     udp = u
     let timer = DispatchSource.makeTimerSource(queue: q)
-    timer.schedule(deadline: .now(), repeating: 1)
+    timer.schedule(deadline: .now(), repeating: 0.1)  // ws/soundcore's 100 ms (1 s till 45)
     timer.setEventHandler { [weak u] in u?.send(content: Data("soundcore-keep-alive-unicast".utf8), completion: .contentProcessed { _ in }) }
     timer.resume()
     keepAlive = timer
