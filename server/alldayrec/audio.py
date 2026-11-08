@@ -167,7 +167,7 @@ def primed(prev: bytes, body: bytes) -> bytes:
 def before(device: str, start_ms: int, max_bytes: int | None = None) -> bytes | None:
     """The stored Ogg piece of `device` that ends where start_ms begins (within a frame), as uploaded; None after a gap."""
     p = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? ORDER BY start_ms DESC LIMIT 1", (device, start_ms)).fetchone()
-    if p is None or not p["path"].endswith(".ogg") or abs(p["start_ms"] + p["seconds"] * 1000 - start_ms) >= 10:
+    if p is None or not p["path"].endswith(".ogg") or abs(p["start_ms"] + p["seconds"] * 1000 - start_ms) >= 10 or gone(p):
         return None
     return None if max_bytes is not None and p["size"] > max_bytes else read(p)
 
@@ -507,6 +507,8 @@ def piece_window(p, offset, count):
     if p["seconds"] <= WHOLE_S:
         x = samples(p)
         return None if x is None else x[offset:offset + count]
+    if gone(p):
+        return None
     if p["path"].endswith(".aac"):
         offset += AAC_DELAY
     seek = max(0, offset // SR - 2)
@@ -534,6 +536,19 @@ def piece_window(p, offset, count):
         return np.frombuffer(pcm.read(count * 2), np.int16)
 
 
+def gone(p) -> bool:
+    """Whether a pieces row's file is missing (a store copied without its recordings, a file deleted by hand): its
+    audio reads as none, as where nothing was recorded, and the file is warned of once instead of failing every reader
+    (the speaker loops retry every 5 minutes)."""
+    f = T().recordings / p["path"]
+    if f.exists():
+        return False
+    if f not in T().gone:
+        T().gone.add(f)
+        log.warning("stored audio missing, read as none: %s", f)
+    return True
+
+
 def read(p) -> bytes:
     """A pieces row's bytes, as uploaded."""
     with open(T().recordings / p["path"], "rb") as f:
@@ -545,6 +560,8 @@ def samples(p) -> np.ndarray | None:
     """A pieces row's audio, decoded, a recorder's going on from the piece before it (decode, primed) and without its
     board's 10 ms hum (dehum). Every reader takes pieces from here (the pipeline, playback, listening); the levels
     stored at upload (save) stay those of the piece as it came."""
+    if gone(p):
+        return None
     body, ogg = read(p), p["path"].endswith(".ogg")
     x = decode(body, aac=p["path"].endswith(".aac"), n=p["n"], prev=before(p["device"], p["start_ms"]) if ogg else None)
     if x is not None and DEHUM and ogg and celt((packets(body)[2:] or [b""])[0]) == 10:
@@ -1010,6 +1027,10 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
         p = db.conn().execute("SELECT * FROM pieces WHERE device = ?", (d,)).fetchone()
         assert np.array_equal(raw, samples(p)[round(1.8 * SR):round(1.8 * SR) + len(raw)]), "s16le: the stored samples"
         assert abs(rms(newer(d, None)[2]) - rms(samples(p)) - up) < 0.05, "listening: the same gain"
+    f = T().recordings / p["path"]  # D3200-TEST's file gone: no audio there (a 404), warned of once, nothing raised
+    f.rename(f.with_suffix(".away"))
+    assert cut(a_, b_, "s16le", d) is None and cut(a_, b_, "wav", d) is None and f in T().gone
+    f.with_suffix(".away").rename(f)
     db.conn().execute("DELETE FROM pieces WHERE start_ms = ?", (M(30),))
 
     async def pieces(after, got):  # the stream's pieces into got, one at a time as it hands them out

@@ -59,6 +59,7 @@ class Tenant:
     chunks: dict | None = None                      # its newest upload
     owner: dict | None = None                       # 我's voiceprint picked on its card (selfvoice), for the next conversations
     read_to: dict = field(default_factory=dict)     # audio.stream: per device, the last piece its reader has finished with
+    gone: set = field(default_factory=set)          # audio.gone: its recordings found missing, each warned of once
     tags: dict = field(default_factory=lambda: {"at": 0.0, "counts": {}})
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
     undo: dict = field(default_factory=dict)        # renames that can be taken back, by undo id (routes_speakers.keep_undo)
