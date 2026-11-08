@@ -297,6 +297,7 @@ WHOLE_S = 300  # keep ordinary device pieces and <=5-minute imports on their exi
 COPY_BYTES = 1024 * 1024
 DECODE_IDLE_S = 300  # no PCM progress, not a limit on the recording's duration
 DECODE_ATTEMPTS = 3
+GONE_RETRY_S = 60  # stream(): how long it waits before looking again for a piece whose file is missing
 
 
 class DecoderTerminated(RuntimeError):
@@ -539,7 +540,8 @@ def piece_window(p, offset, count):
 def gone(p) -> bool:
     """Whether a pieces row's file is missing (a store copied without its recordings, a file deleted by hand): its
     audio reads as none, as where nothing was recorded, and the file is warned of once instead of failing every reader
-    (the speaker loops retry every 5 minutes)."""
+    (the speaker loops retry every 5 minutes). Only for readers that can do without it (playback, voiceprints, listening):
+    stream() holds on a missing file instead, since what it hands the pipeline is finalized for good."""
     f = T().recordings / p["path"]
     if f.exists():
         return False
@@ -791,7 +793,7 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
     # audio after `after` still on its way (a pipeline started mid catch-up took 3 such pieces as late)
     at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, float(ms)
-    decode_failures = 0
+    decode_failures, waiting = 0, None
     while True:
         if edge_s is None:
             T().read_to[device] = at  # the reader came back for more, so the piece it had is done
@@ -819,6 +821,15 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         if p is None:
             await wait_piece(device, edge_s is None)
             continue
+        if gone(p):
+            # Not read as silence: the pipeline would pass over the piece for good (the cursor moves on, it is never
+            # transcribed). Hold on it until the file is back (a directory briefly unavailable, a restore).
+            if waiting != p["start_ms"]:
+                waiting = p["start_ms"]
+                ws.note(f"{device}：存储的音频文件缺失，已暂停；文件补上后自动继续", "warn")
+            await anyio.sleep(GONE_RETRY_S)
+            continue
+        waiting = None
         if p["seconds"] > WHOLE_S:
             # Keep both decode and each read off the loop. The context owns temporary files;
             # cancellation/close releases them even while the consumer is waiting on ASR.
@@ -1095,4 +1106,27 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
     db.put_kv("hold:phone", {"at": M(5), "seen": time.time() - HOLD_MAX_S - 1})
     assert held("phone") is None, "a hold not said again for HOLD_MAX_S is let go"
     assert anyio.run(take, dt.datetime(2026, 10, 2, 10, 4), 2) == [4, 5]
+    async def gone_held():  # a piece's file missing: the stream holds on it (the cursor stays), goes on once the file is back
+        global GONE_RETRY_S
+        GONE_RETRY_S = 0.3
+        for m in (40, 41):
+            assert save("ghost", M(m), tone(20), "audio/ogg") > 19
+        f = T().recordings / db.conn().execute("SELECT path FROM pieces WHERE device = 'ghost'").fetchone()["path"]
+        f.rename(f.with_suffix(".away"))
+        send, got = anyio.create_memory_object_stream()
+        with send, got:
+            async with anyio.create_task_group() as tg:
+                async def ghost():
+                    s = stream("ghost", None)
+                    try:
+                        async for t, x in s:
+                            await send.send(t)
+                    finally:
+                        await s.aclose()
+                tg.start_soon(ghost)
+                assert await next_in(got, 1.5) is None, "a missing file is not read as silence"
+                f.with_suffix(".away").rename(f)
+                assert [await next_in(got, 5) for _ in range(2)] == [40, 41], "heard once the file is back"
+                tg.cancel_scope.cancel()
+    anyio.run(gone_held)
     print("ok")
