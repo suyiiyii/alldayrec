@@ -279,6 +279,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun refused(): Set<Long>
         /** A debug capture of the session (off unless asked for: BeanLink). */
         fun trace(what: String, v: Map<String, Any?>) {}
+        /** The phone's side of a slow link, for bean_lag and too_slow (diag()): its audio route, a call, power, front. */
+        fun phoneState(): Map<String, Any?> = emptyMap()
     }
 
     /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
@@ -475,7 +477,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.log("bean_xfer", "实时文件 ${x.file} 补读 1 分钟没追近：读到单元 ${x.last}，离实时还差 ${behind * Bean.FRAME_MS / 1000} s，" +
                     "读速 ${"%.2f".format(Locale.US, pace)} 倍：这个文件改实时读，缺的停录后补", "warn",
                     mapOf("file" to x.file, "realtime" to false, "reason" to "too_slow", "from" to x.last + 1, "hole_units" to behind,
-                        "hole_ms" to behind * Bean.FRAME_MS, "pace" to Math.round(pace * 100) / 100.0, "watched" to x.watched))
+                        "hole_ms" to behind * Bean.FRAME_MS, "pace" to Math.round(pace * 100) / 100.0, "watched" to x.watched) +
+                        diag(pace * 1000 / Bean.FRAME_MS))
                 throw Again("file ${x.file}: read at $pace of real time, $behind units behind")
             }
             val now = io.now()
@@ -647,6 +650,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         return if (stuck) behind to pace else null
     }
 
+    /** What may slow a live read, logged with bean_lag and too_slow (11-08: 0.67 for hours, cause unknown; a Bluetooth
+     *  headset in call mode that day?): the phone's side (Io.phoneState), the bean's battery and case, units a second. */
+    private fun diag(unitsS: Double): Map<String, Any?> = io.phoneState() +
+        listOf("battery", "charge", "case_battery", "case_charging").associate { "bean_$it" to hw[it] } +
+        ("units_s" to Math.round(unitsS * 10) / 10.0)
+
     private fun edge(file: Long) = maxOf(0L, (io.now() - (files[file]?.latest ?: (file * 1000))) / Bean.FRAME_MS)
 
     private fun begin(x: Xfer) {
@@ -807,8 +816,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 x.lag = lag
                 if (if (lagging) lag <= 10_000 else lag > 60_000) {
                     lagging = !lagging
+                    val fields = mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000)
                     io.log("bean_lag", "实时文件 ${x.file} " + if (lagging) "落后 ${lag / 1000} s" else "追上了，落后 ${lag / 1000} s",
-                        if (lagging) "warn" else null, mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000))
+                        if (lagging) "warn" else null,
+                        if (lagging) fields + diag((s.seq - x.first + 1) * 1000.0 / maxOf(1L, now - x.firstAt)) else fields)
                 }
             }
         }

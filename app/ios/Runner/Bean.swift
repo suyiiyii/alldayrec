@@ -247,7 +247,10 @@ protocol BeanIo: AnyObject {
   func piece()
   /// Starts of this bean's pieces the server could not decode (UploadAnswer.badAudio): their files stay on the bean.
   func refused() -> Set<Int64>
+  /// The phone's side of a slow link, for bean_lag and too_slow (BeanSync.diag()): its audio route, a call, power, front.
+  func phoneState() -> [String: Any]
 }
+extension BeanIo { func phoneState() -> [String: Any] { [:] } }
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
@@ -466,7 +469,8 @@ final class BeanSync {
           log("bean_xfer", "实时文件 \(x.file) 补读 1 分钟没追近：读到单元 \(x.last)，离实时还差 \(behind * Bean.frameMs / 1000) s，" +
               "读速 \(String(format: "%.2f", pace)) 倍：这个文件改实时读，缺的停录后补", "warn",
               ["file": x.file, "realtime": false, "reason": "too_slow", "from": x.last + 1, "hole_units": behind,
-               "hole_ms": behind * Bean.frameMs, "pace": (pace * 100).rounded() / 100, "watched": x.watched])
+               "hole_ms": behind * Bean.frameMs, "pace": (pace * 100).rounded() / 100, "watched": x.watched]
+                .merging(diag(pace * 1000 / Double(Bean.frameMs))) { $1 })
           throw Again(description: "file \(x.file): read at \(pace) of real time, \(behind) units behind")
         }
         let now = io.now()
@@ -665,6 +669,15 @@ final class BeanSync {
     return stuck ? (behind, pace) : nil
   }
 
+  /// What may slow a live read, logged with bean_lag and too_slow (11-08: 0.67 for hours, cause unknown; the owner's
+  /// AirPods in call mode that day?): the phone's side (BeanIo.phoneState), the bean's battery and case, units a second.
+  private func diag(_ unitsS: Double) -> [String: Any] {
+    var d = io.phoneState()
+    for k in ["battery", "charge", "case_battery", "case_charging"] { d["bean_\(k)"] = hw[k] ?? NSNull() }
+    d["units_s"] = (unitsS * 10).rounded() / 10
+    return d
+  }
+
   /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
   private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.latest ?? file * 1000)) / Bean.frameMs) }
 
@@ -843,8 +856,9 @@ final class BeanSync {
         x.lag = lag
         if lagging ? lag <= 10_000 : lag > 60_000 {
           lagging.toggle()
+          let fields: [String: Any] = ["file": x.file, "seq": s.seq, "lag_s": lag / 1000]
           log("bean_lag", "实时文件 \(x.file) " + (lagging ? "落后 \(lag / 1000) s" : "追上了，落后 \(lag / 1000) s"), lagging ? "warn" : nil,
-              ["file": x.file, "seq": s.seq, "lag_s": lag / 1000])
+              lagging ? fields.merging(diag(Double(s.seq - x.first + 1) * 1000 / Double(max(1, now - x.firstAt)))) { $1 } : fields)
         }
       }
     }

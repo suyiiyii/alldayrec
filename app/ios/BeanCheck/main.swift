@@ -584,6 +584,9 @@ do {
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
   check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
   check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
+  let lag = zip(bean.logs, bean.logFields).first { $0.0.0 == "bean_lag" }!.1
+  check((15.0...18.0).contains(lag["units_s"] as! Double), true, "units a second so far: \(lag["units_s"]!)")
+  check(lag.keys.contains("bean_case_charging"), true, "the bean's side with it")
   check(bean.logs.contains { $0.0 == "bean_stall" }, false)
 }
 
@@ -862,6 +865,8 @@ do {
   check(r.bean.transfers.map { $0[2] }, [0, 1])
   let slow = r.bean.logFields.first { $0["reason"] as? String == "too_slow" }!
   check(slow["pace"] as? Double, 0.67)
+  check(slow["units_s"] as? Double, 33.3)
+  check(slow.keys.contains("bean_battery"), true, "the bean's side with it")
   check((5000...5100).contains(slow["hole_units"] as! Int64), true, "\(slow["hole_units"]!) units behind")
   check(r.f.have.first!.0, 0)
   check(r.f.have.count, 2, "the hole stays for after the stop")

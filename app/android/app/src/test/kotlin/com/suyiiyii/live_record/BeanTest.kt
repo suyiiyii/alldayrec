@@ -257,6 +257,9 @@ class BeanTest {
         assertTrue("two thirds of the first minute behind: ${lags[0]}", lags[0] in 38L..42L)
         assertTrue("catching up, 12 s in: ${lags[1]}", lags[1] in 33L..39L)
         assertEquals(listOf(false, true), bean.logs.filter { it.first == "bean_lag" }.map { "追上了" in it.second })
+        val lag = bean.logFields[bean.logs.indexOfFirst { it.first == "bean_lag" }]
+        assertTrue("units a second so far: ${lag["units_s"]}", (lag["units_s"] as Double) in 15.0..18.0)
+        assertTrue("the bean's side with it", "bean_case_charging" in lag)
         assertEquals(0, bean.logs.count { it.first == "bean_stall" })
     }
 
@@ -1229,6 +1232,8 @@ class BeanTest {
         assertEquals(listOf(false, true), r.bean.transfers.map { it.third })
         val slow = r.bean.logFields.first { it["reason"] == "too_slow" }
         assertEquals(0.67, slow["pace"])
+        assertEquals(33.3, slow["units_s"])
+        assertTrue("the bean's side with it", "bean_battery" in slow)
         assertTrue("${slow["hole_units"]} units behind", (slow["hole_units"] as Long) in 5000L..5100L)
         assertEquals(2, r.f.have.size)  // the hole stays for after the stop
     }
