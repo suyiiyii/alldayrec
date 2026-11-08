@@ -285,3 +285,38 @@ def test_date_table_and_certainty():
                                   {"due": None, "due_date": None, "due_certainty": "confirmed"}]}, rows)["todos"]
     assert [x["due_certainty"] for x in t] == ["tentative", None]
     assert mcp_server.todo({"owner": "我", "text": "交报告", **t[0]}) == "[我] 交报告（下周三大概，暂定）"
+
+
+def test_todo_feedback(tmp_path, monkeypatch):
+    """Prompt v15: the device's todos marked 不对 go back as counter-examples, its open todos numbered; a done hint names
+    one by number and a row by its time, sharing words with it (else it is dropped), and shows on that todo, which stays open."""
+    import anyio
+    db.open_db(tmp_path / "t.db")
+    def conv(cid, start, device="mic"):
+        return {"id": cid, "start": start, "end": start[:14] + "30:00.000", "participants": ["我"], "sentences": 1, "speech_s": 600.0, "device": device}
+    a, other, b = conv("c20261026100000", "2026-10-26T10:00:00.000"), conv("c20261026110000", "2026-10-26T11:00:00.000", "phone"), conv("c20261027100000", "2026-10-27T10:00:00.000")
+    rows = [dict(id="1", start=b["start"], end="2026-10-27T10:00:05.000", speaker="我", text="报告我发了", source="mic")]
+    with db.tx() as t:
+        for c in (a, other, b):
+            db.insert_conversation(t, c)
+        db.insert_sentences(t, rows)
+        db.put_summary({"conversation": a["id"], "status": "done", "prompt_version": 14, "title": "t", "todos": [
+            {"owner": "我", "text": "让 AI 跑测试", "quote": "帮我跑一下测试", "at": "2026-10-26T10:00:01.000"},
+            {"owner": "我", "text": "发报告", "due": "明天", "due_date": "2026-10-27", "at": "2026-10-26T10:00:02.000"},
+            {"owner": "未知", "text": "买菜", "at": "2026-10-26T10:00:03.000"}]}, t)
+        db.put_summary({"conversation": other["id"], "status": "done", "title": "t", "todos": [{"owner": "我", "text": "别的设备", "at": None}]}, t)
+    wrong, report, _ = db.todo_ids(a["id"], db.summary(a["id"])["todos"])
+    db.mark_todos([wrong], "wrong")
+    seen = []
+    async def complete(messages, **kwargs):
+        seen.append(messages[0]["content"])
+        return {"title": "t", "summary": "s", "done_hints": [{"n": 1, "quote": "报告我发了", "at": "10:00:00"}, {"n": 2, "at": "10:00:00"}, {"n": 1, "quote": "买好了", "at": "10:00:00"},
+                                                              {"n": 1, "at": "9:99"}, {"n": "x"}]}, {"model": "m"}
+    monkeypatch.setattr(summary, "complete", complete)
+    s = anyio.run(summary.summarize, b, rows)
+    prompt = seen[0]
+    assert summary.WRONG + "- 让 AI 跑测试（原句：帮我跑一下测试）\n" + summary.OPEN + "#1 我：发报告\n这段对话开始于" in prompt, prompt[-300:]
+    assert "别的设备" not in prompt and "买菜" not in prompt, "another device's, 未知's and marked todos stay out"
+    assert s["done_hints"] == [{"id": report, "quote": "报告我发了", "at": rows[0]["start"]}], s["done_hints"]
+    db.put_summary(s)
+    assert [(t["text"], t["done_hint"]) for t in db.due_todos("2026-10-27")] == [("发报告", {"conv": b["id"], "at": rows[0]["start"], "quote": "报告我发了"})]

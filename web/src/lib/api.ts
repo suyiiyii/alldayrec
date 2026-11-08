@@ -79,6 +79,7 @@ export interface Summary {
     unsupported?: boolean; // its quote is not in the transcript (server summary.grounded)
     id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
     mark?: Mark | null;
+    done_hint?: DoneHint | null;
   })[];
   ai_requests?: (At & { text: string })[];
   ai_spans?: Span[];
@@ -348,9 +349,16 @@ export interface Recap {
 // One of my todos with where it came from (server db.todo_view): GET /api/todos/due, a recap's todos
 // a todo's due as said: confirmed (that day, for sure) or tentative (大概, 争取, 看情况)
 export type Certainty = "confirmed" | "tentative";
+// a later sentence saying a todo is done (server db.done_hints, summary prompt v15): shown, never a mark
+export interface DoneHint {
+  conv: string;
+  at: string;
+  quote?: string | null;
+}
 export interface TodoView {
   id?: string; // none: a recap's todo from before ids whose text names no todo of a summary (no marks then)
   mark?: Mark | null;
+  done_hint?: DoneHint | null;
   conv: string;
   text: string; // the summary's
   short?: string; // a recap's wording

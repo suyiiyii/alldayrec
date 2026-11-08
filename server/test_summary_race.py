@@ -188,7 +188,7 @@ def test_sentence_correction_to_existing_participant_rewrites(model):
 
 @pytest.mark.parametrize("first", ["manual", "final", "live"])
 def test_all_summary_sources_share_latest_request_guard(model, monkeypatch, first):
-    async def final(tl, rows, tags, start):
+    async def final(tl, rows, tags, start, todos=""):
         return await model.chat(summary.transcript(rows))
     monkeypatch.setattr(live, "final", final)
 

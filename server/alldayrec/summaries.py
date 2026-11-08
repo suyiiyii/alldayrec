@@ -43,7 +43,8 @@ async def summarize(c: dict, tags: list[str]) -> dict:
     rows = conversation_rows(c)
     tl = db.timeline(c["id"]) if c.get("via_live") else None
     if tl and tl.get("messages") and (c.get("speech_s", 0) >= summary.MIN_SPEECH_S or tl.get("asked")):  # asked: 立即总结 on a short one
-        return {**summary.result(c, rows, *await live.final(tl, rows, tags, c["start"])), "via": "live"}
+        todos, opened = summary.todo_context(c)
+        return {**summary.result(c, rows, *await live.final(tl, rows, tags, c["start"], todos), opened), "via": "live"}
     return await summary.summarize(c, rows, tags)
 
 

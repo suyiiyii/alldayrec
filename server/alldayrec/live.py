@@ -122,10 +122,11 @@ def final_turn(state: dict, rows: list[dict]) -> str:
     return turn(state, rows)[0]
 
 
-async def final(state: dict, rows: list[dict], known_tags: list[str], start: str) -> tuple[dict, dict]:
+async def final(state: dict, rows: list[dict], known_tags: list[str], start: str, todos: str = "") -> tuple[dict, dict]:
     """The closing turn: final_turn, then the final summary in summary.SYSTEM's format. start: the closed conversation's
-    (due dates count from it; the draft layer may have started the open one on the other side of midnight)."""
-    return await complete(state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start)}"}],
+    (due dates count from it; the draft layer may have started the open one on the other side of midnight); todos:
+    summary.todo_context's."""
+    return await complete(state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start, todos)}"}],
                     kind="live")
 
 

@@ -964,6 +964,7 @@
     "conv": "Conversation {t}",
     "overdue": "{n} day overdue | {n} days overdue",
     "tentative": "tentative",
+    "maybeDone": "Maybe done: {q}",
     "done": "Done"
   },
   "todoMarks": {
