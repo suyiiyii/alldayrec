@@ -12,6 +12,16 @@ TURN_GAP_S = float(os.environ.get("TURN_GAP_S", "1.0"))  # same speaker, closer 
 EDGE_S = 3.0                               # rows touching the window edges may be cut: left to the next pass
 
 
+# Two people in one engine sentence (#419: a quick back-and-forth the engine keeps as one): 1.5 s voiceprints every 0.5 s
+# over a sentence of 3 s or more; where the windows in the SPLIT_CTX_S before a time and those in the SPLIT_CTX_S after
+# it are least alike, under SPLIT_COS, it is cut at the nearest word and each part labelled (and cut) on its own. On the
+# five GT cases 0.35 found 71% of two speakers' turns joined, 89% of A-B-A (whole sides instead of 3 s: 18%), and cut
+# 4.6% of single-speaker spans. 0: never cut
+SPLIT_COS = float(os.environ.get("SPLIT_COS", "0.35"))
+SPLIT_WIN_S, SPLIT_HOP_S, SPLIT_CTX_S = 1.5, 0.5, 3.0
+SPLIT_MIN_S = 1.0  # a part shorter than this (the word nearest the change is far from it): no cut
+
+
 CLIP_JITTER_MS = 300  # a re-cut turn's start moves about this much between passes
 
 
@@ -30,11 +40,48 @@ def clip_turns(segs: list[dict], since_s: float) -> list[dict]:
     return out
 
 
+def _part(g: dict, words: list[dict]) -> dict:
+    return {**g, "start_ms": words[0]["start_ms"], "end_ms": words[-1]["end_ms"], "text": "".join(w["text"] for w in words), "words": words}
+
+
+def split_speakers(g: dict, x: np.ndarray, embed) -> list[dict]:
+    """g as the parts different people said (SPLIT_COS), each cut again while it is long enough; [g] when it has no
+    words to cut at."""
+    words = g.get("words") or []
+    a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
+    if SPLIT_COS <= 0 or len(words) < 2 or b - a < 2 * SPLIT_WIN_S or not all(w.get("text") for w in words):
+        return [g]
+    y = x[int(a * SR):int(b * SR)]
+    w, h = int(SPLIT_WIN_S * SR), int(SPLIT_HOP_S * SR)
+    starts = list(range(0, len(y) - w + 1, h))
+    if not starts:
+        return [g]
+    if starts[-1] != len(y) - w:
+        starts.append(len(y) - w)
+    es = [(s / SR, embed(y[s:s + w])) for s in starts]
+    unit = lambda v: v / np.linalg.norm(v)
+    best = None
+    for t in np.arange(SPLIT_WIN_S, len(y) / SR - SPLIT_WIN_S + 1e-6, SPLIT_HOP_S):
+        left = [e for t0, e in es if t - SPLIT_CTX_S - 1e-6 <= t0 and t0 + SPLIT_WIN_S <= t + 1e-6]
+        right = [e for t0, e in es if t - 1e-6 <= t0 and t0 + SPLIT_WIN_S <= t + SPLIT_CTX_S + 1e-6]
+        if left and right and (c := float(unit(np.mean(left, 0)) @ unit(np.mean(right, 0)))) < (best or (SPLIT_COS, 0))[0]:
+            best = (c, a + t)
+    if not best:
+        return [g]
+    # the gap between two words nearest the change
+    i = min(range(1, len(words)), key=lambda k: abs((words[k - 1]["end_ms"] + words[k]["start_ms"]) / 2000 - best[1]))
+    l, r = _part(g, words[:i]), _part(g, words[i:])
+    if min(p["end_ms"] - p["start_ms"] for p in (l, r)) < SPLIT_MIN_S * 1000:
+        return [g]
+    return split_speakers(l, x, embed) + split_speakers(r, x, embed)
+
+
 def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> list:
     """Speaker labels from the conversation clustering, in time order; returns the diarist mark after each
     sentence (None when too short to embed) so a pass can take back the sentences it leaves open. music (music.heard,
-    the final layer's): a sentence it hears as music gets music 1 and S?, and no voiceprint."""
-    marks = []
+    the final layer's): a sentence it hears as music gets music 1 and S?, and no voiceprint. A sentence two people
+    said (split_speakers) becomes its parts in segs, in place, each with `split` (its place, 1 on) and a label of its own."""
+    marks, out = [], []
     for g in segs:
         a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
         g["engine_speaker"] = g.get("speaker")
@@ -44,9 +91,26 @@ def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> 
         if b - a < 0.3 or g.get("music"):
             g["speaker"], g["confidence"] = "S?", 0.0
             marks.append(None)
+            out.append(g)
             continue
-        g["speaker"], g["confidence"] = dia.add(embed(y), b - a)
-        marks.append(dia.mark())
+        parts, done = split_speakers(g, x, embed), []
+        for p in parts:
+            if len(parts) > 1:
+                pa, pb = p["start_ms"] / 1000, p["end_ms"] / 1000
+                y = x[int(pa * SR):int(min(pb, pa + 15) * SR)]
+            p["speaker"], p["confidence"] = dia.add(embed(y), (p["end_ms"] - p["start_ms"]) / 1000)
+            if done and done[-1][0]["speaker"] == p["speaker"]:  # the diarist hears one person after all: one part
+                q = done[-1][0]
+                p = {**_part(q, q["words"] + p["words"]), "confidence": max(q["confidence"], p["confidence"])}
+            else:
+                done.append(None)
+            done[-1] = (p, dia.mark())
+        for k, (p, m) in enumerate(done, 1):
+            if len(done) > 1:
+                p["split"] = k
+            out.append(p)
+            marks.append(m)
+    segs[:] = out
     return marks
 
 

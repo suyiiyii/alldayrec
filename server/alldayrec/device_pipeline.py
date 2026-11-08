@@ -385,7 +385,7 @@ async def pipeline(device: str):
         lo, hi, rows = final_rows(segs, {g["speaker"]: g["speaker"] for g in segs}, base, len(x) / SR, by_label, 0.0, at, 0.0)
         st.voiced += [{"start": iso(at(g["start_ms"] / 1000)), "dur": (g["end_ms"] - g["start_ms"]) / 1000,
                           "e": dia.E[m[0] - 1] if m else None,  # music: no turn mates, so relabel keeps it S?
-                          "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") and not g.get("music") else None}
+                          "key": (iso(base), g["engine_speaker"]) if g.get("engine_speaker") and not g.get("music") and not g.get("split") else None}
                          for g, m in zip(segs, marks)]
         with open(T().data / f"{lo.date()}.passes.jsonl", "a") as f:  # every piece's raw engine output, for tracing lost rows
             ranges = [[iso(dt.datetime.fromtimestamp(x / 1000)) for x in r] for r in heard]

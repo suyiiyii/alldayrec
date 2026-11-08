@@ -109,7 +109,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
         es = [dia.E[m[0] - 1] if m else None for _, _, m in gs]
         labels = await anyio.to_thread.run_sync(
             lambda: relabel(es, [(g["end_ms"] - g["start_ms"]) / 1000 for _, g, _ in gs], owner,
-                            [(iso(base), g.get("engine_speaker")) if g.get("engine_speaker") and not g.get("music") else ("alone", i)
+                            [(iso(base), g.get("engine_speaker")) if g.get("engine_speaker") and not g.get("music") and not g.get("split") else ("alone", i)
                              for i, (base, g, _) in enumerate(gs)], people=dia.people), limiter=threads.INFER)
         for (_, g, _), e, label in zip(gs, es, labels):
             if re.fullmatch(r"S(?:\d+|\?)", g["speaker"]):
