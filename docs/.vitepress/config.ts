@@ -3,6 +3,7 @@ import { join } from "node:path";
 import footnote from "markdown-it-footnote";
 import { defineConfig, type DefaultTheme } from "vitepress";
 import llmstxt from "vitepress-plugin-llms";
+import { withMermaid } from "vitepress-plugin-mermaid";
 
 // Where the site is served: suyiiyii.github.io/alldayrec/ by default; at the root of an org site, DOCS_BASE=/
 // (the docs workflow passes what actions/configure-pages reports)
@@ -69,6 +70,7 @@ const SECTIONS: [zh: string, en: string, pages: [string, string, string][]][] = 
       ["简介与定位", "What AllDayRec is", "explanation/intro"],
       ["和心力球、录音豆对比", "vs 心力球 and the Feishu bean", "explanation/vs-xinliqiu"],
       ["架构与数据流", "Architecture and data flow", "explanation/architecture"],
+      ["领域模型：块、句子和对话", "Domain model: pieces, sentences and conversations", "explanation/domain-model"],
       ["隐私与数据去向", "Privacy: where your data goes", "explanation/privacy"],
       ["语音识别评测", "ASR benchmark", "explanation/asr-benchmark"],
       ["局限与路线图", "Limitations and roadmap", "explanation/roadmap"],
@@ -89,7 +91,8 @@ const nav = (en: boolean): DefaultTheme.NavItem[] =>
 const KEYWORDS =
   "AllDayRec, 全天录, self-hosted all-day recorder, lifelog, speech-to-text, speaker diarization, MCP, open-source Plaud alternative, Limitless alternative, 录音豆, 心力球, 开源心力球";
 
-export default defineConfig({
+// withMermaid: ```mermaid blocks render as diagrams (docs/explanation/domain-model.md)
+export default withMermaid(defineConfig({
   base,
   lastUpdated: true,
   // the benchmark keeps its path in the repo (older links point at it), and shows under 说明 on the site
@@ -118,6 +121,8 @@ export default defineConfig({
     ];
   },
   markdown: { config: (md) => void md.use(footnote) },
+  // diagrams at their own size (text readable on a phone, scrolling sideways); custom.css fits them to the column on a wider screen
+  mermaid: { flowchart: { useMaxWidth: false }, er: { useMaxWidth: false } },
   vite: {
     plugins: [
       llmstxt({
@@ -194,4 +199,4 @@ export default defineConfig({
   // robots.txt names the sitemap, whose URL depends on where the site is served
   buildEnd: ({ outDir }) =>
     writeFileSync(join(outDir, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${host}${base}sitemap.xml\n`),
-});
+}));

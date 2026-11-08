@@ -9,8 +9,10 @@
   },
   "devDependencies": {
     "markdown-it-footnote": "4.0.0",
+    "mermaid": "11.17.2",
     "vitepress": "1.6.4",
-    "vitepress-plugin-llms": "1.14.0"
+    "vitepress-plugin-llms": "1.14.0",
+    "vitepress-plugin-mermaid": "2.0.17"
   },
   "devEngines": {
     "packageManager": {

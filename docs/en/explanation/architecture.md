@@ -76,6 +76,6 @@ When a conversation ends, the server writes a summary with the LLM you configure
 
 ## Who reads this data
 
-The web UI, the web pages inside the app, the [MCP endpoint](../reference/mcp.md) and the [CLI](../reference/cli.md) all read the same tenant's database. The database is SQLite, so you can also read it directly yourself; the tables are in [Data layout](../reference/data.md).
+The web UI, the web pages inside the app, the [MCP endpoint](../reference/mcp.md) and the [CLI](../reference/cli.md) all read the same tenant's database. The database is SQLite, so you can also read it directly yourself; the tables are in [Data layout](../reference/data.md), and how they relate and how the processing loop moves on in [Domain model](./domain-model.md).
 
 One server can serve several people, each with a token, a database and a recordings directory (`tenants.json`), isolated from each other in the same process.

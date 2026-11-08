@@ -327,6 +327,7 @@ final class BeanSync {
     var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
     var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
     var clockSaid: Int64 = 0  // when bean_clock was last logged
+    var resent = false  // live, the bean went back in the file: what comes after is late by the resend, no clock
     var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
     var gainAt: Int64 = 0, gainBehind: Int64 = 0, gainLast: Int64 = 0  // slow(): this minute's start, behind and last unit
     init(_ file: Int64, _ live: Bool, _ from: Int64, realtime: Bool = false, watched: Bool = false) {
@@ -1013,7 +1014,12 @@ final class BeanSync {
       log("bean_gap_time", "文件 \(x.file) 实时单元 \(x.last)→\(s.seq) 之间过了 \((now - x.seen) / 1000) s：豆子若暂停过，" +
           "之后的单元按序号排会早 \(late / 1000) s", "warn", ["file": x.file, "seq": s.seq, "late_ms": late])
     }
-    x.units += 1; x.last = s.seq; x.seen = now
+    if x.live && x.last >= 0 && s.seq <= x.last && !x.resent {  // 11-08 16:42: 20704→0, then 41 s behind all along
+      x.resent = true
+      log("bean_xfer", "实时文件 \(x.file) 豆子从单元 \(x.last) 退回到 \(s.seq) 重发：这次传输之后的单元不再用来对钟", "warn",
+          ["file": x.file, "from": x.last, "to": s.seq])
+    }
+    x.units += 1; x.last = max(x.last, s.seq); x.seen = now
     if overWifi { wifiUnits += 1 }
     // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
     if !x.realtime && x.lag == nil && s.seq - x.first >= BeanSync.restUnits && now > x.firstAt {
@@ -1023,7 +1029,7 @@ final class BeanSync {
       liveSeen = now; liveStalled = false; busy = 0
       // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
       // the transfer has caught up (a read from a unit behind starts behind by the hole it fills)
-      reanchor(x, f, s.seq, now - (s.seq + 1) * Bean.frameMs)
+      if !x.resent { reanchor(x, f, s.seq, now - (s.seq + 1) * Bean.frameMs) }
       let lag = now - f.at(s.seq + 1)
       if x.lag != nil || lag <= 10_000 {
         x.lag = lag

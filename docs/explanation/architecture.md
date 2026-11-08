@@ -76,6 +76,6 @@ AllDayRec 是一个 Python 服务器加几个客户端。音频从录音设备�
 
 ## 谁在读这些数据
 
-网页、App 里的网页、[MCP 端点](../reference/mcp.md)和[命令行](../reference/cli.md)读的都是同一个租户的数据库。数据库是 SQLite，你也可以自己直接读，表结构见[数据目录](../reference/data.md)。
+网页、App 里的网页、[MCP 端点](../reference/mcp.md)和[命令行](../reference/cli.md)读的都是同一个租户的数据库。数据库是 SQLite，你也可以自己直接读，表结构见[数据目录](../reference/data.md)，表之间怎么关联、处理循环怎样推进见[领域模型](./domain-model.md)。
 
 一台服务器可以服务好几个人，每个人一个 token、一个数据库和一个录音目录（`tenants.json`），在同一个进程里互相隔离。
