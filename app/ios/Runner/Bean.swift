@@ -90,6 +90,8 @@ enum Bean {
     return build(0x1A, 0x05, [UInt8(s.count)] + s + [UInt8(p.count)] + p)
   }
   static func wifiOff() -> [UInt8] { build(0x1A, 0x02, []) }
+  /// A 1A/05 answer's address, a.b.c.d:port; nil: no hotspot.
+  static func endpoint(_ p: [UInt8]) -> String? { p.count < 6 ? nil : "\(p[3]).\(p[2]).\(p[1]).\(p[0]):\(u16(p, 4))" }
   /// Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable).
   static func delete(_ file: Int64, _ confirmed: Set<Int64>) throws -> [UInt8] {
     guard confirmed.contains(file) else { throw Fail("file \(file) is not whole on the server: never deleted") }
@@ -378,6 +380,7 @@ final class BeanSync {
   private var wifiNext = false  // asked for: before the next transfer
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiUnits = 0
+  private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
                                  // reconnects (a cut re-pull, a stalled transfer)
@@ -559,6 +562,16 @@ final class BeanSync {
   /// recording, else the file being recorded from where the phone lacks it until within 10 s of live (no realtime over
   /// Wi-Fi). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case it is on still.
   private func wifi() throws {
+    let battery = hw["battery"] as? Int
+    log("bean_wifi_start", "开始 Wi-Fi 快传（手动）：电量 \(battery.map { "\($0)%" } ?? "?")，" +
+        (recording ? "在录音（文件 \(listing.open)）" : "没在录音") + "，积压 \(owed["backlog_s"] ?? 0) s",
+        fields: ["reason": "manual", "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
+                 "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
+    if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
+      log("bean_wifi_fail", "电量 \(battery)% 低于 30%，不开热点，接着用蓝牙", "warn", ["step": "battery", "battery": battery])
+      return
+    }
+    wifiBattery = battery ?? NSNull()
     var r = [UInt8](repeating: 0, count: 12)
     for i in r.indices { r[i] = UInt8.random(in: 0...255) }
     let ssid = "LR-" + Bean.hex(Array(r[0..<4])), password = Bean.hex(Array(r[4...]))
@@ -569,12 +582,13 @@ final class BeanSync {
     catch { log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"]); return }
     wifiOpen = true
     let opened = io.monotonicNow() - t0
-    guard a.payload.count >= 6 else {
-      log("bean_wifi_fail", "豆子没开热点（回了 \(Bean.hex(a.payload))），接着用蓝牙", "warn", ["step": "hotspot", "ms": opened])
+    guard let at = Bean.endpoint(a.payload) else {
+      log("bean_wifi_fail", "豆子没开热点（回了 \(Bean.hex(a.payload))，状态 \(a.status)），接着用蓝牙", "warn",
+          ["step": "hotspot", "ms": opened, "reply": Bean.hex(a.payload), "status": a.status])
       return
     }
-    log("bean_wifi_hotspot", "豆子开了热点（\(opened) ms，地址 \(Bean.hex(a.payload))），" + (recording ? "在录音（文件 \(listing.open)）" : "没在录音"),
-        fields: ["ms": opened, "endpoint": Bean.hex(a.payload), "recording": recording])
+    log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
+        fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
     overWifi = true; wifiUnits = 0
     var t1 = io.monotonicNow(), why = "", rollover = false
     do {
@@ -586,7 +600,8 @@ final class BeanSync {
     if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
     overWifi = false
     io.wifiLeave()
-    let ms = max(1, io.monotonicNow() - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
+    wifiEnded = io.monotonicNow()
+    let ms = max(1, wifiEnded - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
     let audio = Int64(wifiUnits) * Bean.frameMs, x = Double(audio) / Double(ms)
     log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频），\(kb) KB，用时 \(ms / 1000) s，" +
         String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x), wifiUnits == 0 ? "warn" : nil,
@@ -597,7 +612,17 @@ final class BeanSync {
   /// wifi()'s transfers, one at a time as over BLE: what the bean is not recording, or the file it records up to live.
   /// The reason they ended.
   private func wifiLoop() throws -> String {
+    var at = io.monotonicNow(), was = 0
     while true {
+      let t = io.monotonicNow()
+      if t - at >= 10_000 {  // progress: what came in the last 10 s, and the upload queue (does it drain meanwhile?)
+        let n = wifiUnits - was, kbps = Double(n * Bean.unit) / 1.024 / Double(t - at), x = Double(Int64(n) * Bean.frameMs) / Double(t - at)
+        log("bean_wifi_progress", String(format: "Wi-Fi 快传：共 %d 个单元，近 10 s %.0f KB/s，%.1f 倍实时，", wifiUnits, kbps, x) +
+            "文件 \(xfer?.file ?? 0) 到单元 \(xfer?.last ?? -1)，上传队列 \(queued().count) 块",
+            fields: ["units": wifiUnits, "kb": Int64(wifiUnits) * Int64(Bean.unit) / 1024, "kbps": kbps, "x": x, "file": xfer?.file ?? 0,
+                     "seq": xfer?.last ?? -1, "lag_s": xfer?.lag.map { $0 / 1000 } ?? NSNull(), "queued": queued().count])
+        at = t; was = wifiUnits
+      }
       let why: String? = try autoreleasepool {
         if xfer == nil {
           if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
@@ -622,8 +647,13 @@ final class BeanSync {
   /// After a fast transfer: the hotspot off, in case it is on still.
   private func wifiOff() throws {
     wifiOpen = false
-    do { _ = try ask(Bean.wifiOff(), 0x1A02, 5000); log("bean_wifi_off", "关了热点（1A/02）") }
-    catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn") }
+    let back = wifiEnded > 0 ? io.monotonicNow() - wifiEnded : -1
+    log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 \(back / 1000) s；电量 \(wifiBattery) → \(hw["battery"] ?? "?")%",
+        fields: ["ms": back, "battery_before": wifiBattery, "battery": hw["battery"] ?? NSNull(), "recording": recording])
+    do {
+      let f = try ask(Bean.wifiOff(), 0x1A02, 5000)
+      log("bean_wifi_off", "关了热点（1A/02，回复 \(Bean.hex(f.payload))）", fields: ["reply": Bean.hex(f.payload), "status": f.status])
+    } catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn", ["error": "\(error)"]) }
   }
 
   private func clock() throws {

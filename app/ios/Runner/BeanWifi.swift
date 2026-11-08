@@ -21,6 +21,8 @@ final class BeanWifi {
   private let inbox = Inbox<[UInt8]?>()  // nil: the socket went
   @Shared private var seen: String?  // the certificate's pin, as it came
   @Shared private(set) var bytes: Int64 = 0
+  @Shared private var waitingWhy = ""  // why the socket's path is not there (localNetworkDenied: the permission refused)
+  private var monitor: NWPathMonitor?
 
   init(device: String, ssid: String, password: String) { self.device = device; self.ssid = ssid; self.password = password }
 
@@ -34,26 +36,37 @@ final class BeanWifi {
   /// The hotspot, then the socket on it: up to 45 s while its address comes up and the person answers iOS's local
   /// network question (the first time). `endpoint`: the 1A/05 answer, only ever the bean's fixed one.
   func open(_ endpoint: [UInt8]) throws {
-    let at = endpoint.count >= 6 ? "\(endpoint[3]).\(endpoint[2]).\(endpoint[1]).\(endpoint[0]):\(Int(endpoint[4]) | Int(endpoint[5]) << 8)" : "?"
-    guard at == "\(BeanWifi.host):\(BeanWifi.port)" else { throw Bean.Fail("hotspot at \(at), not the bean's") }
+    let at = Bean.endpoint(endpoint) ?? "?"
+    guard at == "\(BeanWifi.host):\(BeanWifi.port)" else {
+      log("bean_wifi_fail", "热点地址 \(at) 不是豆子固定的那个，不连", "warn", ["step": "endpoint", "endpoint": at])
+      throw Bean.Fail("hotspot at \(at), not the bean's")
+    }
+    watch()
     let t0 = BeanWifi.mono()
     let c = NEHotspotConfiguration(ssid: ssid, passphrase: password, isWEP: false)
     c.joinOnce = true  // iOS leaves it when the app leaves the front
     let done = DispatchSemaphore(value: 0)
     var failure: NSError?
     NEHotspotConfigurationManager.shared.apply(c) { failure = $0 as NSError?; done.signal() }
-    guard done.wait(timeout: .now() + 120) == .success else { throw Bean.Fail("joining the hotspot: no answer in 120 s") }
+    guard done.wait(timeout: .now() + 120) == .success else {
+      log("bean_wifi_fail", "加入热点 120 s 没有结果", "warn", ["step": "join", "ms": BeanWifi.mono() - t0])
+      throw Bean.Fail("joining the hotspot: no answer in 120 s")
+    }
     if let e = failure, !(e.domain == NEHotspotConfigurationErrorDomain && e.code == NEHotspotConfigurationError.alreadyAssociated.rawValue) {
-      log("bean_wifi_fail", "没加入豆子的热点：\(e.localizedDescription)（\(e.domain) \(e.code)）", "warn", ["step": "join", "domain": e.domain, "code": e.code])
+      // 7 userDenied: the person tapped 取消; 13 unableToJoin; 8 internal (no entitlement, among others)
+      let what = e.domain == NEHotspotConfigurationErrorDomain && e.code == NEHotspotConfigurationError.userDenied.rawValue ? "主人点了取消" : e.localizedDescription
+      log("bean_wifi_fail", "没加入豆子的热点：\(what)（\(e.domain) \(e.code)，\(BeanWifi.mono() - t0) ms）", "warn",
+          ["step": "join", "domain": e.domain, "code": e.code, "ms": BeanWifi.mono() - t0])
       throw Bean.Fail("join: \(e.code)")
     }
     let joined = BeanWifi.mono() - t0
-    log("bean_wifi_join", "加入了豆子的热点（\(joined) ms）", nil, ["ms": joined])
+    log("bean_wifi_join", "加入了豆子的热点（\(joined) ms\(failure != nil ? "，本来就连着" : "")）", nil, ["ms": joined])
     var tries = 0, why = ""
     while BeanWifi.mono() - t0 < 45_000 + joined {
       tries += 1
       do { try connect(); break } catch {
         why = "\(error)"
+        if tries == 1 || tries % 10 == 0 { log("bean_wifi_socket", "连豆子的 WebSocket 第 \(tries) 次没成：\(why)", "warn", ["tries": tries, "error": why, "path": waitingWhy]) }
         if let s = seen, s != BeanWifi.pin {
           log("bean_wifi_fail", "豆子的证书不是认得的那张（\(s)）", "warn", ["step": "pin", "pin": s])
           throw Bean.Fail("certificate \(s)")
@@ -66,7 +79,7 @@ final class BeanWifi {
       throw Bean.Fail("socket: \(why)")
     }
     let ms = BeanWifi.mono() - t0 - joined
-    log("bean_wifi_socket", "连上豆子的 WebSocket（第 \(tries) 次，\(ms) ms）", nil, ["ms": ms, "tries": tries])
+    log("bean_wifi_socket", "连上豆子的 WebSocket（第 \(tries) 次，\(ms) ms），证书指纹对上 \(seen ?? "")", nil, ["ms": ms, "tries": tries, "pin": seen ?? ""])
   }
 
   private func connect() throws {
@@ -88,11 +101,13 @@ final class BeanWifi {
     let c = NWConnection(to: .url(URL(string: "wss://\(BeanWifi.host):\(BeanWifi.port)/")!), using: p)
     let ready = DispatchSemaphore(value: 0)
     var failure: Error?
-    c.stateUpdateHandler = { [weak self] s in
+    c.stateUpdateHandler = { [weak self, weak c] s in
       switch s {
       case .ready: ready.signal()
       case .failed(let e): failure = e; ready.signal(); if self?.ws != nil { self?.inbox.put(nil) }
-      case .waiting(let e): failure = e  // no route yet, or the local network question unanswered: wait on
+      case .waiting(let e):  // no route yet, or the local network question unanswered or refused: wait on
+        failure = e
+        self?.waitingWhy = BeanWifi.why(c?.currentPath)
       case .cancelled: if self?.ws != nil { self?.inbox.put(nil) }
       default: break
       }
@@ -117,6 +132,34 @@ final class BeanWifi {
     timer.setEventHandler { [weak u] in u?.send(content: Data("soundcore-keep-alive-unicast".utf8), completion: .contentProcessed { _ in }) }
     timer.resume()
     keepAlive = timer
+  }
+
+  static func why(_ p: Network.NWPath?) -> String {
+    guard let p else { return "none" }
+    let reason: String
+    switch p.unsatisfiedReason {
+    case .notAvailable: reason = ""
+    case .cellularDenied: reason = "cellularDenied"
+    case .wifiDenied: reason = "wifiDenied"
+    case .localNetworkDenied: reason = "localNetworkDenied"
+    @unknown default: reason = "other"
+    }
+    return "\(p.status)" + (reason.isEmpty ? "" : " \(reason)")
+  }
+
+  /// The phone's default route while on the hotspot (which has no internet): does the upload still go, over cellular?
+  private func watch() {
+    let m = NWPathMonitor()
+    m.pathUpdateHandler = { [weak self] p in
+      let kinds = [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .other].filter(p.usesInterfaceType).map { "\($0)" }
+      let all = p.availableInterfaces.map { "\($0.type)" }
+      UploadPath.route = "\(p.status) via \(kinds.joined(separator: "+"))"
+      self?.log("bean_wifi_path", "手机网络：\(p.status)，默认走 \(kinds.joined(separator: "+"))，可用 \(all.joined(separator: ","))" +
+                (p.isExpensive ? "（计流量）" : ""), nil, ["status": "\(p.status)", "uses": kinds, "available": all, "expensive": p.isExpensive])
+    }
+    m.start(queue: q)
+    monitor = m
+    UploadPath.device = device
   }
 
   /// Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not).
@@ -176,6 +219,34 @@ final class BeanWifi {
     udp?.cancel(); udp = nil
     ws?.cancel(); ws = nil
     NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
-    log("bean_wifi_leave", "离开豆子的热点（收到 \(bytes / 1024) KB）", nil, ["bytes": bytes])
+    monitor?.cancel(); monitor = nil
+    UploadPath.device = nil
+    let listed = DispatchSemaphore(value: 0)
+    var still: Bool?
+    NEHotspotConfigurationManager.shared.getConfiguredSSIDs { still = $0.contains(self.ssid); listed.signal() }
+    _ = listed.wait(timeout: .now() + 5)
+    log("bean_wifi_leave", "离开豆子的热点（收到 \(bytes / 1024) KB）：配置" + (still == nil ? "查不到" : still! ? "还在" : "已移除"),
+        still == true ? "warn" : nil, ["bytes": bytes, "configured": still ?? NSNull()])
+  }
+}
+
+/// While a fast transfer is on (`device` set): each upload's outcome and the interface it went by (its task's metrics),
+/// into the bean's device log; Uploader calls it.
+final class UploadPath: NSObject, URLSessionTaskDelegate {
+  @Shared static var device: String?
+  @Shared static var route = ""
+  @Shared private var via = "?"
+
+  func urlSession(_ s: URLSession, task: URLSessionTask, didFinishCollecting m: URLSessionTaskMetrics) {
+    via = m.transactionMetrics.last.map { $0.isCellular ? "cellular" : $0.isExpensive ? "expensive" : "wifi/other" } ?? "?"
+  }
+
+  /// The task's delegate while a transfer is on, else nil.
+  static func start() -> UploadPath? { device == nil ? nil : UploadPath() }
+
+  func done(_ pieces: Int, _ ms: Int64, _ error: String?) {
+    guard let d = UploadPath.device else { return }
+    DeviceLog.app(d, "bean_wifi_upload", "快传期间上传 \(pieces) 块" + (error.map { "失败：\($0)" } ?? "成功") + "，走 \(via)（默认路由 \(UploadPath.route)），\(ms) ms",
+                  level: error == nil ? nil : "warn", fields: ["ok": error == nil, "pieces": pieces, "via": via, "route": UploadPath.route, "ms": ms, "error": error ?? NSNull()])
   }
 }
