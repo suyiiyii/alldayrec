@@ -154,7 +154,8 @@ final class FakeBean: BeanIo {
       session = Bean.hkdf(s)
       push(0x2E01, Bean.pub(keys) + s)
     case 0x0101: push(0x0101, info())
-    case 0x1A05: push(0x1A05, [1, 0x2B, 0xA8, 0xC0, 0xBB, 1])  // 192.168.43.1:443 (ws/soundcore's capture)
+    case 0x1A05:  // 192.168.43.1:443 (ws/soundcore's capture); dropOnWifi: BLE goes before the answer
+      if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) } else { push(0x1A05, [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]) }
     case 0x1A02: push(0x1A02, [])
     case 0x01A6: push(0x01A6, [])
     case 0x1A0E:
@@ -201,7 +202,7 @@ final class FakeBean: BeanIo {
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
-  var wifiAsk = false, onWifi = false
+  var wifiAsk = false, onWifi = false, dropOnWifi = false
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { joins.append((ssid, password, endpoint)); onWifi = true }
@@ -655,6 +656,34 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }.prefix(4), [0x2E01, 0x0101, 0x01A6, 0x1A02])
   check(bean.transfers.count, 2); check(bean.transfers[1][0], a); check(bean.transfers[1][1], Int64(got.count)); check(bean.transfers[1][2], 0)
+}
+
+/// A stop by hand holds across the fast transfer's reconnect (#324: a new connection starts the bean, the app's own
+/// reconnects do not): the bean stopped by its button, then the transfer reads the closed file over Wi-Fi; the next
+/// session sends no 18/82, also when BLE goes before the 1A/05 answer.
+for dropFirst in [false, true] {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 60_000) / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0); bean.startable = true
+  bean.onTransfer = { file, from, _ in
+    if !bean.onWifi { bean.header(file, 0xFFFF_FFFF); return }  // live over BLE: nothing until the stop
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  bean.script = [
+    { bean.push(0x1882, [0]); bean.complete(a); bean.recording = false; bean.open = 0; bean.list(a, 60_000) },
+    { bean.wifiAsk = true },
+  ]
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.dropOnWifi = dropFirst
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains(dropFirst ? "BLE went" : "都取到了"), true, again.description)
+  check(bean.starts, 0, "it was recording: no start")
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.starts, 0, "stopped by hand: the reconnect after Wi-Fi starts nothing")
+  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x02 }, true)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.starts, 1, "a link lost (Gone): the next connection starts it again")
 }
 
 /// The session's thread lives as long as the link: what Foundation autoreleases in its loop (the queue listed every 5 s,

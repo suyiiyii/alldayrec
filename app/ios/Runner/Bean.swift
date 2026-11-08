@@ -578,7 +578,11 @@ final class BeanSync {
     let t0 = io.monotonicNow()
     let a: Bean.Frame
     do { a = try ask(Bean.wifiOn(ssid, password), 0x1A05, 45_000) }
-    catch let e as Gone { throw e } catch let e as Again { throw e }
+    catch let e as Gone {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
+      wifiOpen = true
+      log("bean_wifi_fail", "问热点时蓝牙先断了（\(e)），没拿到地址，回蓝牙", "warn", ["step": "hotspot"])
+      throw Again(description: "BLE went while asking for the hotspot")
+    } catch let e as Again { throw e }
     catch { log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"]); return }
     wifiOpen = true
     let opened = io.monotonicNow() - t0
