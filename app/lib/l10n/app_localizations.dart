@@ -1742,6 +1742,12 @@ abstract class AppLocalizations {
   /// **'已请求 Wi‑Fi 快传，当前传输停下后开始'**
   String get beanWifiAsked;
 
+  /// No description provided for @beanWifiAskedVpn.
+  ///
+  /// In zh, this message translates to:
+  /// **'已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭'**
+  String get beanWifiAskedVpn;
+
   /// No description provided for @beanUnbindAfterSync.
   ///
   /// In zh, this message translates to:

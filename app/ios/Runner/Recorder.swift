@@ -103,8 +103,9 @@ enum Recorder {
       case "beanWifi":  // the bean's Wi-Fi fast transfer, by hand (#431): its session takes it before the next transfer
         guard let b = bean else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
         b.wifiWanted = true
-        DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）")
-        result(nil)
+        let vpn = BeanWifi.vpn()  // Shadowrocket's tunnel can take the socket (11-08): say so at the tap
+        DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）" + (vpn ? "；开着 VPN" : ""), fields: ["vpn": vpn])
+        result(vpn)
       case "pause":  // the connected recorder keeps nothing for s seconds (0: records again)
         do {
           guard let l = link else { throw CocoaError(.featureUnsupported) }

@@ -573,6 +573,7 @@
   "beanWifi": "Wi‑Fi 快传（实验）",
   "beanWifiSub": "让录音豆开热点，手机连上去快速取回还没有的录音，追上实时后回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面",
   "beanWifiAsked": "已请求 Wi‑Fi 快传，当前传输停下后开始",
+  "beanWifiAskedVpn": "已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭",
   "beanUnbindAfterSync": "正在取回录音豆里的录音，取完再解除",
   "beanUnbindBody": "只是这台手机忘掉这颗录音豆、改用手机麦克风。录音豆本身什么也不改：按键照样录音，飞书照常能连。还没取回的录音留在豆子里。",
   "linkError": "录音设备出错：{detail}",

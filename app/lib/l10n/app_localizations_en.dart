@@ -989,6 +989,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Wi‑Fi fast transfer asked for: it starts once the current transfer stops';
 
   @override
+  String get beanWifiAskedVpn =>
+      'Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it';
+
+  @override
   String get beanUnbindAfterSync =>
       'Fetching the recordings on the bean; unbind once that is done';
 

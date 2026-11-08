@@ -274,6 +274,7 @@
   "beanWifi": "Wi‑Fi fast transfer (experimental)",
   "beanWifiSub": "The bean opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth once live. iOS asks whether to join its network; stay on this page meanwhile",
   "beanWifiAsked": "Wi‑Fi fast transfer asked for: it starts once the current transfer stops",
+  "beanWifiAskedVpn": "Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it",
   "beanUnbindAfterSync": "Fetching the recordings on the bean; unbind once that is done",
   "beanUnbindBody": "Only this phone forgets the bean and switches to its own microphone. Nothing changes on the bean: its button still records and Feishu can still connect. Recordings not fetched yet stay on the bean.",
   "linkError": "Recorder error: {detail}",

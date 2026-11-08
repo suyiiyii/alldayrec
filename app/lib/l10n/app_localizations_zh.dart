@@ -958,6 +958,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanWifiAsked => '已请求 Wi‑Fi 快传，当前传输停下后开始';
 
   @override
+  String get beanWifiAskedVpn => '已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭';
+
+  @override
   String get beanUnbindAfterSync => '正在取回录音豆里的录音，取完再解除';
 
   @override

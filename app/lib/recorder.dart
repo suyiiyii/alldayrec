@@ -35,7 +35,7 @@ class Recorder {
       _ch.invokeMethod('bind', {'name': name, 'address': address, 'force': force});
   static Future<void> pause(int s) => _ch.invokeMethod('pause', {'s': s});  // 0: record again
   static Future<void> usbDisk(bool on) => _ch.invokeMethod('usbDisk', {'on': on});
-  static Future<void> beanWifi() => _ch.invokeMethod('beanWifi');  // iOS: the bean's Wi-Fi fast transfer, once (#431)
+  static Future<bool> beanWifi() async => await _ch.invokeMethod<bool>('beanWifi') ?? false;  // true: a VPN is on  // iOS: the bean's Wi-Fi fast transfer, once (#431)
   static Future<void> listen(bool on) => _ch.invokeMethod('listen', {'on': on});  // the recorder's sound played on this phone
   /// A web page's <input type=file> (导入录音) on Android: the system's file picker; the chosen files' content:// URIs.
   /// Always answers: on a throw the WebView never releases the input, which stays dead until the page reloads.
