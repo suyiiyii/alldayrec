@@ -804,7 +804,8 @@ class BeanTest {
             bean.push(0x0103, byteArrayOf(7, 5))
         }
         repeat(3) { seq -> bean.script += { bean.units(bean.open, listOf(seq + 3L), wait = 20_000) } }
-        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        // begun before the bean was added: realtime=1 (a realtime=0 fill this slow would fall back: slowFillFallsBackToLive)
+        assertThrows(IOException::class.java) { sync.session(t0 + 1000, "") }
         assertFalse(sync.recording)
         assertEquals(listOf(false, 80, 60, "battery", false), bean.reports.last().let {
             listOf(it["recording"], it["battery"], it["case_battery"], it["charge"], it["case_charging"])
