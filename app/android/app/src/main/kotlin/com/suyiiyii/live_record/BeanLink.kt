@@ -20,6 +20,8 @@ import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.ParcelUuid
 import android.os.PowerManager
@@ -274,6 +276,19 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
         override fun end(at: Long) { prefs.edit().putLong("end:$name", at).commit() }  // Uploader.ends() sends it
         override fun piece() = onPiece(1)
+        /** A Bluetooth headset shares the phone's radio (SCO: a headset in call mode), as may a call or a recording
+         *  (MODE_IN_COMMUNICATION: this app's voice question too); power, and whether the app is in front. */
+        override fun phoneState(): Map<String, Any?> {
+            val am = ctx.getSystemService(AudioManager::class.java)
+            val bt = mapOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO to "BluetoothSCO", AudioDeviceInfo.TYPE_BLUETOOTH_A2DP to "BluetoothA2DP",
+                26 to "BluetoothLE", 27 to "BluetoothLE")  // TYPE_BLE_HEADSET, TYPE_BLE_SPEAKER (API 31)
+            val me = ActivityManager.RunningAppProcessInfo().also(ActivityManager::getMyMemoryState)
+            return DeviceLog.phone().filterKeys { it in setOf("phone_battery", "phone_charging", "low_power", "thermal") } + mapOf(
+                "audio_out" to am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).mapNotNull { bt[it.type] }.distinct(),
+                "audio_mode" to am.mode, "call" to (am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION),
+                "other_audio" to am.isMusicActive,
+                "foreground" to (me.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND))
+        }
         override fun trace(what: String, v: Map<String, Any?>) {
             val w = capture ?: return
             val line = JSONObject(v + mapOf("t" to System.currentTimeMillis(), "what" to what)).toString()

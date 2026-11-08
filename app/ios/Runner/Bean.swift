@@ -247,7 +247,10 @@ protocol BeanIo: AnyObject {
   func piece()
   /// Starts of this bean's pieces the server could not decode (UploadAnswer.badAudio): their files stay on the bean.
   func refused() -> Set<Int64>
+  /// The phone's side of a slow link, for bean_lag and too_slow (BeanSync.diag()): its audio route, a call, power, front.
+  func phoneState() -> [String: Any]
 }
+extension BeanIo { func phoneState() -> [String: Any] { [:] } }
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
@@ -300,6 +303,7 @@ final class BeanSync {
     var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
     var clockSaid: Int64 = 0  // when bean_clock was last logged
     var lag: Int64?  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
+    var gainAt: Int64 = 0, gainBehind: Int64 = 0, gainLast: Int64 = 0  // slow(): this minute's start, behind and last unit
     init(_ file: Int64, _ live: Bool, _ from: Int64, realtime: Bool = false, watched: Bool = false) {
       self.file = file; self.live = live; self.from = from; self.realtime = realtime; self.watched = watched
     }
@@ -459,6 +463,16 @@ final class BeanSync {
                        "hole_ms": hole * Bean.frameMs, "watched": false])
           throw Again(description: "file \(x.file): the live page closed, a hole from \(g)")
         }
+        if let x = xfer, case let (behind, pace)? = slow(x) {
+          flush()
+          fills[x.file] = BeanSync.tries
+          log("bean_xfer", "实时文件 \(x.file) 补读 1 分钟没追近：读到单元 \(x.last)，离实时还差 \(behind * Bean.frameMs / 1000) s，" +
+              "读速 \(String(format: "%.2f", pace)) 倍：这个文件改实时读，缺的停录后补", "warn",
+              ["file": x.file, "realtime": false, "reason": "too_slow", "from": x.last + 1, "hole_units": behind,
+               "hole_ms": behind * Bean.frameMs, "pace": (pace * 100).rounded() / 100, "watched": x.watched]
+                .merging(diag(pace * 1000 / Double(Bean.frameMs))) { $1 })
+          throw Again(description: "file \(x.file): read at \(pace) of real time, \(behind) units behind")
+        }
         let now = io.now()
         if paused { liveSeen = now }
         if (recording || xfer?.live == true) && !paused && liveFile != 0 && now - liveSeen > 30_000 {
@@ -594,7 +608,8 @@ final class BeanSync {
   static func owedFields(now: Int64, closed: Int64, idle: Int64, watched: Bool, live: Bool, pace: Double) -> [String: Any] {
     let s = (now + closed + idle) * Bean.frameMs / 1000
     guard s > 0 else { return [:] }
-    let held: String? = now > 0 ? (live ? "recording" : watched ? "live" : nil) : closed > 0 ? "recording" : nil
+    // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
+    let held: String? = now > 0 && live || closed > 0 ? "recording" : now > 0 && watched ? "live" : nil
     // the recorded file grows by real time while it is read: it comes nearer at pace - 1
     let eta: Double? = held == "recording" ? nil : now > 0 ? (pace > 1.05 ? Double(now * Bean.frameMs) / 1000 / (pace - 1) : nil)
       : Double(idle * Bean.frameMs) / 1000 / pace
@@ -627,7 +642,7 @@ final class BeanSync {
     let how: String
     switch reason {
     case "live_now": how = "直接实时（realtime=1）：" + (mine ? "实时页开着，尾部缺 \(s) s，超过 1 分钟，留到以后补" : "文件在豆子加到这台手机前就开始了")
-    case "live_fallback": how = "直接实时（realtime=1）：realtime=0 已 \(BeanSync.tries) 次没取到，这个文件改回实时，缺的停录后补"
+    case "live_fallback": how = "直接实时（realtime=1）：realtime=0 取不到或追不上实时，这个文件改回实时，缺的停录后补"
     case "tail_short": how = "补尾部 \(s) s（realtime=0）：实时页开着，不超过 1 分钟，补上接着实时"
     case "fill_hole": how = "补前面的洞 \(s) s（realtime=0）" + (x.until > 0 ? "，单元 \(x.until) 起手机已有，到那里断开" : "，补完接着实时")
     default: how = "补尾部 \(s) s（realtime=0），补上接着实时"
@@ -635,6 +650,32 @@ final class BeanSync {
     log("bean_xfer", "实时文件 \(open) 从单元 \(x.from) 起" + how, fields: ["file": open, "realtime": x.realtime, "reason": reason,
         "from": x.from, "hole_units": hole, "hole_ms": hole * Bean.frameMs, "watched": watched])
     return x
+  }
+
+  /// A realtime=0 read of the file being recorded that does not gain on it never gets to live: 11-07/08 the bean sent it
+  /// at 0.67 of real time for hours (one unit a notification, 33 a second; the same bean's closed files 5 times faster;
+  /// nothing in 1A/07 sets a rate, iOS sets no connection interval for a central), the server's audio ever later. Each
+  /// minute of such a read: (units behind, its pace) when still over a minute behind and no nearer than a minute before
+  /// (then live_fallback: realtime=1, the holes after the stop), else nil.
+  private func slow(_ x: Xfer) -> (Int64, Double)? {
+    let now = io.now()
+    guard x.live && !x.realtime && x.last >= 0 && !paused else { x.gainAt = 0; return nil }
+    let behind = edge(x.file) - x.last - 1
+    if x.gainAt == 0 { x.gainAt = now; x.gainBehind = behind; x.gainLast = x.last; return nil }
+    if now - x.gainAt < 60_000 { return nil }
+    let pace = Double((x.last - x.gainLast) * Bean.frameMs) / Double(now - x.gainAt)
+    let stuck = behind > BeanSync.watchedGapUnits && behind >= x.gainBehind
+    x.gainAt = now; x.gainBehind = behind; x.gainLast = x.last
+    return stuck ? (behind, pace) : nil
+  }
+
+  /// What may slow a live read, logged with bean_lag and too_slow (11-08: 0.67 for hours, cause unknown; the owner's
+  /// AirPods in call mode that day?): the phone's side (BeanIo.phoneState), the bean's battery and case, units a second.
+  private func diag(_ unitsS: Double) -> [String: Any] {
+    var d = io.phoneState()
+    for k in ["battery", "charge", "case_battery", "case_charging"] { d["bean_\(k)"] = hw[k] ?? NSNull() }
+    d["units_s"] = (unitsS * 10).rounded() / 10
+    return d
   }
 
   /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
@@ -815,8 +856,9 @@ final class BeanSync {
         x.lag = lag
         if lagging ? lag <= 10_000 : lag > 60_000 {
           lagging.toggle()
+          let fields: [String: Any] = ["file": x.file, "seq": s.seq, "lag_s": lag / 1000]
           log("bean_lag", "实时文件 \(x.file) " + (lagging ? "落后 \(lag / 1000) s" : "追上了，落后 \(lag / 1000) s"), lagging ? "warn" : nil,
-              ["file": x.file, "seq": s.seq, "lag_s": lag / 1000])
+              lagging ? fields.merging(diag(Double(s.seq - x.first + 1) * 1000 / Double(max(1, now - x.firstAt)))) { $1 } : fields)
         }
       }
     }

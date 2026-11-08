@@ -584,11 +584,14 @@ do {
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
   check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
   check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
+  let lag = zip(bean.logs, bean.logFields).first { $0.0.0 == "bean_lag" }!.1
+  check((15.0...18.0).contains(lag["units_s"] as! Double), true, "units a second so far: \(lag["units_s"]!)")
+  check(lag.keys.contains("bean_case_charging"), true, "the bean's side with it")
   check(bean.logs.contains { $0.0 == "bean_stall" }, false)
 }
 
 /// A live transfer from a unit behind (recording for 2 min, nothing of it here yet) starts behind by what it fills:
-/// no live_lag_s nor bean_lag until it has caught up, then as above; units that keep coming as recorded 9 s after
+/// no live_lag_s nor bean_lag until it has caught up, then as above; units that keep coming as recorded 2.5 s after
 /// their seq says date the file anew (reanchor()), so the lag is gone a minute on.
 do {
   let dir = tmp()
@@ -597,14 +600,14 @@ do {
   bean.recording = true; bean.open = a; bean.list(a, 0)
   bean.onTransfer = { file, _, _ in
     bean.header(file, 0xFFFF_FFFF)
-    bean.units(file, Array(0..<1800), ms: 60)  // slow at first: 192 s behind after 108 s
-    bean.units(file, Array(1800..<14000), ms: 5)  // caught up (9 s) 61 s on
+    bean.units(file, Array(0..<450), ms: 60)  // slow at first: 147 s behind after 27 s (no slower for a minute: slow())
+    bean.units(file, Array(450..<14000), ms: 10)  // twice real time: caught up (2.5 s) 135.5 s on
     bean.units(file, Array(14000..<18000))  // then live for 80 s
   }
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0]])
-  check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 9, 0], "filling the tail at the first two, caught up, then dated anew")
+  check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 2, 0], "filling the tail at the first two, caught up, then dated anew")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 
@@ -846,6 +849,35 @@ for code: UInt8? in [2, 3, nil, 0] {
   check(r.f.have.first!.1, 1000)
   check(r.f.have.count, 2)
 }
+
+/// A realtime=0 read of the open file slower than real time (11-08: 0.67, one unit every 30 ms) never gets to live: a
+/// minute on, over a minute behind and no nearer, that file goes realtime=1 (live_fallback), its hole after the stop.
+do {
+  let r = rec(100, [(0, 1000)], watched: false)  // the bean at unit 5000
+  r.bean.onTransfer = { file, from, realtime in
+    if realtime {
+      r.bean.answer(file, from, true); r.bean.more(30)
+      r.bean.script = [{ throw BeanSync.Gone("done") }]
+    } else { r.bean.header(file, 0xFFFF_FFFF); r.bean.units(file, Array(from..<(from + 6000)), ms: 30) }
+  }
+  until(r)
+  check(r.reasons, ["fill_tail", "too_slow", "live_fallback"])
+  check(r.bean.transfers.map { $0[2] }, [0, 1])
+  let slow = r.bean.logFields.first { $0["reason"] as? String == "too_slow" }!
+  check(slow["pace"] as? Double, 0.67)
+  check(slow["units_s"] as? Double, 33.3)
+  check(slow.keys.contains("bean_battery"), true, "the bean's side with it")
+  check((5000...5100).contains(slow["hole_units"] as! Int64), true, "\(slow["hole_units"]!) units behind")
+  check(r.f.have.first!.0, 0)
+  check(r.f.have.count, 2, "the hole stays for after the stop")
+}
+
+/// Closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h of a closed file
+/// said 补传中); the open file's hole alone says why it waits.
+check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: false, live: false, pace: 2)["backlog_held"] as? String, "recording")
+check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: true, live: false, pace: 2)["backlog_held"] as? String, "recording")
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, pace: 2)["backlog_held"] as? String, "live")
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, pace: 2)["backlog_held"] is NSNull, true)
 
 /// The open file with its length known and all of it on the phone (a live header that carried a size, or a unit with the
 /// end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() crashed the app here

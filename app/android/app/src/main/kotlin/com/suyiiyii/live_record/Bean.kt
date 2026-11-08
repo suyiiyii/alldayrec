@@ -279,6 +279,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun refused(): Set<Long>
         /** A debug capture of the session (off unless asked for: BeanLink). */
         fun trace(what: String, v: Map<String, Any?>) {}
+        /** The phone's side of a slow link, for bean_lag and too_slow (diag()): its audio route, a call, power, front. */
+        fun phoneState(): Map<String, Any?> = emptyMap()
     }
 
     /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
@@ -310,6 +312,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var target: Long? = null  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
         var clockSaid = 0L  // when bean_clock was last logged
         var lag: Long? = null  // live, once within 10 s: how long after its end its last unit came (report(), bean_lag)
+        var gainAt = 0L  // slow(): this minute's start, how far behind then and its last unit
+        var gainBehind = 0L
+        var gainLast = 0L
     }
 
     @Volatile var state: Map<String, Any?> = say("encrypting")
@@ -465,6 +470,17 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                         "hole_ms" to hole * Bean.FRAME_MS, "watched" to false))
                 throw Again("file ${x.file}: the live page closed, a hole from $g")
             }
+            xfer?.let { x ->
+                val (behind, pace) = slow(x) ?: return@let
+                flush()
+                fills[x.file] = TRIES
+                io.log("bean_xfer", "实时文件 ${x.file} 补读 1 分钟没追近：读到单元 ${x.last}，离实时还差 ${behind * Bean.FRAME_MS / 1000} s，" +
+                    "读速 ${"%.2f".format(Locale.US, pace)} 倍：这个文件改实时读，缺的停录后补", "warn",
+                    mapOf("file" to x.file, "realtime" to false, "reason" to "too_slow", "from" to x.last + 1, "hole_units" to behind,
+                        "hole_ms" to behind * Bean.FRAME_MS, "pace" to Math.round(pace * 100) / 100.0, "watched" to x.watched) +
+                        diag(pace * 1000 / Bean.FRAME_MS))
+                throw Again("file ${x.file}: read at $pace of real time, $behind units behind")
+            }
             val now = io.now()
             if (paused) liveSeen = now
             if ((recording || xfer?.live == true) && !paused && liveFile != 0L && now - liveSeen > 30_000) {
@@ -607,7 +623,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val s = hole * Bean.FRAME_MS / 1000
         io.log("bean_xfer", "实时文件 $open 从单元 ${x.from} 起" + when (reason) {
             "live_now" -> "直接实时（realtime=1）：" + if (mine) "实时页开着，尾部缺 $s s，超过 1 分钟，留到以后补" else "文件在豆子加到这台手机前就开始了"
-            "live_fallback" -> "直接实时（realtime=1）：realtime=0 已 $TRIES 次没取到，这个文件改回实时，缺的停录后补"
+            "live_fallback" -> "直接实时（realtime=1）：realtime=0 取不到或追不上实时，这个文件改回实时，缺的停录后补"
             "tail_short" -> "补尾部 $s s（realtime=0）：实时页开着，不超过 1 分钟，补上接着实时"
             "fill_hole" -> "补前面的洞 $s s（realtime=0）" + if (x.until > 0) "，单元 ${x.until} 起手机已有，到那里断开" else "，补完接着实时"
             else -> "补尾部 $s s（realtime=0），补上接着实时"
@@ -617,6 +633,29 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     }
 
     /** The unit the bean is at in the file it records, by the phone's clock (a pause would put it early). */
+    /** A realtime=0 read of the file being recorded that does not gain on it never gets to live: 11-07/08 the bean sent it
+     *  at 0.67 of real time for hours (one unit a notification, 33 a second; the same bean's closed files 5 times faster;
+     *  nothing in 1A/07 sets a rate), the server's audio ever later. Each minute of such a read: (units behind, its pace)
+     *  when still over a minute behind and no nearer than a minute before (then live_fallback: realtime=1, the holes after
+     *  the stop), else null. */
+    private fun slow(x: Xfer): Pair<Long, Double>? {
+        val now = io.now()
+        if (!x.live || x.realtime || x.last < 0 || paused) { x.gainAt = 0; return null }
+        val behind = edge(x.file) - x.last - 1
+        if (x.gainAt == 0L) { x.gainAt = now; x.gainBehind = behind; x.gainLast = x.last; return null }
+        if (now - x.gainAt < 60_000) return null
+        val pace = (x.last - x.gainLast) * Bean.FRAME_MS.toDouble() / (now - x.gainAt)
+        val stuck = behind > WATCHED_GAP_UNITS && behind >= x.gainBehind
+        x.gainAt = now; x.gainBehind = behind; x.gainLast = x.last
+        return if (stuck) behind to pace else null
+    }
+
+    /** What may slow a live read, logged with bean_lag and too_slow (11-08: 0.67 for hours, cause unknown; a Bluetooth
+     *  headset in call mode that day?): the phone's side (Io.phoneState), the bean's battery and case, units a second. */
+    private fun diag(unitsS: Double): Map<String, Any?> = io.phoneState() +
+        listOf("battery", "charge", "case_battery", "case_charging").associate { "bean_$it" to hw[it] } +
+        ("units_s" to Math.round(unitsS * 10) / 10.0)
+
     private fun edge(file: Long) = maxOf(0L, (io.now() - (files[file]?.latest ?: (file * 1000))) / Bean.FRAME_MS)
 
     private fun begin(x: Xfer) {
@@ -777,8 +816,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 x.lag = lag
                 if (if (lagging) lag <= 10_000 else lag > 60_000) {
                     lagging = !lagging
+                    val fields = mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000)
                     io.log("bean_lag", "实时文件 ${x.file} " + if (lagging) "落后 ${lag / 1000} s" else "追上了，落后 ${lag / 1000} s",
-                        if (lagging) "warn" else null, mapOf("file" to x.file, "seq" to s.seq, "lag_s" to lag / 1000))
+                        if (lagging) "warn" else null,
+                        if (lagging) fields + diag((s.seq - x.first + 1) * 1000.0 / maxOf(1L, now - x.firstAt)) else fields)
                 }
             }
         }
@@ -957,7 +998,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun owedFields(now: Long, closed: Long, idle: Long, watched: Boolean, live: Boolean, pace: Double): Map<String, Any?> {
             val s = (now + closed + idle) * Bean.FRAME_MS / 1000
             if (s <= 0) return emptyMap()
-            val held = if (now > 0) (if (live) "recording" else if (watched) "live" else null) else if (closed > 0) "recording" else null
+            // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
+            val held = if (now > 0 && live || closed > 0) "recording" else if (now > 0 && watched) "live" else null
             // the recorded file grows by real time while it is read: it comes nearer at pace - 1
             val eta = when {
                 held == "recording" -> null

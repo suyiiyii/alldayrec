@@ -8,6 +8,8 @@
 //    (state restoration, its own identifier); the same timing logs (bean_scan)
 //  - no MTU request: iOS negotiates it; the connect line says what it got
 //  - no debug capture of sessions (Android's bean-capture over adb)
+import AVFoundation
+import CallKit
 import CoreBluetooth
 import Foundation
 
@@ -287,6 +289,16 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func end(_ at: Int64) { prefs.set(at, forKey: "end:\(name)") }  // Uploader.ends() sends it
   func piece() { files += 1 }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
+  /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
+  /// (category PlayAndRecord: this app's voice question too); power, and whether the app is in front.
+  func phoneState() -> [String: Any] {
+    let s = AVAudioSession.sharedInstance(), r = s.currentRoute
+    let (call, front) = DispatchQueue.main.sync { (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp) }
+    let power = Recorder.phone().filter { ["phone_battery", "phone_charging", "low_power", "thermal"].contains($0.key) }
+    return power.merging(["audio_out": r.outputs.map(\.portType.rawValue), "audio_in": r.inputs.map(\.portType.rawValue),
+                          "audio_category": s.category.rawValue, "other_audio": s.isOtherAudioPlaying, "call": call,
+                          "foreground": front]) { $1 }
+  }
 
   //
   // CoreBluetooth, on q
