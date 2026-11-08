@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS conversations_start ON conversations(start);
 CREATE TABLE IF NOT EXISTS summaries (        -- body: the summary as the API returns it
     conversation TEXT PRIMARY KEY, status TEXT NOT NULL, prompt_version INTEGER, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- db.done_hints reads these few, not every body
+    WHERE status = 'done' AND json_array_length(body, '$.done_hints') > 0;
 CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; label and e NULL: no recording, not retried
     conv TEXT NOT NULL, label TEXT, device TEXT, n INTEGER, speech_s REAL, k INTEGER, e BLOB,
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
