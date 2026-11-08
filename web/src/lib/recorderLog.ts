@@ -134,6 +134,14 @@ const phoneMode = (r: Rec) =>
           ms: r.b & 0xffff,
           kb: r.b >>> 16,
         });
+// x 0 done, else the error as a positive errno: 17 it mounted, 19 no card answered, 5 the format failed (lr_log.h FORMAT)
+const format = (r: Rec) =>
+  r.x === 0
+    ? t("rec.formatDone", { gb: ((r.a * 512) / 1e9).toFixed(2), s: (r.b / 1000).toFixed(1) })
+    : t("rec.formatFail", {
+        gb: ((r.a * 512) / 1e9).toFixed(2),
+        why: [5, 17, 19].includes(r.x) ? t(`rec.formatWhy.${r.x}`) : r.x,
+      });
 function readDone(r: Rec) {
   const ms = r.b & 0x3fffff;
   return t("rec.readDone", {
@@ -251,6 +259,7 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   33: ["CARD_SIZE", cardSize],
   34: ["SD_ERRORS", sdErrors],
   35: ["PHONE", phoneMode],
+  36: ["FORMAT", format],
 };
 // every few minutes or every connection: hidden unless asked for
 const ROUTINE = new Set([9, 11, 12, 13, 14, 15, 20, 22, 23, 25, 32, 33]);

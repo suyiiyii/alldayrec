@@ -103,6 +103,7 @@
       "full": "Full, offline recording stopped",
       "usb": "USB drive mode, offline recording paused",
       "none": "No card, or not seated: live upload only",
+      "blank": "not formatted: format it on the app's recorder page; live upload only until then",
       "error": "Card error: reinsert or replace it",
       "free": "{free} / {total} GB free"
     },
@@ -655,6 +656,7 @@
       "CARD_SIZE": "Card capacity",
       "SD_ERRORS": "Card driver errors (10 min)",
       "PHONE": "Phone takes the stream",
+      "FORMAT": "Format the card",
       "unknown": "Unknown event"
     },
     "reset": {
@@ -737,6 +739,13 @@
     "phoneIn": "the phone acks what it stored, the card stops ({b} B behind)",
     "phoneOut": "back to the card ({why}): {b} B not acked written to it, last ACK {ms} ms before, at most {kb} KB not acked",
     "phoneRecovered": "{b} B left in RAM by the last reset written to the card: {file}.BIN",
+    "formatDone": "{gb} GB card formatted as exFAT in {s} s",
+    "formatFail": "{gb} GB card not formatted: {why}",
+    "formatWhy": {
+      "5": "the format failed",
+      "17": "it mounts as it is",
+      "19": "no card answered"
+    },
     "phoneWhy": {
       "1": "Bluetooth gone or LIVE unsubscribed",
       "2": "no ACK for 8 s",

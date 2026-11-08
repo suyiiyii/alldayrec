@@ -1430,6 +1430,96 @@ abstract class AppLocalizations {
   /// **'重插或换一张卡；实时上传照常'**
   String get cardErrorSub;
 
+  /// No description provided for @cardBlankTile.
+  ///
+  /// In zh, this message translates to:
+  /// **'未格式化'**
+  String get cardBlankTile;
+
+  /// No description provided for @cardBlankSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'卡上没有能用的文件系统，下面可以格式化；在那之前只能实时上传'**
+  String get cardBlankSub;
+
+  /// No description provided for @cardFormattingTile.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式化中'**
+  String get cardFormattingTile;
+
+  /// No description provided for @formatCard.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式化存储卡'**
+  String get formatCard;
+
+  /// No description provided for @formatCardTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式化存储卡？'**
+  String get formatCardTitle;
+
+  /// No description provided for @formatCardBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'卡上原有的内容会全部清空，没法恢复。\n\n容量 {size}，格式化成 exFAT（电脑和手机都能读），约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。'**
+  String formatCardBody(String size);
+
+  /// No description provided for @formatCardGo.
+  ///
+  /// In zh, this message translates to:
+  /// **'清空并格式化'**
+  String get formatCardGo;
+
+  /// No description provided for @formatCardWait.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在格式化，约需几十秒，请让手机待在录音设备旁边'**
+  String get formatCardWait;
+
+  /// No description provided for @formatCardDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式化完成，容量 {size}。录音设备已开始往卡上录音。'**
+  String formatCardDone(String size);
+
+  /// No description provided for @formatFailHasFs.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有格式化：这张卡现在能正常读出来，卡上的内容都还在。'**
+  String get formatFailHasFs;
+
+  /// No description provided for @formatFailChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有格式化：录音设备里的卡换过了。请再看一眼卡的容量，重新点格式化。'**
+  String get formatFailChanged;
+
+  /// No description provided for @formatFailNoCard.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有格式化：录音设备读不到卡。请把卡拔出来重新插好再试。'**
+  String get formatFailNoCard;
+
+  /// No description provided for @formatFailWrite.
+  ///
+  /// In zh, this message translates to:
+  /// **'格式化没有成功：卡写不进去，可能坏了。请换一张卡。'**
+  String get formatFailWrite;
+
+  /// No description provided for @formatFailNoAnswer.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音设备没有回应，可能断开了。等它重新连上后看存储卡状态：显示“未格式化”就再试一次。'**
+  String get formatFailNoAnswer;
+
+  /// No description provided for @ok.
+  ///
+  /// In zh, this message translates to:
+  /// **'知道了'**
+  String get ok;
+
   /// No description provided for @advBattery.
   ///
   /// In zh, this message translates to:

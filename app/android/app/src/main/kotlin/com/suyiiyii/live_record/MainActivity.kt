@@ -183,6 +183,12 @@ class MainActivity : FlutterActivity() {
                     if (link == null) result.error("notStarted", null, null)
                     else { link.usbDisk(call.argument<Boolean>("on")!!); result.success(null) }
                 }
+                "formatCard" -> {  // the connected board's card with no file system formatted: its answer (Ble.formatCard)
+                    val link = RecorderService.link
+                    val code = call.argument<Number>("code")?.toLong() ?: -1L
+                    if (link == null) result.error("notConnected", null, null)
+                    else Thread { val err = link.formatCard(code); runOnUiThread { if (err == null) result.error("notConnected", null, null) else result.success(err) } }.start()
+                }
                 "unbind" -> Thread {  // the recorder forgets every phone (when connected), then this phone forgets it
                     val p = getSharedPreferences("recorder", MODE_PRIVATE)
                     val addr = p.getString("bleAddress", null); val name = p.getString("bleName", null)

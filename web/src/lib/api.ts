@@ -173,6 +173,7 @@ export interface RecorderStatus {
   store?: number; // 0 recording to the card; an errno otherwise: with total_kb 0 no card (-19, -116), -28 full, -16 lent
   free_kb?: number;
   total_kb?: number;
+  card?: "ok" | "none" | "failing" | "blank" | "formatting" | null; // the card as the board says it (App's Ble.card)
   backlog_kb?: number; // left on the card for the phone to read in the background
   backlog_eta_s?: number; // at the phone's own reading rate
   backlog_s?: number; // a Feishu bean: seconds of its recording not on the phone yet (beanBehind)
@@ -386,22 +387,24 @@ export interface Due extends TodoView {
 // a device's finals are within 30 s of its newest audio; one with no pipeline (a Recorder) has all its audio final
 export const caughtUp = (d: { left_s?: number }) => (d.left_s ?? 0) < 30;
 // its recorder's card: store is an errno; with nothing mounted this boot (total_kb 0) no card or one not seated (-19,
-// -116: a mount that timed out), as the app's cardState says it
+// -116: a mount that timed out), as the app's cardState says it; a newer firmware says when it has no file system
 export const card = (h: RecorderStatus) =>
   h.store === -28
     ? t("api.card.full")
     : h.store === -16
       ? t("api.card.usb")
-      : h.store && !h.total_kb
-        ? t("api.card.none")
-        : h.store
-          ? t("api.card.error")
-          : h.total_kb
-            ? t("api.card.free", {
-                free: ((h.free_kb ?? 0) / 1048576).toFixed(1),
-                total: (h.total_kb / 1048576).toFixed(1),
-              })
-            : "—";
+      : h.store && (h.card === "blank" || h.card === "formatting")
+        ? t("api.card.blank")
+        : h.store && !h.total_kb
+          ? t("api.card.none")
+          : h.store
+            ? t("api.card.error")
+            : h.total_kb
+              ? t("api.card.free", {
+                  free: ((h.free_kb ?? 0) / 1048576).toFixed(1),
+                  total: (h.total_kb / 1048576).toFixed(1),
+                })
+              : "—";
 
 export interface LogEvent {
   at: string;

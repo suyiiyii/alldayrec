@@ -411,6 +411,9 @@ EVENTS = {
     33: ("CARD_SIZE", card_size),
     34: ("SD_ERRORS", sd_errors),
     35: ("PHONE", phone),
+    36: ("FORMAT", lambda x, a, b: f"{a * 512 / 1e9:.2f} GB card made exFAT in {b / 1000:.1f} s" if not x else
+         f"{a * 512 / 1e9:.2f} GB card not formatted: " + {17: "it mounted after all", 19: "no card answered",
+                                                        5: "the format failed"}.get(x, f"error {x}")),
 }
 
 
@@ -528,6 +531,8 @@ def selftest():
     assert EVENTS[19][1](0, 3, 9) == "3 frames, 9 this boot" and EVENTS[19][1](40, 75, 81) == "75 frames in 40 gaps, 81 this boot"
     assert EVENTS[28][1](0, 1, 0) == "off: System OFF" and EVENTS[28][1](1, 9, 0) == "on: 9"
     assert EVENTS[29][1](204, 0, 0) == "on battery, VDDH 4080 mV"
+    assert EVENTS[36][1](0, 62333952, 21500) == "31.91 GB card made exFAT in 21.5 s"
+    assert EVENTS[36][1](17, 62333952, 900) == "31.91 GB card not formatted: it mounted after all"
     assert EVENTS[29][1](165, 2, 0).startswith("low battery (3300 mV)")
     assert EVENTS[8][1](0, 0, 3) == "card back (the computer left it 3 min): ok" and EVENTS[8][1](0, 0, 0) == "card back: ok"
     assert EVENTS[30][0] == "LIVE_LOST" and EVENTS[30][1](0, 12, 4800).startswith("12 records (4800 B) left out of LIVE (link stalled)")

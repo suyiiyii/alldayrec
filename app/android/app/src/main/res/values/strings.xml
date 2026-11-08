@@ -50,4 +50,5 @@
     <string name="card_usb">Card in USB disk mode</string>
     <string name="card_none">No card in</string>
     <string name="card_error">Card error</string>
+    <string name="card_blank">Card not formatted</string>
 </resources>

@@ -194,6 +194,26 @@ static void sd_power_cycle(void)
     sd_power_on();
 }
 
+bool lr_sd_blank;
+uint32_t lr_sd_sectors;
+
+/* disk init, then the mount; what they say of the card kept for TIME's read (sdcard.h). FatFs's FR_NO_FILESYSTEM is
+ * fs_mount's -ENODEV (zephyr/subsys/fs/fat_fs.c translate_error; its other -ENODEVs, a bad drive name and no work area,
+ * cannot be ours): sector 0 read back fine and holds no FAT or exFAT volume. A read that fails is FR_DISK_ERR, -EIO. */
+static int mount_try(void)
+{
+    int err = disk_access_init("SD");
+    lr_sd_sectors = 0;
+    if (!err) {
+        // the disk's own card from here (__wrap_sdmmc_ioctl) for mount_sd_card_reset's sd_init: a card that never
+        // mounted (no file system) had none, and a reset left it uninitialised for good, read as -EIO
+        disk_access_ioctl("SD", DISK_IOCTL_GET_SECTOR_COUNT, &lr_sd_sectors);
+    }
+    err = err ?: fs_mount(&mount_point);
+    lr_sd_blank = lr_sd_sectors && err == -ENODEV;
+    return err;
+}
+
 int mount_sd_card(void)
 {
     // the card reset at boot only: NCS 2.7's SD disk has no deinit, it would not initialise the card again (mounted back
@@ -205,7 +225,6 @@ int mount_sd_card(void)
         booted = true;
     }
 
-    const char *disk_pdrv = "SD";
     // after a warm reset the card (never powered off) may still be mid-command: give it a few tries
     mount_point.mnt_point = "/SD:";
     mount_point.flags = FS_MOUNT_FLAG_NO_FORMAT;  // a card that reads badly once must not be formatted, recordings and all
@@ -215,7 +234,7 @@ int mount_sd_card(void)
             k_msleep(200 * i);
         }
         watchdog_feed();  // a card that never answers takes seconds per try; the watchdog allows 30 s for all of boot
-        err = disk_access_init(disk_pdrv) ?: fs_mount(&mount_point);
+        err = mount_try();
         LOG_INF("SD mount try %d: %d", i + 1, err);
         lr_log(LR_MOUNT, i + 1, err, 0);
     }
@@ -229,7 +248,7 @@ int mount_sd_card(void)
 /* One try, no waiting: the store tries a failed card again (lr_store.c retry_card). Logged when it works. */
 int mount_sd_card_once(void)
 {
-    int err = disk_access_init("SD") ?: fs_mount(&mount_point);
+    int err = mount_try();
     if (!err) {
         lr_log(LR_MOUNT, 0, 0, 0);
         log_card();
@@ -251,12 +270,40 @@ int mount_sd_card_reset(void)
     }
     sd_power_cycle();
     sd_spi_reset();
-    int err = disk_card ? sd_init(disk_card->sdhc, disk_card) : 0;  // none: it never mounted, disk_access_init inits it
+    int err = disk_card ? sd_init(disk_card->sdhc, disk_card) : 0;  // none: it never answered, disk_access_init inits it
+    if (err) {
+        lr_sd_sectors = 0;
+        lr_sd_blank = false;
+    }
     err = err ?: mount_sd_card_once();
     if (err) {
         lr_log(LR_MOUNT, 0, err, 0);
     }
     return err;
+}
+
+/* FORMAT (lr_store.c): the card tried again from scratch first, and formatted only if it still answers and still holds
+ * no file system; one that mounts now is never formatted (-EEXIST), one that does not answer neither (-ENODEV).
+ * exFAT at any size, not FAT32 up to 32 GB as the SD spec has it: macOS 26 reads a FAT32 volume's whole FAT before
+ * it mounts and gives up after 20 s (32 GB at 32 KB clusters: a 3.9 MB FAT, 20-78 s at the 50-190 KB/s the card is read
+ * at over USB from LR-X1), and mounted an exFAT 32 GB card from it in 2.1 s. Clusters as the SD spec's (SDXC) and
+ * FatFs's own choice: 32 KB up to 32 GB, 128 KB above; the data area on the card's allocation unit (4 MB, 16 MB
+ * above 32 GB). No partition table (FM_SFD): FatFs's MBR puts the volume at sector 63, off the allocation units; an
+ * exFAT card without one mounted on macOS (X1 10-18). work: f_mkfs's buffer, a multiple of 512 B: the FAT is written that
+ * much at a time (4 KB: ~1000 writes for a 4 MB FAT). */
+int format_sd_card(void *work, uint32_t len)
+{
+    unmount_sd_card();
+    int err = mount_sd_card_reset();
+    if (!lr_sd_blank) {
+        return !err ? -EEXIST : -ENODEV;
+    }
+    bool sdxc = lr_sd_sectors >= 0x4000000;  // over 32 GB
+    MKFS_PARM opt = {.fmt = FM_EXFAT | FM_SFD, .n_fat = 1, .align = sdxc ? 32768 : 8192,
+                     .au_size = sdxc ? 128 * 1024 : 32 * 1024};
+    FRESULT res = f_mkfs("SD:", &opt, work, len);
+    LOG_INF("SD format: %d", res);
+    return res ? -EIO : 0;
 }
 
 void unmount_sd_card(void)

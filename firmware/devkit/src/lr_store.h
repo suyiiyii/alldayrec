@@ -37,7 +37,10 @@
  *               total_kb:u32 resetreas:u32 (the last reset's cause) fault_reason:u32 fault_pc:u32 (a crash before it;
  *               0: none) dropped:u32 (frames that never reached the store this boot) append_max_ms:u16 (slowest write)
  *               usb_diag:4 x i16 bonds:u8 (phones bonded; 0: unbound, not recording) pause_left_s:u32 (0: recording)
- *               charge:u8 (lr_power.h) features:u8 (bit 0: ACK taken, phone mode; older firmware: no such byte)
+ *               charge:u8 (lr_power.h) features:u8 (bit 0: ACK taken, phone mode; older firmware: no such byte;
+ *               bits 1-3: the card, 0 older firmware, 1 takes the stream (or full, lent), 2 none answers, 3 it answers and
+ *               fails, 4 no file system: FORMAT takes it, 5 being formatted) card_kb:u32 (the card's size as it
+ *               answered, file system or not; 0: none answered)
  *   ...02 CTRL  write commands, notify replies:
  *               0x01 LIST                -> 0x81 file:u32 size:u32 per file (the open one too, with what the stream
  *                                           has finished), then 0x80 err:i8 open:u32 (the file the stream goes on in)
@@ -57,6 +60,10 @@
  *               0x08 ACK file:u32 offset:u32  the phone has stored `file` up to `offset`, all of it; of other files
  *                                           it says nothing (every ~5 s while it follows; features bit 0 only). Taken
  *                                           at once, a READ going on goes on. No reply: the write's response
+ *               0x09 FORMAT code:u32     -> 0x89 total_kb:u32 status:i8: a card with no file system (features
+ *                                           card 4) made exFAT and recorded to; code: card_kb as TIME read it.
+ *                                           Tens of seconds. -17 it has a file system (never formatted), -22 a wrong
+ *                                           code, -19 no card answers, -5 the format or the mount after it failed
  *               0x20 PAUSE s:u32         nothing kept for s seconds (frames still counted), then recording again by
  *                                           itself; 0 resumes now; a reset resumes too. No reply: the write's response
  *   ...03 DATA  notify offset:u32 bytes...                 (READ)

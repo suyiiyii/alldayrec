@@ -70,10 +70,11 @@ class RecorderService : Service() {
 
         /** The recorder's card when it does not record to it, as recorder_status.dart cardState says it: store an errno,
          *  total_kb 0 when none mounted this boot (no card, or one not seated: -19, a mount that timed out -116). */
-        fun cardLine(store: Int?, totalKb: Long?): Int? = when {
+        fun cardLine(store: Int?, totalKb: Long?, card: String? = null): Int? = when {
             store == null || store == 0 -> null
             store == -28 -> R.string.card_full
             store == -16 -> R.string.card_usb
+            card == "blank" || card == "formatting" -> R.string.card_blank  // a card with no file system (Ble.card)
             (totalKb ?: 0L) == 0L -> R.string.card_none
             else -> R.string.card_error
         }
@@ -143,7 +144,7 @@ class RecorderService : Service() {
                 if (paused > 0) t(R.string.notice_paused, (paused + 59_999) / 60_000) else null,
                 hw?.get("battery")?.let { t(R.string.notice_battery, it) },
                 mapOf("battery" to R.string.on_battery, "charging" to R.string.charging, "full" to R.string.charged)[hw?.get("charge")]?.let { t(it) },
-                cardLine((hw?.get("store") as Number?)?.toInt(), (hw?.get("total_kb") as Number?)?.toLong())?.let { t(it) },
+                cardLine((hw?.get("store") as Number?)?.toInt(), (hw?.get("total_kb") as Number?)?.toLong(), hw?.get("card") as String?)?.let { t(it) },
                 if (oldest != null && now - oldest > BACKLOG_MS) t(R.string.notice_pending, s["pending"]) else null,
                 (s["interruptedAt"] as Long?)?.let { t(R.string.notice_interrupted, SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))) },
             ).joinToString(" · ")

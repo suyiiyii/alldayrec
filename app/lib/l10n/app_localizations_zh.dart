@@ -774,6 +774,56 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cardErrorSub => '重插或换一张卡；实时上传照常';
 
   @override
+  String get cardBlankTile => '未格式化';
+
+  @override
+  String get cardBlankSub => '卡上没有能用的文件系统，下面可以格式化；在那之前只能实时上传';
+
+  @override
+  String get cardFormattingTile => '格式化中';
+
+  @override
+  String get formatCard => '格式化存储卡';
+
+  @override
+  String get formatCardTitle => '格式化存储卡？';
+
+  @override
+  String formatCardBody(String size) {
+    return '卡上原有的内容会全部清空，没法恢复。\n\n容量 $size，格式化成 exFAT（电脑和手机都能读），约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。';
+  }
+
+  @override
+  String get formatCardGo => '清空并格式化';
+
+  @override
+  String get formatCardWait => '正在格式化，约需几十秒，请让手机待在录音设备旁边';
+
+  @override
+  String formatCardDone(String size) {
+    return '格式化完成，容量 $size。录音设备已开始往卡上录音。';
+  }
+
+  @override
+  String get formatFailHasFs => '没有格式化：这张卡现在能正常读出来，卡上的内容都还在。';
+
+  @override
+  String get formatFailChanged => '没有格式化：录音设备里的卡换过了。请再看一眼卡的容量，重新点格式化。';
+
+  @override
+  String get formatFailNoCard => '没有格式化：录音设备读不到卡。请把卡拔出来重新插好再试。';
+
+  @override
+  String get formatFailWrite => '格式化没有成功：卡写不进去，可能坏了。请换一张卡。';
+
+  @override
+  String get formatFailNoAnswer =>
+      '录音设备没有回应，可能断开了。等它重新连上后看存储卡状态：显示“未格式化”就再试一次。';
+
+  @override
+  String get ok => '知道了';
+
+  @override
   String advBattery(Object volts) {
     return '电池 $volts V';
   }

@@ -18,6 +18,13 @@ int mount_sd_card_reset(void);
 struct device;
 void lr_sdhc_spi_unlock(const struct device *sdhc);
 void unmount_sd_card(void);
+/* The last mount try's card: its 512 B sectors if it answered (0: none did: no card, or not seated), and whether it held
+ * no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it) */
+extern bool lr_sd_blank;
+extern uint32_t lr_sd_sectors;
+/* A card with no file system made exFAT (FORMAT, lr_store.c), work a buffer for f_mkfs: 0, -EEXIST it mounts (never
+ * formatted), -ENODEV it no longer answers, -EIO the format failed. Unmounted after; SD mutex held. */
+int format_sd_card(void *work, uint32_t len);
 /* The card's four SPI lines let go (high impedance), on a board that switches the card's supply: before its supply goes
  * off for good (System OFF, lr_power.c) */
 void sd_lines_release(void);

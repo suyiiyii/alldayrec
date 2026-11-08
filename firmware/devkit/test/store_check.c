@@ -212,6 +212,10 @@ void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
 }
 uint32_t lr_log_read(uint32_t from, uint8_t *buf, uint16_t max, bool (*send)(uint32_t, uint16_t, void *), void *arg) { return 0; }
 void unmount_sd_card(void) {}
+bool lr_sd_blank;  // sdcard.h: the last mount's card had no file system; its sectors
+uint32_t lr_sd_sectors;
+static int formats, format_err;  // format_sd_card's calls; what the next returns
+int format_sd_card(void *work, uint32_t len) { formats++; return format_err; }
 
 // a phone following the stream: file -> bytes by offset
 #define FILES 48
@@ -920,7 +924,7 @@ int main(void)
     // stops acking, or falls too far behind. Every frame is in the phone's acked copy or on the card. An app that never
     // acks (all of the above) never started it
     time_read(&the_conn, 0, 0, 0, 0);
-    assert(status[48] == PHONE && !phone_mode && last_code(LR_PHONE) < 0);
+    assert((status[48] & 1) == PHONE && status[48] >> 1 == 1 && !phone_mode && last_code(LR_PHONE) < 0);
     if (PHONE) {
         memset(phone_len, 0, sizeof(phone_len)), memset(card_len, 0, sizeof(card_len));
         boot = 2, seg = 0, seg_size = 0, card_file = UINT32_MAX, seg_open = false;  // a boot's files from segment 0
@@ -1166,6 +1170,27 @@ int main(void)
         ring_recover();
         assert(q.magic == RING_MAGIC && ring_used() == 0 && last_code(LR_PHONE) == e);
     }
+    // FORMAT: only a card that answers and holds no file system, only with its size as TIME gave it; then recorded to
+    int fe;
+    store_err = -ENODEV, lr_sd_sectors = 62333952, n_logged = 0;  // a 32 GB card, a file system that did not mount
+    assert(format_card(31166976) == -EEXIST && !formats);
+    lr_sd_sectors = 0;  // none answers
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert(status[48] >> 1 == 2 && sys_get_le32(status + 49) == 0 && format_card(0) == -ENODEV && !formats);
+    lr_sd_sectors = 62333952, lr_sd_blank = true;
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert(status[48] >> 1 == 4 && sys_get_le32(status + 49) == 31166976);
+    assert(format_card(31166975) == -EINVAL && !formats);
+    format_err = -EIO;
+    assert(format_card(31166976) == -EIO && formats == 1);
+    fe = last_code(LR_FORMAT);
+    assert(fe >= 0 && logged[fe].x == EIO && logged[fe].a == 62333952);
+    store_err = -ENODEV, format_err = 0, n_logged = 0;
+    assert(format_card(31166976) == 0 && formats == 2 && !store_err);
+    fe = last_code(LR_FORMAT);
+    assert(fe >= 0 && logged[fe].x == 0);
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert(status[48] >> 1 == 1);
     printf("store_check ok: %u + %u + %u B on the card\n", card_len[0], card_len[1], card_len[2]);
     return 0;
 }
