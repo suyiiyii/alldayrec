@@ -5,7 +5,9 @@ flutter_version=3.47.5
 flutter_commit=6a19cca56475dbfba1478ee68d7bd0c2ef891da1
 flutter_root="$RUNNER_TEMP/apk-flutter"
 sdk_root="$RUNNER_TEMP/apk-android"
-git clone --quiet --depth 1 --branch "$flutter_version" https://github.com/flutter/flutter.git "$flutter_root"
+# app.yml restores this directory from actions/cache; the commit check below still applies to it.
+[[ -d $flutter_root/.git ]] ||
+  git clone --quiet --depth 1 --branch "$flutter_version" https://github.com/flutter/flutter.git "$flutter_root"
 [[ $(git -C "$flutter_root" rev-parse HEAD) == "$flutter_commit" ]] || {
   echo "Flutter must be the official $flutter_version commit $flutter_commit" >&2
   exit 1
@@ -36,7 +38,7 @@ fi
 if [[ ! -x "$cmd_root/bin/sdkmanager" ]]; then
   staging=$(mktemp -d "$RUNNER_TEMP/apk-sdk.XXXXXX")
   trap 'rm -rf "$staging"' EXIT
-  curl --fail --location --silent --show-error "https://dl.google.com/android/repository/$cmd_archive" --output "$staging/tools.zip"
+  curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 "https://dl.google.com/android/repository/$cmd_archive" --output "$staging/tools.zip"
   printf '%s  %s\n' "$cmd_sha256" "$staging/tools.zip" | sha256sum --check
   unzip -q "$staging/tools.zip" -d "$staging"
   mkdir -p "$sdk_root/cmdline-tools"
@@ -64,13 +66,11 @@ set -o pipefail
 "$cmd_root/bin/sdkmanager" --sdk_root="$sdk_root" 'platforms;android-36' 'platforms;android-37.0' 'build-tools;36.0.0' "ndk;$ndk_version"
 flutter config --no-analytics --android-sdk "$sdk_root"
 flutter precache --android
-gradle_home="$RUNNER_TEMP/apk-gradle-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 {
   echo "FLUTTER_ROOT=$flutter_root"
   echo "ANDROID_HOME=$sdk_root"
   echo "ANDROID_SDK_ROOT=$sdk_root"
   echo "APK_NDK_VERSION=$ndk_version"
   echo "APK_CMDLINE_TOOLS=$cmd_version"
-  echo "GRADLE_USER_HOME=$gradle_home"
 } >> "$GITHUB_ENV"
 echo "$flutter_root/bin" >> "$GITHUB_PATH"

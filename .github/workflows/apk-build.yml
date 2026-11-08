@@ -50,12 +50,34 @@ jobs:
         with:
           distribution: temurin
           java-version: '17.0.18+8'
+      # Save-only caches for app.yml's PR runs: this build never restores one, so its inputs stay fresh. Main only:
+      # PRs read main's caches, not a tag's, and a tag build is the one that holds the release signing key.
+      - name: Save pinned JDK for PR runs
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/Java_Temurin-Hotspot_jdk/17.0.18-8
+          key: jdk-temurin-17.0.18+8-${{ runner.os }}-${{ runner.arch }}
       - name: Set up pinned Flutter and Android SDK
         run: bash .github/scripts/apk-toolchain.sh
+      - name: Save pinned Flutter for PR runs
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apk-flutter
+          key: flutter-3.47.5-6a19cca56475dbfba1478ee68d7bd0c2ef891da1-android-${{ runner.os }}-${{ runner.arch }}
       - name: Build and verify explicitly signed APK
         id: build
         env: *signing
         run: uv run --no-project --python 3.11 python .github/scripts/apk-build.py
+      - name: Save Gradle wrapper and dependencies for PR runs
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock', '.github/scripts/apk-toolchain.sh') }}
       - name: Upload the exact APK, metadata and checksums
         id: artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -64,12 +86,10 @@ jobs:
           path: dist/apk/*
           retention-days: 3
           if-no-files-found: error
-      - name: Remove private signing files and ephemeral Gradle cache
+      - name: Remove private signing files
         if: always()
         shell: bash
-        run: |
-          rm -rf "$RUNNER_TEMP"/apk-signing-*
-          rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"
+        run: rm -rf "$RUNNER_TEMP"/apk-signing-*
 
   prune:
     needs: build
