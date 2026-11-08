@@ -58,3 +58,9 @@ Yes. The server decodes the audio for playback and live listening on the web pag
 The app's **录音设备 › U 盘模式 › 存储卡当 U 盘** (Recorder › USB disk mode › Card as a USB disk) gives the recorder's card to the computer as a USB drive. Normally the OMI drive appears after about 20 seconds.
 
 What the maintainer measured on macOS 26: the system allows about 20 seconds to mount a FAT32 volume, so a large FAT32 card that reads slowly (such as 32 GB) may never mount; the same card formatted as exFAT mounts in about 2 seconds. The firmware reads both FAT32 and exFAT. Also, macOS mounts no disks while the Mac is locked.
+
+## The card says "Not formatted"
+
+The recorder can reach the card, but it holds no FAT32 or exFAT file system: a new blank card, say, or one formatted as ext4 or NTFS on a computer. Until it is formatted, recording goes to live upload only, so nothing is recorded while the phone is away.
+
+On the app's **录音设备** (Recorder) page, tap **格式化存储卡** (Format card) and confirm: the recorder formats the card as exFAT in tens of seconds, then records to it. Everything on the card is erased. The recorder formats only a card whose file system it can't read; for a card that reads fine the app shows no such button. This needs the new firmware.
