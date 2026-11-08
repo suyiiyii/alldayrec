@@ -3,10 +3,11 @@ no drafts and no live analysis; summaries are queued, never written) into a stor
 row by row: the check that a change to how pieces are finalized (#433: side by side) leaves every sentence, its time,
 speaker and conversation as they were. The engine's answers are kept in a cache keyed by the audio it was sent: the
 first run asks the engine, the next get the same answers (with the time the call took when --latency), so two runs
-differ only by the code. A piece no run before sent (a miss) means the pieces were cut differently.
+differ only by the code. A piece no run before sent (a miss) means the pieces were cut differently. Each answer is a
+line of the cache as it comes: a run stopped half way keeps what it paid for.
 
     python -I final_parity.py snapshot <live.db> <recordings> <device> <from> <to> > snap.tar    read only: pieces, people, 我
-    python -I final_parity.py run <snap dir> <out dir> [--cache asr.json] [--latency]           out dir/result.json
+    python -I final_parity.py run <snap dir> <out dir> [--cache asr.jsonl] [--latency]          out dir/result.json
     python -I final_parity.py compare <a result.json> <b result.json>                          exit 1 on any difference
 
 -I (no script dir on sys.path): `uv run python -I <this file>` in another checkout runs that checkout's alldayrec.
@@ -53,15 +54,9 @@ def snapshot(store: str, recordings: str, device: str, a: str, b: str):
             t.add(Path(recordings) / path, f"recordings/{path}")
 
 
-def hwm_mb() -> float | None:
-    """The process's RSS high-water mark, from /proc (Linux)."""
-    f = Path("/proc/self/status")
-    return next((int(line.split()[1]) / 1024 for line in f.read_text().splitlines() if line.startswith("VmHWM")), None) if f.exists() else None
-
-
 def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
     import anyio
-    from alldayrec import asr, core, db, device_pipeline, infer, music
+    from alldayrec import asr, core, db, device_pipeline, infer, music, perf
     from alldayrec.diarist import load_embedder
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -82,7 +77,9 @@ def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
     if (vp := snap / "owner-redimnet2.npz").exists():
         (out / vp.name).write_bytes(vp.read_bytes())
 
-    cache = json.loads(cache_path.read_text()) if cache_path and cache_path.exists() else {}
+    cache = {}
+    if cache_path and cache_path.exists():
+        cache = {r["key"]: r for r in map(json.loads, cache_path.read_text().splitlines())}
     misses, provider = [], asr.PROVIDERS[asr.ENGINE]
 
     async def cached(x, partial=None):
@@ -93,8 +90,11 @@ def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
             return copy.deepcopy(cache[key]["segs"])
         t = time.perf_counter()
         segs = await provider(x, partial)
-        cache[key] = {"segs": segs, "s": round(time.perf_counter() - t, 3)}
+        cache[key] = {"key": key, "segs": segs, "s": round(time.perf_counter() - t, 3)}
         misses.append(key)
+        if cache_path:
+            with open(cache_path, "a") as f:
+                f.write(json.dumps(cache[key], ensure_ascii=False) + "\n")
         return copy.deepcopy(segs)
     asr.PROVIDERS[asr.ENGINE] = cached
     asr.ENGINE_FALLBACK = ""  # a failure is tried again (the final layer's own retry), never answered by another engine
@@ -102,7 +102,6 @@ def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
     infer.check()
     core.state["embed"] = load_embedder()
     core.state["music"] = music.heard if music.ON else None
-    final_to = dt.datetime.fromtimestamp(end / 1000)
 
     t0, c0, peak = time.monotonic(), sum(os.times()[:2]), [0.0]
 
@@ -118,20 +117,17 @@ def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
         async with anyio.create_task_group() as tg:
             tg.start_soon(device_pipeline.pipeline, device)
             tg.start_soon(usage)
-            while not (db.kv(f"end_at:{device}") is None and (done := db.kv(f"finalized_to:{device}"))
-                       and dt.datetime.fromisoformat(done) >= final_to - dt.timedelta(milliseconds=1)):
+            while db.kv(f"end_at:{device}"):  # cleared once all the audio is final and the conversation closed
                 await anyio.sleep(0.5)
             tg.cancel_scope.cancel()
     anyio.run(main)
     c = db.conn()
     res = {"device": device, "audio_s": round(sum(p["seconds"] for p in pieces)), "wall_s": round(time.monotonic() - t0, 1),
-           "cpu_s": round(sum(os.times()[:2]) - c0, 1), "cpu_peak": round(peak[0], 2), "rss_peak_mb": hwm_mb(),
+           "cpu_s": round(sum(os.times()[:2]) - c0, 1), "cpu_peak": round(peak[0], 2), "rss_peak_mb": perf.memory()[1],
            "concurrency": {k: getattr(device_pipeline, k, None) for k in ("FINAL_ASR_CONCURRENCY", "FINAL_EMBED_CONCURRENCY")},
            "pieces": c.execute("SELECT count(*) FROM perf_pieces WHERE layer = 'final'").fetchone()[0], "misses": len(misses),
            "sentences": [dict(r) for r in c.execute(ROWS)], "conversations": [dict(r) for r in c.execute(CONVS)]}
     (out / "result.json").write_text(json.dumps(res, ensure_ascii=False, indent=1))
-    if cache_path:
-        cache_path.write_text(json.dumps(cache, ensure_ascii=False))
     print(json.dumps({k: v for k, v in res.items() if k not in ("sentences", "conversations")} |
                      {"sentences": len(res["sentences"]), "conversations": len(res["conversations"])}))
 
