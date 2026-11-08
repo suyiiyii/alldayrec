@@ -76,12 +76,11 @@ def split_speakers(g: dict, x: np.ndarray, embed) -> list[dict]:
     return split_speakers(l, x, embed) + split_speakers(r, x, embed)
 
 
-def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> list:
-    """Speaker labels from the conversation clustering, in time order; returns the diarist mark after each
-    sentence (None when too short to embed) so a pass can take back the sentences it leaves open. music (music.heard,
-    the final layer's): a sentence it hears as music gets music 1 and S?, and no voiceprint. A sentence two people
-    said (split_speakers) becomes its parts in segs, in place, each with `split` (its place, 1 on) and a label of its own."""
-    marks, out = [], []
+def voices(embed, segs: list[dict], x: np.ndarray, music=None) -> list:
+    """label_sentences' voiceprints, the diarist untouched: per sentence None (too short to embed, or music: music 1)
+    or its parts (split_speakers) each with the voiceprint dia.add takes. Nothing here depends on another piece: the
+    final layer runs it for several pieces at once and labels them in order (label)."""
+    out = []
     for g in segs:
         a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
         g["engine_speaker"] = g.get("speaker")
@@ -89,16 +88,33 @@ def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> 
         if b - a >= 0.3 and music and music(y):
             g["music"] = 1
         if b - a < 0.3 or g.get("music"):
-            g["speaker"], g["confidence"] = "S?", 0.0
-            marks.append(None)
-            out.append(g)
+            out.append(None)
             continue
-        parts, done = split_speakers(g, x, embed), []
+        parts, es = split_speakers(g, x, embed), []
         for p in parts:
             if len(parts) > 1:
                 pa, pb = p["start_ms"] / 1000, p["end_ms"] / 1000
                 y = x[int(pa * SR):int(min(pb, pa + 15) * SR)]
-            p["speaker"], p["confidence"] = dia.add(embed(y), (p["end_ms"] - p["start_ms"]) / 1000)
+            es.append(embed(y))
+        out.append(list(zip(parts, es)))
+    return out
+
+
+def label(dia, segs: list[dict], vs: list) -> list:
+    """Speaker labels from the conversation clustering, in time order, of segs and their voices(); returns the diarist
+    mark after each sentence (None when too short to embed) so a pass can take back the sentences it leaves open. A
+    sentence voices() heard as music, or too short, gets S?. A sentence two people said (split_speakers) becomes its
+    parts in segs, in place, each with `split` (its place, 1 on) and a label of its own."""
+    marks, out = [], []
+    for g, v in zip(segs, vs):
+        if v is None:
+            g["speaker"], g["confidence"] = "S?", 0.0
+            marks.append(None)
+            out.append(g)
+            continue
+        done = []
+        for p, e in v:
+            p["speaker"], p["confidence"] = dia.add(e, (p["end_ms"] - p["start_ms"]) / 1000)
             if done and done[-1][0]["speaker"] == p["speaker"]:  # the diarist hears one person after all: one part
                 q = done[-1][0]
                 p = {**_part(q, q["words"] + p["words"]), "confidence": max(q["confidence"], p["confidence"])}
@@ -112,6 +128,11 @@ def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> 
             marks.append(m)
     segs[:] = out
     return marks
+
+
+def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> list:
+    """voices() then label(): music (music.heard, the final layer's) hears a sentence as music."""
+    return label(dia, segs, voices(embed, segs, x, music))
 
 
 def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, conf: dict | None = None,

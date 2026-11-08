@@ -1,5 +1,6 @@
 """A device's pipeline: its audio stream through the final layer (pieces to the engine once, sentences, conversations)
 and, while a page watches and the device records, the draft layer and the live analysis."""
+import collections
 import datetime as dt
 import json
 import logging
@@ -25,9 +26,9 @@ from alldayrec import ws
 from alldayrec.conversations import IGNORE, Grouper
 from alldayrec.core import iso, owner_npz, queue_summary, state
 from alldayrec.pipeline_state import PipelineState
-from alldayrec.segmenter import BUFFER_S, MERGE_GAP_S, SR, Segmenter, next_cut, speech_in
+from alldayrec.segmenter import BUFFER_S, CHUNK_S, MERGE_GAP_S, QUIET_S, SR, Segmenter, next_cut, speech_in
 from alldayrec.tenant import T
-from alldayrec.transcript import EDGE_S, clip_turns, final_rows, label_sentences, overlaps
+from alldayrec.transcript import EDGE_S, clip_turns, final_rows, label, label_sentences, overlaps, voices
 
 log = logging.getLogger("live")
 
@@ -43,6 +44,10 @@ LIVE_EVERY_S = int(os.environ.get("LIVE_EVERY_S", "120"))  # new speech in the o
 # (10-25: "request timeout after 23 seconds" between the 60 s pieces of a phone with its screen off). Far above the
 # gaps between 1 s pieces in front (~2 s: audio.stream polls each second), 11 s below the server's limit
 STREAM_IDLE_S = 12
+# a backlog's final pieces of one device on their way at once (cut ahead, labelled and committed in order): engine
+# calls, and of them taking voiceprints (each a threads.INFER call, INFER_THREADS threads). Realtime has one piece
+FINAL_ASR_CONCURRENCY = int(os.environ.get("FINAL_ASR_CONCURRENCY", "4"))
+FINAL_EMBED_CONCURRENCY = int(os.environ.get("FINAL_EMBED_CONCURRENCY", "2"))
 
 
 async def pipeline(device: str):
@@ -65,12 +70,15 @@ async def pipeline(device: str):
         log.info("%s resuming after the last finalized row at %s", device, resume)
     fcost, dcost = {}, {}  # what the final and the draft layer spent since their last perf_pieces row (perf.piece)
 
+    cut_to = done0  # where the last piece cut ends (plan); the pieces between done_to and it are on their way
+    embeds = anyio.CapacityLimiter(FINAL_EMBED_CONCURRENCY)
+
     async def feed():
-        """The device's audio stream into the final layer's segmenter, taking the next stretch only while finalization
-        is less than BUFFER_S - 300 s of audio behind: the buffer must not drop audio before it is finalized."""
+        """The device's audio stream into the final layer's segmenter, taking the next stretch only while the cut
+        pieces end less than BUFFER_S - 300 s of audio behind: the buffer must not drop audio before it is cut."""
         async for t, x in audio.stream(device, st.done_to, spent=fcost):
             while True:
-                done = st.done_to
+                done = cut_to
                 a = max(seg.audio_base, seg.sample_at(done)) if seg.anchors and done else seg.audio_base
                 if (seg.samples - a) / SR <= BUFFER_S - 300:
                     break
@@ -306,25 +314,34 @@ async def pipeline(device: str):
         if not st.drafting and dcost:  # no page watches, no draft passes: the draft layer's stream in a row of its own
             perf.piece(device, "draft", None, None, dcost)
 
-    async def final_piece() -> bool:
-        """Cut and finalize the next piece when there is one; True when a piece was done (look for the next at once)."""
+    def rebank():
         nonlocal owner
         if not grouper.open and T().owner is not None and T().owner is not owner:
             owner = T().owner  # 我 picked on the card (self_answer): from the next conversation on, never the open one
             dia.set_bank(owner)
             ddia.set_bank(owner)
+
+    def plan(ahead: bool) -> dict | None:
+        """The next piece after cut_to, or None (not yet). Its kind: gap (no audio, the clock moves on), quiet (no speech,
+        or left to another device), speech (to the engine: prepare). ahead (pieces before it still on their way, a
+        backlog): cut only once CHUNK_S + QUIET_S of audio after it is in and the VAD hears silence at its end: from
+        there more audio cuts it the same (the pause after the last utterance is long enough for QUIET_S then, and no
+        utterance whose start is not known yet hides a pause), so the pieces are those one at a time cuts."""
+        nonlocal cut_to
         if not seg.anchors:
-            return False
-        done = st.done_to
-        base = done or seg.time_at(seg.audio_base)
+            return None
+        base = cut_to or seg.time_at(seg.audio_base)
         st.utts = [u for u in st.utts if u[1] > base]
         rel = lambda t: (t - base).total_seconds()
         end_at = db.kv(f"end_at:{device}")
         force = bool(end_at) and not audio.queued(device)  # the recorder stopped and all its audio is in: no more is coming
+        end = rel(seg.time_at(seg.samples))
+        if ahead and not force and (end < CHUNK_S + QUIET_S or seg.speaking()):
+            return None
         known = st.utts + ([(seg.time_at(seg.pending[0]), seg.time_at(seg.pending[1]))] if seg.pending else [])  # one waiting for a merge
-        cut = next_cut([(max(0.0, rel(a)), rel(b)) for a, b in known], rel(seg.time_at(seg.samples)), seg.speaking(), force)
+        cut = next_cut([(max(0.0, rel(a)), rel(b)) for a, b in known], end, seg.speaking(), force)
         if cut is None:
-            return False
+            return None
         a0 = max(seg.audio_base, seg.sample_at(base))
         b0 = min(seg.samples, seg.sample_at(base + dt.timedelta(seconds=cut)))
         if b0 <= a0:
@@ -332,10 +349,10 @@ async def pipeline(device: str):
             # to finalize. The pause has no speech: on to where the audio goes on (10-07: the iPhone's microphone waited
             # here from 17:59 on, 370 pieces queued; a restart started over the same way)
             if a0 < seg.samples and (nxt := seg.time_at(a0)) > base:
-                await commit(grouper.advance(nxt), [], iso(base), nxt)
-                return True
-            return False
-        x = seg.audio[a0 - seg.audio_base:b0 - seg.audio_base]
+                cut_to = nxt
+                return {"kind": "gap", "base": base, "hi": nxt}
+            return None
+        x = seg.audio[a0 - seg.audio_base:b0 - seg.audio_base].copy()  # the buffer drops it once cut (feed)
         at = lambda s: seg.time_at(a0 + round(s * SR))  # the piece may span a session boundary, where the clock jumps
         hi = at(len(x) / SR)
         points = [a0] + [i for i, _ in seg.anchors if a0 < i < b0] + [b0]
@@ -349,7 +366,7 @@ async def pipeline(device: str):
         # too, so it takes over when the other goes, speech or not
         if speech or st.standby:
             if (other := colocate.decide(device, heard[0][0], heard[-1][1])) == colocate.WAIT:
-                return False
+                return None
             was, st.standby = st.standby, colocate.standby_of(device)
             if st.standby and not was:
                 ws.note(f"{device}：和 {st.standby} 在同一处，转为备用：音频照存，不转写", "state")
@@ -357,28 +374,59 @@ async def pipeline(device: str):
                 ws.note(f"{device}：{was} 断开或不在同一处了，从 {base.strftime('%H:%M:%S')} 起接着转写", "state")
         else:
             other = None
-        if not speech or other:
+        cut_to = hi
+        j = {"kind": "speech" if speech and not other else "quiet", "base": base, "hi": hi, "x": x, "a0": a0, "at": at,
+             "heard": heard, "other": other, "t": time.perf_counter(), "cost": {}, "error": None}
+        if j["kind"] == "speech":  # the loose VAD's speech as it is now (the buffer moves on); done: prepared
+            j["speech"], j["done"] = speech_in(seg, a0, len(x)), anyio.Event()
+        return j
+
+    async def prepare(j: dict):
+        """A speech piece's engine call and voiceprints, beside the other pieces' (FINAL_ASR_CONCURRENCY,
+        FINAL_EMBED_CONCURRENCY); its labels wait for the pieces before it (finish)."""
+        try:
+            with perf.timed(j["cost"], "asr_ms"):
+                segs = await asr.engine_segs(j["x"], j["speech"], device=device)
+            async with embeds:
+                with perf.timed(j["cost"], "embed_ms"):  # with music.py's YAMNet when on
+                    j["vs"] = await anyio.to_thread.run_sync(voices, embed, segs, j["x"], state["music"], limiter=threads.INFER)
+            j["segs"] = segs
+        except Exception as e:
+            j["error"] = e
+        finally:
+            j["done"].set()
+
+    async def finish(j: dict) -> bool:
+        """The piece labelled, its rows and conversations committed, after every piece before it; False when it failed
+        (its engine call or voiceprints: prepare it again)."""
+        x, base, hi, heard, other = j.get("x"), j["base"], j["hi"], j.get("heard"), j.get("other")
+        if j["kind"] == "gap":
+            await commit(grouper.advance(hi), [], iso(base), hi)
+            return True
+        if j["kind"] == "quiet":
             with perf.timed(fcost, "commit_ms"):  # no rows: pages still drop their drafts of this time
                 await commit(grouper.advance(hi), [], iso(base), hi, colocate.split(device, other, heard) if other else heard,
                              "standby" if other else "final")
             final_row(len(x) / SR, 0)
             return True
-        t_run = time.perf_counter()
+        at = j["at"]
         was_open = bool(grouper.open)
         m0 = dia.mark()
+        perf.add(fcost, **j["cost"])  # a failed try's too, as before
+        j["cost"] = {}
         try:
-            with perf.timed(fcost, "asr_ms"):
-                segs = await asr.engine_segs(x, speech_in(seg, a0, len(x)), device=device)
-            engine = segs[0]["engine"] if segs else None
-            with perf.timed(fcost, "embed_ms"):  # with music.py's YAMNet when on
-                marks = await anyio.to_thread.run_sync(label_sentences, dia, embed, segs, x, state["music"], limiter=threads.INFER)
+            if j["error"]:
+                raise j["error"]
+            segs = j["segs"]
+            with perf.timed(fcost, "embed_ms"):
+                marks = await anyio.to_thread.run_sync(label, dia, segs, j["vs"], limiter=threads.INFER)
         except Exception as e:
             dia.rollback(m0)
             log.warning("%s final piece failed: %r", device, e)
             ws.note(f"{device}：定稿引擎调用失败：{str(e)[:120]}，稍后重试这一块", "error")
             st.refine = {"error": str(e)[:200]}
-            await anyio.sleep(10)
             return False
+        engine = segs[0]["engine"] if segs else None
         by_label = {}
         for g in segs:  # final_rows keys confidence by label
             by_label[g["speaker"]] = max(by_label.get(g["speaker"], 0.0), g["confidence"])
@@ -401,7 +449,7 @@ async def pipeline(device: str):
         with perf.timed(fcost, "commit_ms"):
             await commit(closed, rows, iso(lo), hi, heard)
         final_row(len(x) / SR, len(rows))
-        st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((time.perf_counter() - t_run) * 1000),
+        st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((time.perf_counter() - j["t"]) * 1000),
                         "engine": engine, "speakers": by_label, "changed": len(rows), "piece_s": round(len(x) / SR),
                         "backlog_s": round((seg.time_at(seg.samples) - hi).total_seconds())}
         log.info("final %s: %s", device, st.refine)
@@ -414,23 +462,47 @@ async def pipeline(device: str):
         return True
 
     async def final_loop():
-        while True:
-            while await final_piece():
+        """Pieces cut in order (plan), up to FINAL_ASR_CONCURRENCY of them on their way at once (prepare: only in a
+        backlog, one at a time otherwise), labelled and committed in order (finish); a piece that failed is tried again
+        after 10 s, those after it waiting."""
+        jobs = collections.deque()
+        async with anyio.create_task_group() as tg:
+            while True:
+                while True:
+                    rebank()
+                    while len(jobs) < FINAL_ASR_CONCURRENCY and (j := plan(bool(jobs))):
+                        jobs.append(j)
+                        if j["kind"] == "speech":
+                            tg.start_soon(prepare, j, name=f"prepare:{device}")
+                    if not jobs:
+                        break
+                    if "done" in jobs[0] and not jobs[0]["done"].is_set():
+                        with anyio.move_on_after(1):  # meanwhile more audio may let the next piece be cut
+                            await jobs[0]["done"].wait()
+                        continue
+                    j = jobs[0]
+                    if not await finish(j):
+                        await anyio.sleep(10)
+                        if j["error"]:
+                            j.update(error=None, done=anyio.Event())
+                            tg.start_soon(prepare, j, name=f"prepare:{device}")
+                        break
+                    jobs.popleft()
+                    maybe_live()
+                closed, was = [], grouper.open
+                end_at = db.kv(f"end_at:{device}")
+                final_all = not seg.anchors or (st.done_to and (seg.time_at(seg.samples) - st.done_to).total_seconds() < 0.5)
+                if end_at and not audio.queued(device) and final_all:
+                    closed += grouper.end(dt.datetime.fromisoformat(end_at))  # the recorder stopped and its last audio is final
+                    db.put_kv(f"end_at:{device}", None)
+                idle = grouper.tick()  # the safety net: nothing at all for IDLE_S (the recorder died without an end)
+                if idle:
+                    ws.note(f"{device}：20 分钟没有任何事件，按兜底规则关闭对话", "warn")
+                closed += idle
+                if grouper.open is not was:  # closed, or dropped as too short (nothing closed): the store and pages too
+                    await commit(closed)
                 maybe_live()
-            closed, was = [], grouper.open
-            end_at = db.kv(f"end_at:{device}")
-            final_all = not seg.anchors or (st.done_to and (seg.time_at(seg.samples) - st.done_to).total_seconds() < 0.5)
-            if end_at and not audio.queued(device) and final_all:
-                closed += grouper.end(dt.datetime.fromisoformat(end_at))  # the recorder stopped and its last audio is final
-                db.put_kv(f"end_at:{device}", None)
-            idle = grouper.tick()  # the safety net: nothing at all for IDLE_S (the recorder died without an end)
-            if idle:
-                ws.note(f"{device}：20 分钟没有任何事件，按兜底规则关闭对话", "warn")
-            closed += idle
-            if grouper.open is not was:  # closed, or dropped as too short (nothing closed): the store and pages too
-                await commit(closed)
-            maybe_live()
-            await anyio.sleep(2)
+                await anyio.sleep(2)
 
     def drafting() -> bool:
         """A page watches and this device is recording now (its newest audio is recent, backlog or not), not as a standby."""
