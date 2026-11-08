@@ -557,6 +557,9 @@ export interface LabelSuggestions {
     { clip?: string | null; clip_start?: string | null; clip_end?: string | null }
   >;
 }
+// one conversation's (the speaker sheet's 可能是, the conversation page's ⋯ 建议); none when it fails
+export const labelSuggestions = (id: string) =>
+  get<LabelSuggestions>(`/api/conversation/${encodeURIComponent(id)}/speakers`).catch(() => null);
 
 // a profile line with the evidence it came from (a conversation, a todo in it, a row that mentions the person)
 export interface ProfileLine {

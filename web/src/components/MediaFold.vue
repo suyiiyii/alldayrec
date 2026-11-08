@@ -5,13 +5,14 @@ import { hhmmss, type Row } from "../lib/api";
 import Icon from "./Icon.vue";
 import TranscriptRow from "./TranscriptRow.vue";
 
-// A run of media rows as one grey line; opens to the rows, still greyed. seek, menu, who: TranscriptRow's
+// A run of media rows as one grey line; opens to the rows, still greyed. seek, caption, menu, who: TranscriptRow's
 defineProps<{
   rows: Row[];
   hit?: string;
   seek?: (r: Row) => void;
+  caption?: boolean;
   menu?: (r: Row, x: number, y: number) => void;
-  who?: (speaker: string) => void;
+  who?: (speaker: string, r: Row) => void;
 }>();
 const open = ref(false);
 </script>
@@ -35,6 +36,7 @@ const open = ref(false);
       media
       :hit="hit === r.start"
       :seek="seek"
+      :caption="caption"
       :menu="menu"
       :who="who"
     />

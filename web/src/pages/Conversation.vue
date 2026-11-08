@@ -27,6 +27,7 @@ import MediaFold from "../components/MediaFold.vue";
 import PlayerBar from "../components/PlayerBar.vue";
 import QuoteAt from "../components/QuoteAt.vue";
 import RowMenu from "../components/RowMenu.vue";
+import SpeakerSheet from "../components/SpeakerSheet.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
@@ -39,6 +40,7 @@ import {
   inSpans,
   hhmm,
   hhmmss,
+  labelSuggestions,
   minutes,
   post,
   type Conversation,
@@ -47,12 +49,12 @@ import {
   type LiveState,
   type Row,
 } from "../lib/api";
-import { play, player, toggle, track, trackClose, trackOpen, trackSeek } from "../lib/audio";
+import { player, track, trackClose, trackOpen, trackSeek } from "../lib/audio";
 import { dayLabel } from "../lib/calendar";
 import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
-import { guesses, labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
+import { labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 import { toast } from "../lib/toast";
 import { markOf } from "../lib/todos";
@@ -178,22 +180,10 @@ const pct = (x: number) => `${Math.max(1, Math.round(x * 100))}%`;
 // suggestions for the labels (names they were called, merges, voices like a named speaker): applied only by a click
 const sug = ref<LabelSuggestions | null>(null);
 async function loadSug() {
-  sug.value = await get<LabelSuggestions>(
-    `/api/conversation/${encodeURIComponent(props.id)}/speakers`,
-  ).catch(() => null);
+  sug.value = await labelSuggestions(props.id);
 }
 const anon = (p: string) => /^S(\d+|\?)$/.test(p);
 const allMerges = ref(false);
-function hear(label: string) {
-  const v = sug.value?.clips[label];
-  if (!v) return;
-  play(
-    `${props.id}|${label}`,
-    v.clip
-      ? `/api/voice-clip/${v.clip}`
-      : `/api/audio?${new URLSearchParams({ start: v.clip_start!, end: v.clip_end!, ...(c.value?.device && { device: c.value.device }) })}`,
-  );
-}
 const sugCount = computed(() =>
   sug.value
     ? sug.value.names.length + sug.value.merge.length + sug.value.like.length + sug.value.elsewhere.length
@@ -209,7 +199,7 @@ function open(p: typeof panel.value) {
   panel.value = p;
 }
 
-const sheet = useTemplateRef<HTMLDialogElement>("sheet"); // a speaker's sheet (below)
+const speaker = useTemplateRef("speaker"); // a speaker's sheet (SpeakerSheet)
 
 watch(
   () => props.id,
@@ -224,7 +214,7 @@ watch(
     sug.value = null;
     allMerges.value = false;
     panel.value = "";
-    sheet.value?.close();
+    speaker.value?.close();
     void loadSug();
     await load();
     await nextTick();
@@ -278,13 +268,6 @@ async function sendNote() {
   });
 }
 
-// renaming one speaker of this conversation, or merging it into another one; either can be undone for 10 s (the
-// server keeps what it changed: POST /api/speakers/undo). In a sheet (a modal <dialog>: Escape or a tap on the dim
-// backdrop closes it), for the label tapped (editing), or "" for the list ⋯ 改名 opens
-const editing = ref(""),
-  newName = ref(""),
-  names = ref<string[]>([]);
-const { busy: saving, error, detail, run: runSpeaker } = useMutation();
 const named = (p: string) => p !== "我" && !anon(p);
 // A bad recording splits into dozens of speakers: past 8 the row folds to the named ones and the first few
 const FOLD = 8;
@@ -299,65 +282,10 @@ const labels = computed(() =>
   (c.value?.participants ?? []).filter((p) => p !== "我" && p !== "S?"),
 );
 const canEdit = (p?: string | null) => !!p && labels.value.includes(p);
-async function edit(label: string) {
-  if (label && !canEdit(label)) return; // a sentence's speaker not yet among the participants (still recording)
+// a speaker's sheet, for the label tapped, or "" for the list ⋯ 改名 opens
+function edit(label: string) {
   menu.value = false;
-  editing.value = label;
-  newName.value = "";
-  error.value = "";
-  if (!sheet.value?.open) {
-    sheet.value?.showModal();
-    sheet.value?.focus(); // the sheet, not its ✕ (no focus ring) nor the name box (no keyboard)
-  }
-  if (label) names.value = (await get<string[]>("/api/names")).slice(0, 12);
-}
-// 可能是: the names it may have (guesses), a name said here with its sentence to hear
-const maybe = computed(() =>
-  guesses(sug.value, editing.value).map((g) => ({
-    ...g,
-    row: g.at ? c.value?.rows[rowAt(starts.value, Date.parse(g.at))] : undefined,
-  })),
-);
-async function rename(from: string, to: string) {
-  const merge = !!c.value && (c.value.participants.includes(to) || c.value.rows.some((r) => r.speaker === to));
-  await runSpeaker(async () => {
-    const r = await post<{ renamed: number; voiceprints: number; learned?: boolean; undo: string }>(
-      `/api/conversation/${props.id}/rename`,
-      { from, to },
-    );
-    if (editing.value === from) sheet.value?.close(); // not another speaker's sheet opened meanwhile
-    toast(
-      to === "我"
-        ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
-        : merge
-          ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
-          : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
-      { undo: () => void undo(r.undo, from), ms: 10_000 },
-    );
-    await Promise.all([load(), loadSug()]);
-  });
-}
-async function undo(id: string, from: string) {
-  await runSpeaker(async () => {
-    await post("/api/speakers/undo", { undo: id });
-    toast(t("conv.renamedBack", { to: speakerLabel(from) }));
-    await Promise.all([load(), loadSug()]);
-  });
-}
-const save = () => rename(editing.value, newName.value.trim());
-async function alias(name: string, of: string) {
-  await runSpeaker(async () => {
-    await post("/api/aliases", { alias: name, name: of });
-    toast(t("conv.aliasSaved", { name, of }), {
-      undo: () =>
-        void runSpeaker(async () => {
-          await post("/api/aliases", { alias: name, name: "" }); // no name drops it
-          toast(t("conv.aliasRemoved", { name }));
-          await loadSug();
-        }),
-    });
-    await loadSug();
-  });
+  void speaker.value?.open(label);
 }
 </script>
 
@@ -446,29 +374,29 @@ async function alias(name: string, of: string) {
             <a class="at" :href="'#' + h.at" @click.prevent="listen(h.at)"
               ><Icon name="play" :size="12" />{{ hhmmss(h.at) }}</a
             >
-            <button v-if="anon(h.who)" :disabled="saving" @click="rename(h.who, h.canon)">
+            <button v-if="anon(h.who)" :disabled="speaker?.saving" @click="speaker?.rename(h.who, h.canon)">
               {{ t("conv.renameTo", { name: h.canon }) }}
             </button>
-            <button v-else-if="h.canon === h.name" :disabled="saving" @click="alias(h.name, h.who)">
+            <button v-else-if="h.canon === h.name" :disabled="speaker?.saving" @click="speaker?.alias(h.name, h.who)">
               {{ t("conv.saveAlias", { who: h.who }) }}
             </button>
             <div class="quote">{{ t("conv.quote", { q: h.quote }) }}</div>
           </li>
           <li v-for="l in sug.like" :key="`l${l.who}`">
-            <button v-if="sug.clips[l.who]" class="play" :title="t('conv.hear')" @click="hear(l.who)">
+            <button v-if="sug.clips[l.who]" class="play" :title="t('conv.hear')" @click="speaker?.hear(l.who)">
               <Icon :name="player.playing === `${id}|${l.who}` ? 'square' : 'play'" :size="14" /></button
             ><span class="who">{{ speakerLabel(l.who) }}</span
             >{{ t("conv.like", { likeness: likeness(l.score), name: l.name }) }}
-            <button :disabled="saving" @click="rename(l.who, l.name)">
+            <button :disabled="speaker?.saving" @click="speaker?.rename(l.who, l.name)">
               {{ t("conv.isName", { name: l.name }) }}
             </button>
           </li>
           <li v-for="e in sug.elsewhere" :key="`e${e.who}${e.name}`">
-            <button v-if="sug.clips[e.who]" class="play" :title="t('conv.hear')" @click="hear(e.who)">
+            <button v-if="sug.clips[e.who]" class="play" :title="t('conv.hear')" @click="speaker?.hear(e.who)">
               <Icon :name="player.playing === `${id}|${e.who}` ? 'square' : 'play'" :size="14" /></button
             ><span class="who">{{ speakerLabel(e.who) }}</span
             >{{ t("conv.elsewhere", { n: e.convs, name: e.name }, e.convs) }}
-            <button :disabled="saving" @click="rename(e.who, e.name)">
+            <button :disabled="speaker?.saving" @click="speaker?.rename(e.who, e.name)">
               {{ t("conv.renameTo", { name: e.name }) }}
             </button>
           </li>
@@ -479,7 +407,7 @@ async function alias(name: string, of: string) {
                   v-if="sug.clips[l]"
                   class="play"
                   :title="t('conv.hearWho', { who: speakerLabel(l) })"
-                  @click="hear(l)"
+                  @click="speaker?.hear(l)"
                 >
                   <Icon :name="player.playing === `${id}|${l}` ? 'square' : 'play'" :size="14" /></button
                 >{{ speakerLabel(l) }}</template
@@ -491,7 +419,7 @@ async function alias(name: string, of: string) {
                   : t("conv.sameVoice", { likeness: likeness(m.score ?? 0) }),
               })
             }}
-            <button :disabled="saving" @click="rename(m.from, m.to)">
+            <button :disabled="speaker?.saving" @click="speaker?.rename(m.from, m.to)">
               {{ t("conv.mergeInto", { to: speakerLabel(m.to) }) }}
             </button>
           </li>
@@ -522,7 +450,7 @@ async function alias(name: string, of: string) {
         </div>
       </section>
 
-      <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
+      <p v-if="speaker?.error" class="bad" role="alert" :title="speaker.detail">{{ speaker.error }}</p>
       <p v-if="regenError" class="bad" role="alert" :title="regenDetail">{{ regenError }}</p>
 
       <div class="tabs" role="tablist">
@@ -692,73 +620,7 @@ async function alias(name: string, of: string) {
           </template>
         </div>
       </template>
-      <dialog
-        ref="sheet"
-        class="sheet"
-        aria-labelledby="sheet-who"
-        tabindex="-1"
-        @click.self="sheet?.close()"
-      >
-        <div class="in">
-          <div class="phead">
-            <h3 id="sheet-who">
-              <template v-if="editing"><Avatar :name="editing" :size="40" />{{ speakerLabel(editing) }}</template>
-              <template v-else>{{ t("conv.rename") }}</template>
-            </h3>
-            <button class="btn-ghost x" :aria-label="t('conv.close')" @click="sheet?.close()"><Icon name="x" /></button>
-          </div>
-          <div v-if="!editing" class="line">
-            <span class="muted">{{ t("conv.renameWho") }}</span>
-            <button v-for="l in labels" :key="l" class="chip" @click="edit(l)">
-              <Avatar :name="l" :size="20" />{{ speakerLabel(l) }}
-            </button>
-          </div>
-          <template v-else>
-            <div v-if="maybe.length" class="line">
-              <span class="muted">{{ t("conv.maybe") }}</span>
-              <span v-for="g in maybe" :key="g.name" class="guess">
-                <button :disabled="saving" @click="rename(editing, g.name)">{{ g.name }}</button>
-                <button
-                  v-if="g.row"
-                  class="btn-ghost at"
-                  :title="t('conv.hear')"
-                  @click="toggle(g.row)"
-                >
-                  <Icon :name="player.playing === g.row.id ? 'square' : 'play'" :size="12" />{{ hhmmss(g.row.start) }}
-                </button>
-              </span>
-            </div>
-            <div class="line">
-              <button v-if="sug?.clips[editing]" class="btn" @click="hear(editing)">
-                <Icon :name="player.playing === `${id}|${editing}` ? 'square' : 'play'" :size="14" />{{
-                  player.playing === `${id}|${editing}` ? t("conv.stop") : t("conv.hearSome")
-                }}
-              </button>
-              <button v-if="anon(editing)" :disabled="saving" @click="rename(editing, '我')">
-                {{ t("speaker.isMe") }}
-              </button>
-              <RouterLink v-if="named(editing)" class="btn" :to="`/p/${encodeURIComponent(editing)}`">
-                {{ t("conv.profile") }}
-              </RouterLink>
-            </div>
-            <form class="line" @submit.prevent="newName.trim() && save()">
-              <input
-                v-model="newName"
-                enterkeyhint="done"
-                maxlength="20"
-                :placeholder="named(editing) ? t('rowMenu.newName') : t('conv.whoIs', { who: speakerLabel(editing) })"
-              />
-              <button class="btn-primary" :disabled="saving || !newName.trim()">{{ t("conv.save") }}</button>
-            </form>
-            <div v-if="names.length" class="line">
-              <template v-for="n in names" :key="n">
-                <button v-if="n !== editing" class="chip" @click="newName = n">{{ n }}</button>
-              </template>
-            </div>
-            <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
-          </template>
-        </div>
-      </dialog>
+      <SpeakerSheet ref="speaker" :conv="c" :sug="sug" :reload="reload" />
       <!-- on 摘要 too: a fix's 撤销, tapped after a switch to it, still reloads the page -->
       <RowMenu ref="rowMenu" @changed="reload" />
       <!-- on 摘要 too while it plays: what plays can always be stopped -->
@@ -900,82 +762,6 @@ button.person,
   width: 36px;
   padding: 0;
   color: var(--muted);
-}
-/* a speaker's sheet: from the bottom edge on a phone, a card in the middle on a wide screen; .in fills the dialog, so
-   a tap on the dialog itself is one on the backdrop */
-.sheet {
-  width: 100%;
-  max-width: none;
-  margin: auto 0 0;
-  padding: 0;
-  border: 0;
-  outline: none; /* focused as it opens */
-  border-radius: 16px 16px 0 0;
-  background: var(--surface);
-  color: var(--fg);
-}
-@media (min-width: 601px) {
-  .sheet {
-    max-width: 420px;
-    margin: auto;
-    border-radius: 16px;
-  }
-}
-@media (prefers-reduced-motion: no-preference) and (max-width: 600px) {
-  .sheet[open] {
-    animation: up 0.2s ease-out;
-  }
-}
-@keyframes up {
-  from {
-    transform: translateY(100%);
-  }
-}
-.sheet::backdrop {
-  background: rgb(0 0 0 / 0.4);
-}
-.sheet .in {
-  padding: var(--space-4) var(--space-4) max(var(--space-4), env(safe-area-inset-bottom));
-}
-.sheet h3 {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-.line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--fs-sm);
-}
-.line + .line {
-  margin-top: var(--space-3);
-}
-.line .chip {
-  gap: 6px;
-}
-.guess {
-  display: inline-flex;
-  align-items: center;
-}
-.line .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.line input {
-  flex: 1;
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 10px;
-}
-.line input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.sheet .bad {
-  margin: var(--space-3) 0 0;
 }
 .note textarea {
   display: block;
