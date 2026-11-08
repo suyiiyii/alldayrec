@@ -223,6 +223,7 @@
     "renameTo": "改名为 {name}",
     "saveAlias": "记为 {who} 的别名",
     "quote": "「{q}」",
+    "unsupported": "无原文依据",
     "hear": "听一听",
     "hearWho": "听 {who}",
     "like": "的声音{likeness} {name}",

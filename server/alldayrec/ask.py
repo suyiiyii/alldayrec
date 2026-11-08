@@ -29,10 +29,12 @@ DIGEST_DAYS = 7     # today and the 6 days before it, by their summaries
 TRANSCRIPT_CHARS = 8000
 TOOL_CHARS = 20000  # one tool result sent back, at most
 ID = re.compile(r"c\d{14}(?:-[A-Za-z0-9_]+)?")  # device_pipeline.py record(): c<start to the second>[-<device>]
+AT = re.compile(f"({ID.pattern}) (\\d\\d:\\d\\d:\\d\\d)")  # [id HH:MM:SS]: a citation of one sentence
 
 SYSTEM = """你在帮我回答关于我自己过去生活的问题。资料来自我随身录音的转写和每段对话的摘要：「我」是录音者本人，S1、S2… 是没认出名字的其他人，转写有错别字和同音误识别。
 下面先给你最近 {days} 天每段对话的摘要，近期的问题先看这里；更早的、或者要核对原文细节时，调用工具查。
 - 只根据资料回答，不要编；每条结论后面用 [对话 id] 标出处，id 照抄资料里的
+- 依据是某一句原话时，出处写到那句的时间：[对话 id HH:MM:SS]，时间照抄工具结果里那句的时间（conversation 原文的行首时间、grep 的 t）；工具结果里没看到的句子不写时间
 - 搜不到不等于没有：至少换 2~3 个说法（同义词、同音字、相关的人或事）再搜，也可以用 grep 查原文，之后才能说没找到
 - 找不到就直接说没找到，不要拿相关但对不上的对话凑答案
 - 待办、约定里的「今天」「明天」「今晚」是那段对话当天说的，按那段对话的日期理解
@@ -177,21 +179,45 @@ def system(now: dt.datetime) -> str:
 
 
 def sources(answer: str) -> list[dict]:
-    """The conversations the answer cites, in order, those that exist (a device suffix the model added or broke is dropped)."""
+    """The conversations the answer cites, in order, those that exist (a device suffix the model added or broke is dropped);
+    a citation of one sentence ([id HH:MM:SS], kept by checked) once more with `at`, that sentence's start, and `ref`, the
+    citation as written."""
     out = {}
-    for x in ID.findall(answer):
+    for m in re.finditer(f"{AT.pattern}|({ID.pattern})", answer):
+        x, hms = (m[1], m[2]) if m[1] else (m[3], None)
         c = db.conversation(x) or db.conversation(x.split("-")[0])
-        if c and c["id"] not in out:
-            out[c["id"]] = {"id": c["id"], "start": c["start"], "title": (db.summary(c["id"]) or {}).get("title")}
+        if c and (c["id"], hms) not in out:
+            at = next((r["start"] for r in db.sentences(c["start"], c["end"], inclusive=True, source=c.get("device"))
+                       if r["start"][11:19] == hms), None) if hms else None
+            out[c["id"], hms] = {"id": c["id"], "start": c["start"], "title": (db.summary(c["id"]) or {}).get("title"),
+                                 **({"at": at, "ref": m[0]} if at else {})}
     return list(out.values())
 
 
-def run_tool(name: str, args: str) -> str:
+def shown(name: str, res, out: str) -> set[tuple[str, str]]:
+    """(conversation id, HH:MM:SS) of each sentence a tool result showed the model: the conversation tool's transcript
+    lines, grep's rows; out is what was sent (cut at TOOL_CHARS)."""
+    if name == "conversation" and isinstance(res, dict) and res.get("id"):
+        pairs = {(res["id"], t) for t in re.findall(r"^\[(\d\d:\d\d:\d\d)\]", res.get("transcript") or "", re.M)}
+    elif name == "grep" and isinstance(res, list):
+        pairs = {(r["id"], r["t"][11:19]) for r in res if isinstance(r, dict) and r.get("id") and r.get("t")}
+    else:
+        return set()
+    return {(i, t) for i, t in pairs if t in out}
+
+
+def checked(answer: str, seen: set[tuple[str, str]]) -> str:
+    """The answer with each [id HH:MM:SS] whose sentence no tool result showed (shown) cut back to [id]."""
+    return AT.sub(lambda m: m[0] if (m[1], m[2]) in seen else m[1], answer)
+
+
+def run_tool(name: str, args: str) -> tuple[str, object]:
+    """(what the model is sent, at most TOOL_CHARS of the result's JSON; the result)."""
     try:
         res = TOOLS[name](**json.loads(args or "{}"))
     except Exception as e:  # an unknown tool, bad arguments: the model reads the error and tries again
         res = {"error": repr(e)[:200]}
-    return json.dumps(res, ensure_ascii=False)[:TOOL_CHARS]
+    return json.dumps(res, ensure_ascii=False)[:TOOL_CHARS], res
 
 
 async def call(msgs: list[dict], **extra) -> dict:
@@ -220,7 +246,7 @@ async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
     on: a question said to a device, answered short (VOICE) and streamed: awaited with {"delta": text} as the answer
     comes and {"stage": "searching"} before each round of tools; no second call for citations (it would come late)."""
     msgs = [{"role": "system", "content": system(now or dt.datetime.now()) + (VOICE if on else "")}, {"role": "user", "content": q}]
-    calls, usage = [], collections.Counter()
+    calls, usage, seen = [], collections.Counter(), set()
     async def delta(text):
         await on({"delta": text})
     async def reply(**extra) -> dict:
@@ -238,7 +264,8 @@ async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
         if on:
             await on({"stage": "searching"})
         for tc in m["tool_calls"]:
-            out = await anyio.to_thread.run_sync(run_tool, tc["function"]["name"], tc["function"]["arguments"], limiter=threads.DB)  # grep scans every row
+            out, res = await anyio.to_thread.run_sync(run_tool, tc["function"]["name"], tc["function"]["arguments"], limiter=threads.DB)  # grep scans every row
+            seen |= shown(tc["function"]["name"], res, out)
             calls.append({"tool": tc["function"]["name"], "args": tc["function"]["arguments"], "chars": len(out)})
             msgs.append({"role": "tool", "tool_call_id": tc["id"], "content": out})
     answer = m.get("content") or ""
@@ -248,6 +275,7 @@ async def ask(q: str, now: dt.datetime | None = None, on=None) -> dict:
             answer = (await reply(tool_choice="none")).get("content") or answer
         except Exception as e:  # HTTP errors, timeouts: the answer without citations is still the answer
             log.warning("ask: citations not added: %r", e)
+    answer = checked(answer, seen)
     return {"answer": answer, "sources": sources(answer), "calls": calls, "usage": dict(usage)}
 
 
@@ -353,10 +381,18 @@ if __name__ == "__main__":
     g = t_grep("按小时")
     assert sorted((x["id"], x["speaker"]) for x in g) == [("c20260930100000", "老王"), ("c20260930100000-LR_X1_567E", "我")], g
     assert t_grep("复查", after="2026-08-02") == [] and t_grep("复查")[0]["id"] == "c20260801090000"
-    assert json.loads(run_tool("nope", "{}"))["error"] and json.loads(run_tool("day", '{"date": "x"}'))["error"]
-    assert len(run_tool("search", "{}")) <= TOOL_CHARS
+    assert json.loads(run_tool("nope", "{}")[0])["error"] and json.loads(run_tool("day", '{"date": "x"}')[0])["error"]
+    assert len(run_tool("search", "{}")[0]) <= TOOL_CHARS
     src = sources("定了按小时存 [c20260930100000]，另一台也说了 [c20260930100000-LR_X1_567E]，还有 [c20260930100000-x] 和编的 [c20990101000000]")
     assert [x["id"] for x in src] == ["c20260930100000", "c20260930100000-LR_X1_567E"] and src[0]["title"] == "存储方案", src
+    # a citation of one sentence: kept when a tool result showed that sentence, else cut back to the conversation
+    seen_ = shown("conversation", one, json.dumps(one, ensure_ascii=False)) | shown("grep", g, json.dumps(g, ensure_ascii=False))
+    assert ("c20260930100000", "10:01:00") in seen_ and shown("conversation", one, "") == set() and shown("search", [], "") == set()
+    a = checked("按小时存 [c20260930100000 10:01:00]，编的 [c20260930100000 10:09:09]", seen_)
+    assert a == "按小时存 [c20260930100000 10:01:00]，编的 [c20260930100000]", a
+    src = sources(a)
+    assert [(x["id"], x.get("at"), x.get("ref")) for x in src] == [("c20260930100000", "2026-09-30T10:01:00.000", "c20260930100000 10:01:00"),
+                                                                  ("c20260930100000", None, None)], src
 
     replies = iter([{"tool_calls": [{"id": "t1", "type": "function", "function": {"name": "grep", "arguments": '{"q": "复查"}'}}]},
                     {"content": "8 月 1 日聊过复查 [c20260801090000]。"}])
@@ -367,7 +403,7 @@ if __name__ == "__main__":
     summary.call = fake
     r = anyio.run(ask, "我什么时候说过复查？", now)
     assert r["answer"].startswith("8 月 1 日") and [x["id"] for x in r["sources"]] == ["c20260801090000"], r
-    assert r["calls"] == [{"tool": "grep", "args": '{"q": "复查"}', "chars": len(run_tool("grep", '{"q": "复查"}'))}] and r["usage"]["prompt"] == 200, r
+    assert r["calls"] == [{"tool": "grep", "args": '{"q": "复查"}', "chars": len(run_tool("grep", '{"q": "复查"}')[0])}] and r["usage"]["prompt"] == 200, r
     assert seen[1][0][-1]["role"] == "tool" and "c20260801090000" in seen[1][0][-1]["content"] and "tool_choice" not in seen[1][1]
     loop = {"tool_calls": [{"id": "t", "type": "function", "function": {"name": "calendar", "arguments": '{"month": "2026-09"}'}}]}
     replies, seen = iter([loop] * ROUNDS + [{"content": "没找到"}, {"content": "没找到"}]), []
