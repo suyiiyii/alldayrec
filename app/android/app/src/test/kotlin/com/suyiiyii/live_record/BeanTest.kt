@@ -267,16 +267,16 @@ class BeanTest {
         bean.recording = true; bean.open = t0 / 1000; bean.listed[t0 / 1000] = 0
         bean.onTransfer = { file, _, _ ->
             bean.header(file, 0xFFFFFFFFL)
-            bean.units(file, (0L until 1800L).toList(), ms = 60)  // slow at first: 192 s behind after 108 s
-            bean.units(file, (1800L until 14000L).toList(), ms = 5)  // caught up (9 s) 61 s on
+            bean.units(file, (0L until 450L).toList(), ms = 60)  // slow at first: 147 s behind after 27 s (no slower for a minute: slow())
+            bean.units(file, (450L until 14000L).toList(), ms = 10)  // twice real time: caught up (2.5 s) 135.5 s on
             bean.units(file, (14000L until 18000L).toList())  // then live for 80 s
         }
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
         assertEquals(listOf(Triple(t0 / 1000, 0L, false)), bean.transfers)
         val lags = bean.reports.drop(1).map { it["live_lag_s"] }
-        // units that keep coming as recorded 9 s after their seq says date the file anew (reanchor()): the lag goes
-        assertEquals("filling the tail at the first two, caught up, then dated anew", listOf(null, null, 9L, 0L), lags)
+        // units that keep coming as recorded 2.5 s after their seq says date the file anew (reanchor()): the lag goes
+        assertEquals("filling the tail at the first two, caught up, then dated anew", listOf(null, null, 2L, 0L), lags)
         assertEquals(0, bean.logs.count { it.first == "bean_lag" })
     }
 
@@ -1089,6 +1089,9 @@ class BeanTest {
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to 40L, "backlog_held" to null),
             BeanSync.owedFields(0, 0, 6000, watched = true, live = false, pace = 3.0))
         assertNull("no faster than real time: no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 1.0)["backlog_eta_s"])
+        // closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h said 补传中)
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, pace = 2.0)["backlog_held"])
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, pace = 2.0)["backlog_held"])
     }
 
     /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by
@@ -1205,6 +1208,29 @@ class BeanTest {
             assertEquals(1000L, r.f.have.first()[1])
             assertEquals(2, r.f.have.size)
         }
+    }
+
+    /** A realtime=0 read of the open file slower than real time (11-08: 0.67, one unit every 30 ms) never gets to live:
+     *  a minute on, over a minute behind and no nearer, that file goes realtime=1 (live_fallback), its hole after the stop. */
+    @Test fun slowFillFallsBackToLive() {
+        val r = rec(100, listOf(0L to 1000L), watched = false)  // the bean at unit 5000
+        r.bean.onTransfer = { file, from, realtime ->
+            if (realtime) {
+                r.bean.answer(file, from, true); r.bean.more(30)
+                r.bean.script.clear(); r.bean.script += { throw IOException("done") }
+            } else { r.bean.header(file, 0xFFFFFFFFL); r.bean.units(file, (from until from + 6000).toList(), ms = 30) }
+        }
+        for (i in 0..9) {
+            val e = assertThrows(Exception::class.java) { r.sync.session(0, "") }
+            if (e is BeanSync.Again) continue
+            assertEquals("done", e.message); break
+        }
+        assertEquals(listOf("fill_tail", "too_slow", "live_fallback"), r.reasons)
+        assertEquals(listOf(false, true), r.bean.transfers.map { it.third })
+        val slow = r.bean.logFields.first { it["reason"] == "too_slow" }
+        assertEquals(0.67, slow["pace"])
+        assertTrue("${slow["hole_units"]} units behind", (slow["hole_units"] as Long) in 5000L..5100L)
+        assertEquals(2, r.f.have.size)  // the hole stays for after the stop
     }
 
     /** The open file with its length known and all of it on the phone (a live header that carried a size, or a unit

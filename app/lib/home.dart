@@ -21,7 +21,7 @@ import 'settings_page.dart';
 import 'update.dart';
 import 'upload_page.dart';
 
-/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, beanHeld, beanFilling, paused, disconnected, pausedAway, low,
+/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, beanHeld, beanWaiting, beanFilling, paused, disconnected, pausedAway, low,
 /// charging, mic, warning) shows that canned status instead of the recorder's, for screenshots of the chip and its panel.
 const fakeStatus = kDebugMode ? String.fromEnvironment('FAKE_STATUS') : '';
 
@@ -37,6 +37,7 @@ Map cannedStatus(String name) {
     'syncing' => {...ble, 'syncDone': 790500, 'syncTotal': 1254000, 'hw': {...hw, 'backlog_kb': 464000, 'backlog_eta_s': 1200}},
     'fetching' => {...cannedStatus('syncing'), 'connected': false, 'link': {'code': 'joining'}},  // the file being recorded, before LIVE
     'beanHeld' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2529, 'backlog_held': 'live', 'backlog_eta_s': 1264}},
+    'beanWaiting' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 12843, 'backlog_held': 'recording'}},
     'beanFilling' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2160, 'backlog_eta_s': 1080}},
     'paused' => {...ble, 'pausedUntil': now + 12 * 60000 - 1000},
     'disconnected' => {...ble, 'connected': false, 'link': {'code': 'away', 'lastSeen': now - 47 * 60000}},
@@ -587,6 +588,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             value: syncing ? sizeText(left) : owed > 0 ? durationText(l, owed)
                 : pending > 0 ? sizeText(((s['pendingBytes'] as num?) ?? 0) ~/ 1024) : l.allSynced,
             sub: [
+              if (owed > 0 && hw['backlog_held'] == 'recording') l.beanHeldRecording,  // on the bean till it stops (BeanSync.owe())
+              if (owed > 0 && hw['backlog_held'] == 'live') l.beanHeldLive,
               if ((syncing || owed > 0) && eta != null && eta > 0) l.aboutTime(durationText(l, eta)),
               if (pending > 0) l.piecesPending(pending),
             ].join(' · ')),
