@@ -78,7 +78,7 @@ The `kv` keys for a device `<d>`:
 | Object | What it is | Unique key | Stored in | Created by | Changed by | Lifecycle |
 |---|---|---|---|---|---|---|
 | Speaker label | Who said a sentence: 我 (me), a name, `S1` `S2`…, or `S?` (too short, or music) | — | `sentences.speaker` | Voiceprint clustering at finalization (`diarist.py`, `label_sentences` in `transcript.py`) | See [Speaker labels](#speaker-labels) | With its sentence |
-| Voice | One label of one conversation: its mean voiceprint and a sample clip | `(conv, label)`, written `conv\|label` elsewhere | `voices` | Every 5 minutes for conversations closed in the last 3 days (`voices_loop` in `routes_speakers.py`); the late layer | Follows its label on a rename | — |
+| Voice | One label of one conversation: its mean voiceprint and a sample clip | `(conv, label)`, written `conv\|label` elsewhere | `voices` | Every 5 minutes for conversations closed in the last 3 days (`voices_loop` in `routes_voices.py`); the late layer | Follows its label on a rename | — |
 | Apart pin | A voice marked as not belonging to a group | `(voice, grp)` | `apart` | 不是 (not this person) and 拆开 (split) on the person page | Follows renames and merges | — |
 | Person | A named person's voiceprint | `name` | `people` | The first sentence learnt for the name | Recomputed as the weighted mean of `enrolled` after each sentence learnt or taken back (`bank.py`) | — |
 | Enrolled sentence | Which sentence taught a person's voiceprint, one row each | None; `row` is the sentence's `rowid` | `enrolled` | Learning after a rename (`enroll`) | Rows are deleted when a rename moves the sentences away or is undone | — |
