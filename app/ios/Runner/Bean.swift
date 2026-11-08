@@ -628,8 +628,15 @@ final class BeanSync {
           if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
           if busy > 20 { return "豆子一直忙（code 4）" }
           let open = recording ? listing.open : 0
-          guard let x = recording ? (open != 0 ? plan(open) : nil) : backlog(), !x.realtime else { return "都取到了" }
-          x.until = -1  // a cut would end the session
+          // the file being recorded from its first hole, whatever plan() would do over BLE (a read that could not catch
+          // up there, too_slow: realtime from now on; over Wi-Fi it can), on to live
+          if recording && (open == 0 || open * 1000 < since) { return open == 0 ? "都取到了" : "正在录的文件不是这台手机的" }
+          guard let x = recording ? Xfer(open, true, files[open].flatMap(gap) ?? 0) : backlog() else { return "都取到了" }
+          if x.live {
+            let behind = edge(open) - x.from
+            log("bean_xfer", "Wi-Fi 快传实时文件 \(open) 从单元 \(x.from) 起，离实时 \(behind * Bean.frameMs / 1000) s", fields: ["file": open,
+                "realtime": false, "reason": "wifi", "from": x.from, "hole_units": behind, "hole_ms": behind * Bean.frameMs, "watched": io.watched()])
+          }
           try begin(x)
         }
         if let f = try next(1000) { try take(f) }
