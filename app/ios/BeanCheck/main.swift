@@ -611,6 +611,29 @@ do {
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 
+/// A live read (realtime=1) the bean takes back to unit 0 (11-08 16:42: 20704→0 in one transfer), sends all again fast,
+/// then goes on live as far behind as that took, steadily: those units come late by the resend, not by the bean's
+/// clock, so they date nothing (on 11-08 the file went 41 s late for 2.5 h, and the fix at 19:05 overlapped 39 s).
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let openAt = t0 - 600_000, a = openAt / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0)
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 0xFFFF_FFFF)
+    bean.units(file, Array(30_000..<31_500))  // live for 30 s
+    bean.units(file, Array(0..<31_500), ms: 1)  // back to 0, 31.5 s
+    bean.units(file, Array(31_500..<36_000))  // then live again, 31.5 s behind, for 90 s
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 300_000, steps: "") }  // begun before: read live only
+  check(bean.transfers, [[a, 0, 1]])
+  check(bean.logs.filter { $0.0 == "bean_clock" }.map { $0.1 }.filter { !$0.contains("起点") }, [], "no jump from the resend")
+  check(sync.files[a]!.anchors.count, 0)
+  let late = piecesIn(chunks).filter { $0.seq >= 31_500 }.map { abs($0.start - (openAt + $0.seq * 20)) }.max() ?? -1
+  check((0...100).contains(late), true, "dated by seq as before: \(late) ms off")
+}
+
 /// The session's thread lives as long as the link: what Foundation autoreleases in its loop (the queue listed every 5 s,
 /// each piece and the state written) is drained every pass, so its memory stays flat. 1.5.9 had no pool there: +0.87
 /// MB a minute on the iPhone, 10-28.
