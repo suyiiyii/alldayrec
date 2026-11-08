@@ -7,6 +7,7 @@ import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
 import RowMenu from "../components/RowMenu.vue";
+import SpeakerSheet from "../components/SpeakerSheet.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
   beanBehind,
@@ -16,7 +17,9 @@ import {
   hhmm,
   hhmmss,
   holdLeft,
+  labelSuggestions,
   type Conversation,
+  type LabelSuggestions,
   type Row,
 } from "../lib/api";
 import { t } from "../i18n";
@@ -34,7 +37,7 @@ const route = useRoute(),
   router = useRouter();
 const today = todayOf();
 const day = computed(() => (route.query.day as string | undefined) || today);
-const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo } = useLive(
+const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo, reload } = useLive(
   day,
   true,
 );
@@ -144,9 +147,32 @@ const convOf = (r: Row) =>
     (c) => (!c.device || c.device === r.source) && c.start <= r.start && r.start <= c.end,
   );
 const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
-// a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu)
+// a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu). A tap
+// on its speaker, by the same rule: their sheet (SpeakerSheet), as on the conversation page
 const rowMenu = useTemplateRef("rowMenu");
 const press = (r: Row, x: number, y: number) => rowMenu.value?.open(r, x, y, convOf(r));
+const closed = (r: Row) => (r.state === "final" ? convOf(r) : undefined);
+const speaker = useTemplateRef("speaker");
+const picked = ref(""),
+  sug = ref<LabelSuggestions | null>(null);
+const sheetConv = computed(() => {
+  const c = convs.value.find((x) => x.id === picked.value);
+  return c ? { ...c, rows: rows.value.filter((r) => closed(r) === c) } : null;
+});
+async function edit(label: string, r: Row) {
+  const c = closed(r);
+  if (!c) return;
+  if (picked.value !== c.id) [picked.value, sug.value] = [c.id, null];
+  await nextTick(); // the sheet has this conversation
+  void speaker.value?.open(label);
+  await loadSug();
+}
+async function loadSug() {
+  const id = picked.value,
+    s = await labelSuggestions(id);
+  if (picked.value === id) sug.value = s; // not another conversation's sheet opened meanwhile
+}
+const refresh = () => Promise.all([reload(), picked.value && loadSug()]);
 
 const go = (d: string) => router.push({ query: d === today ? {} : { day: d } });
 watch(day, () => {
@@ -252,7 +278,7 @@ function jump(start: string) {
       </RouterLink>
     </div>
   </AppHeader>
-  <!-- today: the summary card on top (a phone) or on the right (a wide screen), the captions large -->
+  <!-- any day: the captions large; today, the summary card on top (a phone) or on the right (a wide screen) -->
   <main :class="{ cols: side }" :style="{ '--head': headH + 'px' }">
     <aside v-if="side" ref="aside" class="side">
       <LivePanel :status="status" :lives="lives" :done-to="doneTo" @jump="jump" />
@@ -264,11 +290,12 @@ function jump(start: string) {
           :row="it.r"
           :media="it.media"
           :hit="hit === it.r.start"
-          :caption="live"
+          caption
           :now="said.has(it.r)"
           :menu="press"
+          :who="closed(it.r) ? edit : undefined"
         />
-        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" :menu="press" />
+        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" caption :menu="press" :who="edit" />
         <div v-else-if="it.k === 'conv'" class="conv">
           {{
             t(
@@ -340,7 +367,8 @@ function jump(start: string) {
         <Icon name="calendar" :size="48" />{{ t("live.empty") }}
       </div>
     </div>
-    <RowMenu ref="rowMenu" />
+    <RowMenu ref="rowMenu" @changed="refresh" />
+    <SpeakerSheet ref="speaker" :conv="sheetConv" :sug="sug" :reload="refresh" />
   </main>
   <button v-show="live && !follow" class="jump" @click="toBottom">
     <Icon name="chevron-down" :size="16" />{{ t("live.toLatest") }}

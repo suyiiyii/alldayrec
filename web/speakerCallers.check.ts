@@ -1,4 +1,5 @@
-// Real SFC callers: live full/mini and linked/unlinked recap prose preserve product names.
+// Real SFC callers: live full/mini and linked/unlinked recap prose preserve product names; a caption row's speaker
+// opens the speaker sheet only where the page gives it one (who), and the sheet lists the labels to rename.
 import assert from "node:assert/strict";
 import { createServer } from "vite-plus";
 import vue from "@vitejs/plugin-vue";
@@ -8,6 +9,12 @@ Object.defineProperty(globalThis, "localStorage", {
   value: { getItem: () => null, setItem() {}, removeItem() {} },
   configurable: true,
 });
+// lib/audio.ts (TranscriptRow's ▶) listens on both as it loads
+for (const name of ["document", "window"])
+  Object.defineProperty(globalThis, name, {
+    value: { addEventListener() {} },
+    configurable: true,
+  });
 Object.defineProperty(globalThis, "matchMedia", {
   value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
   configurable: true,
@@ -26,6 +33,8 @@ try {
   const { i18n } = await server.ssrLoadModule("/src/i18n.ts");
   const { default: LivePanel } = await server.ssrLoadModule("/src/components/LivePanel.vue");
   const { default: RecapCard } = await server.ssrLoadModule("/src/components/RecapCard.vue");
+  const { default: TranscriptRow } = await server.ssrLoadModule("/src/components/TranscriptRow.vue");
+  const { default: SpeakerSheet } = await server.ssrLoadModule("/src/components/SpeakerSheet.vue");
   const text = "S1 uses Amazon S3 and Galaxy S24";
   const live = {
     device: "mic",
@@ -90,6 +99,20 @@ try {
       );
     }
   }
+  i18n.global.locale.value = "zh";
+  const row = { id: "r1", start: "2026-10-26T10:00:00", end: "2026-10-26T10:00:02", speaker: "S2", state: "final", text: "嗯" };
+  for (const who of [undefined, () => {}]) {
+    const html = await render(TranscriptRow, { row, caption: true, who });
+    assert.ok(html.includes("row caption") && html.includes("说话人 2"), html);
+    assert.equal(html.includes('class="name"'), !!who, html);
+  }
+  const sheet = await render(SpeakerSheet, {
+    conv: { id: "c1", participants: ["我", "S2", "S?", "顾明哲"], rows: [row] },
+    sug: null,
+    reload: async () => {},
+  });
+  assert.ok(sheet.includes("说话人 2") && sheet.includes("顾明哲"), sheet);
+  assert.ok(!sheet.includes("未识别") && !/chip[^>]*>[^<]*<[^>]*>我</.test(sheet), sheet);
   console.log("speaker callers ok");
 } finally {
   await server.close();

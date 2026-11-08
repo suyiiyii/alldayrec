@@ -10,10 +10,10 @@ import Icon from "./Icon.vue";
 
 // media: played aloud, not said in the room. seek: the page has a player (the conversation page): ▶ and a tap on
 // the row play from this sentence on; without it ▶ plays the sentence alone. caption: the live page's large text under
-// the speaker; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
+// the speaker, any day; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
 // long press or a right click on the row opens the page's RowMenu there; on a touch screen the row's text is not
 // selectable (no callout, no loupe: its 复制 copies it), with a mouse it still is. who: a tap on the speaker (not 我,
-// not 未识别) opens the page's sheet for them
+// not 未识别) opens the page's sheet for them (SpeakerSheet)
 const { row, seek, menu, who } = defineProps<{
   row: Row;
   hit?: boolean;
@@ -22,7 +22,7 @@ const { row, seek, menu, who } = defineProps<{
   caption?: boolean;
   now?: boolean;
   menu?: (r: Row, x: number, y: number) => void;
-  who?: (speaker: string) => void;
+  who?: (speaker: string, r: Row) => void;
 }>();
 // a tap, not the end of selecting text to copy
 const tap = () => seek && !getSelection()?.toString() && seek(row);
@@ -67,7 +67,7 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
       <button
         v-else-if="who && row.speaker && row.speaker !== '我' && row.speaker !== 'S?'"
         class="name"
-        @click.stop="who(row.speaker)"
+        @click.stop="who(row.speaker, row)"
       >
         <Avatar :name="row.speaker" />{{ speakerLabel(row.speaker) }}
       </button>
