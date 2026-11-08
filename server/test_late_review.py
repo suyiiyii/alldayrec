@@ -306,7 +306,7 @@ def test_mcp_old_conversation_id_keeps_todo_marks(store):
     db.mark_todos([tid], "done")
     s = span(40, 600)
     late_merge.attach(s, [row(40, 590)], {"S1": E1}, {})
-    assert "（已标记）" in mcp_server.conversation(B)
+    assert "（已标记）" in mcp_server.conversation(B)[0]  # (text, evidence)
 
 
 def test_previous_process_read_ahead_is_ignored_before_first_selection(store):

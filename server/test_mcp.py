@@ -103,6 +103,16 @@ def test_tools_and_paging():
     assert "- 10-01 10:00 [我 → 老王] 改存储（今天）" in tool("todos", after="2026-10-01", before="2026-10-02")[0]
     assert "我答应 TA 的\n- 改存储（今天）" in tool("person", name="老王")[0] and tool("person", name="没这人")[1]
     assert "另一台也录到了" in tool("grep", q="另一台")[0] and "找到 0 句" in tool("grep", q="另一台", after="2026-10-02")[0]
+    # grep and conversation also give their evidence: the sentence (id, time to the second, speaker) and its words
+    ev = rpc("tools/call", name="grep", arguments={"q": "另一台"})["result"]["structuredContent"]["evidence"]
+    assert ev == [{"conversation": None, "sentence": "x", "at": "2026-10-01T10:00:01", "speaker": "我", "quote": "另一台也录到了"}], ev
+    ev = rpc("tools/call", name="conversation", arguments={"id": CID})["result"]["structuredContent"]["evidence"]
+    assert ev == [{"conversation": CID, "sentence": "r300", "at": "2026-10-01T10:05:00", "speaker": "我", "quote": "我今天改", "kind": "todo", "text": "改存储"},
+                  {"conversation": CID, "sentence": None, "at": None, "speaker": None, "quote": "", "kind": "decision", "text": "按小时存"}], ev
+    assert "structuredContent" not in rpc("tools/call", name="day", arguments={"date": "2026-10-01"})["result"]
+    schemas = {t["name"]: t.get("outputSchema") for t in m.TOOL_LIST}
+    assert schemas["grep"] == schemas["conversation"] == m.EVIDENCE and not schemas["day"]
+    assert all("搜不到不代表没说过" in t["description"] or "找不到不代表没说过" in t["description"] for t in m.TOOL_LIST if t["name"] in ("search", "grep"))
     at, _ = tool("transcript_at", date="2026-10-01", start="10:00", end="10:00")
     assert "## phone" in at and "## LR-X1-567E" in at and "原文 61 句" in at, at[:200]
     assert tool("transcript_at", date="2026-10-01", start="10", end="11")[1] and tool("day")[1], "missing / malformed arguments"

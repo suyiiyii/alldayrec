@@ -59,8 +59,8 @@ async def live_http():
                 runner.should_exit = True
 
 
-async def new_link(c, token="tenant-a"):
-    r = await c.post("/api/mcp-links", json={"label": "security check"}, headers={"authorization": "Bearer " + token})
+async def new_link(c, token="tenant-a", can_write=True):
+    r = await c.post("/api/mcp-links", json={"label": "security check", "can_write": can_write}, headers={"authorization": "Bearer " + token})
     assert r.status_code == 201
     return r.json()
 
@@ -309,7 +309,7 @@ def test_link_quota_atomic_and_list_bounded(tenants):
     anyio.run(run)
     # An older store can contain more than the new quota; the response is still bounded.
     def legacy():
-        db.conn().execute("INSERT INTO mcp_links VALUES ('legacy', 'legacy', 'legacy-hash', 'prefix', '2000-01-01', NULL)")
+        db.conn().execute("INSERT INTO mcp_links (id, label, secret_hash, prefix, created_at) VALUES ('legacy', 'legacy', 'legacy-hash', 'prefix', '2000-01-01')")
         assert len(mcp_links.listing()) == 20
     tenant.call(tenants[0], legacy)
 

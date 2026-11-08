@@ -237,7 +237,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | Method | Description | Parameters |
 |---|---|---|
 | `GET` | List this tenant's AI connection links: metadata only, never the secret or its hash. | — |
-| `POST` | Create a revocable MCP-only credential from JSON {label}: returns its path once (201). | — |
+| `POST` | Create a revocable MCP-only credential from JSON {label, can_write?} (can_write: it may mark todos; read only by default): returns its path once (201). | — |
 
 ### `/api/mcp-links/{link_id}`
 

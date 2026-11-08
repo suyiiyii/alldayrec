@@ -19,20 +19,21 @@ def now():
     return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
 
 
-def create(label: str) -> dict:
+def create(label: str, can_write: bool = False) -> dict:
+    """A new link; can_write: it may call mark_todo, else it sees only the read tools."""
     secret = secrets.token_urlsafe(32)
-    row = dict(id=secrets.token_hex(12), label=label, prefix=secret[:8], created_at=now(), last_used_at=None)
+    row = dict(id=secrets.token_hex(12), label=label, prefix=secret[:8], created_at=now(), last_used_at=None, can_write=can_write)
     with db.tx() as c:
         if c.execute("SELECT count(*) FROM mcp_links").fetchone()[0] >= MAX_LINKS:
             raise LimitReached
-        c.execute("INSERT INTO mcp_links VALUES (?, ?, ?, ?, ?, ?)",
-                  (row["id"], label, hashlib.sha256(secret.encode()).hexdigest(), row["prefix"], row["created_at"], None))
+        c.execute("INSERT INTO mcp_links (id, label, secret_hash, prefix, created_at, last_used_at, can_write) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (row["id"], label, hashlib.sha256(secret.encode()).hexdigest(), row["prefix"], row["created_at"], None, int(can_write)))
     return {**row, "path": f"/mcp/k/{secret}"}
 
 
 def listing() -> list[dict]:
-    return [dict(r) for r in db.conn().execute(
-        "SELECT id, label, prefix, created_at, last_used_at FROM mcp_links ORDER BY created_at DESC, id LIMIT ?", (MAX_LINKS,))]
+    return [{**dict(r), "can_write": bool(r["can_write"])} for r in db.conn().execute(
+        "SELECT id, label, prefix, created_at, last_used_at, can_write FROM mcp_links ORDER BY created_at DESC, id LIMIT ?", (MAX_LINKS,))]
 
 
 def revoke(link_id: str) -> bool:
@@ -63,12 +64,12 @@ def handle(link_id: str, msg, headers):
     """
     t, c = tenant.T(), db.conn()
     with t.mcp_gate:
-        row = c.execute("SELECT last_used_at FROM mcp_links WHERE id = ?", (link_id,)).fetchone()
+        row = c.execute("SELECT last_used_at, can_write FROM mcp_links WHERE id = ?", (link_id,)).fetchone()
         if row is None:
             return 404, None
         t.mcp_active[link_id] = t.mcp_active.get(link_id, 0) + 1
     try:
-        status, out = mcp_server.handle(msg, headers)
+        status, out = mcp_server.handle(msg, headers, write=bool(row["can_write"]))
         if 200 <= status < 300 and (out is None or ("error" not in out and not out.get("result", {}).get("isError"))):
             at = now()
             if row["last_used_at"] is None or dt.datetime.fromisoformat(at) - dt.datetime.fromisoformat(row["last_used_at"]) >= dt.timedelta(minutes=1):

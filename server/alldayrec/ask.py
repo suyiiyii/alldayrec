@@ -137,10 +137,10 @@ def t_calendar(month):
                                              "FROM conversations WHERE start LIKE ? GROUP BY 1", (month[:7] + "%",))}
 
 
-def t_grep(q, after="", before="", limit=30):
-    """Each sentence with the conversation it is in (its device's), for the citation."""
+def t_grep(q, after="", before="", limit=30, sid=False):
+    """Each sentence with the conversation it is in (its device's), for the citation; sid: with the sentence's id too."""
     return [dict(r) for r in db.conn().execute(
-        """SELECT substr(s.start, 1, 19) t, s.speaker, s.text, (SELECT c.id FROM conversations c WHERE c.start <= s.start AND s.start <= c.end
+        f"""SELECT {"s.id sid, " if sid else ""}substr(s.start, 1, 19) t, s.speaker, s.text, (SELECT c.id FROM conversations c WHERE c.start <= s.start AND s.start <= c.end
              AND (c.device IS NULL OR c.device = s.source) ORDER BY c.start DESC LIMIT 1) id
            FROM sentences s WHERE instr(s.text, ?) AND s.start >= ? AND s.start < ? ORDER BY s.start DESC LIMIT ?""",
         (q, after or "0", before or "9", min(int(limit), 60)))]

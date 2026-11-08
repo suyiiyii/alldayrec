@@ -112,9 +112,11 @@ type AiLink = {
   prefix: string;
   created_at: string;
   last_used_at: string | null;
+  can_write: boolean; // may mark todos (完成 / 不对); read only otherwise
 };
 const aiLinks = ref<AiLink[]>([]),
   linkLabel = ref(""),
+  linkWrite = ref(false),
   linkError = ref(""),
   linkBusy = ref(false);
 const linkNotice = ref("");
@@ -137,12 +139,16 @@ async function createLink() {
   linkBusy.value = true;
   linkError.value = "";
   try {
-    const row = await post<AiLink & { path: string }>("/api/mcp-links", { label: linkLabel.value });
+    const row = await post<AiLink & { path: string }>("/api/mcp-links", {
+      label: linkLabel.value,
+      can_write: linkWrite.value,
+    });
     const { path, ...metadata } = row;
     freshLink.value = { id: row.id, path };
     linkCopied.value = false;
     aiLinks.value.unshift(metadata);
     linkLabel.value = "";
+    linkWrite.value = false;
   } catch (e) {
     linkError.value = (e as Error).message;
   } finally {
@@ -362,6 +368,11 @@ async function copy(c: (typeof CLIENTS)[number]) {
             />
             <button :disabled="linkBusy || !linkLabel.trim()">{{ t("connect.linkCreate") }}</button>
           </div>
+          <label class="link-write"
+            ><input v-model="linkWrite" type="checkbox" :disabled="linkBusy" />{{
+              t("connect.linkWrite")
+            }}</label
+          >
         </form>
         <div v-if="freshLink" class="fresh-link">
           <p>{{ t("connect.linkOnce") }}</p>
@@ -376,6 +387,9 @@ async function copy(c: (typeof CLIENTS)[number]) {
           <li v-for="link in aiLinks" :key="link.id">
             <div class="link-meta">
               <b>{{ link.label }}</b> <code>{{ link.prefix }}…</code>
+              <span class="link-scope" :class="{ rw: link.can_write }">{{
+                t(link.can_write ? "connect.linkRw" : "connect.linkRo")
+              }}</span>
               <small>{{ t("connect.linkCreated", { at: linkDate(link.created_at) }) }}</small>
               <small>{{
                 link.last_used_at
@@ -422,6 +436,20 @@ async function copy(c: (typeof CLIENTS)[number]) {
   margin: var(--space-3) 0;
   padding-bottom: var(--space-3);
   border-bottom: 1px solid var(--line);
+}
+.link-write {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+.link-scope {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.link-scope.rw {
+  color: var(--warn);
 }
 .link-form {
   margin: var(--space-3) 0;
