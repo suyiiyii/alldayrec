@@ -945,6 +945,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanUnbindSub => '这台手机不再连它，改用手机麦克风；录音豆本身什么也不改';
 
   @override
+  String get beanWifi => 'Wi‑Fi 快传（实验）';
+
+  @override
+  String get beanWifiSub =>
+      '让录音豆开热点，手机连上去快速取回还没有的录音，追上实时后回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
+
+  @override
+  String get beanWifiAsked => '已请求 Wi‑Fi 快传，当前传输停下后开始';
+
+  @override
   String get beanUnbindAfterSync => '正在取回录音豆里的录音，取完再解除';
 
   @override

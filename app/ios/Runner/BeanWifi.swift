@@ -1,0 +1,181 @@
+// The Feishu recorder bean's Wi-Fi fast transfer (#431): its hotspot joined (NEHotspotConfiguration: iOS asks the
+// person each time, the name being new each time), then a WebSocket over TLS to the bean, the one certificate the bean
+// has pinned (expired and not for its address: only for this endpoint, nothing else trusts it). Requests go as hex text,
+// answers come as binary 09 FF frames (ws/soundcore wifi.py, 0BSD; Eliqi797/open-feishu-recording-bean
+// PinnedRecorderLink.swift, MIT, for the endpoint, the pin, the keep-alive and the request headers; see
+// THIRD_PARTY_NOTICES.md). BeanSync (Bean.swift) does the rest, as over BLE; BeanLink carries its bytes here meanwhile.
+import CryptoKit
+import Foundation
+import Network
+import NetworkExtension
+
+final class BeanWifi {
+  static let host = "192.168.43.1", port: UInt16 = 443  // the bean's, whatever else it answers
+  /// SHA-256 of the bean's certificate (DER), as Eliqi797 found it
+  static let pin = "3f2667135cafff135614944392d6b3bc0e991b2ca55dbe9e469caca44d5a0125"
+
+  private let device: String, ssid: String, password: String
+  private let q = DispatchQueue(label: "bean.wifi")
+  @Shared private var ws: NWConnection?  // set once it is up: what goes after that ends receive()
+  private var udp: NWConnection?, keepAlive: DispatchSourceTimer?
+  private let inbox = Inbox<[UInt8]?>()  // nil: the socket went
+  @Shared private var seen: String?  // the certificate's pin, as it came
+  @Shared private(set) var bytes: Int64 = 0
+
+  init(device: String, ssid: String, password: String) { self.device = device; self.ssid = ssid; self.password = password }
+
+  private func log(_ kind: String, _ text: String, _ level: String? = nil, _ fields: [String: Any] = [:]) {
+    Ble.log("bean \(kind): \(text)")
+    DeviceLog.app(device, kind, text, level: level, fields: fields)
+  }
+
+  private static func mono() -> Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
+
+  /// The hotspot, then the socket on it: up to 45 s while its address comes up and the person answers iOS's local
+  /// network question (the first time). `endpoint`: the 1A/05 answer, only ever the bean's fixed one.
+  func open(_ endpoint: [UInt8]) throws {
+    let at = endpoint.count >= 6 ? "\(endpoint[3]).\(endpoint[2]).\(endpoint[1]).\(endpoint[0]):\(Int(endpoint[4]) | Int(endpoint[5]) << 8)" : "?"
+    guard at == "\(BeanWifi.host):\(BeanWifi.port)" else { throw Bean.Fail("hotspot at \(at), not the bean's") }
+    let t0 = BeanWifi.mono()
+    let c = NEHotspotConfiguration(ssid: ssid, passphrase: password, isWEP: false)
+    c.joinOnce = true  // iOS leaves it when the app leaves the front
+    let done = DispatchSemaphore(value: 0)
+    var failure: NSError?
+    NEHotspotConfigurationManager.shared.apply(c) { failure = $0 as NSError?; done.signal() }
+    guard done.wait(timeout: .now() + 120) == .success else { throw Bean.Fail("joining the hotspot: no answer in 120 s") }
+    if let e = failure, !(e.domain == NEHotspotConfigurationErrorDomain && e.code == NEHotspotConfigurationError.alreadyAssociated.rawValue) {
+      log("bean_wifi_fail", "没加入豆子的热点：\(e.localizedDescription)（\(e.domain) \(e.code)）", "warn", ["step": "join", "domain": e.domain, "code": e.code])
+      throw Bean.Fail("join: \(e.code)")
+    }
+    let joined = BeanWifi.mono() - t0
+    log("bean_wifi_join", "加入了豆子的热点（\(joined) ms）", nil, ["ms": joined])
+    var tries = 0, why = ""
+    while BeanWifi.mono() - t0 < 45_000 + joined {
+      tries += 1
+      do { try connect(); break } catch {
+        why = "\(error)"
+        if let s = seen, s != BeanWifi.pin {
+          log("bean_wifi_fail", "豆子的证书不是认得的那张（\(s)）", "warn", ["step": "pin", "pin": s])
+          throw Bean.Fail("certificate \(s)")
+        }
+        Thread.sleep(forTimeInterval: 0.7)
+      }
+    }
+    guard ws != nil else {
+      log("bean_wifi_fail", "连不上豆子的 WebSocket（\(tries) 次，\(why)）", "warn", ["step": "socket", "tries": tries])
+      throw Bean.Fail("socket: \(why)")
+    }
+    let ms = BeanWifi.mono() - t0 - joined
+    log("bean_wifi_socket", "连上豆子的 WebSocket（第 \(tries) 次，\(ms) ms）", nil, ["ms": ms, "tries": tries])
+  }
+
+  private func connect() throws {
+    let tls = NWProtocolTLS.Options()
+    sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { [weak self] _, trust, finish in
+      let t = sec_trust_copy_ref(trust).takeRetainedValue()
+      let leaf = (SecTrustCopyCertificateChain(t) as? [SecCertificate])?.first
+      let pin = leaf.map { SHA256.hash(data: SecCertificateCopyData($0) as Data).map { String(format: "%02x", $0) }.joined() }
+      self?.seen = pin
+      finish(pin == BeanWifi.pin)
+    }, q)
+    let p = NWParameters(tls: tls)
+    p.requiredInterfaceType = .wifi  // the hotspot, never the cellular route
+    let w = NWProtocolWebSocket.Options()
+    w.autoReplyPing = true
+    w.maximumMessageSize = 4 << 20
+    w.setAdditionalHeaders([("User-Agent", "okhttp/3.12.13.18")])  // the SDK's, as the bean knows it
+    p.defaultProtocolStack.applicationProtocols.insert(w, at: 0)
+    let c = NWConnection(to: .url(URL(string: "wss://\(BeanWifi.host):\(BeanWifi.port)/")!), using: p)
+    let ready = DispatchSemaphore(value: 0)
+    var failure: Error?
+    c.stateUpdateHandler = { [weak self] s in
+      switch s {
+      case .ready: ready.signal()
+      case .failed(let e): failure = e; ready.signal(); if self?.ws != nil { self?.inbox.put(nil) }
+      case .waiting(let e): failure = e  // no route yet, or the local network question unanswered: wait on
+      case .cancelled: if self?.ws != nil { self?.inbox.put(nil) }
+      default: break
+      }
+    }
+    c.start(queue: q)
+    guard ready.wait(timeout: .now() + 15) == .success, failure == nil || c.state == .ready else {
+      c.stateUpdateHandler = nil
+      c.cancel()
+      throw failure ?? Bean.Fail("no answer in 15 s")
+    }
+    ws = c
+    pump(c)
+    let u = NWConnection(host: .init(BeanWifi.host), port: 32003, using: {
+      let p = NWParameters.udp
+      p.requiredInterfaceType = .wifi
+      return p
+    }())
+    u.start(queue: q)
+    udp = u
+    let timer = DispatchSource.makeTimerSource(queue: q)
+    timer.schedule(deadline: .now(), repeating: 1)
+    timer.setEventHandler { [weak u] in u?.send(content: Data("soundcore-keep-alive-unicast".utf8), completion: .contentProcessed { _ in }) }
+    timer.resume()
+    keepAlive = timer
+  }
+
+  /// Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not).
+  private func pump(_ c: NWConnection) {
+    c.receiveMessage { [weak self] data, context, _, error in
+      guard let self else { return }
+      if error != nil { self.inbox.put(nil); return }
+      let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
+      if let data {
+        self.bytes += Int64(data.count)
+        switch meta?.opcode {
+        case .binary: self.inbox.put([UInt8](data))
+        case .text: if let b = BeanWifi.unhex(String(decoding: data, as: UTF8.self)) { self.inbox.put(b) }
+        case .close: self.inbox.put(nil); return
+        default: break
+        }
+      }
+      self.pump(c)
+    }
+  }
+
+  static func unhex(_ s: String) -> [UInt8]? {
+    let c = Array(s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8)
+    guard c.count >= 20, c.count % 2 == 0, c.starts(with: Array("09ff".utf8)) else { return nil }
+    var out: [UInt8] = []
+    out.reserveCapacity(c.count / 2)
+    for i in stride(from: 0, to: c.count, by: 2) {
+      guard let b = UInt8(String(decoding: c[i..<(i + 2)], as: UTF8.self), radix: 16) else { return nil }
+      out.append(b)
+    }
+    return out
+  }
+
+  /// A frame BeanSync made, as hex text (the bean ignores binary requests).
+  func send(_ frame: [UInt8]) throws { try text(Bean.hex(frame)) }
+
+  private func text(_ s: String) throws {
+    guard let c = ws else { throw BeanSync.Gone("Wi-Fi socket closed") }
+    let ctx = NWConnection.ContentContext(identifier: "text", metadata: [NWProtocolWebSocket.Metadata(opcode: .text)])
+    let sent = DispatchSemaphore(value: 0)
+    var failure: Error?
+    c.send(content: Data(s.utf8), contentContext: ctx, isComplete: true, completion: .contentProcessed { failure = $0; sent.signal() })
+    guard sent.wait(timeout: .now() + 10) == .success else { throw Bean.Fail("Wi-Fi send: no answer in 10 s") }
+    if let failure { throw BeanSync.Gone("Wi-Fi send: \(failure)") }
+  }
+
+  func receive(_ ms: Int64) throws -> [UInt8]? {
+    guard let m = inbox.poll(Double(ms) / 1000) else { return nil }
+    guard let b = m else { inbox.put(nil); throw BeanSync.Gone("Wi-Fi socket closed") }
+    return b
+  }
+
+  /// FINISH (the SDK's goodbye), the socket closed and the hotspot forgotten: iOS goes back to the Wi-Fi it had.
+  func close() {
+    try? text("FINISH")
+    keepAlive?.cancel(); keepAlive = nil
+    udp?.cancel(); udp = nil
+    ws?.cancel(); ws = nil
+    NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
+    log("bean_wifi_leave", "离开豆子的热点（收到 \(bytes / 1024) KB）", nil, ["bytes": bytes])
+  }
+}

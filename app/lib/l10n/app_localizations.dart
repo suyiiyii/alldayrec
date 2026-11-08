@@ -1718,6 +1718,24 @@ abstract class AppLocalizations {
   /// **'这台手机不再连它，改用手机麦克风；录音豆本身什么也不改'**
   String get beanUnbindSub;
 
+  /// No description provided for @beanWifi.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi‑Fi 快传（实验）'**
+  String get beanWifi;
+
+  /// No description provided for @beanWifiSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'让录音豆开热点，手机连上去快速取回还没有的录音，追上实时后回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
+  String get beanWifiSub;
+
+  /// No description provided for @beanWifiAsked.
+  ///
+  /// In zh, this message translates to:
+  /// **'已请求 Wi‑Fi 快传，当前传输停下后开始'**
+  String get beanWifiAsked;
+
   /// No description provided for @beanUnbindAfterSync.
   ///
   /// In zh, this message translates to:

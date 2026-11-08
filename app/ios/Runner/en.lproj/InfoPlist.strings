@@ -2,3 +2,4 @@
 "NSBluetoothAlwaysUsageDescription" = "Connects to the recorder to fetch the audio it recorded and upload it";
 "NSMicrophoneUsageDescription" = "Records and uploads to your AllDayRec server for transcription";
 "NSCameraUsageDescription" = "The camera scans the sign-in QR code";
+"NSLocalNetworkUsageDescription" = "Joins the Feishu recorder bean's own hotspot to fetch its audio fast";

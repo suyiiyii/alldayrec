@@ -237,6 +237,25 @@ class _RecorderPageState extends State<RecorderPage> {
             FirmwareTile(name: name, model: model, fw: fw, dfu: dfu, dfuBusy: st['dfuBusy'] == true),
             const Divider(height: 20),
           ],
+          // #431, a developer build only (flutter build ios --dart-define=BEAN_WIFI=true): by hand while it is measured
+          if (bean && Platform.isIOS && const bool.fromEnvironment('BEAN_WIFI')) ...[
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.wifi_rounded),
+              title: Text(l.beanWifi),
+              subtitle: Text(l.beanWifiSub),
+              onTap: live
+                  ? () {
+                      final m = ScaffoldMessenger.of(context);
+                      _call(() async {
+                        await Recorder.beanWifi();
+                        m.showSnackBar(SnackBar(content: Text(l.beanWifiAsked), behavior: SnackBarBehavior.floating));
+                      });
+                    }
+                  : null,
+            ),
+            const Divider(height: 20),
+          ],
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.link_off_rounded, color: syncing ? cs.outline : cs.error),

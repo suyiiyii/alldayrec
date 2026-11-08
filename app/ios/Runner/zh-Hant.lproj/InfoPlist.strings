@@ -2,3 +2,4 @@
 "NSBluetoothAlwaysUsageDescription" = "连接录音设备，取回它录下的音频并上传";
 "NSMicrophoneUsageDescription" = "录音并上传到 AllDayRec 服务端转写";
 "NSCameraUsageDescription" = "扫码登录需要使用摄像头";
+"NSLocalNetworkUsageDescription" = "连上飞书录音豆的临时热点，快速取回它录下的音频";

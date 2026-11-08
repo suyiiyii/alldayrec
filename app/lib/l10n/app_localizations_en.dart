@@ -975,6 +975,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'This phone stops connecting to it and uses its own microphone; nothing changes on the bean';
 
   @override
+  String get beanWifi => 'Wi‑Fi fast transfer (experimental)';
+
+  @override
+  String get beanWifiSub =>
+      'The bean opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth once live. iOS asks whether to join its network; stay on this page meanwhile';
+
+  @override
+  String get beanWifiAsked =>
+      'Wi‑Fi fast transfer asked for: it starts once the current transfer stops';
+
+  @override
   String get beanUnbindAfterSync =>
       'Fetching the recordings on the bean; unbind once that is done';
 

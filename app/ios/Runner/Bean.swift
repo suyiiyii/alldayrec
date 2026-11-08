@@ -18,9 +18,10 @@ enum Bean {
 
   /// The commands a bean is sent: its info (01/01), its clock (01/A6), the key exchange (2E/01), its files (1A/0E), a
   /// file's audio (1A/07); a delete (1A/10, DELETE) only of a file the server has whole (delete()); and the start of a
-  /// recording (18/82 01, START: start()), never its stop (00) or pause (02). Nothing that binds or unbinds (0B/xx),
-  /// turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and never the OTA service) or reads device logs.
-  static let sends: Set<Int> = [0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07]
+  /// recording (18/82 01, START: start()), never its stop (00) or pause (02); its Wi-Fi hotspot on (1A/05) and off (1A/02)
+  /// for the fast transfer (BeanSync.wifi()). Nothing that binds or unbinds (0B/xx), resets, updates firmware (FF/xx, and
+  /// never the OTA service) or reads device logs.
+  static let sends: Set<Int> = [0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07, 0x1A05, 0x1A02]
   static let deleteCmd = 0x1A10
   static let startCmd = 0x1882
 
@@ -80,6 +81,15 @@ enum Bean {
   static func transfer(_ file: Int64, _ offset: Int64, _ realtime: Bool) -> [UInt8] {
     build(0x1A, 0x07, le32(offset) + le32(file) + [realtime ? 1 : 0])
   }
+  /// Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag.
+  static func wifiTransfer(_ file: Int64, _ offset: Int64) -> [UInt8] { build(0x1A, 0x07, le32(offset) + le32(file)) }
+  /// The hotspot on, by a name it has not had (a repeated one gets an empty answer and no hotspot): its answer is its
+  /// address, IPv4 reversed and the port LE; off.
+  static func wifiOn(_ ssid: String, _ password: String) -> [UInt8] {
+    let s = [UInt8](ssid.utf8), p = [UInt8](password.utf8)
+    return build(0x1A, 0x05, [UInt8(s.count)] + s + [UInt8(p.count)] + p)
+  }
+  static func wifiOff() -> [UInt8] { build(0x1A, 0x02, []) }
   /// Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable).
   static func delete(_ file: Int64, _ confirmed: Set<Int64>) throws -> [UInt8] {
     guard confirmed.contains(file) else { throw Fail("file \(file) is not whole on the server: never deleted") }
@@ -249,6 +259,18 @@ protocol BeanIo: AnyObject {
   func refused() -> Set<Int64>
   /// The phone's side of a slow link, for bean_lag and too_slow (BeanSync.diag()): its audio route, a call, power, front.
   func phoneState() -> [String: Any]
+  /// The fast transfer was asked for (once: reading it clears it).
+  func wifiAsked() -> Bool
+  /// Joins the bean's hotspot and opens its WebSocket (`endpoint`: the 1A/05 answer); send and receive go over it then,
+  /// until wifiLeave() (FINISH, the hotspot forgotten).
+  func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws
+  func wifiLeave()
+}
+
+extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say otherwise)
+  func wifiAsked() -> Bool { false }
+  func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { throw Bean.Fail("no Wi-Fi") }
+  func wifiLeave() {}
 }
 extension BeanIo { func phoneState() -> [String: Any] { [:] } }
 
@@ -352,6 +374,10 @@ final class BeanSync {
   private var fills: [Int64: Int] = [:]  // realtime=0 reads of the open file that came to nothing (missed())
   private var runFile: Int64 = -1, runFrom: Int64 = 0
   private var writeFailed = false  // said once until a piece is written again
+  private var overWifi = false  // wifi(): the transfers go over the hotspot's WebSocket
+  private var wifiNext = false  // asked for: before the next transfer
+  private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
+  private var wifiUnits = 0
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
                                  // reconnects (a cut re-pull, a stalled transfer)
@@ -410,6 +436,7 @@ final class BeanSync {
       let p = try step("status", "读设备信息") { try ask(Bean.info(), 0x0101).payload }
       hw = try Bean.info(p)
       try step("clock", "对时") { try clock() }
+      if wifiOpen { try wifiOff() }
       listing = try step("status", "读文件列表") { try list() }
       log("connect", "连上：\(t)；固件 \(hw["fw"] ?? "")，序列号 \(Bean.serial(p))，电量 \(hw["battery"] ?? "")%，" +
           (recording ? "在录音（文件 \(listing.open)）" : "没在录音") + "，豆子上 \(listing.files.count) 个文件",
@@ -430,6 +457,11 @@ final class BeanSync {
       // a pool per pass: this thread lives as long as the link, and what Foundation autoreleases here (the queue listed
       // every 5 s, each piece and the state written) would stay until it ends (Ble.swift's session loop, 10-06)
       try autoreleasepool {
+        if io.wifiAsked() {  // a transfer cannot be stopped but by the link going: Wi-Fi first in the next session
+          wifiNext = true
+          if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
+        }
+        if xfer == nil && wifiNext { wifiNext = false; try wifi() }
         if xfer == nil && io.now() >= quietUntil {
           if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
           let open = listing.open
@@ -519,6 +551,79 @@ final class BeanSync {
       why = "答了，3 s 内没开始录新文件"
     } catch let e as Gone { throw e } catch let e as Again { throw e } catch { why = "\(error)" }
     log("bean_start", "自动开始录音没成功（\(why)），这次连接不再试", "warn")
+  }
+
+  /// Wi-Fi fast transfer (#431; by hand for now: the device page's developer button). The bean opens a hotspot of a new
+  /// name (1A/05; its BLE goes, ws/soundcore), the phone joins it (io.wifiJoin) and reads what it lacks over its
+  /// WebSocket as over BLE, into the same pieces (the same units, dated the same): the backlog when the bean is not
+  /// recording, else the file being recorded from where the phone lacks it until within 10 s of live (no realtime over
+  /// Wi-Fi). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case it is on still.
+  private func wifi() throws {
+    var r = [UInt8](repeating: 0, count: 12)
+    for i in r.indices { r[i] = UInt8.random(in: 0...255) }
+    let ssid = "LR-" + Bean.hex(Array(r[0..<4])), password = Bean.hex(Array(r[4...]))
+    let t0 = io.monotonicNow()
+    let a: Bean.Frame
+    do { a = try ask(Bean.wifiOn(ssid, password), 0x1A05, 45_000) }
+    catch let e as Gone { throw e } catch let e as Again { throw e }
+    catch { log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"]); return }
+    wifiOpen = true
+    let opened = io.monotonicNow() - t0
+    guard a.payload.count >= 6 else {
+      log("bean_wifi_fail", "豆子没开热点（回了 \(Bean.hex(a.payload))），接着用蓝牙", "warn", ["step": "hotspot", "ms": opened])
+      return
+    }
+    log("bean_wifi_hotspot", "豆子开了热点（\(opened) ms，地址 \(Bean.hex(a.payload))），" + (recording ? "在录音（文件 \(listing.open)）" : "没在录音"),
+        fields: ["ms": opened, "endpoint": Bean.hex(a.payload), "recording": recording])
+    overWifi = true; wifiUnits = 0
+    var t1 = io.monotonicNow(), why = "", rollover = false
+    do {
+      try io.wifiJoin(ssid, password, a.payload)
+      t1 = io.monotonicNow()
+      reader = Bean.Reader(); inbox = []
+      why = try wifiLoop()
+    } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)" }
+    if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
+    overWifi = false
+    io.wifiLeave()
+    let ms = max(1, io.monotonicNow() - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
+    let audio = Int64(wifiUnits) * Bean.frameMs, x = Double(audio) / Double(ms)
+    log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频），\(kb) KB，用时 \(ms / 1000) s，" +
+        String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x), wifiUnits == 0 ? "warn" : nil,
+        ["why": why, "units": wifiUnits, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x])
+    throw Again(description: "Wi-Fi transfer over: \(why)", naturalRollover: rollover)
+  }
+
+  /// wifi()'s transfers, one at a time as over BLE: what the bean is not recording, or the file it records up to live.
+  /// The reason they ended.
+  private func wifiLoop() throws -> String {
+    while true {
+      let why: String? = try autoreleasepool {
+        if xfer == nil {
+          if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
+          if busy > 20 { return "豆子一直忙（code 4）" }
+          let open = recording ? listing.open : 0
+          guard let x = recording ? (open != 0 ? plan(open) : nil) : backlog(), !x.realtime else { return "都取到了" }
+          x.until = -1  // a cut would end the session
+          try begin(x)
+        }
+        if let f = try next(1000) { try take(f) }
+        guard let x = xfer else { return nil }
+        let now = io.now()
+        if x.live && x.lag != nil { complete(x, 0, "；追上实时，回蓝牙接着实时"); return "追上实时" }
+        if x.key == nil && now - x.at > 15_000 { failed(x, "Wi-Fi 上没回音"); return "豆子没回音" }
+        if now - x.seen > 30_000 { complete(x, -1, "；30 s 没收到单元"); return "30 s 没收到单元" }
+        return nil
+      }
+      if let why { return why }
+    }
+  }
+
+  /// After a fast transfer: the hotspot off, in case it is on still.
+  private func wifiOff() throws {
+    wifiOpen = false
+    do { _ = try ask(Bean.wifiOff(), 0x1A02, 5000); log("bean_wifi_off", "关了热点（1A/02）") }
+    catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn") }
   }
 
   private func clock() throws {
@@ -686,7 +791,7 @@ final class BeanSync {
     if x.live && liveFile != x.file { liveFile = x.file; liveSeen = x.at }
     state = ["code": x.live ? "joining" : "beanIdle"]
     if x.live { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
-    try send(Bean.transfer(x.file, x.from * Int64(Bean.unit), x.realtime))
+    try send(overWifi ? Bean.wifiTransfer(x.file, x.from * Int64(Bean.unit)) : Bean.transfer(x.file, x.from * Int64(Bean.unit), x.realtime))
   }
 
   /// Release legacy holds while recording: even closed-file backlog cannot be fetched then. After a stop, finish
@@ -790,7 +895,7 @@ final class BeanSync {
         if h.size % Int64(Bean.unit) != 0 { return failed(x, "file of \(h.size) B") }
         let f = file(x.file, x.file * 1000)
         f.total = h.size / Int64(Bean.unit)
-        if !x.live { x.until = rest(f, x.from) }
+        if !x.live && !overWifi { x.until = rest(f, x.from) }  // over Wi-Fi a cut would cost more than the rest
       }
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
@@ -842,6 +947,7 @@ final class BeanSync {
           "之后的单元按序号排会早 \(late / 1000) s", "warn", ["file": x.file, "seq": s.seq, "late_ms": late])
     }
     x.units += 1; x.last = s.seq; x.seen = now
+    if overWifi { wifiUnits += 1 }
     // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
     if !x.realtime && x.lag == nil && s.seq - x.first >= BeanSync.restUnits && now > x.firstAt {
       pace = Double((s.seq - x.first) * Bean.frameMs) / Double(now - x.firstAt)

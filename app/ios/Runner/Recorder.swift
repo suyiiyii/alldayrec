@@ -100,6 +100,11 @@ enum Recorder {
         let on = a["on"] as? Bool ?? false
         guard let l = link else { return result(on ? FlutterError(code: "notStarted", message: nil, details: nil) : nil) }
         do { try l.listen(on); result(nil) } catch { result(FlutterError(code: "listen", message: error.localizedDescription, details: nil)) }
+      case "beanWifi":  // the bean's Wi-Fi fast transfer, by hand (#431): its session takes it before the next transfer
+        guard let b = bean else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
+        b.wifiWanted = true
+        DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）")
+        result(nil)
       case "pause":  // the connected recorder keeps nothing for s seconds (0: records again)
         do {
           guard let l = link else { throw CocoaError(.featureUnsupported) }

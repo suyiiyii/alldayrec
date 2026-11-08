@@ -45,6 +45,9 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   private let notes = Inbox<[UInt8]?>()  // nil: the link is gone
   private let found = Inbox<(CBPeripheral, String)>()  // and how: scan, request
   private var sync: BeanSync!
+  /// Wi-Fi fast transfer asked for (Recorder's beanWifi, the device page): BeanSync's next pass takes it
+  @Shared var wifiWanted = false
+  @Shared private var wifi: BeanWifi?  // while there is one, BeanSync's bytes go over it
 
   /// What the link does, as a code the app words (recorder_status.dart): the session's while one runs.
   var state: [String: Any] { inSession ? sync.state : linkState }
@@ -260,6 +263,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   /// To the bean's command characteristic only (never the OTA service), and only what BeanSync lets through.
   func send(_ frame: [UInt8]) throws {
+    if let w = wifi { guard Bean.allowed(frame, sync.deletable) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }; return try w.send(frame) }
     guard Bean.allowed(frame, sync.deletable), frame.count <= mtu - 3 else { throw Bean.Fail("not sent: \(frame.count) B") }
     guard let p = peripheral, let ch = cmd else { throw BeanSync.Gone() }
     _ = try op("write") { p.writeValue(Data(frame), for: ch, type: .withResponse) }
@@ -267,7 +271,9 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   func receive(_ ms: Int64) throws -> [UInt8]? {
     // Bluetooth off: no disconnect callback comes; unbound: this phone no longer connects to it
-    guard on, poweredOn, prefs.string(forKey: "bleName") == name else { throw BeanSync.Gone() }
+    guard on, prefs.string(forKey: "bleName") == name else { throw BeanSync.Gone() }
+    if let w = wifi { return try w.receive(ms) }
+    guard poweredOn else { throw BeanSync.Gone() }
     guard let note = notes.poll(Double(ms) / 1000) else { return nil }
     guard let b = note else { notes.put(nil); throw BeanSync.Gone() }
     return b
@@ -288,6 +294,13 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func held() -> Int64? { Recorder.hold(name) }
   func end(_ at: Int64) { prefs.set(at, forKey: "end:\(name)") }  // Uploader.ends() sends it
   func piece() { files += 1 }
+  func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
+  func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
+    let w = BeanWifi(device: name, ssid: ssid, password: password)
+    wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
+    do { try w.open(endpoint) } catch { wifiLeave(); throw error }
+  }
+  func wifiLeave() { wifi?.close(); wifi = nil }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
   /// (category PlayAndRecord: this app's voice question too); power, and whether the app is in front.
