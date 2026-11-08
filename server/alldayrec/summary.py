@@ -23,12 +23,14 @@ from alldayrec.tenant import T
 log = logging.getLogger("live")
 
 MIN_SPEECH_S = 60
-PROMPT_VERSION = 13  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
+PROMPT_VERSION = 14  # 2: tags, 3: people, 4: speech to AI told apart from speech to people, 5: media played aloud, 6: no "there was none" lines, fewer people,
                      # 7: a todo's owner is who does it (not who said it), what I tell an AI is never a todo, 8: a todo's due_date (its due on the calendar),
                      # 9: each person's point has its sentence (people[].points_at), 10: shorter: summary 2~4 sentences, points and AI requests ≤ 30 字,
                      # 11: summary one sentence ≤ 40 字, business before chitchat; one 闲聊 topic; todos/decisions extracted independently,
                      # 12: preserve the actor (I only for the recorder); people points cite their own speaker,
-                     # 13: AI speech from any speaker; retain the speaker in AI request text
+                     # 13: AI speech from any speaker; retain the speaker in AI request text,
+                     # 14: due_date picked from a 3-week date table (calendar), not reckoned; a date only talked about is
+                     # no due; due_certainty confirmed / tentative
 # Who each line is said to, and media played aloud: shared with split.py, which must not take dictation to an AI for
 # a talk with someone
 AUDIENCE = """所有说话人（「我」、其他标签或姓名）都用同一标准区分听众，先分清再整理：
@@ -47,14 +49,15 @@ SYSTEM = """你在整理一段现场录音转写出来的对话。每行是「[�
  "tags": ["2~5 个标签：这段对话和什么相关（项目、领域、活动、人际场合），优先沿用已有标签"],
  "topics": [{"title": "议题", "points": ["要点，一行、不超过 30 字，每个议题最多 4 条"], "at": "议题开始那一行的时间 HH:MM:SS"}],
  "ai_requests": [{"text": "谁让 AI 做什么，一行、不超过 30 字：录音者写「我让 AI…」，其他人以原说话人标签或姓名开头，如「S1 让 AI 查日志」；不抄整段指令", "at": "原句那一行的时间 HH:MM:SS"}],
- "todos": [{"owner": "去做这件事的人：我 | S1 | 未知", "to": "答应给谁或替谁做，写说话人标签；不是对人的就写 null", "text": "要做的事", "due": "原话里的时间，没有写 null", "due_date": "due 换算成的日期 YYYY-MM-DD，说不准写 null", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}],
+ "todos": [{"owner": "去做这件事的人：我 | S1 | 未知", "to": "答应给谁或替谁做，写说话人标签；不是对人的就写 null", "text": "要做的事", "due": "原话里的时间，没有写 null", "due_date": "due 对应的日期 YYYY-MM-DD，从日期表里选，说不准写 null", "due_certainty": "confirmed | tentative，due_date 是 null 时写 null", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}],
  "decisions": [{"text": "定下来的事", "quote": "依据的原句", "at": "原句那一行的时间 HH:MM:SS"}]}
 ai_spans 是任意说话人对 AI 说话的连续时间段（第一句和最后一句的时间）。每段只能是同一个说话人对 AI 说的话：换说话人（即使也在对 AI 说话）、或中间夹着对人说的话（包括人类回应、嗯、对、这个、你让他们上去吧），就在那里断开分段；人类回应不算 AI 话语，不进 ai_spans；没有就给空数组。
 media_spans 是外放媒体的连续时间段（第一句和最后一句的时间）：中间夹着在场的人说话（包括我对媒体内容的点评），就在那里断开分成两段；没有就给空数组。
 媒体里的声音即使有姓名也不是现场参与人；媒体里的话不是任何在场的人说的：不进 people、todos、decisions、topics，不要写成「我」说的或做的。
 所有说话人对 AI 说的话只进 ai_requests，不进 todos、decisions、people、topics；ai_requests 每句请求各一条，即使同一说话人在同一个 ai_spans 段内连续请求也不合并；每条保留该句说话人的主体和原句时间，不把其他标签改成「我」。夹在 AI 请求之间的对人说话和人类回应，仍按人的对话提取。todos 只收人要做的事：我答应别人的、别人答应的、别人要我做的、我自己说要做的。
 todos 的 owner 是要去做这件事的人，不是说这句话的人：别人要我做的事（我答应了，或者没有拒绝），owner 是「我」、to 是对方；我让在场的 S1 去做的事，owner 是 S1、to 是「我」。
-due_date 按这段对话的日期换算（最后一行写了这段对话哪天几点开始、星期几）：今天、今晚、待会儿是当天，明天、后天往后数，周五、下周一按星期数；原句的时间比开始时间早，说明过了午夜，那句话是第二天说的。「X 之前」「X 之内」取最后一天，「X 之后」取之后的第一天（国庆之后 = 国庆假期结束后的第一天）。说不出是哪一天（过几天、以后、有空、下周、最近）或者 due 是 null 时写 null，不要猜。
+due_date 不要自己推算：相对的说法只从最后附的日期表里选（表里写了每天是星期几、本周还是下周），今天、今晚、待会儿是表里的今天，明天、后天、周五、下周一、下下周三按表里的星期和周次找；原句的时间比开始时间早，说明过了午夜，那句话是第二天说的，从表里的下一天算起。说了几月几号的照写。「X 之前」「X 之内」取最后一天，「X 之后」取之后的第一天（国庆之后 = 国庆假期结束后的第一天）。说不出是哪一天（过几天、以后、有空、下周、最近）或者 due 是 null 时写 null，不要猜。
+只是讨论过、提到过的日期（那天是周三、上次 5 号去的、周五有个会）不是待办的截止，due 和 due_date 都写 null；这条只管日期，不改变哪些话算待办。due_certainty 只说截止的日子有多确定：说定了那天做完写 confirmed，「大概」「争取」「尽量」「看情况」这类没说死的写 tentative。它不放宽哪些话算待办：没人答应的提议、对 AI 的吩咐照旧不是待办。
 任何说话人对 AI 助手的吩咐（帮我查、改、跑、开分支、合并、部署、派人去调研……）说得再像吩咐人，也只进 ai_requests，不是任何人的待办。这种话前后没有人用人的口吻接话，常常是一个人连着说一长段；其他标签也可能在对 AI 说话，仍按该标签或姓名记录主体，不据语气改写成「我」。
 people 只列在这段里说了实质内容的标签（观点、信息、经历、提问、表态），「我」在最前；S?、只有附和的、只说了一两句零碎话（问一句、喊人、接一句玩笑、递东西）的都不列。人多的闲聊挑主要说话的几个，一般不超过 8 个。按这个人自己的话写，不要写成别人对他的评价。
 summary 只写一句，写这段里最重要的事：正事（工作、安排、决定、要办的事、重要的信息）在前，闲聊、外放的媒体、任何说话人对 AI 说的话都不写进去；整段都是闲聊、媒体或对 AI 说话时，才用这一句说聊了什么、在看或听什么、在让 AI 做什么。只写这段里有的事：没有媒体、没有对 AI 说话、没有待办时不要提「没有」。
@@ -184,7 +187,18 @@ def instructions(known_tags: list[str], start: str) -> str:
     the language to write in."""
     d = dt.datetime.fromisoformat(start)
     return (SYSTEM + ("\n已有标签：" + "、".join(known_tags) if known_tags else "")
-            + f"\n这段对话开始于 {d:%Y-%m-%d}（周{'一二三四五六日'[d.weekday()]}）{d:%H:%M}。\n" + lang_line())
+            + f"\n这段对话开始于 {d:%Y-%m-%d}（周{'一二三四五六日'[d.weekday()]}）{d:%H:%M}。\n" + calendar(d.date()) + "\n" + lang_line())
+
+
+WEEKS = ("本周", "下周", "下下周", "三周后")
+
+
+def calendar(d0: dt.date) -> str:
+    """Three weeks of days from the conversation's, each with its weekday and its week (weeks start on Monday): the
+    model picks a due_date here instead of counting days (after TaoSheng's digest prompt, 0xCoach/TaoSheng, MIT)."""
+    monday, tag = d0 - dt.timedelta(days=d0.weekday()), ("（今天）", "（明天）", "（后天）")
+    return "日期表：\n" + "\n".join(f"{d} 周{'一二三四五六日'[d.weekday()]} {WEEKS[(d - monday).days // 7]}{tag[i] if i < 3 else ''}"
+                                   for i in range(21) for d in [d0 + dt.timedelta(days=i)])
 
 
 async def chat(text: str, known_tags: list[str], start: str) -> tuple[dict, dict]:
@@ -253,7 +267,8 @@ def anchor(res: dict, rows: list[dict]) -> dict:
         res[k] = [{**x, "at": at(x.get("at"))} for x in res.get(k) or []]
     for k in ("todos", "decisions"):
         res[k] = [{**x, **({} if grounded(x.get("quote"), x["at"], rows) else {"unsupported": True})} for x in res[k]]
-    res["todos"] = [{**x, "due_date": day(x.get("due_date")) if x.get("due") else None} for x in res["todos"]]
+    res["todos"] = [{**x, "due_date": (d := day(x.get("due_date")) if x.get("due") else None),
+                     "due_certainty": x.get("due_certainty") if d and x.get("due_certainty") in ("confirmed", "tentative") else None} for x in res["todos"]]
     for k in ("ai_spans", "media_spans"):
         res[k] = [{"from": at(x.get("from")), "to": at(x.get("to"))} for x in res.get(k) or [] if isinstance(x, dict)]
         res[k] = [x for x in res[k] if x["from"] and x["to"]]
@@ -293,7 +308,7 @@ def typed(res: dict) -> tuple[dict, list[str]]:
         v = out.get(k) or []
         out[k] = [x for x in v if isinstance(x, str if k == "tags" else dict)] if isinstance(v, list) else []
         if k in ("todos", "decisions", "ai_requests"):  # each one a text, its other words text or null (todo_ids, due_todos)
-            out[k] = [{**x, **{f: None for f in ("due", "owner", "to", "quote") if x.get(f) is not None and not isinstance(x[f], str)}}
+            out[k] = [{**x, **{f: None for f in ("due", "owner", "to", "quote", "due_certainty") if x.get(f) is not None and not isinstance(x[f], str)}}
                       for x in out[k] if isinstance(x.get("text"), str)]
         if out[k] != v:
             bad.append(k)
@@ -354,10 +369,16 @@ if __name__ == "__main__":
     r = anchor({"topics": [{"title": "b", "at": "10:02:00"}, {"title": "a", "at": "10:00:01"}], "todos": [{"text": "x", "at": "9:99"}]}, rows)
     assert [t["title"] for t in r["topics"]] == ["a", "b"] and r["topics"][0]["at"] == rows[0]["start"]
     assert r["todos"][0]["at"] is None and r["todos"][0]["due_date"] is None and r["decisions"] == []
-    todos = anchor({"todos": [{"due": "明天", "due_date": "2026-10-01"}, {"due": "下周", "due_date": "下周"}, {"due": None, "due_date": "2026-10-01"},
-                              {"due": "周五", "due_date": "2026-10-1"}, {"due": "月底", "due_date": "2026-09-31"}]}, rows)["todos"]
-    assert [t["due_date"] for t in todos] == ["2026-10-01", None, None, None, None], todos
-    assert instructions(["工作"], "2026-10-04T23:50:10.000").endswith("\n已有标签：工作\n这段对话开始于 2026-10-04（周日）23:50。\n" + ZH)
+    todos = anchor({"todos": [{"due": "明天", "due_date": "2026-10-01", "due_certainty": "tentative"}, {"due": "下周", "due_date": "下周", "due_certainty": "confirmed"},
+                              {"due": None, "due_date": "2026-10-01"}, {"due": "周五", "due_date": "2026-10-1"}, {"due": "月底", "due_date": "2026-09-31"},
+                              {"due": "周三", "due_date": "2026-10-07", "due_certainty": "sure"}]}, rows)["todos"]
+    assert [(t["due_date"], t["due_certainty"]) for t in todos] == [("2026-10-01", "tentative"), (None, None), (None, None), (None, None), (None, None),
+                                                                     ("2026-10-07", None)], todos
+    assert instructions(["工作"], "2026-10-04T23:50:10.000").endswith("\n已有标签：工作\n这段对话开始于 2026-10-04（周日）23:50。\n日期表：\n"
+                                                                    "2026-10-04 周日 本周（今天）\n2026-10-05 周一 下周（明天）\n2026-10-06 周二 下周（后天）\n"
+                                                                    "2026-10-07 周三 下周\n" + "\n".join(calendar(dt.date(2026, 10, 4)).splitlines()[5:]) + "\n" + ZH)
+    assert calendar(dt.date(2026, 10, 4)).splitlines()[-1] == "2026-10-24 周六 三周后" and calendar(dt.date(2026, 10, 7)).splitlines()[5:7] == [
+        "2026-10-11 周日 本周", "2026-10-12 周一 下周"]
     assert anchor({"people": [{"who": "S1", "points": ["a"]}, {"who": "S1", "points": ["b"]}, "x"]}, rows)["people"] == [{"who": "S1", "points": ["a", "b"], "points_at": [None, None]}]
     rows = [dict(rows[0], end="2026-09-30T10:00:09.000"), dict(rows[1], end="2026-09-30T10:02:09.000"), dict(start="2026-09-30T10:03:00.000", end="2026-09-30T10:03:30.000", text="欢迎收看", speaker="S2")]
     spans = anchor({"media_spans": [{"from": "10:03:00", "to": "10:03:00"}, {"from": "10:00:01", "to": "bad"}, "x"]}, rows)["media_spans"]
@@ -376,7 +397,7 @@ if __name__ == "__main__":
     s = result({"id": "c1"}, rows, {"title": ["t"], "tags": [{"name": "工作"}, "工作"], "todos": ["买菜", {"text": "a"}], "topics": "t"}, {})
     assert s["title"] == "" and s["tags"] == ["工作"] and [x["text"] for x in s["todos"]] == ["a"] and s["topics"] == [], s
     s = result({"id": "c1"}, rows, {"todos": [{"text": ["买菜"]}, {"text": "b", "due": 1, "owner": "我", "to": None}], "decisions": [{"quote": "q"}]}, {})
-    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "unsupported": True, "due_date": None}] and s["decisions"] == [], s
+    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "unsupported": True, "due_date": None, "due_certainty": None}] and s["decisions"] == [], s
     # a todo's or decision's quote must be in the transcript, else it is marked unsupported (无原文依据)
     said = [dict(start=f"2026-09-30T10:00:0{i}.000", text=t, speaker="我") for i, t in enumerate(["嗯，那我周五把报告发给老王。", "好的。", "你发吧"])]
     g = anchor({"todos": [{"quote": "我周五把报告发给老王", "at": "10:00:00"}, {"quote": "那我周五把报告，发给老王吧", "at": "10:00:00"},

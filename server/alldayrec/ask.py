@@ -125,7 +125,7 @@ def t_person(name):
 
 
 def t_todos(after, before, owner=""):
-    return [{"id": c["id"], "date": c["start"][:16], **{k: t.get(k) for k in ("owner", "to", "text", "due", "quote")}, "todo_id": i}
+    return [{"id": c["id"], "date": c["start"][:16], **{k: t.get(k) for k in ("owner", "to", "text", "due", "due_certainty", "quote")}, "todo_id": i}
             for c in db.conversations(after, before) for ts in [(c["summary"] or {}).get("todos") or []]
             for i, t in zip(db.todo_ids(c["id"], ts), ts) if not owner or t.get("owner") == owner][:80]
 

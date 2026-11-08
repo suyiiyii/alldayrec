@@ -960,6 +960,7 @@
     "with": "和{who}",
     "conv": "对话 {t}",
     "overdue": "过期 {n} 天",
+    "tentative": "暂定",
     "done": "完成"
   },
   "todoMarks": {

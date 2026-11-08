@@ -74,6 +74,7 @@ export interface Summary {
     text: string;
     due?: string | null;
     due_date?: string | null; // the due on the calendar (YYYY-MM-DD), from summary prompt v8 on
+    due_certainty?: Certainty | null; // how sure that due is, from prompt v14 on
     quote?: string;
     unsupported?: boolean; // its quote is not in the transcript (server summary.grounded)
     id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
@@ -345,6 +346,8 @@ export interface Recap {
   people: { who: string; note: string }[];
 }
 // One of my todos with where it came from (server db.todo_view): GET /api/todos/due, a recap's todos
+// a todo's due as said: confirmed (that day, for sure) or tentative (大概, 争取, 看情况)
+export type Certainty = "confirmed" | "tentative";
 export interface TodoView {
   id?: string; // none: a recap's todo from before ids whose text names no todo of a summary (no marks then)
   mark?: Mark | null;
@@ -354,6 +357,7 @@ export interface TodoView {
   to?: string | null;
   due?: string | null; // as said
   due_date?: string | null;
+  due_certainty?: Certainty | null;
   at?: string | null; // when it was said
   quote?: string | null; // the sentence
   title?: string | null; // the conversation's, and its start

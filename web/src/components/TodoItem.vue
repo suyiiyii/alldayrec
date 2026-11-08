@@ -22,7 +22,12 @@ const context = computed(() =>
     .join(" · "),
 );
 const when = computed(() =>
-  t.age_days ? tr("todoItem.overdue", { n: t.age_days }, t.age_days) : t.due,
+  [
+    t.age_days ? tr("todoItem.overdue", { n: t.age_days }, t.age_days) : t.due,
+    t.due && t.due_certainty === "tentative" && tr("todoItem.tentative"),
+  ]
+    .filter(Boolean)
+    .join(" · "),
 );
 const to = computed(
   () => `/c/${t.conv}` + (t.at ? "?" + new URLSearchParams({ tab: "transcript", at: t.at }) : ""),

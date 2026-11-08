@@ -960,6 +960,7 @@
     "with": "with {who}",
     "conv": "Conversation {t}",
     "overdue": "{n} day overdue | {n} days overdue",
+    "tentative": "tentative",
     "done": "Done"
   },
   "todoMarks": {

@@ -43,7 +43,7 @@ def test_due_context_and_stale(tmp_path):
         "过了八天": (8, True), "过了七天": (7, False), "说待会儿的过了四天": (4, True), "说明天的过了三天": (3, False), "没标题的": (1, False),
         "今天的": (0, False)}
     assert got["今天的"] == {"id": f"{C1}:2026-10-01T10:05:00.000", "mark": None, "conv": C1, "text": "今天的", "to": "S1", "due": "某天",
-                           "due_date": day, "at": "2026-10-01T10:05:00.000", "quote": "我今天把文档发你", "title": "周会",
+                           "due_date": day, "due_certainty": None, "at": "2026-10-01T10:05:00.000", "quote": "我今天把文档发你", "title": "周会",
                            "start": "2026-10-01T10:00:00.000", "with": ["S1"], "age_days": 0, "stale": False}
     assert got["过了八天"]["with"] == ["S1", "老王"] and got["过了八天"]["id"].startswith(f"{C1}:") and "#" not in got["过了八天"]["id"], "no to: the others, aliases as their person"
     assert got["没标题的"]["title"] is None and got["没标题的"]["with"] == []

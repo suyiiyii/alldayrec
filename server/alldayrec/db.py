@@ -533,7 +533,7 @@ def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict) -> d
     person; none given: the others in the conversation), the conversation's title and start."""
     to = al.get(t.get("to"), t.get("to"))
     return {"id": i, "mark": closed.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
-            **{k: t.get(k) for k in ("due", "due_date", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
+            **{k: t.get(k) for k in ("due", "due_date", "due_certainty", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
             "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
 
