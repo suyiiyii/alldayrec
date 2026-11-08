@@ -283,6 +283,31 @@ class BeanTest {
         assertEquals(0, bean.logs.count { it.first == "bean_lag" })
     }
 
+    /** A live read (realtime=1) the bean takes back to unit 0 (11-08 16:42 on iOS: 20704→0 in one transfer), sends all again
+     *  fast, then goes on live as far behind as that took, steadily: those units come late by the resend, not by the bean's
+     *  clock, so they date nothing (the file went 41 s late for 2.5 h, and the fix at 19:05 overlapped 39 s). */
+    @Test fun liveReadTakenBackDatesNothing() {
+        val dir = Files.createTempDirectory("bean").toFile(); val chunks = File(dir, "chunks")
+        val t0 = 1_793_000_000_000L
+        val openAt = t0 - 600_000; val a = openAt / 1000
+        val bean = FakeBean(t0)
+        bean.recording = true; bean.open = a; bean.listed[a] = 0
+        bean.onTransfer = { file, _, _ ->
+            bean.header(file, 0xFFFFFFFFL)
+            bean.units(file, (30_000L until 31_500L).toList())  // live for 30 s
+            bean.units(file, (0L until 31_500L).toList(), ms = 1)  // back to 0, 31.5 s
+            bean.units(file, (31_500L until 36_000L).toList())  // then live again, 31.5 s behind, for 90 s
+        }
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), chunks, bean)
+        assertThrows(IOException::class.java) { sync.session(t0 - 300_000, "") }  // begun before: read live only
+        assertEquals(listOf(Triple(a, 0L, true)), bean.transfers)
+        assertEquals("no jump from the resend", emptyList<String>(),
+            bean.logs.filter { it.first == "bean_clock" && !it.second.contains("起点") }.map { it.second })
+        assertEquals(0, sync.files[a]!!.anchors.size)
+        val late = piecesIn(chunks).filter { it.second >= 31_500 }.maxOf { kotlin.math.abs(it.first - (openAt + it.second * 20)) }
+        assertTrue("dated by seq as before: $late ms off", late <= 100)
+    }
+
     @Test fun reconnectAfterMissedResumeRestoresLiveGuard() {
         val dir = Files.createTempDirectory("bean").toFile()
         val t0 = 1_793_000_000_000L
