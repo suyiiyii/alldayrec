@@ -38,10 +38,21 @@ def wav(x: np.ndarray) -> bytes:
 
 
 def sentences(transcripts: list[dict]) -> list[dict]:
-    """A transcription's sentences as engine_segs takes them, speaker ids as SPEAKER_<n> (None without one)."""
-    return [{"start_ms": s["begin_time"], "end_ms": s["end_time"], "text": s["text"],
-             "speaker": None if s.get("speaker_id") is None else f"SPEAKER_{s['speaker_id']}"}
-            for t in transcripts[:1] for s in t.get("sentences", []) if s.get("text", "").strip()]
+    """A transcription's sentences as engine_segs takes them, speaker ids as SPEAKER_<n> (None without one), with their
+    words (each its text and punctuation; their texts join to the sentence's): transcript.split_speakers cuts a sentence
+    at a word where the voice changes. A sentence ends where its last word does: the engine's end can run on past it
+    (#419: 0.4% of the rows, 2.3% of the time, a 192 s row of 13 characters)."""
+    out = []
+    for t in transcripts[:1]:
+        for s in t.get("sentences", []):
+            if not s.get("text", "").strip():
+                continue
+            words = [{"start_ms": w["begin_time"], "end_ms": w["end_time"], "text": w.get("text", "") + (w.get("punctuation") or "")}
+                     for w in s.get("words") or []]
+            out.append({"start_ms": s["begin_time"], "end_ms": min(s["end_time"], words[-1]["end_ms"]) if words else s["end_time"],
+                        "text": s["text"], "speaker": None if s.get("speaker_id") is None else f"SPEAKER_{s['speaker_id']}",
+                        **({"words": words} if words else {})})
+    return out
 
 
 async def upload(data: bytes, auth: dict) -> str:
