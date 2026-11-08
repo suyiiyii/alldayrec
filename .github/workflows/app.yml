@@ -17,11 +17,31 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - run: pipx install uv
+      # JDK, Flutter and Gradle come from GitHub releases, which can answer 504 for minutes. apk-build.yml saves these
+      # caches on main (and never reads them); a PR restores main's, or its own from an earlier run.
+      - name: Restore pinned JDK into the tool cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.tool_cache }}/Java_Temurin-Hotspot_jdk/17.0.18-8
+          key: jdk-temurin-17.0.18+8-${{ runner.os }}-${{ runner.arch }}
       - name: Set up pinned JDK without sudo
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1, into the runner's own tool cache
         with:
           distribution: temurin
           java-version: '17.0.18+8'
+      - name: Restore pinned Flutter
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ${{ runner.temp }}/apk-flutter
+          key: flutter-3.47.5-6a19cca56475dbfba1478ee68d7bd0c2ef891da1-android-${{ runner.os }}-${{ runner.arch }}
+      - name: Restore Gradle wrapper and dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock', '.github/scripts/apk-toolchain.sh') }}
+          restore-keys: gradle-${{ runner.os }}-
       - name: Set up pinned Flutter and runner-owned Android SDK
         run: bash ../.github/scripts/apk-toolchain.sh
       - run: flutter analyze
@@ -36,12 +56,11 @@ jobs:
           # Flutter normally installs these during an APK build; this gate builds no APK.
           cp "$FLUTTER_ROOT/bin/cache/artifacts/gradle_wrapper/gradlew" .
           cp "$FLUTTER_ROOT/bin/cache/artifacts/gradle_wrapper/gradle/wrapper/gradle-wrapper.jar" gradle/wrapper/
+          # The wrapper downloads its distribution from GitHub once, with no retry; a cache miss retries it here.
+          for i in 1 2 3 4 5; do ./gradlew --version --no-daemon -q > /dev/null && break; [[ $i == 5 ]] && exit 1; sleep 30; done
           ./gradlew :app:testDebugUnitTest --no-daemon --max-workers=2 --no-parallel \
             '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=512m -XX:ReservedCodeCacheSize=128m' \
             -Dorg.gradle.vfs.watch=false -Pkotlin.compiler.execution.strategy=in-process
-      - name: Remove hosted ephemeral Gradle cache
-        if: always()
-        run: rm -rf "$RUNNER_TEMP"/apk-gradle-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"
 
   # the iPhone's Feishu recorder bean (Bean.swift: frames, crypto vectors, BeanSync against a fake bean): CryptoKit and
   # CommonCrypto exist on macOS only

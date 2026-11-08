@@ -17,7 +17,7 @@ done
 NRFUTIL="$CACHE/bin/nrfutil"
 BOOTSTRAP_SHA=1cf4bd1d3d64f43a6b9602d8d8e8d647bec0d26d517ba72fd154f95546b50260
 if [ ! -f "$NRFUTIL" ]; then
-  curl --fail --location --output "$NRFUTIL" \
+  curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output "$NRFUTIL" \
     https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
 fi
 printf '%s  %s\n' "$BOOTSTRAP_SHA" "$NRFUTIL" | sha256sum --check
