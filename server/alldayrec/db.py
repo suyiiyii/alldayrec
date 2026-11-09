@@ -9,6 +9,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -647,14 +648,31 @@ def terms() -> list[str]:
     return [r[0] for r in conn().execute("SELECT term FROM terms ORDER BY at DESC, term")]
 
 
+WORD_MAX = 30  # characters a term or hotword has at most
+HOTWORDS_S = 10  # db.hotwords read again after this: each ASR window and summary asks, it reads every conversation (20 ms at 20k)
+
+
+def word(w: str) -> str:
+    """A term or name as the prompts and engines get it: no newlines or control characters; "" when longer than WORD_MAX."""
+    w = "".join(ch for ch in w if ch.isprintable()).strip()
+    return w if len(w) <= WORD_MAX else ""
+
+
 def hotwords() -> list[str]:
     """What the ASR engines listen for and the prompts spell by, the most recently used first: the terms (by when each
-    was set) and the names of the people bank but 我 (by the last conversation each was in)."""
+    was set) and the names of the people bank but 我 (by the last conversation each was in), each a word(); kept on
+    the tenant for HOTWORDS_S (a term set drops it at once)."""
+    cache = tenant.T().hotwords
+    if time.monotonic() - cache["at"] < HOTWORDS_S:
+        return cache["words"]
     last = dict(conn().execute("SELECT j.value, max(c.start) FROM conversations c, json_each(c.participants) j GROUP BY j.value"))
-    at = {r[0]: last.get(r[0]) or "" for r in conn().execute("SELECT name FROM people WHERE name != '我'")}
-    for term, t in conn().execute("SELECT term, at FROM terms"):
-        at[term] = max(t, at.get(term, ""))
-    return sorted(at, key=lambda w: (at[w], w), reverse=True)
+    at = {}
+    for w, t in [(r[0], last.get(r[0]) or "") for r in conn().execute("SELECT name FROM people WHERE name != '我'")] + \
+            list(conn().execute("SELECT term, at FROM terms")):
+        if w := word(w):
+            at[w] = max(t, at.get(w, ""))
+    cache.update(at=time.monotonic(), words=sorted(at, key=lambda w: (at[w], w), reverse=True))
+    return cache["words"]
 
 
 def name_hints(conv_id: str | None = None) -> dict[str, dict]:

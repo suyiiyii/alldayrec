@@ -23,8 +23,10 @@ class Session:
     Raises on task-failed and on a connection closed before the task finished."""
 
     async def __aenter__(self):
+        return await asr.hinted("qwen-stream", URL, self.start, qwen_asr.HOTWORDS, qwen_asr.fits)  # the file job's hotwords
+
+    async def start(self, words):
         self.task = uuid.uuid4().hex
-        words = asr.hotwords(qwen_asr.HOTWORDS, qwen_asr.fits)  # the same as the file job's
         # no permessage-deflate: PCM hardly compresses, and deflating a page's first 300 s in one send held the event loop up to 0.76 s
         self.ws = await websockets.connect(URL, additional_headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}"}, max_size=None,
                                            compression=None)

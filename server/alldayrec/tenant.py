@@ -62,6 +62,7 @@ class Tenant:
     gone: set = field(default_factory=set)          # audio.gone: its recordings found missing, each warned of once
     tags: dict = field(default_factory=lambda: {"at": 0.0, "counts": {}})
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
+    hotwords: dict = field(default_factory=lambda: {"at": 0.0, "words": []})  # db.hotwords, a few seconds old at most
     undo: dict = field(default_factory=dict)        # renames that can be taken back, by undo id (routes_speakers.keep_undo)
     requests: dict = field(default_factory=dict)    # its HTTP requests this minute by (method, route, status): (ms, bytes) each (perf)
     mcp_gate: threading.Condition = field(default_factory=threading.Condition)  # atomic liveness check + execution leases, in workers

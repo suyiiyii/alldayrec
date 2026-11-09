@@ -380,10 +380,39 @@ def test_outside_any_tenant():
             contextvars.Context().run(f)
 
 
+def test_asr_requests(two, monkeypatch):
+    """Each tenant's hotwords (its terms and named people) go in its own ASR requests only, both side by side, the
+    hotwords kept on each tenant (db.hotwords) as they are in the server."""
+    from alldayrec import net
+    a, b = two
+    monkeypatch.setenv("STEPFUN_API_KEY", "k")
+    sent = []
+
+    def handler(req):
+        sent.append(json.loads(req.content)["audio"]["input"]["transcription"]["hotwords"])
+        return httpx2.Response(200, content=b'data: {"type": "transcript.text.done", "text": ""}\n\n')
+    monkeypatch.setattr(net, "TRANSPORT", httpx2.MockTransport(handler))
+    got = {}
+
+    async def one(t):
+        tenant.enter(t)
+        for _ in range(2):
+            await asr.stepfun_sse(np.zeros(1600, np.int16))
+        got[t.id] = sent[-1]
+
+    async def both():
+        async with anyio.create_task_group() as tg:
+            for t in (a, b):
+                tg.start_soon(one, t)
+    anyio.run(both)
+    assert got == {"a": ["MARKa词", "MARKa人"], "b": ["MARKb词", "MARKb人"]} and len(sent) == 4
+    assert not [w for w in sent if "MARKa词" in w and "MARKb词" in w]
+
+
 def test_nothing_per_person_in_a_module():
     """The modules the server runs keep no mutable state at module level but these (none of them a person's): a cache
     or a dict added there would be shared by every tenant."""
-    allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
+    allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS", "refused_at", "REJECTED"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
                "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
@@ -392,6 +421,7 @@ def test_nothing_per_person_in_a_module():
                "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)
                "compute": {"CALLS"}, "infer_server": {"state"}}  # calls to the inference service by op and result; its model and token
+    # asr's: the engines that refused the hotwords and how often (an engine's, at its endpoint, for everyone)
     here = Path(server.__file__).parent
     mutable = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
     found = {}

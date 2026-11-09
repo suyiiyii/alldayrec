@@ -147,7 +147,7 @@ def test_engine_squeeze(monkeypatch):
         if partial:
             partial(us[:1])
         return us, {}
-    fake = types.SimpleNamespace(transcribe=transcribe, HOTWORDS=0, fits=bool)
+    fake = types.SimpleNamespace(transcribe=transcribe, HOTWORDS=0, fits=bool, URL="")
     monkeypatch.setitem(sys.modules, "alldayrec.volc_asr", fake)
     monkeypatch.setattr(alldayrec, "volc_asr", fake, raising=False)  # asr.py: from alldayrec import volc_asr
     got = []

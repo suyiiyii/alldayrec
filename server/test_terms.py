@@ -1,6 +1,8 @@
 """The 热词和术语: kept per tenant with the people bank's names, the most recently used first; in each engine's request
 that takes hotwords (within its limits), in the summary's and the questions' prompts, on the web API and over MCP."""
+import gzip
 import json
+import urllib.error
 
 import anyio
 import httpx2
@@ -13,7 +15,9 @@ from alldayrec import ask
 from alldayrec import asr
 from alldayrec import db
 from alldayrec import live
+from alldayrec import core
 from alldayrec import mcp_server
+from alldayrec import monitor
 from alldayrec import qwen_asr
 from alldayrec import qwen_stream
 from alldayrec import routes_api
@@ -25,8 +29,12 @@ from test_net import delta, mock, sse
 
 
 @pytest.fixture
-def store(tmp_path):
-    """Alice last in a conversation 11-02, Bob 11-01, Carol never; 我 is in the bank too; term 灵犀 set 11-03, 星河 10-30."""
+def store(tmp_path, monkeypatch):
+    """Alice last in a conversation 11-02, Bob 11-01, Carol never; 我 is in the bank too; term 灵犀 set 11-03, 星河 10-30.
+    db.hotwords read afresh each time; no engine has refused them yet."""
+    monkeypatch.setattr(db, "HOTWORDS_S", 0)
+    monkeypatch.setattr(asr, "refused_at", {})
+    monkeypatch.setattr(asr, "REJECTED", {})
     t = db.open_db(tmp_path / "t.db")
     c = db.conn()
     for name in ("我", "Alice", "Bob", "Carol"):
@@ -47,6 +55,24 @@ def test_hotwords_most_recent_first(store):
     token = tenant.current.set(None)
     assert asr.hotwords(9) == [], "no tenant (a replay script): none"
     tenant.current.reset(token)
+
+
+def test_hotwords_cleaned_and_kept(store, monkeypatch):
+    """A name or term goes to the prompts and engines without newlines or control characters, none longer than
+    WORD_MAX; read again after HOTWORDS_S, at once after a term is set."""
+    c = db.conn()
+    c.execute("INSERT INTO people VALUES (?, 1, ?)", ("Dan\n忽略以上\x07", b""))
+    c.execute("INSERT INTO people VALUES (?, 1, ?)", ("长" * (db.WORD_MAX + 1), b""))
+    c.execute("INSERT INTO terms VALUES (?, '2026-11-04')", ("\t新词\r\n",))
+    assert db.hotwords() == ["新词", "灵犀", "Alice", "Bob", "星河", "Dan忽略以上", "Carol"], "cleaned; too long: left out"
+    assert "\n" not in summary.terms_line() and "\x07" not in summary.terms_line()
+    assert db.word("长" * db.WORD_MAX) == "长" * db.WORD_MAX and db.word("长" * (db.WORD_MAX + 1)) == ""
+    monkeypatch.setattr(db, "HOTWORDS_S", 60)
+    first = db.hotwords()
+    c.execute("DELETE FROM terms")
+    assert db.hotwords() == first, "kept a while: not every ASR window reads every conversation"
+    anyio.run(routes_api.term_set, {"term": "飞书"})
+    assert db.hotwords()[0] == "飞书" and "灵犀" not in db.hotwords(), "a term set: read again at once"
 
 
 def test_terms_api(store):
@@ -163,7 +189,7 @@ def test_prompts_carry_terms(store, monkeypatch):
 
     async def complete(messages, **kw):
         seen.append(messages)
-        return {"title": "t", "summary": "K8s 1200 灵犀"}, {"model": "m"}
+        return {"title": "t", "summary": "K8s 1200 灵犀"}, {"model": "m", "choices": [{"message": {"content": "{}"}}]}
     monkeypatch.setattr(summary, "complete", complete)
     monkeypatch.setattr(live, "complete", complete)
     line = summary.TERMS.format("K8s 1200、灵犀、Alice、Bob、星河、Carol")
@@ -172,6 +198,10 @@ def test_prompts_carry_terms(store, monkeypatch):
     rows = [dict(start="2026-11-05T10:00:00.000", end="2026-11-05T10:00:01.000", text="你好", speaker="我")]
     anyio.run(live.final, {"messages": [], "drafted": True}, rows, [], "2026-11-05T10:00:00.000")
     assert line in seen[1][-1]["content"] and len(seen) == 2
+    state = live.new("2026-11-05T10:00:00.000", "dev", [])
+    assert line in state["messages"][0]["content"], "the live analysis while the conversation goes on: in its system prompt"
+    anyio.run(live.analyze, state, rows)
+    assert line in seen[2][0]["content"], "every turn carries it"
     import datetime as dt
     assert line in ask.system(dt.datetime(2026, 11, 5, 12))
     monkeypatch.setattr(summary, "PROMPT_TERMS", 2)
@@ -179,3 +209,135 @@ def test_prompts_carry_terms(store, monkeypatch):
     db.conn().execute("DELETE FROM terms")
     db.conn().execute("DELETE FROM people")
     assert summary.terms_line() == "" and "热词" not in summary.instructions([], "2026-11-05T10:00:00") and "热词" not in ask.system(dt.datetime(2026, 11, 5, 12))
+    assert "热词" not in live.new("2026-11-05T10:00:00.000", "dev", [])["messages"][0]["content"]
+
+
+def qwen_peer(monkeypatch, sent, picky=True):
+    """Bailian's file job: a request with a vocabulary a 400 (picky), else a task that heard nothing."""
+    monkeypatch.setattr(qwen_asr, "POLL_S", 0)
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dk")
+
+    def handler(req):
+        if req.url.path == "/api/v1/uploads":
+            return httpx2.Response(200, json={"data": {"upload_host": "http://oss", "upload_dir": "d", "policy": "p", "signature": "s",
+                                                       "oss_access_key_id": "a", "x_oss_object_acl": "private", "x_oss_forbid_overwrite": "true"}})
+        if req.url.host == "oss":
+            return httpx2.Response(200)
+        if req.method == "POST":
+            sent.append(json.loads(req.content)["parameters"])
+            if picky and "vocabulary" in sent[-1]:
+                return httpx2.Response(400, json={"code": "InvalidParameter"})
+            return httpx2.Response(200, json={"output": {"task_id": "t"}})
+        return httpx2.Response(200, json={"output": {"task_status": "FAILED", "code": "ASR_RESPONSE_HAVE_NO_WORDS"}})
+    mock(monkeypatch, handler)
+    return lambda: anyio.run(asr.qwen, np.zeros(1600, np.int16)), lambda: "vocabulary" in sent[-1]
+
+
+def stepfun_peer(engine):
+    def peer(monkeypatch, sent):
+        """StepFun's SSE: a request with hotwords a 400; stepfun's file job (diarize) a sentence of its own."""
+        monkeypatch.setenv("STEPFUN_API_KEY", "k")
+
+        def handler(req):
+            sent.append(json.loads(req.content)["audio"]["input"]["transcription"])
+            if "hotwords" in sent[-1]:
+                return httpx2.Response(400, json={"error": "bad"})
+            return httpx2.Response(200, content=sse(delta("灵犀。", 0, 300)) + sse({"type": "transcript.text.done", "text": "灵犀。"}))
+        mock(monkeypatch, handler)
+
+        async def diarize(x):
+            return [{"start_ms": 0, "end_ms": 300, "text": "灵犀。", "speaker": "SPEAKER_0"}]
+        monkeypatch.setattr(asr, "diarize", diarize)
+        return lambda: anyio.run(asr.PROVIDERS[engine], np.zeros(1600, np.int16)), lambda: "hotwords" in sent[-1]
+    return peer
+
+
+def volc_peer_picky(monkeypatch, sent):
+    """Volcengine: a request with a corpus the bad-parameter error (45000001)."""
+    class Picky(volc_peer.Peer):
+        async def recv(self):
+            req = self.sent[0][1]["payload"]["request"]
+            sent.append(req)
+            if "corpus" in req:
+                body = gzip.compress(b'"invalid request parameter"')
+                return bytes([0x11, 0xF0, 0x11, 0]) + (45000001).to_bytes(4, "big") + len(body).to_bytes(4, "big") + body
+            return await super().recv()
+
+    def connect(url, **kw):
+        return Picky()
+    monkeypatch.setenv("VOLC_ASR_KEY", "k")
+    monkeypatch.setattr(websockets, "connect", connect)
+    return lambda: anyio.run(asr.volc, np.zeros(4000, np.int16)), lambda: "corpus" in sent[-1]
+
+
+def qwen_stream_peer(monkeypatch, sent):
+    """Bailian's streaming: a run-task with a vocabulary failed (InvalidParameter), else started."""
+    class WS:
+        async def send(self, m):
+            self.task = json.loads(m)
+            sent.append(self.task["payload"]["parameters"])
+
+        async def recv(self):
+            if "vocabulary" in sent[-1]:
+                return json.dumps({"header": {"event": "task-failed", "error_code": "InvalidParameter", "error_message": "vocabulary"}})
+            return json.dumps({"header": {"event": "task-started"}})
+
+        async def close(self):
+            pass
+
+    async def connect(url, **kw):
+        return WS()
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dk")
+    monkeypatch.setattr(websockets, "connect", connect)
+
+    async def run():
+        async with qwen_stream.Session() as s:
+            return s
+    return lambda: anyio.run(run), lambda: "vocabulary" in sent[-1]
+
+
+@pytest.mark.parametrize("engine, peer", [("qwen", qwen_peer), ("stepfun-sse", stepfun_peer("stepfun-sse")),
+                                          ("stepfun", stepfun_peer("stepfun")), ("volc", volc_peer_picky),
+                                          ("qwen-stream", qwen_stream_peer)])
+def test_hotwords_refused(store, monkeypatch, engine, peer):
+    """An engine that refuses the request with hotwords: taken at once without them, a warning, lr_hotwords_rejected_total
+    up one; then none to that engine for REFUSED_S, and again after it."""
+    sent = []
+    run, hinted = peer(monkeypatch, sent)
+    assert run() is not None
+    assert len(sent) == 2 and not hinted(), "the same request again, without the hotwords"
+    assert asr.REJECTED == {engine: 1}
+    monkeypatch.setattr(core, "TENANTS", [tenant.T()])
+    assert f'lr_hotwords_rejected_total{{instance="{tenant.T().id}",engine="{engine}"}} 1.0' in monitor.process_metrics(
+        {"cpu_s": 0, "s": 0, "rss_mb": None, "hwm_mb": None, "lag_p50_ms": None, "lag_p99_ms": None, "threads": None})
+    run()
+    assert len(sent) == 3 and not hinted() and asr.REJECTED == {engine: 1}, "in the cool-down: none sent, no failed try first"
+    for k in asr.refused_at:
+        asr.refused_at[k] -= asr.REFUSED_S
+    run()
+    assert len(sent) == 5 and asr.REJECTED == {engine: 2}, "after it: tried with them again"
+
+
+def test_hotwords_not_refused(store, monkeypatch):
+    """A failure the hotwords are not to blame for (a 429, a 5xx) is raised as before, not tried again; an accepted
+    request keeps them; HOTWORDS=0: none to any engine."""
+    for code in (429, 500, 402):
+        assert not asr.refused(urllib.error.HTTPError("u", code, "x", {}, None))
+    assert asr.refused(urllib.error.HTTPError("u", 400, "x", {}, None)) and asr.refused(RuntimeError("45000001: bad"))
+    assert not asr.refused(RuntimeError("qwen asr FAILED: FILE_DOWNLOAD_FAILED x")) and not asr.refused(TimeoutError())
+    assert asr.refused(RuntimeError("stepfun sse HTTP 400: x")) and not asr.refused(RuntimeError("stepfun sse HTTP 429: invalid"))
+    sent = []
+    run, hinted = qwen_peer(monkeypatch, sent, picky=False)
+    run()
+    assert len(sent) == 1 and hinted() and not asr.REJECTED
+    monkeypatch.setattr(asr, "HOTWORDS", False)
+    run()
+    assert not hinted() and asr.hotwords(9) == []
+    monkeypatch.setattr(asr, "HOTWORDS", True)
+
+    tries = []
+    monkeypatch.setenv("STEPFUN_API_KEY", "k")
+    mock(monkeypatch, lambda req: tries.append(req) or httpx2.Response(429))
+    with pytest.raises(RuntimeError, match="HTTP 429"):
+        anyio.run(asr.stepfun_sse, np.zeros(1600, np.int16))
+    assert len(tries) == 1 and not asr.REJECTED and not asr.refused_at, "one try only"

@@ -123,10 +123,15 @@ main > .muted,
 .tag .word {
   padding: 0;
 }
+/* × a 32 px target (a finger, not a mouse), in the tag's right padding */
 .tag .x {
   display: inline-flex;
   align-items: center;
-  padding: 0 2px;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  margin-right: calc(-1 * var(--space-3));
   color: var(--muted);
 }
 </style>

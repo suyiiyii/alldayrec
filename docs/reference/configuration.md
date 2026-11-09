@@ -63,6 +63,7 @@ type: reference
 | `HOLD_STALE_S` | `1200` | `1200` | 手机持续上报补传 hold，但 hold 之前这么多秒没有新音频到达，就继续定稿；静默手机仍等最多 12 小时，静默超过 5 分钟后回来重新获得宽限期。之后到的更早录音按迟到音频补转写（见 `LATE_SETTLE_S`）。设得很大（如 `315360000`）可实际关闭无进展超时；`0` 会立即过期，不是关闭 |
 | `DRAFT_ENGINE` | 空 | 同 `ENGINE` | 初稿层（页面开着时）的引擎；另可设 `qwen-stream`：页面开着时把音频流式推给千问（百炼 qwen-audio-3.1-asr-flash-streaming，用 `DASHSCOPE_API_KEY`），边说边出字 |
 | `ENGINE_FALLBACK` | 空 | 无 | `ENGINE` 或 `DRAFT_ENGINE` 在某个窗口上失败（402、451、5xx、超时）时改用的引擎；空着就稍后重试 |
+| `HOTWORDS` | `1` | `1` | 设成 `0` 时不给任何语音识别引擎传热词（[热词和术语](../how-to/add-terms.md)）；摘要和问答的提示词照样带 |
 | `VOLC_ASR_KEY` | 空 | — | 火山方舟 Agent Plan 的 API key，`volc` 用 |
 | `STEPFUN_API_KEY` | 空 | — | 阶跃星辰的 key，`stepfun`、`stepfun-sse` 用 |
 | `STEPFUN_SSE_URL` | 空 | `https://api.stepfun.com/v1/audio/asr/sse` | 阶跃 SSE 接口；默认是按量付费的地址，Step Plan 用 `.../step_plan/v1/audio/asr/sse` |

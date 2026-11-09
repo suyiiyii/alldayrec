@@ -14,7 +14,7 @@ from alldayrec import core
 from alldayrec import db
 from alldayrec import routes_audio
 from alldayrec import routes_speakers
-from alldayrec.routes_speakers import apply_rename, enroll, keep_undo, rename, speaker_undo
+from alldayrec.routes_speakers import apply_rename, check_name, enroll, keep_undo, rename, speaker_undo
 
 A, B, C = np.eye(4)[0], np.eye(4)[1], np.array([0.5, np.sqrt(0.75), 0, 0])  # C: 0.5 from A, a third person
 
@@ -235,6 +235,11 @@ def test_music_row_given_to_someone(store):
     was = ledger()
     with pytest.raises(HTTPException):
         apply_rename(c, "S?", "张三")  # every S? row of it at once: no
+    for bad in ("张\n三", "张三\x07"):  # a name goes into the prompts and the engines (db.hotwords): one line
+        with pytest.raises(HTTPException):
+            anyio.run(rename, c, {"from": "张三", "to": bad})
+        with pytest.raises(HTTPException):
+            check_name(bad)
     r = anyio.run(sentence_speaker, "1-2", {"conv": c, "to": "张三"})
     row = lambda: tuple(db.conn().execute("SELECT speaker, music FROM sentences WHERE id = '1-2'").fetchone())
     assert row() == ("张三", None) and r["voiceprints"] == 1 and len(ledger()) == len(was) + 1

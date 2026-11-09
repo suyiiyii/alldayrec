@@ -14,7 +14,7 @@ Transcripts often turn rare names, product names and jargon into words that soun
 3. To change a term, tap it, edit it in the box, and press Enter or tap **Save**. Press Esc to cancel.
 4. To remove a term, tap the **×** next to it.
 
-A term is at most 30 characters. A change takes effect at once: the next audio sent for recognition and the next summary use it.
+A term is at most 30 characters, on one line. A change takes effect at once: the next audio sent for recognition and the next summary use it.
 
 People you named on the People page (the names in the voiceprint bank, except 我) are added by themselves and shown under **Names added for you**. You do not need to add them.
 
@@ -31,7 +31,9 @@ When there are more terms than an engine takes, the most recently used come firs
 
 With `stepfun`, speakers and sentence breaks come from the file-mode recognition service, which gets no terms. The text comes from the SSE call, which does.
 
-With every engine, the prompts for summaries, the live analysis when a conversation ends, and **Ask AI** carry the list (up to 200 terms).
+When an engine refuses a request with the terms (a 4xx, or a failed task that says a parameter is bad), the window is sent again at once without them, so transcripts do not stop. That engine then gets no terms for an hour, the log has a warning, and the metric `lr_hotwords_rejected_total{engine}` goes up by 1. To turn the terms off for every engine, set `HOTWORDS=0` ([configuration](../reference/configuration.md)).
+
+With every engine, the prompts for summaries, the live analysis (while a conversation goes on and when it ends) and **Ask AI** carry the list (up to 200 terms).
 
 ## Read the list from an AI agent
 

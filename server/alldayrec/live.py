@@ -46,8 +46,10 @@ def background(convs: list[dict]) -> str:
 
 
 def new(start: str, device: str, earlier: list[dict]) -> dict:
+    """A conversation's agent: its system prompt carries the hotwords (terms_line) for every turn (analyze), as of its start."""
+    terms = terms_line()
     return {"start": start, "device": device, "topics": [], "next_id": 1, "fed_to": "",
-            "messages": [{"role": "system", "content": SYSTEM + "\n" + lang_line()}, {"role": "user", "content": background(earlier)}]}
+            "messages": [{"role": "system", "content": SYSTEM + "\n" + (terms + "\n" if terms else "") + lang_line()}, {"role": "user", "content": background(earlier)}]}
 
 
 def public(state: dict) -> dict:

@@ -3,8 +3,11 @@ sentences with times and speakers back, ENGINE_FALLBACK on a failure, every try 
 import base64
 import json
 import logging
+import math
 import os
+import re
 import time
+import urllib.error
 
 import anyio
 import numpy as np
@@ -27,6 +30,7 @@ DRAFT_ENGINE = os.environ.get("DRAFT_ENGINE") or ENGINE  # draft layer's (stepfu
                                                          # qwen-stream: one streaming session while a page watches, stream_loop)
 ENGINE_FALLBACK = os.environ.get("ENGINE_FALLBACK", "")  # a window the provider fails on (402, 451, 5xx, timeout) goes here; empty: none
 SQUEEZE_KEEP_S = float(os.environ.get("SQUEEZE_KEEP_S", "3"))  # VAD silences longer than this go to the engine cut to this; 0: whole
+HOTWORDS = os.environ.get("HOTWORDS", "1") != "0"  # 0: no engine gets the hotwords (the prompts still do)
 
 
 async def _http(url, data=None, headers=None, method=None) -> bytes:
@@ -41,8 +45,43 @@ FILE_MODELS = tuple(os.environ.get("FILE_MODELS", "stepaudio-2.5-asr-8006,doubao
 
 def hotwords(limit: int, fits=lambda w: True) -> list[str]:
     """The tenant's hotwords (db.hotwords) as an engine takes them: those it accepts (fits), the most recently used
-    first, at most `limit`; none outside a tenant (replay_case's runs)."""
-    return [w for w in db.hotwords() if fits(w)][:limit] if tenant.current.get(None) else []
+    first, at most `limit`; none outside a tenant (replay_case's runs) or with HOTWORDS=0."""
+    return [w for w in db.hotwords() if fits(w)][:limit] if HOTWORDS and tenant.current.get(None) else []
+
+
+REFUSED_S = 3600  # an engine that refused the hotwords gets none for this long
+refused_at: dict[tuple[str, str], float] = {}  # (engine, endpoint) -> when it last refused them (monotonic), this process
+REJECTED: dict[str, int] = {}  # engine -> requests it refused with hotwords and took without: lr_hotwords_rejected_total
+BAD_PARAMS = re.compile(r"param|invalid|45000001", re.I)  # a failed task's codes for a bad request (Bailian, Volcengine)
+
+
+def refused(e: Exception) -> bool:
+    """An answer that may be to the hotwords: a 4xx (urllib's, or stepfun_asr's "HTTP 4xx") but auth, balance, rate
+    and content refusals, or a failed task saying a parameter is bad."""
+    m = isinstance(e, RuntimeError) and re.search(r"HTTP (\d{3})", str(e))
+    code = e.code if isinstance(e, urllib.error.HTTPError) else int(m[1]) if m else None
+    if code:
+        return 400 <= code < 500 and code not in (401, 402, 403, 429, 451)
+    return isinstance(e, RuntimeError) and bool(BAD_PARAMS.search(str(e)))
+
+
+async def hinted(engine: str, endpoint: str, call, limit: int, fits=lambda w: True):
+    """call(words) with the hotwords (hotwords(limit, fits)); one the engine refuses with them (refused) is tried once
+    more at once without, and that engine at that endpoint gets none for REFUSED_S: a refusal must not fail every window."""
+    key = (engine, endpoint)
+    words = hotwords(limit, fits) if time.monotonic() - refused_at.get(key, -math.inf) >= REFUSED_S else []
+    if not words:
+        return await call([])
+    try:
+        return await call(words)
+    except Exception as e:
+        if not refused(e):
+            raise
+        out = await call([])
+        refused_at[key] = time.monotonic()
+        REJECTED[engine] = REJECTED.get(engine, 0) + 1
+        log.warning("asr %s refused %d hotwords (%s), took the request without; none for %d s", engine, len(words), failure(e), REFUSED_S)
+        return out
 
 
 def sent_audio(x: np.ndarray, speech: list[tuple[float, float]]) -> tuple[np.ndarray, list[tuple[float, float]]]:
@@ -89,14 +128,19 @@ def failure(e: Exception) -> str:
 async def volc(x: np.ndarray, partial=None) -> list[dict]:
     from alldayrec import volc_asr
     mark = lambda us: [{"speaker": "SPEAKER_0", **u} for u in us]
-    return mark((await volc_asr.transcribe(x, partial=partial and (lambda us: partial(mark(us))),
-                                           words=hotwords(volc_asr.HOTWORDS, volc_asr.fits)))[0])
+    return mark((await hinted("volc", volc_asr.URL, lambda w: volc_asr.transcribe(x, partial=partial and (lambda us: partial(mark(us))), words=w),
+                              volc_asr.HOTWORDS, volc_asr.fits))[0])
 
 
 async def stepfun_sse(x: np.ndarray, partial=None) -> list[dict]:
     """StepFun's SSE alone: text and character times, sentences cut by punctuation and pauses, no speakers."""
-    return stepfun_asr.sentences(await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))),
-                                                       hotwords(stepfun_asr.HOTWORDS)))
+    return stepfun_asr.sentences(await sse(x, partial, "stepfun-sse"))
+
+
+def sse(x: np.ndarray, partial, engine: str):
+    """stepfun_asr.sse with the hotwords (hinted), partial(sentences) as they come."""
+    return hinted(engine, stepfun_asr.URL, lambda w: stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))), w),
+                  stepfun_asr.HOTWORDS)
 
 
 async def stepfun(x: np.ndarray, partial=None) -> list[dict]:
@@ -108,7 +152,7 @@ async def stepfun(x: np.ndarray, partial=None) -> list[dict]:
         file.append(await diarize(x))
     async with anyio.create_task_group() as tg:
         tg.start_soon(job)
-        deltas = await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))), hotwords(stepfun_asr.HOTWORDS))
+        deltas = await sse(x, partial, "stepfun")
     return stepfun_asr.merge(deltas, file[0])
 
 
@@ -118,7 +162,7 @@ async def stepfun_file(x: np.ndarray, partial=None) -> list[dict]:
 
 async def qwen(x: np.ndarray, partial=None) -> list[dict]:
     """Bailian's Qwen-Audio 3.1 file job (qwen_asr): text, sentences and speakers at once, no partial answers."""
-    return await qwen_asr.transcribe(x, hotwords(qwen_asr.HOTWORDS, qwen_asr.fits))
+    return await hinted("qwen", qwen_asr.BASE, lambda w: qwen_asr.transcribe(x, w), qwen_asr.HOTWORDS, qwen_asr.fits)
 
 
 async def local(x: np.ndarray, partial=None) -> list[dict]:
