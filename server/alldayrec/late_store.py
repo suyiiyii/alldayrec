@@ -223,6 +223,13 @@ def claim(now_ms: int | None = None):
             return dict(t.execute("SELECT * FROM late_spans WHERE id = ?", (r["id"],)).fetchone())
 
 
+def stopped(span):
+    """The server stopped while span waited for the infer service (compute.Stopping): its claim and the try the claim
+    counted given back, so outages with restarts never use up its tries."""
+    db.conn().execute("UPDATE late_spans SET status='waiting', tries=MAX(0, tries-1) WHERE id=? AND status='processing'",
+                      (span["id"],))
+
+
 def move_seam(span, cut):
     """Return the untranscribed suffix to the next job, atomically and without resetting retries."""
     with db.tx() as t:

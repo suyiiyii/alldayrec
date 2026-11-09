@@ -25,6 +25,7 @@ from alldayrec import device_pipeline
 from alldayrec import infer
 from alldayrec import infer_server
 from alldayrec import late
+from alldayrec import late_store
 from alldayrec import monitor
 from alldayrec import server
 from alldayrec import threads
@@ -366,7 +367,8 @@ first one alone is S? as with a local model: the diarist's, a lone short sentenc
 
 def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
     """The server stopped while a pipeline and a late span wait for the service: the lifespan ends in a moment (not
-    once the service is back, or at a SIGKILL), raising nothing, and the span spends no try (recover() hands it back)."""
+    once the service is back, or at a SIGKILL), raising nothing. The span's claim is given back with the try it counted
+    (tries go up at the claim): three stops in a row during one outage leave it waiting with no try used, not failed."""
     rig(tmp_path, monkeypatch, hear)
     monkeypatch.setitem(infer_server.state, "compute", Stub())
     monkeypatch.setitem(infer_server.state, "token", TOKEN)
@@ -410,19 +412,23 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
             assert waiting == {"pipeline", "late"} and r.down_seconds() > 0, waiting
             t = time.monotonic()
         return time.monotonic() - t
-    took = anyio.run(run)
+    state = lambda: tuple(db.conn().execute("SELECT status, tries FROM late_spans WHERE id = ?", (s["id"],)).fetchone())
+    for k in range(3):  # a restart each time, the service down all along
+        waiting.clear()
+        took = anyio.run(run)
+        assert took < 3 and not up, (k, took)
+        assert not compute.STOP.is_set(), "cleared for a next start"
+        assert state() == ("waiting", 0), (k, state())
     rescue.cancel()
     for u in up:
         u.should_exit = True
-    assert took < 3 and not up, took
-    assert not compute.STOP.is_set(), "cleared for a next start"
-    st = db.conn().execute("SELECT status FROM late_spans WHERE id = ?", (s["id"],)).fetchone()[0]
-    assert st == "processing", "not failed: no try of its spent on the stop"
+    late_store.recover()
+    assert state() == ("waiting", 0), "not failed: the stops used none of its tries"
 
 
 def test_late_span_waits_out_its_timeout(store, monkeypatch):
     """A late span waiting for the service longer than LATE_PROCESS_TIMEOUT_S: the wait is not the span's time, so no
-    TimeoutError (no try spent, no ASR paid again); done once the service is back."""
+    TimeoutError (no second claim: no try more than its one, no ASR paid again); done once the service is back."""
     monkeypatch.setitem(infer_server.state, "compute", Stub())
     monkeypatch.setitem(infer_server.state, "token", TOKEN)
     monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
@@ -451,3 +457,4 @@ def test_late_span_waits_out_its_timeout(store, monkeypatch):
         up.should_exit = True
     anyio.run(run)
     assert db.conn().execute("SELECT note FROM late_spans WHERE id=?", (s["id"],)).fetchone()[0] != "TimeoutError"
+

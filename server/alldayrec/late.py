@@ -234,4 +234,8 @@ async def processor():
             e = threads.first(e)
             late_store.failed(span, e)
             log.warning("late span %s: %s", span["id"], type(e).__name__)
+        except BaseException as e:
+            if isinstance(threads.first(e), compute.Stopping):
+                late_store.stopped(span)
+            raise
         late_store.queue_summaries()
