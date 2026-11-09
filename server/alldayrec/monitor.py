@@ -205,6 +205,7 @@ def process_metrics(s: dict) -> str:
           ("loop_lag_ms", {"quantile": "0.99"}, s["lag_p99_ms"])]
     xs += [(f"threads_{k}", {"pool": pool}, v) for pool, t in (s["threads"] or {}).items() for k, v in t.items()]
     xs += [("infer_calls_total", {"op": op, "result": r}, n) for (op, r), n in compute.CALLS.items()]  # INFER_URL's calls
+    xs += [("infer_down_seconds", {}, compute.REMOTE.down_seconds() if compute.REMOTE else None)]  # 0: answering
     return "".join(prom_line(f"lr_{n}", {"instance": core.TENANTS[0].id, **labels}, v) + "\n" for n, labels, v in xs if v is not None)
 
 

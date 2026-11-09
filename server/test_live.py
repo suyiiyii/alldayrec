@@ -246,7 +246,7 @@ def test_main_settings(monkeypatch):
     class Started(Exception):
         pass
 
-    def started(d=None):
+    def started(d=None, skip=()):
         raise Started
     monkeypatch.setattr(infer, "fetch", started)  # past the settings, before any model download
     monkeypatch.setattr(sys, "argv", ["alldayrec"])

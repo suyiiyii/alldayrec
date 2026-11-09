@@ -68,11 +68,11 @@ def download(url: str, dest: Path, sha256: str):
         part.unlink(missing_ok=True)
 
 
-def fetch(d: Path = DIR):
+def fetch(d: Path = DIR, skip=()):
     """Download every model file missing in d, once: one that fails to come, or is not the pinned one, stops the
-    start (a file already there is left to check())."""
+    start (a file already there is left to check()). skip: those this process does without (compute.served)."""
     for name, url in SOURCES.items():
-        if (d / name).is_file():
+        if name in skip or (d / name).is_file():
             continue
         logging.getLogger(__name__).info("models: downloading %s from %s", name, url)
         try:
@@ -81,10 +81,10 @@ def fetch(d: Path = DIR):
             raise SystemExit(f"models: downloading {name} from {url} failed: {e} ({FIX.format(d=d)})")
 
 
-def check(d: Path = DIR):
-    """SystemExit naming every model file that is missing in d or not the pinned one, and its URL."""
+def check(d: Path = DIR, skip=()):
+    """SystemExit naming every model file that is missing in d or not the pinned one, and its URL (but skip's)."""
     bad = [f"{d / n} {'is missing' if not (d / n).is_file() else 'has another sha256'} (the pinned one: {SOURCES[n]})"
-           for n, h in MODELS.items() if not (d / n).is_file() or sha(d / n) != h]
+           for n, h in MODELS.items() if n not in skip and (not (d / n).is_file() or sha(d / n) != h)]
     if bad:
         raise SystemExit(f"models: {'; '.join(bad)}; {FIX.format(d=d)}")
 

@@ -4,9 +4,12 @@
 
 POST /embed and /music: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most MAX_S s),
 with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]} or {"music": bool}.
-GET /health (no token): {"ok": true}; GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no
-database, no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch).
-HOST (127.0.0.1), INFER_CALLS and INFER_THREADS as for the server: calls at once, onnxruntime threads a call.
+GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM (the server checks them at
+start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
+no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
+alldayrec.tenant for MODELS_DIR's default (DATA_DIR/models), only that path. INFER_HOST (127.0.0.1) and INFER_PORT
+(8771): its own, so it never takes the server's HOST and PORT from a shared .env. INFER_CALLS and INFER_THREADS as for
+the server: calls at once, onnxruntime threads a call.
 """
 import argparse
 import hmac
@@ -42,10 +45,16 @@ async def run(op: str, request: Request, f):
     if not authorized(request):
         CALLS[op, "401"] += 1
         return JSONResponse({"error": "unauthorized"}, 401)
-    body = await request.body()
-    if len(body) > MAX_S * SR * 2:
+    over = JSONResponse({"error": f"over {MAX_S} s"}, 413)
+    if int(request.headers.get("content-length") or 0) > MAX_S * SR * 2:
         CALLS[op, "413"] += 1
-        return JSONResponse({"error": f"over {MAX_S} s"}, 413)
+        return over
+    body = bytearray()
+    async for chunk in request.stream():  # counted as it comes: a chunked body without a length stops at the limit too
+        body += chunk
+        if len(body) > MAX_S * SR * 2:
+            CALLS[op, "413"] += 1
+            return over
     if not body or len(body) % 2:
         CALLS[op, "400"] += 1
         return JSONResponse({"error": "the body is int16 samples"}, 400)
@@ -73,8 +82,12 @@ async def music_(request: Request):
 
 
 @app.get("/health")
-async def health():
-    return {"ok": True}
+async def health(request: Request):
+    if "authorization" not in request.headers:
+        return {"ok": True}
+    if not authorized(request):
+        return JSONResponse({"error": "unauthorized"}, 401)
+    return {"ok": True, "models": compute.models(), "dim": compute.DIM}
 
 
 @app.get("/metrics")
@@ -89,7 +102,7 @@ async def metrics(request: Request):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8771")))
+    p.add_argument("--port", type=int, default=int(os.environ.get("INFER_PORT", "8771")))
     args = p.parse_args()
     if not os.environ.get("INFER_TOKEN"):
         raise SystemExit("not set: INFER_TOKEN (the server sends the same one)")
@@ -97,9 +110,10 @@ def main():
     infer.fetch()
     infer.check()
     state["compute"], state["token"] = compute.Local(), os.environ["INFER_TOKEN"]
-    logging.getLogger(__name__).info("ready on %s:%d", os.environ.get("HOST", "127.0.0.1"), args.port)
+    host = os.environ.get("INFER_HOST", "127.0.0.1")
+    logging.getLogger(__name__).info("ready on %s:%d", host, args.port)
     import uvicorn
-    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=args.port, log_level="warning", access_log=False)
+    uvicorn.run(app, host=host, port=args.port, log_level="warning", access_log=False)
 
 
 if __name__ == "__main__":

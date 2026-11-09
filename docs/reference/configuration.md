@@ -116,10 +116,10 @@ type: reference
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
 | `FINAL_ASR_CONCURRENCY`、`FINAL_EMBED_CONCURRENCY` | `4`、`2` | 按设备算：一个设备积压时，同时送引擎的定稿块数，和其中同时算声纹的块数。两个设备同时积压，各送各的，合计可到两倍；全进程的声纹计算仍共用 `INFER_CALLS` 名额。块照旧按时间顺序认人、切对话、写库，结果和逐块处理一样。不积压时始终只有一块，延迟不变；同一时段还有别的录音设备有音频，或本设备正给它当备用（同处备用）时，也是一块一块来 | `device_pipeline.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
-| `INFER_URL` | 空 | 独立推理服务 `alldayrec-infer` 的地址，例如 `https://infer.example.com`。设了以后声纹和音乐检测交给它算；空：在服务器进程里算 | `compute.py` |
+| `INFER_URL` | 空 | 独立推理服务 `alldayrec-infer` 的地址，例如 `https://infer.example.com`。设了以后声纹和音乐检测只在那里算，服务器不下载、也不加载这两个模型；服务失败时调用等它恢复，按 2 秒起、翻倍到 60 秒的间隔一直重试。空：在服务器进程里算 | `compute.py` |
 | `INFER_TOKEN` | 空 | 推理服务的令牌。设了 `INFER_URL` 时必填，服务器和 `alldayrec-infer` 两边设成同一个值 | `compute.py`、`infer_server.py` |
-| `INFER_TIMEOUT` | `30` | 调用推理服务时，每次尝试的超时秒数。失败后再试一次 | `compute.py` |
-| `INFER_FALLBACK` | `local` | 推理服务两次都失败时：`local` 在服务器本机算，并记一条警告和 `lr_infer_calls_total{result="local"}`；`none` 报错，和本机计算出错一样处理 | `compute.py` |
+| `INFER_TIMEOUT` | `30` | 每次尝试等推理服务回答的秒数（连接：2 秒） | `compute.py` |
+| `INFER_HOST`、`INFER_PORT` | `127.0.0.1`、`8771` | `alldayrec-infer` 监听的地址和端口（它自己的变量，共用 `.env` 时不会拿到服务器的 `HOST`、`PORT`） | `infer_server.py` |
 | `MUSIC_DETECT` | `1` | 定稿时听出是音乐（外放的歌、伴奏和人声差不多一样响）的句子不取声纹，说话人记为 `S?`，不会进人物页；仍然转写，转写行上有音符图标。把这句的说话人纠正成某个人，它就算人声：音符去掉，照常学声纹。0 关闭 | `music.py` |
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |

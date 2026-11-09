@@ -209,9 +209,10 @@ def main():
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
-    infer.fetch()  # a first start: the missing model files, downloaded
-    infer.check()  # every model file there and the pinned one, before anything starts
-    log.info("models ok: %d files in %s", len(infer.MODELS), infer.DIR)
+    skip = compute.served()  # INFER_URL: the voiceprint and music models are the service's, never here
+    infer.fetch(skip=skip)  # a first start: the missing model files, downloaded
+    infer.check(skip=skip)  # every model file there and the pinned one, before anything starts
+    log.info("models ok: %d files in %s", len(infer.MODELS) - len(skip), infer.DIR)
     # before the event loop: building the session keeps the GIL ~0.3 s, which in a thread held up the loop at each start
     c = compute.load()  # in this process, or the alldayrec-infer service at INFER_URL
     state["embed"] = c.embed
