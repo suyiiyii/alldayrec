@@ -508,7 +508,8 @@ function edit(label: string) {
                         td.owner ? speakerLabel(td.owner) : t("common.unknown")
                       }}{{ td.to ? ` → ${speakerLabel(td.to)}` : "" }}</span
                     ><span v-if="td.due" class="due"
-                      >{{ td.due }}{{ td.due_date ? " · " + td.due_date.slice(5) : "" }}</span
+                      >{{ td.due }}{{ td.due_date ? " · " + td.due_date.slice(5) : ""
+                      }}{{ td.due_certainty === "tentative" ? " · " + t("todoItem.tentative") : "" }}</span
                     ><QuoteAt :at="td.at" :c="c" @jump="jump" /><span v-if="markOf(td)" class="done">{{ t(`conv.marked.${markOf(td)}`) }}</span>
                   </div>
                   <div v-if="td.quote" class="quote">{{ t("conv.quote", { q: td.quote }) }}</div>

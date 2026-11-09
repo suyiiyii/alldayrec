@@ -271,3 +271,17 @@ def test_topic_without_time_is_filled():
     ]}, rows)["topics"]
     assert [t["at"] for t in topics] == [rows[0]["start"], rows[1]["start"], rows[2]["start"], rows[3]["start"], None, None], topics
     assert [t["title"] for t in topics][-2:] == ["猫", "预算"]  # nulls still sort last
+
+
+def test_date_table_and_certainty():
+    """Prompt v14: three weeks of dates, the model picks a due from them; a date only talked about is no due; a due's
+    certainty is kept only with its date and shown as 暂定 in MCP."""
+    from alldayrec import mcp_server
+    p = summary.instructions([], "2026-11-08T23:50:00")
+    assert "2026-11-08 周日 本周（今天）\n2026-11-09 周一 下周（明天）" in p and "2026-11-28 周六 三周后" in p and "2026-11-29" not in p
+    assert "只是讨论过、提到过的日期" in p and "tentative" in p
+    rows = [dict(start="2026-11-08T23:50:01.000", text="x", speaker="我")]
+    t = summary.anchor({"todos": [{"due": "下周三大概", "due_date": "2026-11-11", "due_certainty": "tentative"},
+                                  {"due": None, "due_date": None, "due_certainty": "confirmed"}]}, rows)["todos"]
+    assert [x["due_certainty"] for x in t] == ["tentative", None]
+    assert mcp_server.todo({"owner": "我", "text": "交报告", **t[0]}) == "[我] 交报告（下周三大概，暂定）"

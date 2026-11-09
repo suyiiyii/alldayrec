@@ -45,7 +45,8 @@ def day_of(s: str, what: str = "date") -> str:
 
 
 def todo(t: dict) -> str:
-    return f"[{t.get('owner') or '未知'}{' → ' + t['to'] if t.get('to') else ''}] {t.get('text', '')}{'（' + t['due'] + '）' if t.get('due') else ''}"
+    due = (t.get("due") or "") + ("，暂定" if t.get("due") and t.get("due_certainty") == "tentative" else "")
+    return f"[{t.get('owner') or '未知'}{' → ' + t['to'] if t.get('to') else ''}] {t.get('text', '')}{'（' + due + '）' if due else ''}"
 
 
 def brief(c: dict) -> str:
