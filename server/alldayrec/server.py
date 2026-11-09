@@ -69,16 +69,22 @@ log = logging.getLogger("live")
 async def lifespan(app):
     """The process's tasks (the metrics, the balance) and each tenant's (run_tenant), until the server stops: then all
     of them are cancelled."""
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(supervised, "metrics", metrics_loop, name="metrics")
-        if os.environ.get("STEPFUN_API_KEY"):
-            tg.start_soon(supervised, "balance", balance_loop, name="balance")
-        if monitor.LOOP_STALL_MS > 0:
-            tg.start_soon(supervised, "stalls", loop_stalls, name="stalls")
-        for t in core.TENANTS:
-            tg.start_soon(run_tenant, t, name=f"tenant:{t.id}")
-        yield
-        tg.cancel_scope.cancel()
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(supervised, "metrics", metrics_loop, name="metrics")
+            if os.environ.get("STEPFUN_API_KEY"):
+                tg.start_soon(supervised, "balance", balance_loop, name="balance")
+            if monitor.LOOP_STALL_MS > 0:
+                tg.start_soon(supervised, "stalls", loop_stalls, name="stalls")
+            for t in core.TENANTS:
+                tg.start_soon(run_tenant, t, name=f"tenant:{t.id}")
+            yield
+            compute.STOP.set()  # the calls waiting for the infer service (in threads, which a cancel waits for) end
+            tg.cancel_scope.cancel()
+    except* compute.Stopping:
+        pass
+    finally:
+        compute.STOP.clear()
 
 
 app = FastAPI(lifespan=lifespan)

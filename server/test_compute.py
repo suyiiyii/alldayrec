@@ -24,7 +24,12 @@ from alldayrec import db
 from alldayrec import device_pipeline
 from alldayrec import infer
 from alldayrec import infer_server
+from alldayrec import late
+from alldayrec import monitor
+from alldayrec import server
+from alldayrec import threads
 from test_backlog import DEVICE, SR, flac, hear, rig, tone
+from test_late_audio import span, store  # noqa: F401 (store: a fixture)
 
 TOKEN = "test-token"
 MODELS = all((infer.DIR / n).is_file() for n in (infer.EMB, infer.YAMNET))
@@ -97,9 +102,15 @@ def counted(r) -> list:
 
 
 def background(f, *args) -> dict:
-    """f(*args) in a thread; the dict gets "out" when it returns."""
+    """f(*args) in a thread; the dict gets "out" when it returns, "error" when it raises."""
     got = {}
-    t = threading.Thread(target=lambda: got.update(out=f(*args)), daemon=True)
+
+    def run():
+        try:
+            got["out"] = f(*args)
+        except BaseException as e:
+            got["error"] = e
+    t = threading.Thread(target=run, daemon=True)
     t.start()
     got["thread"] = t
     return got
@@ -240,7 +251,17 @@ def test_load(service, monkeypatch, caplog, tmp_path):
 
     monkeypatch.setenv("INFER_TOKEN", "wrong")
     r = compute.load()
-    assert not r.ok and r.down_seconds() > 0 and "INFER_TOKEN is not the service's" in caplog.text, "said at start"
+    assert not r.ok and "INFER_TOKEN is not the service's" in caplog.text, "said at start"
+    time.sleep(0.3)
+    assert r.down_seconds() == 0, "not down before a call fails: the service may start after the server, no call yet"
+    monkeypatch.setattr(compute, "STOP", threading.Event())
+    got = background(r.embed, speech())
+    time.sleep(0.5)
+    assert r.down_seconds() > 0, "a call failed"
+    compute.STOP.set()  # the call ends (Stopping) instead of trying on
+    got["thread"].join(5)
+    assert isinstance(got.get("error"), compute.Stopping), got
+    compute.STOP.clear()
 
     monkeypatch.setenv("INFER_TOKEN", TOKEN)
     other = types.SimpleNamespace(models=lambda: {infer.EMB: "other"}, DIM=192)
@@ -317,3 +338,92 @@ first one alone is S? as with a local model: the diarist's, a lone short sentenc
         up[0].should_exit = True
 
     anyio.run(run)
+
+
+def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
+    """The server stopped while a pipeline and a late span wait for the service: the lifespan ends in a moment (not
+    once the service is back, or at a SIGKILL), raising nothing, and the span spends no try (recover() hands it back)."""
+    rig(tmp_path, monkeypatch, hear)
+    monkeypatch.setitem(infer_server.state, "compute", Stub())
+    monkeypatch.setitem(infer_server.state, "token", TOKEN)
+    monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
+    monkeypatch.setattr(compute, "BACKOFF_S", (0.5, 1.0))
+    port, url = down()
+    r, waiting = compute.Remote(url, TOKEN, 5.0), set()
+    monkeypatch.setitem(core.state, "embed", lambda x: waiting.add("pipeline") or r.embed(x))
+    monkeypatch.setitem(core.state, "music", lambda x: waiting.add("pipeline") or r.music(x))
+    t0 = dt.datetime.fromtimestamp(round(time.time()) - 600)
+    x = np.concatenate([tone(0, 2), np.zeros(3 * SR, np.int16)])
+    for k in range(5):
+        audio.save(DEVICE, int((t0 + dt.timedelta(seconds=k)).timestamp() * 1000), flac(x[k * SR:(k + 1) * SR]), "audio/flac")
+    db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=5)))
+    s = span(0, 20)
+
+    async def late_process(sp):
+        waiting.add("late")
+        await anyio.to_thread.run_sync(r.embed, speech())  # not under threads.INFER: the service here needs one
+
+    async def both():  # the server's tasks: a device's pipeline and the late processor
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(device_pipeline.pipeline, DEVICE)
+            tg.start_soon(late.processor)
+    monkeypatch.setattr(late, "process", late_process)
+    monkeypatch.setattr(server, "metrics_loop", both)
+    monkeypatch.setattr(core, "TENANTS", [])
+    monkeypatch.setattr(monitor, "LOOP_STALL_MS", 0)  # no loop_stalls: its lag samples are the process's (test_metrics)
+    monkeypatch.setattr(compute, "STOP", threading.Event())
+    up = []
+    rescue = threading.Timer(15, lambda: up.append(serve(bound(port))))  # without the fix: back after 15 s, not never
+    rescue.start()
+
+    async def run():
+        async with server.lifespan(server.app):
+            for _ in range(100):
+                if waiting == {"pipeline", "late"}:
+                    break
+                await anyio.sleep(0.1)
+            await anyio.sleep(0.5)
+            assert waiting == {"pipeline", "late"} and r.down_seconds() > 0, waiting
+            t = time.monotonic()
+        return time.monotonic() - t
+    took = anyio.run(run)
+    rescue.cancel()
+    for u in up:
+        u.should_exit = True
+    assert took < 3 and not up, took
+    assert not compute.STOP.is_set(), "cleared for a next start"
+    st = db.conn().execute("SELECT status FROM late_spans WHERE id = ?", (s["id"],)).fetchone()[0]
+    assert st == "processing", "not failed: no try of its spent on the stop"
+
+
+def test_late_span_waits_out_its_timeout(store, monkeypatch):
+    """A late span waiting for the service longer than LATE_PROCESS_TIMEOUT_S: the wait is not the span's time, so no
+    TimeoutError (no try spent, no ASR paid again); done once the service is back."""
+    monkeypatch.setitem(infer_server.state, "compute", Stub())
+    monkeypatch.setitem(infer_server.state, "token", TOKEN)
+    monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
+    monkeypatch.setattr(compute, "BACKOFF_S", (0.2, 0.4))
+    port, url = down()
+    r = compute.Remote(url, TOKEN, 5.0)
+    monkeypatch.setattr(compute, "REMOTE", r)
+    monkeypatch.setattr(late, "LATE_PROCESS_TIMEOUT_S", 1.5)
+    s = span(0, 20)
+
+    async def process(sp):
+        await anyio.to_thread.run_sync(r.embed, speech(), limiter=threads.INFER)
+        await anyio.sleep(0)  # the rest of a span's work: a timeout fires here
+        db.conn().execute("UPDATE late_spans SET status='done' WHERE id=?", (sp["id"],))
+    monkeypatch.setattr(late, "process", process)
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(late.processor)
+            await anyio.sleep(4)  # down for 2.7 timeouts
+            up = await anyio.to_thread.run_sync(serve, bound(port))
+            with anyio.fail_after(5):
+                while db.conn().execute("SELECT status FROM late_spans WHERE id=?", (s["id"],)).fetchone()[0] != "done":
+                    await anyio.sleep(0.1)
+            tg.cancel_scope.cancel()
+        up.should_exit = True
+    anyio.run(run)
+    assert db.conn().execute("SELECT note FROM late_spans WHERE id=?", (s["id"],)).fetchone()[0] != "TimeoutError"

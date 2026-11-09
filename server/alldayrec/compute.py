@@ -11,7 +11,8 @@ from a thread under threads.INFER, so a backend is only a blocking function.
   each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
   service has been failing, lr_infer_calls_total{op,result} counts calls (remote, retried) and failed tries (error).
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,
-  every call fails as above until the service is fixed and the server restarted.
+  every call fails as above until the service is fixed (each try asks again: no restart needed). The server stopping
+  (STOP) ends a call waiting for the service with Stopping instead of waiting on to a SIGKILL.
 """
 import logging
 import os
@@ -29,6 +30,12 @@ BACKOFF_S = (2.0, 60.0)  # the wait after a first failure, doubling up to the la
 LOG_EVERY_S = 60
 CALLS: Counter = Counter()  # (op, result) -> calls; result: remote, retried (after failed tries), error (a failed try)
 REMOTE = None  # the process's Remote when INFER_URL is set (load()): its down time for monitor
+STOP = threading.Event()  # set by the server's lifespan as it stops: a call waiting for the service raises Stopping
+
+
+class Stopping(BaseException):
+    """The server stops while a call waits for the service. No Exception: no caller takes it for a failure of its
+    own (late.processor's except would spend the span's tries)."""
 
 
 class Compute(Protocol):
@@ -90,14 +97,16 @@ class Remote:
             if now - self.logged >= LOG_EVERY_S:
                 self.logged = now
                 log.error("infer service %s: %s%s; failing for %.0f s, calls wait (next try in %.0f s)", op, err,
-                          ", INFER_TOKEN is not the service's" if status == 401 else "", now - self.down_since, self.wait)
+                          ", INFER_TOKEN is not the service's" if status == 401 else ", check INFER_URL" if status == 404
+                          else "", now - self.down_since, self.wait)
 
     def _post(self, op: str, x: np.ndarray, parse):
         """parse(the service's answer), once one comes: every failure is tried again (failed())."""
         body, tries = np.ascontiguousarray(x, "<i2").tobytes(), 0
         while True:
             while (w := self.next_try - time.monotonic()) > 0:  # the service failing: no try before the backoff's
-                time.sleep(w)
+                if STOP.wait(w):
+                    raise Stopping
             try:
                 if not self.ok:
                     self.ok = self.same_models()
@@ -147,4 +156,5 @@ def load() -> Compute:
     except Exception as e:
         r.ok = False
         r.failed("health", e)
+        r.down_since = None  # down once a call fails: a service started after this server, no call yet, is not down
     return r
