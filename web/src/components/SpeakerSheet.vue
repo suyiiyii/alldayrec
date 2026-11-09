@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from "vue";
+import { computed, onBeforeUnmount, ref, useTemplateRef } from "vue";
 import { t } from "../i18n";
 import { get, hhmmss, post, type LabelSuggestions, type NameCheck as Check, type Row } from "../lib/api";
 import { play, player, toggle } from "../lib/audio";
@@ -100,8 +100,8 @@ async function rename(from: string, to: string, check = false) {
       undo: r.undo,
       back: t("conv.renamedBack", { to: speakerLabel(from) }),
     };
-    // not another speaker's sheet opened meanwhile
-    if (editing.value === from && r.also) [also.value, editing.value] = [{ ...r.also, to, done: d }, ""];
+    // not another speaker's sheet opened meanwhile, nor the sheet closed
+    if (editing.value === from && r.also && dlg.value?.open) [also.value, editing.value] = [{ ...r.also, to, done: d }, ""];
     else {
       if (editing.value === from) close();
       done(d);
@@ -121,14 +121,18 @@ function other(free: string) {
   [newName.value, ask.value, sure] = [free, null, true];
   box.value?.focus();
 }
+let joining = false; // 一起改 on its way: its answer decides which 撤销 (together)
 function closed() {
-  // the sheet closed (✕, 不用了, Escape, the backdrop) with 一起改 not taken: now the rename's 撤销 is in reach
+  // the sheet closed (✕, 不用了, Escape, the backdrop, the page left) with 一起改 not taken: now the rename's 撤销 is in reach
+  if (joining) return;
   if (also.value) done(also.value.done);
   also.value = null;
 }
+onBeforeUnmount(closed);
 async function together() {
   const a = also.value;
-  if (!a) return;
+  if (!a || saving.value) return;
+  joining = true;
   await run(async () => {
     const { to, voices, group, suggestion } = a;
     const r = await post<{ mixed: true } | { renamed: number; undo: string | null }>("/api/speakers/name", {
@@ -144,10 +148,13 @@ async function together() {
     }
     also.value = null;
     close();
-    const back = t("common.undone");
-    done({ msg: t("nameCheck.togetherDone", { n: r.renamed }, r.renamed), undo: r.undo ?? a.done.undo, back });
+    const undo = r.undo ?? a.done.undo; // the rename's taken into it
+    // none renamed (named meanwhile): the rename's toast, its 撤销 the one undo
+    done(r.renamed ? { msg: t("nameCheck.togetherDone", { n: r.renamed }, r.renamed), undo, back: t("common.undone") } : { ...a.done, undo });
     await props.reload();
   });
+  joining = false;
+  if (!dlg.value?.open) closed(); // closed while it was on its way, and not taken (mixed, an error)
 }
 async function alias(name: string, of: string) {
   await run(async () => {
