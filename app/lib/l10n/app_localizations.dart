@@ -1733,7 +1733,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiSub.
   ///
   /// In zh, this message translates to:
-  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
+  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。手机会问要不要加入它的网络；期间留在这个页面'**
   String get beanWifiSub;
 
   /// No description provided for @beanWifiRecording.
@@ -1754,6 +1754,12 @@ abstract class AppLocalizations {
   /// **'已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭'**
   String get beanWifiAskedVpn;
 
+  /// No description provided for @beanWifiPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi‑Fi 快传要「附近的设备」权限：允许后再点一次（拒绝过的话到系统设置里打开）'**
+  String get beanWifiPermission;
+
   /// No description provided for @beanWifiLowBattery.
   ///
   /// In zh, this message translates to:
@@ -1769,13 +1775,19 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiDenied.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传没成：iOS 问要不要加入豆子的网络时点了取消'**
+  /// **'上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消'**
   String get beanWifiDenied;
+
+  /// No description provided for @beanWifiUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消，或没找到豆子的热点；已回到蓝牙，可以再点一次'**
+  String get beanWifiUnavailable;
 
   /// No description provided for @beanWifiBackground.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传没成：App 不在前台，iOS 不让加入热点；快传期间留在这个页面'**
+  /// **'上次 Wi‑Fi 快传没成：App 不在前台，手机不让加入热点；快传期间留在这个页面'**
   String get beanWifiBackground;
 
   /// No description provided for @beanWifiNoJoin.
@@ -1811,7 +1823,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiJoinTimeout.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传没成：iOS 2 分钟都没答复要不要加入豆子的热点（它的提问可能没人点），已回到蓝牙'**
+  /// **'上次 Wi‑Fi 快传没成：手机问要不要加入豆子的热点，2 分钟没人答复，已回到蓝牙'**
   String get beanWifiJoinTimeout;
 
   /// No description provided for @beanWifiFailed.

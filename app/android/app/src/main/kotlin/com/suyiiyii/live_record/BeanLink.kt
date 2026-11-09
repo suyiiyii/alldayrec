@@ -232,7 +232,10 @@ fun beanAdv(r: ScanResult): Pair<String, Int>? {
 class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, chunks: File,
                private val sliceS: () -> Int, private val onPiece: (Int) -> Unit, private val onName: (String) -> Unit,
                private val onReport: (String, Map<String, Any?>) -> Unit) {
-    private val name = prefs.getString("bleName", null) ?: ""
+    val name = prefs.getString("bleName", null) ?: ""
+    /** Wi-Fi fast transfer asked for (MainActivity's beanWifi, the device page): BeanSync's next pass takes it */
+    @Volatile var wifiWanted = false
+    @Volatile private var wifi: BeanWifi? = null  // while there is one, BeanSync's bytes go over it
     private val adapter = ctx.getSystemService(BluetoothManager::class.java).adapter
     @Volatile private var on = true
     @Volatile private var gatt: BluetoothGatt? = null
@@ -254,8 +257,12 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     private val notes = LinkedBlockingQueue<ByteArray>()
 
     private val io = object : BeanSync.Io {
-        override fun send(frame: ByteArray) = write(gatt ?: throw Gone(), frame)
+        override fun send(frame: ByteArray) {
+            wifi?.let { check(Bean.allowed(frame, sync.deletable)) { "not sent: ${Bean.hex(frame)}" }; return it.send(frame) }
+            write(gatt ?: throw Gone(), frame)
+        }
         override fun receive(ms: Long): ByteArray? {
+            wifi?.let { return it.receive(ms) }
             if (adapter?.isEnabled != true) throw Gone()  // Bluetooth off: no disconnect callback comes
             val b = notes.poll(ms, TimeUnit.MILLISECONDS) ?: return null
             if (b === GONE) { notes.put(GONE); throw Gone() }
@@ -289,6 +296,14 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
                 "other_audio" to am.isMusicActive,
                 "foreground" to (me.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND))
         }
+        override fun wifiAsked() = wifiWanted.also { wifiWanted = false }
+        override fun wifiJoin(ssid: String, password: String, endpoint: ByteArray) {
+            // the BLE link goes meanwhile (the bean drops it): its GONE waits in `notes` for the way back, which ends the session
+            val w = BeanWifi(ssid, password, AndroidNet(ctx) { k, t, l, f -> log(k, t, l, f, null) }) { k, t, l, f -> log(k, t, l, f, null) }
+            wifi = w
+            try { w.open(endpoint) } catch (e: Exception) { wifiLeave(); throw e }
+        }
+        override fun wifiLeave() { wifi?.close(); wifi = null }
         override fun trace(what: String, v: Map<String, Any?>) {
             val w = capture ?: return
             val line = JSONObject(v + mapOf("t" to System.currentTimeMillis(), "what" to what)).toString()
@@ -298,13 +313,14 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         }
     }
 
-    private val sync = BeanSync(name, File(ctx.filesDir, "bean/$name.json"), chunks, io)
+    private val sync: BeanSync = BeanSync(name, File(ctx.filesDir, "bean/$name.json"), chunks, io)
     private val thread = Thread { loop() }
 
     val state get() = if (inSession) sync.state else linkState
     /** The session is up (its key exchange and first reads done): recording or not. */
     val connected get() = inSession && sync.state["code"] in setOf("beanIdle", "joining", "connected")
     val hw get() = sync.hw + sync.owed + mapOf("name" to name)
+    val wifiNote get() = sync.wifiNote
     val syncDoneKb get() = sync.syncDoneKb
     val syncTotalKb get() = sync.syncTotalKb
 
@@ -530,7 +546,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     /** To the bean's command characteristic only (never the OTA service), and only what BeanSync lets through. */
     @Suppress("DEPRECATION")
     private fun write(g: BluetoothGatt, v: ByteArray) {
-        check(Bean.allowed(v, sync.deletable) && v.size <= mtu - 3) { "not sent: ${v.size} B" }
+        check(Bean.allowed(v, sync.deletable, sync.hotspot) && v.size <= mtu - 3) { "not sent: ${v.size} B" }
         val ch = cmd ?: throw Gone()
         op("write") {
             if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(ch, v, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothGatt.GATT_SUCCESS

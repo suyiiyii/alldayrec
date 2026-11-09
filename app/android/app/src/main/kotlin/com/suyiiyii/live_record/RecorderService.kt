@@ -50,7 +50,7 @@ class RecorderService : Service() {
                 "pending" to q.size, "pendingBytes" to q.sumOf { it.length() }, "oldest" to q.firstOrNull()?.let(Uploader::startMs),
                 "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to (l?.state ?: b?.state),
                 "connected" to (l?.state?.get("code") == "connected" || b?.connected == true), "tag" to slicer?.tag, "hw" to (l?.hw ?: b?.hw),
-                "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (l != null || b != null) "ble" else "mic"), "usbNote" to l?.usbNote, "lastSync" to l?.syncNote,
+                "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (l != null || b != null) "ble" else "mic"), "usbNote" to l?.usbNote, "wifiNote" to b?.wifiNote, "lastSync" to l?.syncNote,
                 "syncDone" to (l?.syncDoneKb ?: b?.syncDoneKb), "syncTotal" to (l?.syncTotalKb ?: b?.syncTotalKb), "syncLive" to l?.syncLiveKb, "pausedUntil" to l?.pausedUntil,
                 "listen" to link?.listening?.lines)
         }
@@ -107,6 +107,7 @@ class RecorderService : Service() {
                 "connected" -> s(R.string.link_connected)
                 "encrypting" -> s(R.string.link_encrypting)
                 "beanIdle" -> s(R.string.link_bean_idle)
+                "beanWifi" -> s(R.string.link_bean_wifi)
                 "linkError" -> s(R.string.link_error, v["detail"])
                 "rejected" -> s(R.string.note_rejected)
                 "uploadFailed" -> s(R.string.note_upload_failed, v["detail"])
@@ -126,7 +127,7 @@ class RecorderService : Service() {
             val title = when {
                 s["source"] != "ble" -> t(R.string.notice_recording)
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
-                total > 0 -> if ((s["link"] as Map<*, *>?)?.get("code") == "beanIdle")  // a bean's backlog: it is not recording
+                total > 0 -> if ((s["link"] as Map<*, *>?)?.get("code") in setOf("beanIdle", "beanWifi"))  // a bean's backlog: it is not recording
                     t(R.string.notice_bean_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
                 else if (s["connected"] == true)
                     t(R.string.notice_live_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)

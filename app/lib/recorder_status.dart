@@ -235,6 +235,7 @@ String nativeText(BuildContext context, Object? v) {
     'beanWifiLowBattery' => l.beanWifiLowBattery(v['battery']),
     'beanWifiNoHotspot' => l.beanWifiNoHotspot,
     'beanWifiDenied' => l.beanWifiDenied,
+    'beanWifiUnavailable' => l.beanWifiUnavailable,
     'beanWifiBackground' => l.beanWifiBackground,
     'beanWifiNoJoin' => l.beanWifiNoJoin,
     'beanWifiNoSocket' => l.beanWifiNoSocket,

@@ -238,7 +238,7 @@ class _RecorderPageState extends State<RecorderPage> {
             const Divider(height: 20),
           ],
           // #431: the bean's Wi-Fi fast transfer, by hand
-          if (bean && Platform.isIOS) ...[
+          if (bean && (Platform.isIOS || Platform.isAndroid)) ...[
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.wifi_rounded),
@@ -249,7 +249,12 @@ class _RecorderPageState extends State<RecorderPage> {
                       final m = ScaffoldMessenger.of(context);
                       _call(() async {
                         final r = await Recorder.beanWifi();
-                        final text = switch (r) { 'recording' => l.beanWifiRecording, 'vpn' => l.beanWifiAskedVpn, _ => l.beanWifiAsked };
+                        final text = switch (r) {
+                          'recording' => l.beanWifiRecording,
+                          'vpn' => l.beanWifiAskedVpn,
+                          'permission' => l.beanWifiPermission,
+                          _ => l.beanWifiAsked,
+                        };
                         m.clearSnackBars();  // taps in a row: one note, not a queue of the same
                         m.showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
                       });

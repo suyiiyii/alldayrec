@@ -30,7 +30,7 @@ final codes = <Map<String, Object?>>[
   {'code': 'noModel'}, {'code': 'model', 'want': 'LR-X1', 'model': 'LR-P3'}, {'code': 'same', 'version': '20261011.164128-098861b'},
   {'code': 'sha256'}, {'code': 'zip', 'detail': 'bad zip'},
   {'code': 'beanWifiRecording'}, {'code': 'beanWifiLowBattery', 'battery': 25}, {'code': 'beanWifiNoHotspot'},
-  {'code': 'beanWifiDenied'}, {'code': 'beanWifiBackground'}, {'code': 'beanWifiNoJoin'}, {'code': 'beanWifiJoinTimeout'},
+  {'code': 'beanWifiDenied'}, {'code': 'beanWifiUnavailable'}, {'code': 'beanWifiBackground'}, {'code': 'beanWifiNoJoin'}, {'code': 'beanWifiJoinTimeout'},
   {'code': 'beanWifiNoSocket'}, {'code': 'beanWifiNoAnswer'}, {'code': 'beanWifiBusy'}, {'code': 'beanWifiNoUnits'},
   {'code': 'beanWifiFailed', 'detail': 'Wi-Fi socket closed'},
 ];

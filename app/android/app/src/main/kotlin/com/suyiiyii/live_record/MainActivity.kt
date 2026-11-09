@@ -204,6 +204,21 @@ class MainActivity : FlutterActivity() {
                     if (link == null) { if (on) result.error("notStarted", null, null) else result.success(null) }
                     else try { link.listen(on); result.success(null) } catch (e: Exception) { result.error("listen", e.message, null) }
                 }
+                "beanWifi" -> {  // the bean's Wi-Fi fast transfer, by hand (#431): its session takes it before the next transfer
+                    val b = RecorderService.bean ?: return@setMethodCallHandler result.error("notStarted", null, null)
+                    // Android 13+: joining a hotspot by name needs 附近的设备 (neverForLocation), asked at the tap; tap again once allowed
+                    if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.NEARBY_WIFI_DEVICES)) {
+                        requestPermissions(arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES), 3)
+                        DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）：没有「附近的设备」权限，先申请", "warn", mapOf("permission" to false))
+                        return@setMethodCallHandler result.success("permission")
+                    }
+                    b.wifiWanted = true  // while the bean records BeanSync logs bean_wifi_skip and goes on over BLE
+                    val vpn = AndroidNet.vpn(this)  // a VPN may keep the bean's sockets off the hotspot: say so at the tap
+                    val recording = b.hw["recording"] == true
+                    DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）" + (if (vpn) "；开着 VPN" else "") + (if (recording) "；豆子在录音" else ""),
+                        fields = mapOf("vpn" to vpn, "recording" to recording))
+                    result.success(if (recording) "recording" else if (vpn) "vpn" else "ok")
+                }
                 "pause" -> {  // the connected recorder keeps nothing for s seconds (0: records again)
                     try { RecorderService.link!!.pause(call.argument<Int>("s")!!); result.success(null) }
                     catch (e: Exception) { result.error("notConnected", null, null) }

@@ -982,7 +982,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiSub =>
-      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. iOS asks whether to join its network; stay on this page meanwhile';
+      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. The phone asks whether to join its network; stay on this page meanwhile';
 
   @override
   String get beanWifiRecording =>
@@ -997,6 +997,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it';
 
   @override
+  String get beanWifiPermission =>
+      'Wi‑Fi fast transfer needs the Nearby devices permission: allow it, then tap again (if you refused it before, turn it on in the system settings)';
+
+  @override
   String beanWifiLowBattery(Object battery) {
     return 'The last Wi‑Fi fast transfer did not start: the bean is at $battery%, below 30% it opens no hotspot';
   }
@@ -1007,11 +1011,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiDenied =>
-      'The last Wi‑Fi fast transfer failed: iOS\'s question to join the bean\'s network was cancelled';
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s network was cancelled';
+
+  @override
+  String get beanWifiUnavailable =>
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s network was cancelled, or it did not find the bean\'s hotspot; back on Bluetooth, tap again to retry';
 
   @override
   String get beanWifiBackground =>
-      'The last Wi‑Fi fast transfer failed: iOS joins no hotspot for an app in the background; stay on this page meanwhile';
+      'The last Wi‑Fi fast transfer failed: the phone joins no hotspot for an app in the background; stay on this page meanwhile';
 
   @override
   String get beanWifiNoJoin =>
@@ -1035,7 +1043,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiJoinTimeout =>
-      'The last Wi‑Fi fast transfer failed: iOS gave no answer on joining the bean\'s hotspot in 2 minutes (its question may be unanswered); back on Bluetooth';
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s hotspot went unanswered for 2 minutes; back on Bluetooth';
 
   @override
   String beanWifiFailed(Object detail) {
