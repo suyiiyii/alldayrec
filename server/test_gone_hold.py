@@ -120,19 +120,47 @@ def test_gone_while_read_is_held(tmp_path, monkeypatch):
     a, b = hour_ago(5), hour_ago(4)
     save(a, flac(tone(0, 10)))
     save(b, flac(tone(1, 10)))
-    samples, back = audio.samples, []
+    samples, reads, back = audio.samples, [], []
 
-    def vanish(p):  # the first read of b: its file goes just before
-        if p["start_ms"] == int(b.timestamp() * 1000) and not back:
-            back.append(away(b))
+    def vanish(p):  # b's file goes just before its first read and is back for its third: held twice meanwhile
+        if p["start_ms"] == int(b.timestamp() * 1000):
+            reads.append(p)
+            if len(reads) == 1:
+                back.append(away(b))
+            elif len(reads) == 3:
+                back[0]()  # in the reader's own read, not on the clock: a file back between a read and its check is passed (L5)
         return samples(p)
     monkeypatch.setattr(audio, "samples", vanish)
 
     async def run():
         async with reading() as s:
-            assert await handed(s, 2, 2) == [a], "b is not read as silence"
-            back[0]()
-            assert await handed(s, 1, 5) == [b], "b once its file is back"
+            assert await handed(s, 2, 60) == [a, b], "b is not read as silence: handed once its file is back"
+    anyio.run(run)
+    assert len(reads) == 3
+
+
+def test_long_file_gone_is_held(tmp_path, monkeypatch):
+    """A long file (piece_blocks) not yet read whose file is gone: held too, read once it is back."""
+    db.open_db(tmp_path / "t.db")
+    monkeypatch.setattr(audio, "GONE_RETRY_S", 0.3)
+    monkeypatch.setattr(audio, "WHOLE_S", 5)
+    a, b = hour_ago(5), hour_ago(4)
+    save(a, flac(tone(0, 10)))
+    save(b, flac(tone(1, 10)))
+    back, checks, gone = away(b), [], audio.gone
+
+    def checked(p):  # the file is back at the reader's third look at it: held twice meanwhile
+        if p["start_ms"] == int(b.timestamp() * 1000):
+            checks.append(p)
+            if len(checks) == 3:
+                back()
+        return gone(p)
+    monkeypatch.setattr(audio, "gone", checked)
+
+    async def run():
+        async with reading() as s:
+            got = await handed(s, 1000, 60, to=b)
+        assert got[0] == a and got[-1] == b, got
     anyio.run(run)
 
 

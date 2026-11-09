@@ -234,20 +234,34 @@ def hour_file(device: str, start_ms: int, ext: str) -> Path:
     return Path("chunks") / re.sub(r"[^\w.-]", "_", device) / f"{t:%Y-%m-%d}" / f"{t:%H}.{ext}"
 
 
+def make_parents(f: Path) -> set[Path]:
+    """Makes the directories f (in the recordings dir) goes in; the directories that f, new, and those made add a name
+    to: fsync them once f is written, for its name to be on disk too (a new device's or day's first piece). f's own
+    directory always: a retry after a failed first write finds f there already, its name maybe not on disk yet."""
+    new = [d for d in (f, *f.parents) if T().recordings in d.parents and not d.exists()]
+    f.parent.mkdir(parents=True, exist_ok=True)
+    return {d.parent for d in new} | {f.parent}
+
+
+def sync_dirs(dirs: set[Path]):
+    for parent in dirs:
+        d = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(d)
+        finally:
+            os.close(d)
+
+
 def append(path: Path, body: bytes) -> int:
     """Appends body to the recordings dir / path and returns where it starts; on disk (fsync) when this returns. Hold _append."""
     f = T().recordings / path
-    new = not f.exists()
-    f.parent.mkdir(parents=True, exist_ok=True)
+    dirs = make_parents(f)
     with open(f, "ab") as h:
         pos = h.seek(0, os.SEEK_END)  # a failed write before leaves bytes no row points at: harmless
         h.write(body)
         h.flush()
         os.fsync(h.fileno())
-    if new:  # the file's name is durable too
-        d = os.open(f.parent, os.O_RDONLY)
-        os.fsync(d)
-        os.close(d)
+    sync_dirs(dirs)
     return pos
 
 
@@ -439,18 +453,14 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         if r := kept():
             return r[0]
         dest = T().recordings / path
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        dirs = make_parents(dest)
         source.seek(0)
         with dest.open("ab") as out:
             pos = out.tell()
             shutil.copyfileobj(source, out, COPY_BYTES)
             out.flush()
             os.fsync(out.fileno())
-        directory = os.open(dest.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        sync_dirs(dirs)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
@@ -547,7 +557,7 @@ def gone(p) -> bool:
         return False
     if f not in T().gone:
         T().gone.add(f)
-        log.warning("stored audio missing (read as none; the final layer holds on it): %s", f)
+        log.warning("stored audio missing: %s", f)
     return True
 
 
