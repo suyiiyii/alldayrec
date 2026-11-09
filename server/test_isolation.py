@@ -385,7 +385,8 @@ def test_nothing_per_person_in_a_module():
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
-               "music": {"@cache _yamnet"}}  # the music model, loaded once for everyone like the VAD
+               "music": {"@cache _yamnet"},  # the music model, loaded once for everyone like the VAD
+               "speaker_eval": {"BASELINE", "SLACK"}}  # the nightly eval's fixed rates, read only (no server path uses it)
     here = Path(server.__file__).parent
     mutable = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
     found = {}

@@ -24,6 +24,10 @@ AllDayRec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 - **ReDimNet2 B6** (`redimnet2-b6.onnx`), the voiceprint model, by [PalabraAI](https://github.com/PalabraAI/redimnet2): code and weights MIT. Exported to ONNX by `server/alldayrec/export_onnx.py` from the release weights `b6-vb2+vox2+cnc2_v0-lm.pt`; the server downloads that export from this repository's `models-v1` release, which carries this same notice. **Its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0** (non-commercial, share-alike); the other training sets are VoxCeleb2 and CN-Celeb. Check whether that fits your use; you can always make the file yourself with `export_onnx.py`.
 - **YAMNet** (`yamnet.onnx`), the music classifier, by Google ([tensorflow/models](https://github.com/tensorflow/models/tree/master/research/audioset/yamnet), trained on AudioSet): code and weights Apache-2.0. Converted to ONNX as `server/alldayrec/export_onnx.py` describes; the server downloads it from this repository's `models-v1` release.
 
+## Test data (not in the repository; the nightly speaker eval downloads it, `server/alldayrec/speaker_eval.py`)
+
+- **AISHELL-1** ([OpenSLR 33](https://www.openslr.org/33/)), by Beijing Shell Shell Technology Co., Ltd.: Apache-2.0 (below). 40 of its speakers, 30 utterances each, re-encoded as Opus, are this repository's `eval-spk-v1` release, which carries this same notice.
+
 ## Fetched at build time (not in the repository)
 
 - **nRF Connect SDK** v2.7.0 (`sdk-nrf`: LicenseRef-Nordic-5-Clause, for use with Nordic Semiconductor devices only; the firmware runs on the nRF52840) and **Zephyr** (Apache-2.0), for `firmware/devkit` and `firmware/selftest`.
