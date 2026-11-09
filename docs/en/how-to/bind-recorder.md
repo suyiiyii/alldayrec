@@ -26,7 +26,7 @@ On the **录音设备** page, tap **解除绑定** (Unbind).
 
 ## Feishu recorder bean
 
-The Android app connects to a Feishu recorder bean directly since 1.5.5. The iPhone app can't yet.
+The iPhone app and the Android app (1.5.5 and later) both connect to a Feishu recorder bean directly.
 
 First finish syncing in Feishu, then quit the Feishu app or turn off its Bluetooth permission. The bean connects to one phone at a time: while Feishu holds it, it is missing from the list or marked "正连着其他手机" (Connected to another phone). Recordings Feishu syncs are deleted from the bean, too.
 
@@ -37,7 +37,8 @@ The binding is kept on this phone only. From then on:
 
 - The phone starts the bean recording when it connects. A press of its button stops it until the phone next connects.
 - With the phone nearby, it uploads as it records.
-- With the phone away, the audio stays on the bean. Once the phone is back, it fills in what is missing from the file the bean is recording while it records (Android app 1.5.9 and later); finished files are fetched after you stop the bean with its button. Only files recorded after the binding are fetched.
+- With the phone away, the audio stays on the bean. Once the phone is back, it fills in what is missing from the file the bean is recording while it records (Android app 1.5.9 and later, and the iPhone app); finished files are fetched after you stop the bean with its button. Only files recorded after the binding are fetched.
+- While the bean is not recording, you can tap **Wi‑Fi 快传** (Wi‑Fi fast transfer) on the **录音设备** (Recorder) page, on iPhone and Android alike: the bean opens a hotspot, the phone joins it to fetch the audio not sent yet, fast, then goes back to Bluetooth. The phone asks whether to join the bean's network; stay on that page while it transfers. Below 30% battery the bean opens no hotspot.
 - While the 实时 (Live) page is open, the phone keeps up with what is said now: if it missed 1 minute or less while away, that is filled first and then it goes on live; a longer gap is filled after the page closes (this also needs server v0.4.0).
 - Files the server has in full are deleted from the bean, one at a time, only while the bean is not recording.
 

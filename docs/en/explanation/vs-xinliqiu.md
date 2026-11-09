@@ -22,7 +22,7 @@ All three do the same job: they record what you say during the day and turn it i
 | | **AllDayRec** | OPPO AI 心力球 | Anker × Feishu AI recorder bean |
 |---|---|---|---|
 | **Price / subscription** | Free software; ASR paid by use to the service you pick, default Qwen about ¥0.05 per hour of audio; LLM extra | ¥499 early-adopter price, bought with an invite code by people picked for the early-adopter program, with 60 days of the Ultra plan[^xlq-buy]; formal software pricing expected at the end of November 2026[^xlq-plan] | ¥899 with 6 months of device AI credits; after that 300 free transcription minutes a month, or the AI Premium membership at ¥69/month with 3000 minutes a month[^lrd] |
-| **Hardware** | None to buy: the phone or a browser records; also connects a Feishu recorder bean (Android), or build the open-source recorder `LR-P3` | 9.8 g collar clip, 24 h of continuous recording, 5 m pickup[^xlq] | 10 g button, worn on a magnet or a lanyard; 8 h per charge, 32 h with the charging case[^lrd] |
+| **Hardware** | None to buy: the phone or a browser records; also connects a Feishu recorder bean, or build the open-source recorder `LR-P3` | 9.8 g collar clip, 24 h of continuous recording, 5 m pickup[^xlq] | 10 g button, worn on a magnet or a lanyard; 8 h per charge, 32 h with the charging case[^lrd] |
 | **Phones and platforms** | Android app, iPhone app (built from source with Xcode), browser | The current version needs an OPPO, OnePlus or realme phone[^xlq] | Bound in the Feishu app; recordings sync to Feishu Minutes[^lrd2] |
 | **Original audio** | Kept: every line plays back and can be transcribed again | Text only, no original audio[^xlq] | Deleted from the device after it reaches the phone; the audio downloads only from the Minutes web page[^lrd] |
 | **Where the data lives** | Your own server | OPPO's AI PCC private cloud[^xlq] | Feishu cloud[^lrd] |
@@ -41,7 +41,7 @@ As of 2026-10-26. "No" means no published source code or way to host it yourself
 - **Pick OPPO's 心力球** if you use an OPPO, OnePlus or realme phone, want a light clip you can forget about, only need the text, want coach-style reminders and insights, and don't want to run a server.
 - **Pick the Feishu recorder bean** if your team already works in Feishu, you mostly record meetings, and you need minutes, sharing and collaboration.
 - **Pick AllDayRec** if you want to keep the original audio and your data on your own server, you use an iPhone or any Android phone, you want your AI agent to search your days over MCP, or you want to change the code and the hardware.
-- **Already have a recorder bean?** The Android app connects to it from 1.5.5 on, and the recordings go to your own server. The bean connects to one phone at a time: see [How to bind a recorder](../how-to/bind-recorder.md#feishu-recorder-bean).
+- **Already have a recorder bean?** The iPhone app and the Android app (1.5.5 and later) both connect to it, and the recordings go to your own server. The bean connects to one phone at a time: see [How to bind a recorder](../how-to/bind-recorder.md#feishu-recorder-bean).
 
 ## Try AllDayRec
 

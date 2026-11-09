@@ -15,7 +15,7 @@ Long recordings can be imported directly: the server decodes and processes them 
 |---|---|---|
 | A voice recorder or phone recordings (MP3, WAV, `.m4a`) | Yes | Upload as is |
 | Plaud | Yes | Export MP3 or WAV in the Plaud app, then upload it |
-| Anker × Feishu 录音豆 | Yes, connect it directly | The Android app connects to the bean directly and uploads what it records after the binding, see [How to bind a recorder](./bind-recorder.md#feishu-recorder-bean). For recordings from before the binding, download them one at a time from the Feishu Minutes web page, then upload them |
+| Anker × Feishu 录音豆 | Yes, connect it directly | The iPhone app and the Android app both connect to the bean directly and upload what it records after the binding, see [How to bind a recorder](./bind-recorder.md#feishu-recorder-bean). For recordings from before the binding, download them one at a time from the Feishu Minutes web page, then upload them |
 | OPPO 心力球 | No | It keeps no original audio, so there is no audio to import |
 
 The sources for the third-party products are in [What AllDayRec is](../explanation/intro.md#how-it-compares).

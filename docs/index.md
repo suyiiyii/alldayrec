@@ -24,7 +24,7 @@ hero:
       link: https://github.com/suyiiyii/alldayrec
 features:
   - title: 用你已有的设备
-    details: 飞书录音豆（仅安卓）和开源录音设备直接连 App 实时同步；其他设备的录音文件可以导入；没有设备，安卓、iPhone App 和浏览器都能直接录。
+    details: 飞书录音豆和开源录音设备直接连 App 实时同步；其他设备的录音文件可以导入；没有设备，安卓、iPhone App 和浏览器都能直接录。
     link: /how-to/bind-recorder
   - title: 两层转写
     details: 定稿交给云端语音识别（默认阿里云百炼千问，约 ¥0.05/小时音频），页面开着时几秒内出初稿；也可以 <code>ENGINE=local</code> 在本机转写。

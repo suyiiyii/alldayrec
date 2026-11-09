@@ -24,7 +24,7 @@ hero:
       link: https://github.com/suyiiyii/alldayrec
 features:
   - title: Use the devices you already have
-    details: The Feishu recorder bean (Android only) and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
+    details: The Feishu recorder bean and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
     link: /en/how-to/bind-recorder
   - title: Transcribes in two layers
     details: The final transcript comes from a cloud ASR engine (default Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; <code>ENGINE=local</code> transcribes on your machine instead.

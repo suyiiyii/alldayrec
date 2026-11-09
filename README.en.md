@@ -29,7 +29,7 @@ AllDayRec is an all-day recording and memory service that runs on your own serve
 
 ## What it does
 
-- **Use the devices you already have**: the Feishu recorder bean (Android only) and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
+- **Use the devices you already have**: the Feishu recorder bean and the open-source recorder connect to the app and sync live; recordings from other devices can be imported; with no device at all, the Android app, the iPhone app and a browser record directly.
 - **Transcribes in two layers**: the final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
 - **Knows who spoke**: it learns your own voice and remembers the names you give others.
 - **Remembers**: conversation summaries, to-dos with due dates, a daily recap, and full-text search.
