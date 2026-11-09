@@ -3,15 +3,30 @@ on:
   schedule:
     - cron: '30 19 * * *'  # nightly, 03:30 Beijing time
   workflow_dispatch:
-  pull_request:  # a change to the eval itself shows its run on the PR
-    paths: ['server/alldayrec/speaker_eval.py', '.github/workflows/speaker-eval.yml']
+  pull_request:  # a change to the eval or to what labels speakers shows its run on the PR
+    paths:
+      - 'server/alldayrec/speaker_eval.py'
+      - 'server/alldayrec/diarist.py'
+      - 'server/alldayrec/bank.py'
+      - 'server/alldayrec/speakers.py'
+      - 'server/alldayrec/selfvoice.py'
+      - 'server/alldayrec/infer.py'
+      - 'server/uv.lock'
+      - '.github/workflows/speaker-eval.yml'
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  speaker-eval:  # who-said-it on a made-up day of AISHELL-1 speech; fails on a step back from main's rates (speaker_eval.py)
+  # who-said-it on a made-up day of AISHELL-1 speech; fails on a step back from main's rates (speaker_eval.py). A coarse
+  # guard against big regressions only: read speech by distinct speakers has few near misses, so OWNER_MIN 0.7 -> 0.55
+  # or PEOPLE_MIN 0.7 -> 0.6 leaves it green. A green run is no evidence that a threshold change is safe.
+  speaker-eval:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository  # not on forks' PRs
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -22,6 +37,8 @@ jobs:
       PACK_SHA256: 678ac6930e90d0d7eb83d14a2a921a0857a83c68e3231e9977b5d03ddedf2b4a
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - run: |  # the pack is Opus, decoded by ffmpeg
           if command -v ffmpeg >/dev/null; then ffmpeg -version | head -1; exit 0; fi
           APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"

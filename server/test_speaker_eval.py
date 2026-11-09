@@ -1,5 +1,8 @@
 """speaker_eval (the nightly guard): which moves fail it, and that the day it makes and the speakers it picks stay the same
 from run to run (the pack and BASELINE depend on both). The run itself needs the pack and the models: speaker-eval.yml."""
+import numpy as np
+
+from alldayrec import diarist, infer
 from alldayrec import speaker_eval as se
 
 
@@ -29,3 +32,16 @@ def test_day_and_pick_fixed(tmp_path):
     got = se.pick(info)
     assert got == se.pick(info) and len(got) == se.SPEAKERS
     assert sum(int(s) % 2 for s in got) == se.SPEAKERS // 2, "half of each gender"
+
+
+def test_stranger_taken_for_me_counts(tmp_path, monkeypatch):
+    """A stranger's sentence labelled 我 is a stranger named (a name is a name), not left out."""
+    (tmp_path / "manifest.json").write_text('{"speakers": [{"utts": [{"file": "a.ogg"}]}]}')
+    for f in ("fetch", "check"):
+        monkeypatch.setattr(infer, f, lambda: None)
+    monkeypatch.setattr(infer, "embedder", lambda: lambda x: np.ones(4))
+    monkeypatch.setattr(se, "decode", lambda p: np.zeros(se.SR, np.int16))
+    monkeypatch.setattr(se, "day", lambda man: [[(0, "a.ogg", 1.0), (se.KNOWN + 1, "a.ogg", 1.0), (se.KNOWN + 2, "a.ogg", 1.0)]])
+    monkeypatch.setattr(diarist, "relabel", lambda E, dur, owner, people: ["我", "我", "S1"])
+    res = se.run(tmp_path)
+    assert (res["stranger_named"], res["me_right"]) == (50.0, 100.0)

@@ -2,8 +2,9 @@
 PACK_URL), labelled the way a closed conversation is (diarist.relabel) with 我's voiceprint and the people bank
 (bank.pick, bank.samples) as the user teaches it, conversation after conversation. Scores: a known person's sentences
 given their name, no name or another; 我's given 我; a stranger's given a name; and per conversation how pure its labels
-are. CI (speaker-eval.yml) runs it nightly and fails on a step back from BASELINE by more than SLACK: a guard
-against regressions, not a benchmark.
+are. CI (speaker-eval.yml) runs it nightly and fails on a step back from BASELINE by more than SLACK: a coarse guard
+against big regressions, not a benchmark. Read speech by distinct speakers has few near misses: OWNER_MIN 0.55 or
+PEOPLE_MIN 0.6 (both 0.7) leave it green, so a green run says nothing about a threshold change.
 
     python -m alldayrec.speaker_eval build <aishell dir> <pack dir>   # the maintainer: from resource_aishell + the unpacked wav tars
     python -m alldayrec.speaker_eval run <pack dir> [--out result.json] [--summary file.md]
@@ -34,9 +35,11 @@ AISHELL-1 is by Beijing Shell Shell Technology Co., Ltd., licensed under the Apa
 (https://www.apache.org/licenses/LICENSE-2.0). Changes: 40 speakers and 30 utterances of each picked
 (alldayrec.speaker_eval.pick, seed 20261108), converted from 16 kHz WAV to Opus. manifest.json lists them.
 """
-# main's rates (11-09, 4e49627: K=5 bank, voice check); raise them with the change that earns it
-BASELINE = {"known_right": 73.7, "known_wrong": 3.2, "me_right": 82.3, "stranger_named": 0.0, "purity": 93.4}
-# a nightly run fails when a rate moves the wrong way by more than this (points): the day is fixed, so a move is the code
+# main's rates (11-09, 4e49627: K=5 bank, voice check; stranger_named: 2 of 75 sentences, both taken for 我); raise
+# them with the change that earns it
+BASELINE = {"known_right": 73.7, "known_wrong": 3.2, "me_right": 82.3, "stranger_named": 2.7, "purity": 93.4}
+# a nightly run fails when a rate moves the wrong way by more than this (points): the day is fixed, so a move is the
+# code. One sentence is 1.3 points of stranger_named (75), 0.5 of known (186), 0.6 of me (175)
 SLACK = {"known_right": 3.0, "known_wrong": 1.0, "me_right": 2.0, "stranger_named": 1.0, "purity": 2.0}
 
 
@@ -133,7 +136,7 @@ def run(pack: Path) -> dict:
                 n["known_wrong"] += lab not in (name,) and not diarist_anon(lab)
             elif k > KNOWN:
                 n["stranger"] += 1
-                n["stranger_named"] += not diarist_anon(lab) and lab != "我"
+                n["stranger_named"] += not diarist_anon(lab)  # 我 too: a stranger taken for 我
         by = defaultdict(list)
         for k, lab in zip(truth, labels):
             by[lab].append(k)
