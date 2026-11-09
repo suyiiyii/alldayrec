@@ -1,6 +1,6 @@
 import { ref } from "vue";
-import { intl, lang } from "../i18n";
-import { get } from "./api";
+import { intl, lang, t } from "../i18n.ts";
+import { get, hhmm } from "./api.ts";
 
 export interface DayInfo {
   conversations: number;
@@ -26,6 +26,14 @@ export function shiftDay(day: string, n: number) {
   t.setDate(t.getDate() + n);
   return t.toLocaleDateString("sv");
 }
+
+/** When someone was last heard, from an ISO time: 今天 HH:MM, 昨天 HH:MM, else MM-DD. */
+export const heard = (iso: string) =>
+  iso.startsWith(today())
+    ? t("common.todayAt", { t: hhmm(iso) })
+    : iso.startsWith(shiftDay(today(), -1))
+      ? t("common.yesterdayAt", { t: hhmm(iso) })
+      : iso.slice(5, 10);
 
 /** The nearest day with sentences before (-1) or after (1) `day`. */
 export function neighbour(day: string, dir: -1 | 1) {

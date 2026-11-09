@@ -9,7 +9,6 @@ import { lang, t } from "../i18n";
 import {
   errorTitle,
   get,
-  hhmm,
   post,
   type NameCheck as Check,
   type Sample,
@@ -18,7 +17,7 @@ import {
   type Voice,
 } from "../lib/api";
 import { play, player } from "../lib/audio";
-import { shiftDay, today } from "../lib/calendar";
+import { heard } from "../lib/calendar";
 import { useDismiss } from "../lib/dismiss";
 import { useMutation } from "../lib/mutation";
 import { likeness, speakerLabel } from "../lib/speakers";
@@ -92,12 +91,6 @@ const rows = computed(() => [
 const mins = (s: number) =>
   s < 60 ? t("common.sec", { n: Math.round(s) }) : t("common.min", { n: Math.round(s / 60) });
 const day = (iso: string) => `${iso.slice(5, 10)} ${iso.slice(11, 16)}`;
-const heard = (iso: string) =>
-  iso.startsWith(today())
-    ? t("common.todayAt", { t: hhmm(iso) })
-    : iso.startsWith(shiftDay(today(), -1))
-      ? t("common.yesterdayAt", { t: hhmm(iso) })
-      : iso.slice(5, 10);
 const voiceId = (v: Sample) => `${v.conv}|${v.label}`;
 function listen(v: Sample) {
   const src = v.clip
