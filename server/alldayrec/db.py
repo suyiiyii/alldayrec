@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; 
     UNIQUE (conv, label));
 CREATE TABLE IF NOT EXISTS apart (voice TEXT NOT NULL, grp TEXT NOT NULL, PRIMARY KEY (voice, grp));
 CREATE TABLE IF NOT EXISTS people (name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);  -- bank.py: the mean of enrolled
+CREATE TABLE IF NOT EXISTS people_samples (   -- bank.fill: a name's voiceprints (e: k x dim) made from enrolled when it
+    name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);  -- had n sentences; people.e stays the mean (code before reads it)
 CREATE TABLE IF NOT EXISTS enrolled (          -- bank.py: what taught each people row: a sentence (row: its rowid in sentences,
     name TEXT NOT NULL, conv TEXT, row INTEGER, n INTEGER NOT NULL, e BLOB NOT NULL);  -- n 1, e its voiceprint), or with row
 CREATE INDEX IF NOT EXISTS enrolled_name ON enrolled(name);  -- NULL the people row as it was before this table (n its sentences)
@@ -156,6 +158,10 @@ def init():
         conn().execute("ALTER TABLE sentences ADD COLUMN late_job INTEGER")
     if "seam_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
         conn().execute("ALTER TABLE late_spans ADD COLUMN seam_ms INTEGER")
+    from alldayrec import bank  # 11-09: a name's samples, for a store from before them or written by code before them
+    for (name,) in conn().execute("SELECT p.name FROM people p LEFT JOIN people_samples s ON s.name = p.name "
+                                  "WHERE s.n IS NOT p.n").fetchall():
+        bank.fill(name)
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
@@ -618,7 +624,12 @@ def apart() -> set[tuple[str, str]]:
 
 
 def people() -> dict[str, tuple[int, np.ndarray]]:
-    return {r["name"]: (r["n"], vec(r["e"])) for r in conn().execute("SELECT * FROM people")}
+    """name: (sentences that taught it, its voiceprints k x dim: bank.samples; not made yet for these n: the mean)."""
+    out = {}
+    for name, n, e, sn, s in conn().execute("SELECT p.name, p.n, p.e, s.n, s.e FROM people p LEFT JOIN people_samples s ON s.name = p.name"):
+        m = vec(e)
+        out[name] = (n, vec(s).reshape(-1, len(m)) if sn == n else m[None])
+    return out
 
 
 def aliases() -> dict[str, str]:

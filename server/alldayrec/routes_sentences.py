@@ -86,7 +86,7 @@ async def sentence_speaker(sid: str, body: dict):
             T().speakers["at"] = 0.0
         queue_summary({**c, "participants": after}, keep=True)
         learn = to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed")
-        rows = [{**r, "conv": c["id"], "music": None}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5 else []
+        rows = [{**r, "conv": c["id"], "music": None}] if learn and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S else []
         ws.note(f"对话 {c['start'][11:19]}：{r['start'][11:19]} 这一句 {frm} 改为 {to}", "state")
     await enroll_soon(to, rows)
     return {"speaker": to, "participants": after, "voiceprints": len(rows), "undo": keep_undo([before])}

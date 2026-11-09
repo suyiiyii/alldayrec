@@ -140,7 +140,7 @@ def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):
             gate.set()
         assert len(cut) == 3
         n, e = db.people()["张三"]
-        assert n == 3 and list(e) == [0, 1, 0, 0]
+        assert n == 3 and e.tolist() == [[0, 1, 0, 0]]
     anyio.run(run)
 
 

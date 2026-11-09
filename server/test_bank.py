@@ -53,15 +53,18 @@ def ledger():
 
 
 def test_pick():
-    """Per label: OWN_MIN to its own mean, BANK_MIN to the name's voiceprint when there is one; CAP, in turns."""
+    """Per label: OWN_MIN to its own mean, not what 我 could have said; CAP, in turns. How far from the name: no matter."""
     assert bank.pick([[A, A, A, B]], None) == [(0, 0), (0, 1), (0, 2)], "B, a third of one label: out"
-    assert bank.pick([[A, A], [C, C, C]], A) == [(0, 0), (0, 1)], "C sounds like itself, not like the name"
+    assert bank.pick([[A, A], [C, C, C]], A) == [(0, 0), (1, 0), (0, 1), (1, 1), (1, 2)], "C, 0.5 from the name: named, taught"
+    me = bank.unit(C + 0.3 * A)  # 我: 0.99 to C, 0.6 to A
+    assert bank.pick([[A, A], [C, C, C]], A, [me]) == [(0, 0), (0, 1)], "C, closer to 我 than to the name: 我 could have said it"
+    assert bank.pick([[C, C, C]], [A, C], [me]) == [(0, 0), (0, 1), (0, 2)], "as close to a sample of the name: the name's"
     got = bank.pick([[A] * 30, [B] * 30, [C] * 30], None)
     assert len(got) == bank.CAP and [sum(i == k for i, _ in got) for k in range(3)] == [14, 13, 13]
 
 
 def test_legacy_bank_kept(tmp_path):
-    """The bank before the ledger is one row of it: a learnt sentence adds to it as the running mean did."""
+    """The bank before the ledger is one row of it, a sample of its own beside a conversation's."""
     db.open_db(tmp_path / "t.db")
     db.conn().execute("DROP TABLE enrolled")
     db.conn().execute("INSERT INTO people VALUES ('张三', 3, ?)", (db.blob(A),))
@@ -70,22 +73,25 @@ def test_legacy_bank_kept(tmp_path):
     with db.tx() as t:
         db.insert_sentences(t, [dict(id="1", start="2026-10-05T10:00:00.000", end="2026-10-05T10:00:02.000", speaker="张三")])
         assert bank.learn(t, "张三", "c1", [({"start": "2026-10-05T10:00:00.000"}, B)]) == 1
+    assert np.allclose(db.people()["张三"][1], [(3 * A + B) / 4]), "till its samples are made: the mean"
+    bank.sync("张三")
     n, e = db.people()["张三"]
-    assert n == 4 and np.allclose(e, (3 * A + B) / 4)
+    assert n == 4 and np.allclose(e, [A, B])
     with db.tx() as t:
         bank.forget(t, "张三", [1])
-    assert db.people()["张三"][0] == 3 and np.allclose(db.people()["张三"][1], A)
+    bank.sync("张三")
+    assert db.people()["张三"][0] == 3 and np.allclose(db.people()["张三"][1], [A])
 
 
 def test_learning_filtered_recorded_undone(store):
-    """A label's odd sentence and a voice unlike the name's are not learnt; the undo takes a rename's sentences out of
-    the bank, learnt before it or not (an undo before the learning: it learns nothing)."""
+    """A label's odd sentence is not learnt, a voice unlike the name's is (a sample of its own); the undo takes a
+    rename's sentences out of the bank, learnt before it or not (an undo before the learning: it learns nothing)."""
     c1 = conv(1, "S1", [A, A, A, B])
     c2 = conv(2, "S1", [C, C, C])
     r1 = anyio.run(rename, c1, {"from": "S1", "to": "张三"})
-    assert len(ledger()) == 3 and np.allclose(db.people()["张三"][1], A), "B, a fourth of S1: not 张三's"
+    assert len(ledger()) == 3 and np.allclose(db.people()["张三"][1], [A]), "B, a fourth of S1: not 张三's"
     r2 = anyio.run(rename, c2, {"from": "S1", "to": "张三"})
-    assert len(ledger()) == 3, "C is itself, 0.5 from what 张三 sounds like"
+    assert len(ledger()) == 6 and np.allclose(db.people()["张三"][1], [A, C]), "C, 0.5 from what 张三 sounds like: named, a sample"
     assert anyio.run(speaker_undo, {"undo": r2["undo"]}) == {"undone": 1}
     assert anyio.run(speaker_undo, {"undo": r1["undo"]}) == {"undone": 1}
     assert ledger() == [] and "张三" not in db.people()
@@ -211,7 +217,9 @@ def test_relearn(store, tmp_path):
     run("--apply")
     now = dump()
     assert [r[:4] for r in now[0]] == [("张三", None, None, 20), ("张三", "c-new", 7, 1), ("李四", None, None, 9)]
-    assert db.people()["张三"][0] == 21 and np.allclose(bank.unit(db.people()["张三"][1]), A)
+    assert db.people()["张三"][0] == 21 and np.allclose(bank.unit(db.people()["张三"][1][0]), A), "the mean till a restart"
+    db.init()
+    assert np.allclose(db.people()["张三"][1], [A, A]), "at start: the NULL row and c-new, two samples"
     assert now[0][2] == was[0][2] and now[1][1] == was[1][1], "李四 as it was"
     run("--apply")
     assert dump() == now
@@ -232,3 +240,40 @@ def test_music_row_given_to_someone(store):
     assert row() == ("张三", None) and r["voiceprints"] == 1 and len(ledger()) == len(was) + 1
     anyio.run(speaker_undo, {"undo": r["undo"]})
     assert row() == ("S?", 1) and ledger() == was
+
+
+def test_samples_merge_most_alike_keep_legacy():
+    """Each conversation one sample, the bank before the ledger one of its own; past SAMPLES the most alike merge."""
+    E = np.eye(8)
+    rows = [(None, None, 50, E[0])] + [(f"c{i}", i, 1, E[i]) for i in range(1, 5)]
+    assert np.allclose(bank.samples(rows), E[:5])
+    rows += [("c1", 9, 1, E[1]), ("c5", 10, 1, bank.unit(E[4] + 0.1 * E[5]))]  # c1 again: still one; c5 ~ c4
+    got = bank.samples(rows)
+    assert got.shape == (bank.SAMPLES, 8) and np.allclose(got[:4], E[:4]) and float(got[4] @ E[4]) > 0.99
+
+
+def test_store_from_one_mean_to_samples(tmp_path):
+    """A store from before the samples: at start each name's from its ledger; people stays as the code before reads
+    and writes it (a rollback): e the mean, three columns."""
+    db.open_db(tmp_path / "t.db")
+    c = db.conn()
+    c.execute("DROP TABLE people_samples")
+    c.execute("INSERT INTO people VALUES ('张三', 3, ?)", (db.blob((2 * A + B) / 3),))
+    c.executemany("INSERT INTO enrolled VALUES ('张三', ?, ?, 1, ?)", [("c1", 1, db.blob(A)), ("c1", 2, db.blob(A)), ("c2", 3, db.blob(B))])
+    db.init()
+    n, e = db.people()["张三"]
+    assert n == 3 and np.allclose(e, [A, B])
+    old = {r["name"]: (r["n"], db.vec(r["e"])) for r in c.execute("SELECT * FROM people")}  # db.people() before 11-09
+    assert old["张三"][1].shape == A.shape and np.allclose(old["张三"][1], (2 * A + B) / 3)
+    c.execute("INSERT OR REPLACE INTO people VALUES ('张三', 4, ?)", (db.blob(C),))  # a rename learnt by the code before
+    assert np.allclose(db.people()["张三"][1], [C]), "samples of another n: the mean it wrote"
+
+
+def test_nearest_sample_names():
+    """A cluster near one of a name's samples takes the name, though far from their mean."""
+    from alldayrec import diarist
+    rng = np.random.default_rng(0)
+    me, a, b, c = (bank.unit(rng.normal(size=192)) for _ in range(4))
+    E = [bank.unit(b + rng.normal(size=192) * 0.03) for _ in range(4)]
+    assert diarist.relabel(E, [2.0] * 4, {"mic": me}, people={"王五": [a, c, b]}) == ["王五"] * 4
+    assert diarist.relabel(E, [2.0] * 4, {"mic": me}, people={"王五": bank.unit(a + b + c)}) == ["S1"] * 4, "their mean: 0.58 off"
