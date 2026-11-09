@@ -22,9 +22,10 @@ void unmount_sd_card(void);
  * no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it) */
 extern bool lr_sd_blank;
 extern uint32_t lr_sd_sectors;
-/* A card with no file system made exFAT (FORMAT, lr_store.c), work a buffer for f_mkfs: 0, -EEXIST it mounts (never
- * formatted), -ENODEV it no longer answers, -EIO the format failed. Unmounted after; SD mutex held. */
-int format_sd_card(void *work, uint32_t len);
+/* A card with no file system made exFAT (FORMAT, lr_store.c), if it is still kb KB; work a buffer for f_mkfs: 0, -EEXIST
+ * it mounts (never formatted), -ENODEV it no longer answers, -EINVAL another size, -EIO the format failed. Unmounted
+ * after; SD mutex held. */
+int format_sd_card(uint32_t kb, void *work, uint32_t len);
 /* The card's four SPI lines let go (high impedance), on a board that switches the card's supply: before its supply goes
  * off for good (System OFF, lr_power.c) */
 void sd_lines_release(void);

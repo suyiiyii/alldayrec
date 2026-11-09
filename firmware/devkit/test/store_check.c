@@ -215,7 +215,8 @@ void unmount_sd_card(void) {}
 bool lr_sd_blank;  // sdcard.h: the last mount's card had no file system; its sectors
 uint32_t lr_sd_sectors;
 static int formats, format_err;  // format_sd_card's calls; what the next returns
-int format_sd_card(void *work, uint32_t len) { formats++; return format_err; }
+static uint32_t format_kb;       // the code the last one was given
+int format_sd_card(uint32_t kb, void *work, uint32_t len) { formats++, format_kb = kb; return format_err; }
 
 // a phone following the stream: file -> bytes by offset
 #define FILES 48
@@ -1182,7 +1183,7 @@ int main(void)
     assert(status[48] >> 1 == 4 && sys_get_le32(status + 49) == 31166976);
     assert(format_card(31166975) == -EINVAL && !formats);
     format_err = -EIO;
-    assert(format_card(31166976) == -EIO && formats == 1);
+    assert(format_card(31166976) == -EIO && formats == 1 && format_kb == 31166976);  // checked again on the fresh probe
     fe = last_code(LR_FORMAT);
     assert(fe >= 0 && logged[fe].x == EIO && logged[fe].a == 62333952);
     store_err = -ENODEV, format_err = 0, n_logged = 0;

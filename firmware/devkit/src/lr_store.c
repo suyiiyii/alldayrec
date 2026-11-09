@@ -1316,7 +1316,7 @@ static int format_card(uint32_t code)
     k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
     int64_t t0 = k_uptime_get();
     formatting = true;
-    int err = format_sd_card(chunk, sizeof(chunk));
+    int err = format_sd_card(code, chunk, sizeof(chunk));  // the code checked again on the card probed afresh
     formatting = false;
     uint32_t ms = k_uptime_get() - t0;
     k_mutex_unlock(&write_sdcard_mutex);

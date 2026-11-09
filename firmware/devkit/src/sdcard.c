@@ -283,7 +283,8 @@ int mount_sd_card_reset(void)
 }
 
 /* FORMAT (lr_store.c): the card tried again from scratch first, and formatted only if it still answers and still holds
- * no file system; one that mounts now is never formatted (-EEXIST), one that does not answer neither (-ENODEV).
+ * no file system and still has the size the user confirmed (kb, its KB; else -EINVAL: a card swapped in since); one that
+ * mounts now is never formatted (-EEXIST), one that does not answer neither (-ENODEV).
  * exFAT at any size, not FAT32 up to 32 GB as the SD spec has it: macOS 26 reads a FAT32 volume's whole FAT before
  * it mounts and gives up after 20 s (32 GB at 32 KB clusters: a 3.9 MB FAT, 20-78 s at the 50-190 KB/s the card is read
  * at over USB from LR-X1), and mounted an exFAT 32 GB card from it in 2.1 s. Clusters as the SD spec's (SDXC) and
@@ -291,12 +292,15 @@ int mount_sd_card_reset(void)
  * above 32 GB). No partition table (FM_SFD): FatFs's MBR puts the volume at sector 63, off the allocation units; an
  * exFAT card without one mounted on macOS (X1 10-18). work: f_mkfs's buffer, a multiple of 512 B: the FAT is written that
  * much at a time (4 KB: ~1000 writes for a 4 MB FAT). */
-int format_sd_card(void *work, uint32_t len)
+int format_sd_card(uint32_t kb, void *work, uint32_t len)
 {
     unmount_sd_card();
     int err = mount_sd_card_reset();
     if (!lr_sd_blank) {
         return !err ? -EEXIST : -ENODEV;
+    }
+    if (lr_sd_sectors / 2 != kb) {
+        return -EINVAL;
     }
     bool sdxc = lr_sd_sectors >= 0x4000000;  // over 32 GB
     MKFS_PARM opt = {.fmt = FM_EXFAT | FM_SFD, .n_fat = 1, .align = sdxc ? 32768 : 8192,
