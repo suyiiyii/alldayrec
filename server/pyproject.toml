@@ -24,6 +24,7 @@ local = ["sherpa-onnx>=2.0.0", "sherpa-onnx-core>=2.0.0"]
 
 [project.scripts]
 alldayrec = "alldayrec.server:main"  # as python -m alldayrec
+alldayrec-infer = "alldayrec.infer_server:main"  # the voiceprints and music detection as a service (INFER_URL)
 
 [project.urls]
 Homepage = "https://github.com/suyiiyii/alldayrec"

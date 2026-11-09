@@ -33,6 +33,7 @@ from alldayrec import addresses
 from alldayrec import asr
 from alldayrec import audio
 from alldayrec import auth
+from alldayrec import compute
 from alldayrec import core
 from alldayrec import db
 from alldayrec import firmware
@@ -208,13 +209,14 @@ def main():
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
-    infer.fetch()  # a first start: the missing model files, downloaded
-    infer.check()  # every model file there and the pinned one, before anything starts
-    log.info("models ok: %d files in %s", len(infer.MODELS), infer.DIR)
-    from alldayrec.diarist import load_embedder
+    skip = compute.served()  # INFER_URL: the voiceprint and music models are the service's, never here
+    infer.fetch(skip=skip)  # a first start: the missing model files, downloaded
+    infer.check(skip=skip)  # every model file there and the pinned one, before anything starts
+    log.info("models ok: %d files in %s", len(infer.MODELS) - len(skip), infer.DIR)
     # before the event loop: building the session keeps the GIL ~0.3 s, which in a thread held up the loop at each start
-    state["embed"] = load_embedder()
-    state["music"] = music.heard if music.ON else None
+    c = compute.load()  # in this process, or the alldayrec-infer service at INFER_URL
+    state["embed"] = c.embed
+    state["music"] = c.music if music.ON else None
     if not tenant.FILE.exists():
         token = tenant.create()
         log.info("first start: %s made, one tenant; on this machine open http://127.0.0.1:%d/connect?token=%s",

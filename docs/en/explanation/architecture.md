@@ -64,6 +64,25 @@ For the accuracy of the local engine against the cloud engines, see [ASR benchma
 
 The voiceprint model ReDimNet2 runs on the local CPU. The server recognizes 「我」 (me: the person recording), and within a conversation it labels the other people S1, S2 and so on; sentences too short to recognize are labeled S?. Once you give a label a name in the web UI, the same voice is recognized in later conversations.
 
+## The compute interface
+
+Voiceprints and music detection are the two heaviest computations in the server, and both sit behind one compute interface (`Compute` in `server/alldayrec/compute.py`). It takes 16 kHz int16 samples and returns a voiceprint or whether they are music. It reads no database and no audio files, and it does not know whose data it is computing.
+
+- **In the process by default**: without `INFER_URL`, the server computes them itself on onnxruntime, exactly as before.
+- **As a separate service**: `alldayrec-infer`, in the same package, offers only these computations, and can run on another machine, one with spare CPU or a GPU. With `INFER_URL` and `INFER_TOKEN` set, the server POSTs the samples to it and never loads or downloads these two models itself, so the server's machine needs no CPU or memory for them. When the service is down, hung, gives a 401 or 403, or answers with something that is not a voiceprint, the call waits and tries again, 2 s later, then 4 s, 8 s and up to every 60 s, until it is answered. Meanwhile uploads are taken and stored as usual and the web pages open; only that device's transcripts and speakers wait, and they catch up once the service is back, without losing a sentence. An error is logged at most once a minute, and `lr_infer_down_seconds` says how long the service has been failing, for an alert. At start the server asks the service's `/health` (with the token) for its model files and voiceprint size; when they are not the server's, every call waits the same way and the log says why.
+
+Speech detection (VAD), ffmpeg decoding and the clustering that tells speakers apart stay in the server process. The VAD runs one stream per device and carries its state from one piece to the next, and one call costs less than a network round trip. Decoding reads the audio on disk, and clustering reads the tenant's voiceprints, so these stay with the database and the audio. To deploy it:
+
+```sh
+# On the inference machine: the same model files as the server's, the missing ones downloaded to MODELS_DIR at the first start
+INFER_TOKEN=<a random token> INFER_HOST=0.0.0.0 INFER_PORT=8771 alldayrec-infer
+# In the server's .env: reach it only over a private network, Tailscale or an HTTPS reverse proxy (never through a proxy from the environment)
+INFER_URL=http://infer.example.com:8771
+INFER_TOKEN=<the same token>
+```
+
+`GET /health` needs no token; `GET /metrics` needs it and returns each computation's calls, compute seconds and audio seconds. For the variables, see [Configuration](../reference/configuration.md#other-environment-variables).
+
 ## Conversations, summaries and the recap
 
 Sentences are grouped into conversations by time. A conversation ends after 5 minutes with nobody speaking, when the recorder stops, or when it reaches 4 hours. A conversation with less than 10 seconds of speech is not kept as a conversation (its sentences stay in the transcript).
