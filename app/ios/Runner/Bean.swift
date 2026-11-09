@@ -382,7 +382,6 @@ final class BeanSync {
   private var wifiNext = false  // asked for: before the next transfer
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiUnits = 0
-  private var wifiOpenMute = false  // this pass: the open file got no answer over Wi-Fi
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
@@ -464,8 +463,10 @@ final class BeanSync {
       // every 5 s, each piece and the state written) would stay until it ends (Ble.swift's session loop, 10-06)
       try autoreleasepool {
         if io.wifiAsked() {  // a transfer cannot be stopped but by the link going: Wi-Fi first in the next session
-          wifiNext = true
-          if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
+          if recording { wifiRecording() } else {
+            wifiNext = true
+            if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
+          }
         }
         if xfer == nil && wifiNext { wifiNext = false; try wifi() }
         if xfer == nil && io.now() >= quietUntil {
@@ -561,13 +562,14 @@ final class BeanSync {
 
   /// Wi-Fi fast transfer (#431; by hand for now: the device page's developer button). The bean opens a hotspot of a new
   /// name (1A/05; its BLE goes, ws/soundcore), the phone joins it (io.wifiJoin) and reads what it lacks over its
-  /// WebSocket as over BLE, into the same pieces (the same units, dated the same): the backlog when the bean is not
-  /// recording, else the file being recorded from where the phone lacks it until within 10 s of live (no realtime over
-  /// Wi-Fi). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case it is on still.
+  /// WebSocket as over BLE, into the same pieces (the same units, dated the same): the backlog, only while the bean is
+  /// not recording (wifiRecording()). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case
+  /// it is on still.
   private func wifi() throws {
+    if recording { return wifiRecording() }
     let battery = hw["battery"] as? Int
     log("bean_wifi_start", "开始 Wi-Fi 快传（手动）：电量 \(battery.map { "\($0)%" } ?? "?")，" +
-        (recording ? "在录音（文件 \(listing.open)）" : "没在录音") + "，积压 \(owed["backlog_s"] ?? 0) s",
+        "没在录音，积压 \(owed["backlog_s"] ?? 0) s",
         fields: ["reason": "manual", "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
                  "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
     if needList { listing = try list() }  // a file just closed: its length
@@ -602,7 +604,7 @@ final class BeanSync {
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
-    overWifi = true; wifiUnits = 0; wifiOpenMute = false
+    overWifi = true; wifiUnits = 0
     state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false
     do {
@@ -624,8 +626,7 @@ final class BeanSync {
     throw Again(description: "Wi-Fi transfer over: \(why)", naturalRollover: rollover)
   }
 
-  /// wifi()'s transfers, one at a time as over BLE: what the bean is not recording, or the file it records up to live.
-  /// The reason they ended.
+  /// wifi()'s transfers, one at a time as over BLE, until the backlog is in or the bean records. The reason they ended.
   private func wifiLoop() throws -> String {
     var at = io.monotonicNow(), was = 0
     while true {
@@ -640,37 +641,25 @@ final class BeanSync {
         at = t; was = wifiUnits
       }
       let why: String? = try autoreleasepool {
+        if recording { return "豆子开始录音，回蓝牙" }  // its button: it answers nothing over Wi-Fi then (wifiRecording())
         if xfer == nil {
           if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
           if busy > 20 { return "豆子一直忙（code 4）" }
-          let open = recording ? listing.open : 0
-          // the file being recorded from its first hole, whatever plan() would do over BLE (a read that could not catch
-          // up there, too_slow: realtime from now on; over Wi-Fi it can), on to live
-          if recording && (open == 0 || open * 1000 < since) { return open == 0 ? "都取到了" : "正在录的文件不是这台手机的" }
-          // the open file unanswered (11-08 22:36, 23:41: both while recording; 21:26, stopped, all came): the closed ones
-          let x = recording && !wifiOpenMute ? Xfer(open, true, files[open].flatMap(gap) ?? 0) : backlog()
-          guard let x else { return wifiOpenMute ? "录音中豆子不回正在录的文件" : "都取到了" }
-          if x.live {
-            let behind = edge(open) - x.from
-            log("bean_xfer", "Wi-Fi 快传实时文件 \(open) 从单元 \(x.from) 起，离实时 \(behind * Bean.frameMs / 1000) s", fields: ["file": open,
-                "realtime": false, "reason": "wifi", "from": x.from, "hole_units": behind, "hole_ms": behind * Bean.frameMs, "watched": io.watched()])
-          }
+          guard let x = backlog() else { return "都取到了" }
           try begin(x)
         }
         if let f = try next(1000) { try take(f) }
         guard let x = xfer else { return nil }
         let now = io.now()
-        if x.live && x.lag != nil { complete(x, 0, "；追上实时，回蓝牙接着实时"); return "追上实时" }
         if x.key == nil && now - x.at > 8000 {  // ws/soundcore: 3 asks 8 s apart
           if x.asked < 3 {
             x.asked += 1; x.at = now
-            log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) Wi-Fi 上 8 s 没回音，第 \(x.asked) 次再要", "warn",
+            log("bean_xfer", "补传文件 \(x.file) Wi-Fi 上 8 s 没回音，第 \(x.asked) 次再要", "warn",
                 ["file": x.file, "from": x.from, "asked": x.asked, "recording": recording])
             try send(Bean.wifiTransfer(x.file, x.from * Int64(Bean.unit)))
             return nil
           }
-          failed(x, "Wi-Fi 上要了 3 次都没回音（\(recording ? "在录音" : "没在录音")）")
-          if x.live { wifiOpenMute = true; return nil }  // the closed files next, if any
+          failed(x, "Wi-Fi 上要了 3 次都没回音")
           return "豆子没回音"
         }
         if now - x.seen > 30_000 { complete(x, -1, "；30 s 没收到单元"); return "30 s 没收到单元" }
@@ -678,6 +667,13 @@ final class BeanSync {
       }
       if let why { return why }
     }
+  }
+
+  /// No fast transfer while the bean records: over Wi-Fi it answers no 1A/07 then, for the file it records or a closed one
+  /// (11-08 22:36, 23:41, 11-09 10:12: three asks each, nothing; stopped, 11-08 21:26, the first answered), and Anker's
+  /// SDK demo refuses it (「正在录音中，无法传输文件」). BLE goes on live.
+  private func wifiRecording() {
+    log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields: ["recording": true, "backlog_s": owed["backlog_s"] ?? 0])
   }
 
   /// After a fast transfer: the hotspot off, in case it is on still.
@@ -981,8 +977,7 @@ final class BeanSync {
 
   private func failed(_ x: Xfer, _ why: String) {
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 没开始：\(why)", "warn", ["file": x.file, "from": x.from, "realtime": x.realtime])
-    if overWifi { if !x.live { file(x.file, x.file * 1000).tries += 1 } }  // a Wi-Fi miss says nothing of BLE's reads
-    else if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
+    if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
     xfer = nil
     save()
   }
@@ -1107,7 +1102,7 @@ final class BeanSync {
     let toc = Int(audio.first ?? 0)
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 开始：首单元 \(s.seq)（请求从 \(x.from) 起），Opus 配置 \(toc >> 3)",
         fields: ["file": x.file, "seq": s.seq, "from": x.from, "realtime": x.realtime, "toc": toc])
-    if x.live && !overWifi { state = ["code": "connected"] }
+    if x.live { state = ["code": "connected"] }
   }
 
   private func complete(_ x: Xfer, _ result: Int, _ why: String = "") {

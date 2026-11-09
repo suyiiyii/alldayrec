@@ -1733,8 +1733,14 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiSub.
   ///
   /// In zh, this message translates to:
-  /// **'让录音豆开热点，手机连上去快速取回还没有的录音，追上实时后回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
+  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
   String get beanWifiSub;
+
+  /// No description provided for @beanWifiRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'豆子在录音，Wi‑Fi 快传要停录后用'**
+  String get beanWifiRecording;
 
   /// No description provided for @beanWifiAsked.
   ///

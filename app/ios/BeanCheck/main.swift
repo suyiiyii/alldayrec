@@ -173,7 +173,6 @@ final class FakeBean: BeanIo {
       check(p.count == 8, onWifi, "1A/07 over Wi-Fi has no realtime flag, over BLE it has")
       let t = [Bean.u32(p, 4), Bean.u32(p, 0) / Int64(Bean.unit), p.count > 8 && p[8] == 1 ? 1 : 0]
       transfers.append(t)
-      if onWifi && wifiMute.contains(t[0]) { break }
       if onWifi, let n = wifiIgnore[t[0]], n > 0 { wifiIgnore[t[0]] = n - 1; break }  // the bean ignoring a request
       onTransfer(t[0], t[1], t[2] == 1)
     default: break
@@ -205,7 +204,7 @@ final class FakeBean: BeanIo {
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
   var wifiAsk = false, onWifi = false, dropOnWifi = false
-  var wifiIgnore: [Int64: Int] = [:], wifiMute: Set<Int64> = []  // 1A/07s over Wi-Fi left unanswered: so many, or all
+  var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { joins.append((ssid, password, endpoint)); onWifi = true }
@@ -628,23 +627,23 @@ do {
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 
-/// Wi-Fi fast transfer (#431): asked for while the bean records a file begun 10 min ago, none of it here. Over BLE the
-/// hotspot of a new name (1A/05), its answer to wifiJoin; over the WebSocket the file from unit 0 (1A/07, no realtime
-/// flag) into pieces as over BLE, until within 10 s of live; then back to BLE (Again), whose next session turns the
-/// hotspot off (1A/02) and reads on from the tail, realtime=0 over BLE.
+/// Wi-Fi fast transfer (#431), the bean not recording, a closed file of 60 s none of it here: over BLE the hotspot of a
+/// new name (1A/05), its answer to wifiJoin; over the WebSocket the file from unit 0 (1A/07, no realtime flag) into
+/// pieces as over BLE, a tap meanwhile ignored; then back to BLE (Again), whose next session turns the hotspot off (1A/02).
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
   let a = (t0 - 600_000) / 1000
-  bean.recording = true; bean.open = a; bean.list(a, 0); bean.wifiAsk = true
+  bean.list(a, 60_000); bean.wifiAsk = true
   bean.onTransfer = { file, from, _ in
-    bean.header(file, 0xFFFF_FFFF)
-    if from == 0 { bean.units(file, Array(0..<31_200), ms: 1) }  // 20× real time: within 10 s of live at about unit 31053
-    if bean.onWifi { bean.wifiAsk = true }  // tapped again meanwhile (11-08): not another one after it
+    check(bean.onWifi, true, "the backlog over Wi-Fi only")
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+    bean.wifiAsk = true  // tapped again meanwhile (11-08): not another one after it
   }
+  bean.script = Array(repeating: {}, count: 40)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(again.description.contains("追上实时"), true, again.description)
+  check(again.description.contains("都取到了"), true, again.description)
   check(bean.joins.count, 1)
   let on = bean.sentOf(0x1A05), ssid = Array(on[1..<(1 + Int(on[0]))]), pw = Array(on[(2 + Int(on[0]))...])
   check(String(decoding: ssid, as: UTF8.self), bean.joins[0].0); check(String(decoding: pw, as: UTF8.self), bean.joins[0].1)
@@ -652,8 +651,7 @@ do {
   check(bean.onWifi, false, "the hotspot left")
   check(bean.transfers, [[a, 0, 0]])
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
-  check(got.first, 0); check(got == Array(0..<Int64(got.count)), true, "each unit once, in order")
-  check((31_053...31_060).contains(got.count), true, "up to live: \(got.count)")
+  check(got == Array(0..<3000), true, "each unit once, in order: \(got.count)")
   check(bean.logs.contains { $0.0 == "bean_wifi_done" }, true)
   check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x02 }, false, "off in the next session")
   let n = bean.sent.count
@@ -661,19 +659,39 @@ do {
   check(bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }.prefix(4), [0x2E01, 0x0101, 0x01A6, 0x1A02])
   check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x05 }.count, 1, "the tap during it dropped")
   check(bean.logs.contains { $0.0 == "bean_wifi_ask" }, true)
-  check(bean.transfers.count, 2); check(bean.transfers[1][0], a); check(bean.transfers[1][1], Int64(got.count)); check(bean.transfers[1][2], 0)
+  check(bean.transfers.count, 1, "all of it here: nothing more over BLE")
+}
+
+/// Asked for while the bean records (11-08 22:36, 23:41, 11-09 10:12: over Wi-Fi it answered no 1A/07, for the file it
+/// records nor a closed one; Anker's SDK demo refuses it): no hotspot, the live read over BLE goes on, not cut.
+do {
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, b = (t0 - 900_000) / 1000
+  bean.recording = true; bean.open = a; bean.list(b, 60_000); bean.list(a, 0)
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 0xFFFF_FFFF)
+    bean.units(file, Array(0..<300), ms: 1)
+    bean.wifiAsk = true  // the tap, mid-read
+    bean.units(file, Array(300..<600), ms: 1)
+  }
+  let dir = tmp()
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x05 }, false, "no hotspot while recording")
+  check(bean.joins.count, 0)
+  check(bean.transfers.count, 1, "the live read not cut for it")
+  check(bean.logs.contains { $0.0 == "bean_wifi_skip" && $0.1.contains("在录音") }, true)
 }
 
 /// Over Wi-Fi the bean may let a 1A/07 go unanswered (ws/soundcore: "the first request on a fresh socket is sometimes
-/// ignored"; 11-08 22:36 and 23:41 none answered in 15 s): asked again every 8 s, three times in all.
+/// ignored"): asked again every 8 s, three times in all.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
   let a = (t0 - 120_000) / 1000
-  bean.recording = true; bean.open = a; bean.list(a, 0); bean.wifiAsk = true; bean.wifiIgnore = [a: 2]
+  bean.list(a, 60_000); bean.wifiAsk = true; bean.wifiIgnore = [a: 2]
   bean.onTransfer = { file, from, _ in
-    bean.header(file, 0xFFFF_FFFF)
-    if from == 0 { bean.units(file, Array(0..<3000), ms: 1) }
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
   }
   bean.script = Array(repeating: {}, count: 40)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
@@ -684,36 +702,34 @@ do {
   check(bean.logs.filter { $0.1.contains("次再要") }.count, 2)
 }
 
-/// The open file never answered over Wi-Fi while recording: after three asks the closed file still lacking is read,
-/// and the open one is left to BLE.
+/// The bean starts recording during a fast transfer (its button): Wi-Fi ends there, back to BLE for live.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
-  let a = (t0 - 600_000) / 1000, b = (t0 - 900_000) / 1000
-  bean.recording = true; bean.open = a; bean.list(b, 60_000); bean.list(a, 0); bean.wifiAsk = true; bean.wifiMute = [a]
-  bean.onTransfer = { file, from, _ in
-    if file == b { bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
-    else { bean.header(file, 0xFFFF_FFFF) }
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, _, _ in
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(0..<1500), ms: 1); bean.push(0x1882, [1])
   }
-  bean.script = Array(repeating: {}, count: 60)
+  bean.script = Array(repeating: {}, count: 40)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(again.description.contains("录音中豆子不回正在录的文件"), true, again.description)
-  check(bean.transfers.filter { $0[0] == a }.count, 3, "the open file asked three times")
-  check(bean.transfers.contains { $0[0] == b }, true, "then the closed one")
-  check(queue(chunks).flatMap { packets($0).dropFirst(2) }.count, 3000)
+  check(again.description.contains("豆子开始录音"), true, again.description)
+  check(bean.onWifi, false, "the hotspot left")
+  check(bean.transfers.count, 1)
+  check(queue(chunks).flatMap { packets($0).dropFirst(2) }.count, 1500, "what came before is kept")
 }
 
-/// Nothing lacking (a file begun just now): no hotspot.
+/// Nothing lacking: no hotspot.
 do {
   let dir = tmp()
   let bean = FakeBean(t0)
-  bean.recording = true; bean.open = t0 / 1000; bean.list(bean.open, 0); bean.wifiAsk = true
-  bean.onTransfer = { file, _, _ in bean.header(file, 0xFFFF_FFFF) }
+  bean.wifiAsk = true
+  bean.script = Array(repeating: {}, count: 5)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   for _ in 0..<2 { do { try sync.session(since: t0 - 3_600_000, steps: "") } catch {} }
   check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x05 }, false, "no hotspot for nothing")
-  check(bean.logs.contains { $0.0 == "bean_wifi_skip" }, true)
+  check(bean.logs.contains { $0.0 == "bean_wifi_skip" && $0.1.contains("没有积压") }, true)
 }
 
 /// A stop by hand holds across the fast transfer's reconnect (#324: a new connection starts the bean, the app's own

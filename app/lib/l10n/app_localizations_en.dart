@@ -982,7 +982,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiSub =>
-      'The bean opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth once live. iOS asks whether to join its network; stay on this page meanwhile';
+      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. iOS asks whether to join its network; stay on this page meanwhile';
+
+  @override
+  String get beanWifiRecording =>
+      'The bean is recording: Wi‑Fi fast transfer works once it stops';
 
   @override
   String get beanWifiAsked =>

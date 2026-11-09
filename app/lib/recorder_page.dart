@@ -248,8 +248,9 @@ class _RecorderPageState extends State<RecorderPage> {
                   ? () {
                       final m = ScaffoldMessenger.of(context);
                       _call(() async {
-                        final vpn = await Recorder.beanWifi();
-                        m.showSnackBar(SnackBar(content: Text(vpn ? l.beanWifiAskedVpn : l.beanWifiAsked), behavior: SnackBarBehavior.floating));
+                        final r = await Recorder.beanWifi();
+                        final text = switch (r) { 'recording' => l.beanWifiRecording, 'vpn' => l.beanWifiAskedVpn, _ => l.beanWifiAsked };
+                        m.showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
                       });
                     }
                   : null,

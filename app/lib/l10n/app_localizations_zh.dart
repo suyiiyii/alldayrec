@@ -952,7 +952,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanWifiSub =>
-      '让录音豆开热点，手机连上去快速取回还没有的录音，追上实时后回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
+      '录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
+
+  @override
+  String get beanWifiRecording => '豆子在录音，Wi‑Fi 快传要停录后用';
 
   @override
   String get beanWifiAsked => '已请求 Wi‑Fi 快传，当前传输停下后开始';
