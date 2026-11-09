@@ -3,7 +3,7 @@
     INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
 POST /embed, /music and /segment: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
-MAX_S s; /segment at most 10 s), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
+MAX_S s, /segment SEG_S, else 413), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
 {"music": bool} or {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment).
 GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM (the server checks them at
 start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
@@ -31,6 +31,7 @@ from alldayrec import infer
 from alldayrec import threads
 
 MAX_S = 600  # a voiceprint takes at most 15 s of a sentence and a few enrollment samples; this bounds a request's memory
+SEG_S = 10  # pyannote's chunk (transcript.SEG_N): a longer one would fail in transcript.segment
 SR = 16000
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 state = {"compute": None, "token": ""}  # main() sets them; tests put their own
@@ -42,18 +43,18 @@ def authorized(request: Request) -> bool:
                                                         f"Bearer {state['token']}".encode())
 
 
-async def run(op: str, request: Request, f):
+async def run(op: str, request: Request, f, most: int = MAX_S):
     if not authorized(request):
         CALLS[op, "401"] += 1
         return JSONResponse({"error": "unauthorized"}, 401)
-    over = JSONResponse({"error": f"over {MAX_S} s"}, 413)
-    if int(request.headers.get("content-length") or 0) > MAX_S * SR * 2:
+    over = JSONResponse({"error": f"over {most} s"}, 413)
+    if int(request.headers.get("content-length") or 0) > most * SR * 2:
         CALLS[op, "413"] += 1
         return over
     body = bytearray()
     async for chunk in request.stream():  # counted as it comes: a chunked body without a length stops at the limit too
         body += chunk
-        if len(body) > MAX_S * SR * 2:
+        if len(body) > most * SR * 2:
             CALLS[op, "413"] += 1
             return over
     if not body or len(body) % 2:
@@ -84,7 +85,7 @@ async def music_(request: Request):
 
 @app.post("/segment")
 async def segment(request: Request):
-    return await run("segment", request, lambda x: {"frames": state["compute"].segment(x).tolist()})
+    return await run("segment", request, lambda x: {"frames": state["compute"].segment(x).tolist()}, SEG_S)
 
 
 @app.get("/health")

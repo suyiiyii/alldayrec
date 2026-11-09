@@ -268,6 +268,53 @@ def test_main_settings(monkeypatch):
         server.main()
 
 
+def test_main_infer_url(monkeypatch):
+    """INFER_URL set: main() puts the service's computations in core.state, the speaker-change frames of turns() too;
+    none is made in this process."""
+    import sys
+    import types
+
+    import pytest
+
+    from alldayrec import asr
+    from alldayrec import compute
+    from alldayrec import core
+    from alldayrec import infer
+    from alldayrec import music
+    from alldayrec import server
+    from alldayrec import tenant
+    from alldayrec import transcript
+
+    class Started(Exception):
+        pass
+
+    def started():
+        raise Started
+    monkeypatch.setattr(infer, "fetch", lambda skip=(): None)
+    monkeypatch.setattr(infer, "check", lambda skip=(): None)
+    monkeypatch.setattr(tenant, "FILE", types.SimpleNamespace(exists=started))  # past the state, before the tenants
+    monkeypatch.setattr(sys, "argv", ["alldayrec"])
+    for k in ("DASHSCOPE_API_KEY", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "INFER_TOKEN"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setenv("INFER_URL", "http://127.0.0.1:9")
+    monkeypatch.setattr(asr, "ENGINE", "qwen")
+    monkeypatch.setattr(asr, "DRAFT_ENGINE", "qwen-stream")
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
+    monkeypatch.setattr(transcript, "SPLIT_TURNS", True)
+    monkeypatch.setattr(music, "ON", True)
+    monkeypatch.setattr(compute, "REMOTE", None)
+    monkeypatch.setattr(compute, "Local", lambda: pytest.fail("computed here"))
+    monkeypatch.setattr(compute.Remote, "same_models", lambda self: True)
+    for k in ("embed", "music", "turns"):
+        monkeypatch.setitem(core.state, k, None)
+    with pytest.raises(Started):
+        server.main()
+    r = compute.REMOTE
+    assert isinstance(r, compute.Remote)
+    assert core.state["embed"] == r.embed and core.state["music"] == r.music
+    assert core.state["turns"].func is transcript.turns and core.state["turns"].keywords == {"segment": r.segment}
+
+
 def test_speech_in():
     """What the engine is sent: the loose VAD's speech, in seconds into the window, and the speech still running from
     its start (a short blip that may not become speech too)."""

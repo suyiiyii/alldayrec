@@ -83,6 +83,10 @@ INFER_TOKEN=<the same token>
 
 `GET /health` needs no token; `GET /metrics` needs it and returns each computation's calls, compute seconds and audio seconds. For the variables, see [Configuration](../reference/configuration.md#other-environment-variables).
 
+A request takes at most 600 s of audio, and speaker-change frames (`/segment`) at most 10 s; over that the service answers 413. A 413 means the request itself is wrong and no retry can help, so the server neither waits nor tries again: it logs an error and the call fails.
+
+When upgrading, upgrade the inference service (`--infer`) first and then the server, or both at once. A newer server may check for more models than an older service has (speaker-change detection, for one); while `/health` does not match, every call waits, until the service is upgraded too.
+
 ## Conversations, summaries and the recap
 
 Sentences are grouped into conversations by time. A conversation ends after 5 minutes with nobody speaking, when the recorder stops, or when it reaches 4 hours. A conversation with less than 10 seconds of speech is not kept as a conversation (its sentences stay in the transcript).

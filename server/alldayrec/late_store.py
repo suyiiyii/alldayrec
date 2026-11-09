@@ -225,9 +225,10 @@ def claim(now_ms: int | None = None):
 
 def stopped(span):
     """The server stopped while span waited for the infer service (compute.Stopping): its claim and the try the claim
-    counted given back, so outages with restarts never use up its tries."""
-    db.conn().execute("UPDATE late_spans SET status='waiting', tries=MAX(0, tries-1) WHERE id=? AND status='processing'",
-                      (span["id"],))
+    counted given back, so outages with restarts never use up its tries. At most 3 times (stops): each claim pays the
+    span's ASR again, so a fourth stop is an interrupted claim as any other (recover() keeps its try)."""
+    db.conn().execute("UPDATE late_spans SET status='waiting', tries=MAX(0, tries-1), stops=stops+1 "
+                      "WHERE id=? AND status='processing' AND stops < 3", (span["id"],))
 
 
 def move_seam(span, cut):

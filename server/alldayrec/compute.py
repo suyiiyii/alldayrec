@@ -8,13 +8,14 @@ backend is only a blocking function.
 - remote (INFER_URL=https://infer.example.com): POSTs the samples to alldayrec --infer (infer_server.py) with
   INFER_TOKEN, 2 s to connect and INFER_TIMEOUT s to answer. This process then never loads those models (nor downloads
   them, served()). A call that fails (refused, a timeout, any 4xx or 5xx, an answer that is no unit DIM-float
-  voiceprint, no SEG_FRAMES x 7 frames) waits for the service: it tries again after BACKOFF_S, doubling to its last,
-  until one is answered; no sentence is lost or skipped, its device's pipeline waits (uploads are still taken and
+  voiceprint, no SEG_FRAMES x 7 finite frames) waits for the service: it tries again after BACKOFF_S, doubling to its
+  last, until one is answered; no sentence is lost or skipped, its device's pipeline waits (uploads are still taken and
   stored). Calls meanwhile sleep to the next try instead of each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
   service has been failing, lr_infer_calls_total{op,result} counts calls (remote, retried) and failed tries (error).
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,
   every call fails as above until the service is fixed (each try asks again: no restart needed). The server stopping
-  (STOP) ends a call waiting for the service with Stopping instead of waiting on to a SIGKILL.
+  (STOP) ends a call waiting for the service with Stopping instead of waiting on to a SIGKILL. A 413 (samples over the
+  service's limit: no try can help) is no failure of the service: an error logged, the call raises.
 """
 import logging
 import os
@@ -128,6 +129,11 @@ class Remote:
                 r.raise_for_status()
                 out = parse(r.json())
             except Exception as e:  # refused, a timeout, a 4xx / 5xx, another model, a wrong answer
+                if getattr(getattr(e, "response", None), "status_code", 0) == 413:  # this call's samples: no try helps
+                    CALLS[op, "error"] += 1
+                    log.error("infer service %s: 413, %.1f s of samples over its limit; not tried again", op,
+                              len(x) / 16000)
+                    raise
                 self.failed(op, e)
                 tries += 1
                 continue

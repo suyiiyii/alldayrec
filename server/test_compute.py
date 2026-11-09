@@ -3,6 +3,7 @@ that fails (down, hung, a wrong token, another model, a wrong answer) is waited 
 sentence is lost meanwhile; the token; and a service that holds nothing of a tenant's. With the model files in
 MODELS_DIR the real models run on both sides; without them (CI) a stand-in model does, the HTTP path is the same."""
 import datetime as dt
+import json
 import socket
 import subprocess
 import sys
@@ -208,6 +209,46 @@ def test_wrong_answer_is_tried_again(service, monkeypatch):
     assert np.allclose(r.segment(x), Stub().segment(x), atol=1e-6) and compute.CALLS["segment", "error"] == 2
 
 
+def test_non_finite_answer_is_tried_again(monkeypatch):
+    """NaN or Infinity in a voiceprint or frames (JSON literals another service may send; infer_server's own JSON
+    never has them, it answers 500): never taken, tried again."""
+    monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
+    monkeypatch.setattr(compute, "BACKOFF_S", (0.01, 0.01))
+    x = speech()
+    v, f = Stub().embed(x), Stub().segment(x)
+    v_nan, f_nan, f_inf = v.copy(), f.copy(), f.copy()
+    v_nan[5], f_nan[3, 2], f_inf[0, 0] = np.nan, np.nan, -np.inf
+    answers = {"/embed": [{"embedding": v_nan}, {"embedding": v}],
+               "/segment": [{"frames": f_nan}, {"frames": f_inf}, {"frames": f}]}
+
+    def answer(request):  # the answer's text as it is, not through FastAPI's JSON
+        return httpx2.Response(200, text=json.dumps({k: a.tolist() for k, a in answers[request.url.path].pop(0).items()}))
+    r = compute.Remote("http://infer.test", TOKEN, 5.0)
+    r.http = httpx2.Client(transport=httpx2.MockTransport(answer))
+    assert np.array_equal(r.embed(x), v) and compute.CALLS["embed", "error"] == 1
+    assert np.array_equal(r.segment(x), f) and compute.CALLS["segment", "error"] == 2
+    assert answers == {"/embed": [], "/segment": []}
+
+
+def test_over_the_limit_is_not_tried_again(service, caplog):
+    """/segment takes at most 10 s (pyannote's chunk; more: 413, never computed). A 413 is this call's samples, not the
+    service down: an error logged, the call raises at once, no try more, the service not taken for down."""
+    ok = {"Authorization": f"Bearer {TOKEN}"}
+    x = speech(10.0)
+    long = np.concatenate([x, x[:1]])
+    assert httpx2.post(f"{service}/segment", content=x.tobytes(), headers=ok).status_code == 200
+    assert httpx2.post(f"{service}/segment", content=long.tobytes(), headers=ok).status_code == 413
+    assert httpx2.post(f"{service}/segment", content=iter([long.tobytes()]), headers=ok).status_code == 413, "chunked"
+    assert httpx2.post(f"{service}/embed", content=long.tobytes(), headers=ok).status_code == 200, "10 s for frames only"
+    r = compute.Remote(service, TOKEN, 5.0)
+    tries = counted(r)
+    got = background(r.segment, long)
+    got["thread"].join(5)
+    assert isinstance(got.get("error"), httpx2.HTTPStatusError) and got["error"].response.status_code == 413, got
+    assert len(tries) == 1 and r.down_seconds() == 0 and compute.CALLS["segment", "error"] == 1
+    assert "infer service segment: 413" in caplog.text
+
+
 def test_token(service, monkeypatch, caplog):
     x = speech().tobytes()
     for h in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": TOKEN}):
@@ -368,7 +409,8 @@ first one alone is S? as with a local model: the diarist's, a lone short sentenc
 def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
     """The server stopped while a pipeline and a late span wait for the service: the lifespan ends in a moment (not
     once the service is back, or at a SIGKILL), raising nothing. The span's claim is given back with the try it counted
-    (tries go up at the claim): three stops in a row during one outage leave it waiting with no try used, not failed."""
+    (tries go up at the claim): three stops in a row during one outage leave it waiting with no try used, not failed.
+    No more than three (each claim pays the span's ASR again): a fourth stop is an interrupted claim, its try kept."""
     rig(tmp_path, monkeypatch, hear)
     monkeypatch.setitem(infer_server.state, "compute", Stub())
     monkeypatch.setitem(infer_server.state, "token", TOKEN)
@@ -399,7 +441,7 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "LOOP_STALL_MS", 0)  # no loop_stalls: its lag samples are the process's (test_metrics)
     monkeypatch.setattr(compute, "STOP", threading.Event())
     up = []
-    rescue = threading.Timer(15, lambda: up.append(serve(bound(port))))  # without the fix: back after 15 s, not never
+    rescue = threading.Timer(25, lambda: up.append(serve(bound(port))))  # without the fix: back after 15 s, not never
     rescue.start()
 
     async def run():
@@ -413,17 +455,42 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
             t = time.monotonic()
         return time.monotonic() - t
     state = lambda: tuple(db.conn().execute("SELECT status, tries FROM late_spans WHERE id = ?", (s["id"],)).fetchone())
-    for k in range(3):  # a restart each time, the service down all along
+    for k in range(4):  # a restart each time, the service down all along
         waiting.clear()
         took = anyio.run(run)
         assert took < 3 and not up, (k, took)
         assert not compute.STOP.is_set(), "cleared for a next start"
-        assert state() == ("waiting", 0), (k, state())
+        assert state() == (("waiting", 0) if k < 3 else ("processing", 1)), (k, state())
     rescue.cancel()
     for u in up:
         u.should_exit = True
     late_store.recover()
-    assert state() == ("waiting", 0), "not failed: the stops used none of its tries"
+    assert state() == ("waiting", 1), "not failed: three stops used none of its tries, the fourth one"
+
+
+def test_cancel_with_the_service_up_keeps_the_try(store, monkeypatch):
+    """Only compute.Stopping gives a claim back: a stop with the service up (the span on its ASR, say) is an interrupted
+    claim as before, its try kept (recover())."""
+    monkeypatch.setattr(compute, "REMOTE", compute.Remote("http://127.0.0.1:9", TOKEN, 5.0))  # never called: not down
+    s, started = span(0, 20), []
+
+    async def process(sp):
+        started.append(sp["id"])
+        await anyio.sleep_forever()
+    monkeypatch.setattr(late, "process", process)
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(late.processor)
+            with anyio.fail_after(5):
+                while not started:
+                    await anyio.sleep(0.05)
+            tg.cancel_scope.cancel()
+    anyio.run(run)
+    state = lambda: tuple(db.conn().execute("SELECT status, tries FROM late_spans WHERE id = ?", (s["id"],)).fetchone())
+    assert started == [s["id"]] and state() == ("processing", 1)
+    late_store.recover()
+    assert state() == ("waiting", 1)
 
 
 def test_late_span_waits_out_its_timeout(store, monkeypatch):
