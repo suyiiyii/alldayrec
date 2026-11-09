@@ -77,7 +77,7 @@ final class BeanWifi {
         break
       } else {
         let other = BeanWifi.wifiAddress() != nil
-        log("bean_wifi_fail", "iOS 说加入了，8 s 内手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次，\(BeanWifi.mono() - t1) ms）", "warn",
+        log("bean_wifi_fail", "iOS 说加入了，20 s 内手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次，\(BeanWifi.mono() - t1) ms）", "warn",
             ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
       }
@@ -174,10 +174,11 @@ final class BeanWifi {
     keepAlive = timer
   }
 
-  /// The phone's address on the hotspot (its DHCP gives 192.168.43.x), within 8 s; nil: iOS said joined and is not. No
-  /// entitlement needed, unlike NEHotspotNetwork.fetchCurrent.
+  /// The phone's address on the hotspot (its DHCP gives 192.168.43.x), within 20 s; nil: iOS said joined and is not. No
+  /// entitlement needed, unlike NEHotspotNetwork.fetchCurrent. 11-09: 8 s went by on the first join and the second got
+  /// it at 8.2 s: waiting longer costs less than joining again (iOS asks the person each time)
   private func onHotspot() -> String? {
-    for _ in 0..<16 {
+    for _ in 0..<40 {
       if let a = BeanWifi.wifiAddress(), a.hasPrefix("192.168.43.") { return a }
       Thread.sleep(forTimeInterval: 0.5)
     }
@@ -243,13 +244,12 @@ final class BeanWifi {
     return "\(p.status)" + (reason.isEmpty ? "" : " \(reason)")
   }
 
-  /// The phone's default route while on the hotspot (which has no internet): does the upload still go, over cellular?
+  /// The phone's default route while on the hotspot (which has no internet); uploads wait meanwhile (UploadPath)
   private func watch() {
     let m = NWPathMonitor()
     m.pathUpdateHandler = { [weak self] p in
       let kinds = [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .other].filter(p.usesInterfaceType).map { "\($0)" }
       let all = p.availableInterfaces.map { "\($0.type)" }
-      UploadPath.route = "\(p.status) via \(kinds.joined(separator: "+"))"
       self?.log("bean_wifi_path", "手机网络：\(p.status)，默认走 \(kinds.joined(separator: "+"))，可用 \(all.joined(separator: ","))" +
                 (p.isExpensive ? "（计流量）" : ""), nil, ["status": "\(p.status)", "uses": kinds, "available": all, "expensive": p.isExpensive])
     }
@@ -326,24 +326,8 @@ final class BeanWifi {
   }
 }
 
-/// While a fast transfer is on (`device` set): each upload's outcome and the interface it went by (its task's metrics),
-/// into the bean's device log; Uploader calls it.
-final class UploadPath: NSObject, URLSessionTaskDelegate {
+/// While a fast transfer is on (`device` set) uploads wait (Uploader): the hotspot has no internet, and 11-09 with a VPN
+/// on the phone's route went back and forth between Wi-Fi and cellular and uploads failed (-1005); the queue goes after.
+enum UploadPath {
   @Shared static var device: String?
-  @Shared static var route = ""
-  @Shared private var via = "?"
-
-  func urlSession(_ s: URLSession, task: URLSessionTask, didFinishCollecting m: URLSessionTaskMetrics) {
-    // isCellular is false through a VPN's tunnel (11-08: Wi-Fi gone, the default route cellular, still false)
-    via = m.transactionMetrics.last.map { $0.isCellular ? "蜂窝" : $0.isExpensive ? "计流量接口" : "非蜂窝接口（VPN 隧道或 Wi-Fi）" } ?? "?"
-  }
-
-  /// The task's delegate while a transfer is on, else nil.
-  static func start() -> UploadPath? { device == nil ? nil : UploadPath() }
-
-  func done(_ pieces: Int, _ ms: Int64, _ error: String?) {
-    guard let d = UploadPath.device else { return }
-    DeviceLog.app(d, "bean_wifi_upload", "快传期间上传 \(pieces) 块" + (error.map { "失败：\($0)" } ?? "成功") + "，走 \(via)（默认路由 \(UploadPath.route)），\(ms) ms",
-                  level: error == nil ? nil : "warn", fields: ["ok": error == nil, "pieces": pieces, "via": via, "route": UploadPath.route, "ms": ms, "error": error ?? NSNull()])
-  }
 }
