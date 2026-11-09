@@ -343,7 +343,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         part = null
     }
 
-    // What the server's timeline says of this recording (live-record#441), as device-log events of the phone's audio
+    // What the server's timeline says of this recording, as device-log events of the phone's audio
     // name: why it heard nothing (mic_lost, its reason, then mic_back), and when the phone played media aloud (media_on/off)
     private var lost: String? = null  // the mic_lost sent, until its mic_back; the slicer thread's
     private var aloud = false         // media_on sent, until its media_off

@@ -388,7 +388,7 @@ final class Slicer {
   private var anchorMs: Int64 = 0, fileSlice = 0
   private var gapFrom: Int64?  // main: the system stopped the recording at this time and it has not resumed yet
   private var observers: [NSObjectProtocol] = []
-  // What the server's timeline says of this recording (live-record#441), as device-log events of the phone's audio name:
+  // What the server's timeline says of this recording, as device-log events of the phone's audio name:
   // why it heard nothing (mic_lost, its reason, then mic_back), and when the phone played media aloud (media_on/off)
   private let device = Recorder.defaults.string(forKey: "device") ?? "phone"  // the pieces' device (Recorder.upload)
   private let callObserver = CXCallObserver()

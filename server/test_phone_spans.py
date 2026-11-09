@@ -1,4 +1,4 @@
-"""What a phone recording with its microphone says of it (live-record#441): when it heard nothing and why (a call,
+"""What a phone recording with its microphone says of it: when it heard nothing and why (a call,
 another app holding the microphone), and when it played media aloud. Its events pair into spans for the timeline and
 进度, and the media ones become the summary's media_spans (greyed, folded, never a person in the room)."""
 import datetime as dt
