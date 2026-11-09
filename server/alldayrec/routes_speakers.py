@@ -49,7 +49,7 @@ async def rename(conv_id: str, body: dict):
     conv_id, frm = db.resolve_voice(conv_id, frm)
     if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(conv_id, frm)], to, limiter=threads.DB)):
         return {"check": q}
-    also = None if speakers.ANON.fullmatch(to) else await anyio.to_thread.run_sync(earlier, conv_id, frm, limiter=threads.DB)
+    also = None if speakers.ANON.fullmatch(to) else earlier(conv_id, frm)  # no await: renames in a row queue no stale summary
     me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
@@ -84,10 +84,11 @@ def name_check(voices: list[tuple[str, str]], to: str) -> dict | None:
 
 def earlier(conv_id: str, label: str) -> dict | None:
     """The label's voice in earlier conversations still unnamed (B3, 「之前 N 段对话里也出现过」): the other voices of its
-    card or of the suggestion it is in (speaker_groups as last made: a rename since leaves them, not a wrong one, as
-    the label is checked again here). voices: conv|label each; None when there are none."""
+    card or of the suggestion it is in, from speaker_groups as last made (a rename since leaves some out, never a wrong
+    one: each is checked against its conversation here). voices: conv|label each; None when there are none."""
     k, start = f"{conv_id}|{label}", conv_start(conv_id)
-    gs = T().speakers["groups"] or speaker_groups()
+    # shortcut: none before the groups were first made (seconds of work, not here); the conversation page makes them
+    gs = T().speakers["groups"] or []
     ms = next((x["members"] for g in gs for x in [g, *g["suggested"]] if any(voice_key(m) == k for m in x["members"])), [])
     ms = [m for m in ms if m["start"] < start and speakers.ANON.fullmatch(m["label"])]
     now = {cid: json.loads(ps) for cid, ps in db.conn().execute(

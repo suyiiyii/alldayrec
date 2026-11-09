@@ -135,7 +135,7 @@ def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):
         async with anyio.create_task_group() as tenant.T().tg:
             with anyio.fail_after(5):  # learning first would wait for the gate for good
                 r = await rename(c["id"], {"from": "S1", "to": "张三"})
-                assert {**r, "undo": None} == {"participants": ["张三"], "renamed": 3, "voiceprints": 3, "undo": None}
+                assert {**r, "undo": None} == {"participants": ["张三"], "renamed": 3, "voiceprints": 3, "undo": None, "also": None}
             assert db.conversation(c["id"])["participants"] == ["张三"] and "张三" not in db.people() and not cut, "nothing learnt yet"
             gate.set()
         assert len(cut) == 3

@@ -50,6 +50,9 @@ def test_earlier_then_together(store):
     v = E[1] + E[2]
     c1, c2, c3, c4 = conv(1, "S1", v + 0.1 * E[3]), conv(2, "S1", v + 0.1 * E[4]), conv(3, "S2", E[6]), conv(4, "S1", v)
     c5 = conv(5, "S1", v + 0.1 * E[5])  # later: not 之前
+    routes_speakers.T().speakers["groups"] = None
+    assert routes_speakers.earlier(c4, "S1") is None, "the groups not made yet (the conversation page makes them)"
+    routes_speakers.speaker_groups()
     r = rename(c4, "S1", "R")
     assert r["also"] == {"voices": [f"{c2}|S1", f"{c1}|S1"], "n": 2} and c3 not in str(r["also"]) and c5 not in str(r["also"])
     db.conn().execute("UPDATE sentences SET speaker = 'S7' WHERE speaker = 'S1' AND start < ?", (db.conversation(c2)["start"],))
