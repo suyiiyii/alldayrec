@@ -277,7 +277,7 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
             return r[0]
         pos = append(path, body)
         received = int(time.time() * 1000)
-        with db.tx() as t:
+        with db.tx(durable=True) as t:
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
@@ -451,7 +451,7 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         finally:
             os.close(directory)
         received = int(time.time() * 1000)
-        with db.tx() as t:
+        with db.tx(durable=True) as t:
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
