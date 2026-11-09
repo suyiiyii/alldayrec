@@ -64,7 +64,7 @@ async def sentence_speaker(sid: str, body: dict):
     c, r = sentence(sid, body.get("conv"))
     frm, to = r.get("speaker") or "", (body.get("to") or "").strip()
     _, to = db.resolve_voice(body.get("conv") or c["id"], to)
-    if not to or to == "S?" or len(to) > 20 or to == frm:
+    if not to or to == "S?" or len(to) > 20 or not to.isprintable() or to == frm:
         raise HTTPException(400, "bad name")
     if frm in c["participants"] and sum(x.get("speaker") == frm for x in conversation_rows(c)) == 1:
         res, rows, before = apply_rename(c["id"], frm, to)

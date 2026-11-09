@@ -22,6 +22,14 @@ URL = "wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_{mode}"
 RESOURCE = "volc.seedasr.sauc.duration"
 SR = 16000
 PACKET_MS = 200
+# hotwords sent inline (request.corpus.context, over a list made in the console): nostream takes 5000 (docs 6561/1354869)
+HOTWORDS = 5000
+
+
+def fits(w: str) -> bool:
+    # shortcut: the inline length limit is undocumented, this is the console list's (each under 10 characters, docs
+    # doubao-voice/hot-words); upgrade when Volcengine documents the inline one
+    return len(w) < 10
 
 FULL_CLIENT, AUDIO_ONLY, FULL_SERVER, SERVER_ERROR = 0b0001, 0b0010, 0b1001, 0b1111
 POS_SEQ, NEG_WITH_SEQ = 0b0001, 0b0011
@@ -108,7 +116,12 @@ async def _session(x: np.ndarray, mode: str, pace_s: float, options: dict, consu
     return {"seconds": round(time.perf_counter() - t0, 1), "responses": responses, "logid": logid}
 
 
-async def _run(x: np.ndarray, mode: str, pace_s: float, speakers: bool, log=None) -> tuple[list[dict], dict]:
+def corpus(words) -> dict:
+    """The request fields that make the engine listen for words (none: no fields)."""
+    return {"corpus": {"context": json.dumps({"hotwords": [{"word": w} for w in words]}, ensure_ascii=False)}} if words else {}
+
+
+async def _run(x: np.ndarray, mode: str, pace_s: float, speakers: bool, log=None, words=()) -> tuple[list[dict], dict]:
     last = None
 
     def consume(r):
@@ -119,7 +132,7 @@ async def _run(x: np.ndarray, mode: str, pace_s: float, speakers: bool, log=None
                 log(r)
 
     meta = await _session(x, mode, pace_s,
-                          {"result_type": "full", **({"enable_speaker_info": True} if speakers else {})}, consume)
+                          {"result_type": "full", **({"enable_speaker_info": True} if speakers else {}), **corpus(words)}, consume)
     return utterances(last), {**meta, "text": (last or {}).get("result", {}).get("text", "")}
 
 
@@ -149,8 +162,8 @@ async def stream(x: np.ndarray, pace_s: float = 0.02, end_window_ms: int | None 
         return await _stream(x, pace_s, end_window_ms)
 
 
-async def transcribe(x: np.ndarray, mode: str = "nostream", pace_s: float = 0.02, speakers: bool = True, partial=None):  # 0.02: 10x real time
-    """Bounded: a stalled connection (send blocked, no answer) must fail so the caller retries next pass.
+async def transcribe(x: np.ndarray, mode: str = "nostream", pace_s: float = 0.02, speakers: bool = True, partial=None, words=()):  # 0.02: 10x real time
+    """words: hotwords (fits, at most HOTWORDS) to listen for. Bounded: a stalled connection (send blocked, no answer) must fail so the caller retries next pass.
     partial(utts): called with the definite sentences so far each time an answer adds some (nostream answers every
     ~4 s while a window goes in at 10x, each ~15-20 s of audio further: a 5 min window's first sentences in ~3 s)."""
     budget = 30 + len(x) / SR * (pace_s * 5 + 0.3)  # sending time plus the engine's ~0.25x real time, with headroom
@@ -162,7 +175,7 @@ async def transcribe(x: np.ndarray, mode: str = "nostream", pace_s: float = 0.02
             seen[0] = len(us)
             partial(us)
     with anyio.fail_after(budget):
-        return await _run(x, mode, pace_s, speakers, log)
+        return await _run(x, mode, pace_s, speakers, log, words)
 
 
 def main():

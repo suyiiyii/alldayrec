@@ -53,6 +53,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `people` | Voiceprints of people with recognized names |
 | `enrolled` | The sentences each person's voiceprint was learnt from, one row each; an undo or a split takes them back out |
 | `aliases` | Other names of a person |
+| `terms` | Terms: each term and when it was added or changed |
 | `name_hints` | What each label was called in a conversation (used only to suggest names) |
 | `profiles` | People cards of people with recognized names, each row with its source |
 | `pieces` | The index of uploaded pieces, which is also the processing queue |

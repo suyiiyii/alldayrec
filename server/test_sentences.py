@@ -88,7 +88,7 @@ def test_one_sentence_and_undo(store):
     anyio.run(speaker_undo, {"undo": r["undo"]})
     assert dump() == was
 
-    for to in ("", "S?", "S1", "名" * 21):
+    for to in ("", "S?", "S1", "名" * 21, "张\n三"):
         with pytest.raises(HTTPException) as e:
             fix("f1", to)
         assert e.value.status_code == 400

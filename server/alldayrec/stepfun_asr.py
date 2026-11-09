@@ -19,6 +19,8 @@ ACCOUNT = "https://api.stepfun.com/v1/accounts"  # the pay-as-you-go account the
 GAP_MS = 600     # a pause this long between characters ends a sentence
 REACH_MS = 1000  # a character this close to a file sentence joins it (the rule of replay_case.words_to_turns)
 END = "。？！?!"   # ... and these end one
+# shortcut: hotwords (audio.input.transcription.hotwords) have no documented limit; 500 is ours, upgrade once StepFun gives one
+HOTWORDS = 500
 
 
 async def balance() -> float:
@@ -27,18 +29,19 @@ async def balance() -> float:
     return float(json.loads(r.content)["balance"])
 
 
-def _body(x: np.ndarray) -> bytes:
+def _body(x: np.ndarray, words=()) -> bytes:
     return json.dumps({"audio": {"data": base64.b64encode(x.tobytes()).decode(), "input": {
-        "transcription": {"model": "stepaudio-2.5-asr", "language": "zh", "enable_itn": True, "enable_timestamp": True},
+        "transcription": {"model": "stepaudio-2.5-asr", "language": "zh", "enable_itn": True, "enable_timestamp": True,
+                          **({"hotwords": list(words)} if words else {})},
         "format": {"type": "pcm", "codec": "pcm_s16le", "rate": 16000, "bits": 16, "channel": 1}}}}).encode()
 
 
-async def sse(x: np.ndarray, on_sentence=None) -> list[dict]:
-    """x: 16 kHz int16 PCM. Its deltas [{delta, start_time, end_time}] (ms into x), runs on one time spread out
+async def sse(x: np.ndarray, on_sentence=None, words=()) -> list[dict]:
+    """x: 16 kHz int16 PCM, words: hotwords (at most HOTWORDS) to listen for. Its deltas [{delta, start_time, end_time}] (ms into x), runs on one time spread out
     (spread: every reader, final and draft, gets them so); on_sentence(deltas so far) whenever one ends a sentence or
     starts one after a pause (see sentences), as each arrives.
     Raises on an HTTP error (402 balance, 429 rate, 451 refused) and unless transcript.text.done arrives (a cut stream)."""
-    body = await anyio.to_thread.run_sync(_body, x, limiter=threads.MEDIA)  # a 5 min window is 13 MB of JSON: ~35 ms, off the event loop
+    body = await anyio.to_thread.run_sync(_body, x, words, limiter=threads.MEDIA)  # a 5 min window is 13 MB of JSON: ~35 ms, off the event loop
     out = []
     with net.errors():
         async with net.client(60) as c, c.stream("POST", URL, content=body, headers={

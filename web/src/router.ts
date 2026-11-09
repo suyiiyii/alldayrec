@@ -70,6 +70,7 @@ export const router = createRouter({
       component: () => import("./pages/Connect.vue"),
       meta: { title: "title.connect" },
     },
+    { path: "/terms", component: () => import("./pages/Terms.vue"), meta: { title: "title.terms" } },
   ],
 });
 // meta.title: the page's title in locales/*.json, again when the language changes

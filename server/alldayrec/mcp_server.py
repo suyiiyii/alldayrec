@@ -197,6 +197,11 @@ def names() -> str:
     return f"# 认出名字的说话人 {len(n)} 个（按对话段数）\n" + "、".join(f"{k} {v}" for k, v in n.items())
 
 
+def terms() -> str:
+    w = db.hotwords()
+    return f"# 热词和术语 {len(w)} 个（最近用到的在前）\n" + "、".join(w)
+
+
 def mark_todo(id: str, text: str, mark: str) -> str:
     """The web page's 完成 / 不对 (db.mark_todos); once is enough."""
     if mark not in ("done", "wrong"):
@@ -240,6 +245,8 @@ TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [
     (person, "一个认出名字的说话人：和我聊过几段、最早最近、最近 12 段里 TA 说了什么、TA 的待办、我答应 TA 的事。问某个人的事先用它，比关键词搜全。",
      {"name": S}, ["name"]),
     (names, "认出名字的说话人，按一起出现的对话段数从多到少。", {}, []),
+    (terms, "录音者的热词和术语表（人名、公司、产品、术语），加上认出名字的说话人，最近用到的在前。转写里和其中某个同音、近音的词多半就是它："
+     "搜索、grep 时也用这里的写法再找一次。", {}, []),
 ]}
 READ_LIST = [{"name": n, "description": desc, "inputSchema": {"type": "object", "properties": {**props, "cursor": CURSOR}, "required": req},
               **({"outputSchema": EVIDENCE} if n in ("grep", "conversation") else {}), "annotations": READ} for n, (f, desc, props, req) in TOOLS.items()]

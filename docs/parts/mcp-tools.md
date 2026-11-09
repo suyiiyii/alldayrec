@@ -13,4 +13,5 @@
 | `due` | 我今天到期和已经过期、还没标完成或不对的待办（只有带日期的），最早到期的在前。 | `cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `person` | 一个认出名字的说话人：和我聊过几段、最早最近、最近 12 段里 TA 说了什么、TA 的待办、我答应 TA 的事。问某个人的事先用它，比关键词搜全。 | `name` (string)<br>`cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `names` | 认出名字的说话人，按一起出现的对话段数从多到少。 | `cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
+| `terms` | 录音者的热词和术语表（人名、公司、产品、术语），加上认出名字的说话人，最近用到的在前。转写里和其中某个同音、近音的词多半就是它：搜索、grep 时也用这里的写法再找一次。 | `cursor?` (string): 翻页：上一页末尾给的 cursor；第一页不填 |
 | `mark_todo` (writes) | 把一段对话里的一条待办标成完成（done）或不对（wrong），和网页上点「完成」「不对」一样，标了的不再出现在到期列表和回顾里。id 和 text 照抄 todos / due / conversation 返回的。只在我明确要你标的时候用。 | `id` (string)<br>`text` (string)<br>`mark` (done/wrong) |

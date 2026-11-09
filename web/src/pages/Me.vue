@@ -56,6 +56,7 @@ const LINKS = computed(() => {
     { to: "/connect#ai", icon: "sparkles", title: t("me.ai"), sub: t("me.aiSub") },
     { to: "/record", icon: "mic", title: t("me.record"), sub: t("me.recordSub") },
     { to: "/import", icon: "upload", title: t("me.import"), sub: t("me.importSub") },
+    { to: "/terms", icon: "list", title: t("me.terms"), sub: t("me.termsSub") },
   ];
   // the online demo (src/demo.ts) has no phone, AI service or recorder to connect and takes no uploads: 待办 and 处理进度 only
   // in the app the phone is connected already: 连接手机 is for another one, from a browser

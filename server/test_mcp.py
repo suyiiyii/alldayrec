@@ -81,7 +81,7 @@ def test_protocol():
 
     status, ls = modern("tools/list")
     tools = {t["name"]: t for t in ls["result"]["tools"]}
-    assert len(tools) == 12 and ls["result"]["cacheScope"] == "public" and ls["result"]["ttlMs"] > 0
+    assert len(tools) == 13 and ls["result"]["cacheScope"] == "public" and ls["result"]["ttlMs"] > 0
     assert all(t["annotations"]["readOnlyHint"] for n, t in tools.items() if n != "mark_todo") and not tools["mark_todo"]["annotations"]["readOnlyHint"]
     assert all(t["name"].isascii() and t["inputSchema"]["type"] == "object" for t in tools.values())
     assert rpc("tools/call", name="ask", arguments={})["error"]["code"] == -32602 and rpc("tools/call", name="day", arguments="x")["error"]["code"] == -32602

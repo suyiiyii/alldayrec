@@ -7,7 +7,7 @@ whole timeline. When the conversation closes, one more turn asks the same agent 
 """
 import json
 
-from alldayrec.summary import complete, faithful, instructions, lang_line, transcript
+from alldayrec.summary import complete, faithful, instructions, lang_line, terms_line, transcript
 
 FIELDS = ("points", "decisions", "todos", "open_questions")
 SYSTEM = """你在一段正在进行的对话现场（开会、讨论、聊天、日常生活都算），持续整理议题时间线，帮在场的我随时回顾刚才讲了什么。
@@ -46,8 +46,10 @@ def background(convs: list[dict]) -> str:
 
 
 def new(start: str, device: str, earlier: list[dict]) -> dict:
+    """A conversation's agent: its system prompt carries the hotwords (terms_line) for every turn (analyze), as of its start."""
+    terms = terms_line()
     return {"start": start, "device": device, "topics": [], "next_id": 1, "fed_to": "",
-            "messages": [{"role": "system", "content": SYSTEM + "\n" + lang_line()}, {"role": "user", "content": background(earlier)}]}
+            "messages": [{"role": "system", "content": SYSTEM + "\n" + (terms + "\n" if terms else "") + lang_line()}, {"role": "user", "content": background(earlier)}]}
 
 
 def public(state: dict) -> dict:
@@ -126,8 +128,9 @@ async def final(state: dict, rows: list[dict], known_tags: list[str], start: str
     """The closing turn: final_turn, then the final summary in summary.SYSTEM's format. start: the closed conversation's
     (due dates count from it; the draft layer may have started the open one on the other side of midnight); todos:
     summary.todo_context's."""
-    msgs = state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start, todos)}"}]
-    return await faithful(msgs, *await complete(msgs, kind="live"), "\n".join([*(r.get("text") or "" for r in rows), *known_tags, start, todos]), "live")
+    terms = terms_line()
+    msgs = state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start, todos, terms)}"}]
+    return await faithful(msgs, *await complete(msgs, kind="live"), "\n".join([*(r.get("text") or "" for r in rows), *known_tags, start, todos, terms]), "live")
 
 
 if __name__ == "__main__":

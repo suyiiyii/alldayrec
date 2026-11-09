@@ -117,7 +117,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
-    if not to or to == "S?" or len(to) > 20 or to == frm or frm == "S?":  # S?: music and odd rows, one at a time only
+    if not to or to == "S?" or len(to) > 20 or not to.isprintable() or to == frm or frm == "S?":  # S?: music and odd rows, one at a time only
         raise HTTPException(400, "bad name")
     hit = [r for r in conversation_rows(c) if r.get("speaker") == frm]
     if not hit:
@@ -451,7 +451,7 @@ async def speaker_one(gid: str):
 
 
 def check_name(to: str):
-    if not to or to == "S?" or len(to) > 20 or speakers.ANON.fullmatch(to):
+    if not to or to == "S?" or len(to) > 20 or not to.isprintable() or speakers.ANON.fullmatch(to):
         raise HTTPException(400, "bad name")
 
 

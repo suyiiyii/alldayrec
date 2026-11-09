@@ -465,6 +465,28 @@ async def tags():
     return tag_counts()
 
 
+@router.get("/api/terms")
+async def terms():
+    """The 热词和术语 the owner keeps (terms, the latest set first) and the names of the people bank that go with them
+    (names, the most recently in a conversation first): the hotwords the ASR engines and the prompts get (db.hotwords)."""
+    own = db.terms()
+    return {"terms": own, "names": [w for w in db.hotwords() if w not in set(own)]}
+
+
+@router.post("/api/terms")
+async def term_set(body: dict):
+    """A term added (term), changed (old to term) or dropped (old alone)."""
+    term, old = (body.get("term") or "").strip(), (body.get("old") or "").strip()
+    if not (term or old) or len(term) > db.WORD_MAX or not term.isprintable():
+        raise HTTPException(400, "bad term")
+    with db.tx() as c:
+        c.execute("DELETE FROM terms WHERE term = ?", (old,))
+        if term:
+            c.execute("INSERT OR REPLACE INTO terms VALUES (?, ?)", (term, dt.datetime.now().isoformat(timespec="seconds")))
+    T().hotwords["at"] = 0.0
+    return await terms()
+
+
 @router.get("/api/conversation/{conv_id}")
 async def conversation(conv_id: str):
     c = find_conversation(conv_id)

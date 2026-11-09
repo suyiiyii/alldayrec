@@ -206,6 +206,7 @@ def process_metrics(s: dict) -> str:
     xs += [(f"threads_{k}", {"pool": pool}, v) for pool, t in (s["threads"] or {}).items() for k, v in t.items()]
     xs += [("infer_calls_total", {"op": op, "result": r}, n) for (op, r), n in compute.CALLS.items()]  # INFER_URL's calls
     xs += [("infer_down_seconds", {}, compute.REMOTE.down_seconds() if compute.REMOTE else None)]  # 0: answering
+    xs += [("hotwords_rejected_total", {"engine": e}, n) for e, n in asr.REJECTED.items()]  # requests taken without them
     return "".join(prom_line(f"lr_{n}", {"instance": core.TENANTS[0].id, **labels}, v) + "\n" for n, labels, v in xs if v is not None)
 
 

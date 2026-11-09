@@ -9,6 +9,9 @@ import uuid
 
 import websockets
 
+from alldayrec import asr
+from alldayrec import qwen_asr
+
 MODEL = "qwen-audio-3.1-asr-flash-streaming"
 URL = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 FRAME = 32000  # bytes a message: 1 s of 16 kHz int16
@@ -20,13 +23,17 @@ class Session:
     Raises on task-failed and on a connection closed before the task finished."""
 
     async def __aenter__(self):
+        return await asr.hinted("qwen-stream", URL, self.start, qwen_asr.HOTWORDS, qwen_asr.fits)  # the file job's hotwords
+
+    async def start(self, words):
         self.task = uuid.uuid4().hex
         # no permessage-deflate: PCM hardly compresses, and deflating a page's first 300 s in one send held the event loop up to 0.76 s
         self.ws = await websockets.connect(URL, additional_headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}"}, max_size=None,
                                            compression=None)
         await self.ws.send(json.dumps({"header": {"action": "run-task", "task_id": self.task, "streaming": "duplex"}, "payload": {
             "task_group": "audio", "task": "asr", "function": "recognition", "model": MODEL,
-            "parameters": {"format": "pcm", "sample_rate": 16000, "language_hints": ["zh", "en"]}, "input": {}}}))
+            "parameters": {"format": "pcm", "sample_rate": 16000, "language_hints": ["zh", "en"],
+                           **({"vocabulary": dict.fromkeys(words, qwen_asr.WEIGHT)} if words else {})}, "input": {}}}))
         m = json.loads(await self.ws.recv())
         if m["header"]["event"] != "task-started":
             await self.ws.close()
