@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef } from "vue";
 import { t } from "../i18n";
-import { get, hhmmss, post, type LabelSuggestions, type Row } from "../lib/api";
+import { get, hhmmss, post, type LabelSuggestions, type NameCheck as Check, type Row } from "../lib/api";
 import { play, player, toggle } from "../lib/audio";
 import { useMutation } from "../lib/mutation";
 import { anonymous, guesses, speakerLabel } from "../lib/speakers";
@@ -9,12 +9,16 @@ import { toast } from "../lib/toast";
 import { rowAt } from "../lib/track";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
+import NameCheck from "./NameCheck.vue";
 
 // One speaker of one closed conversation (conv: its participants and sentences; sug: its label suggestions), one per
 // page (open(label); open("") lists the speakers first): who they may be (one tap renames), a bit of their voice,
 // 这是我, a name box with recent names, 查看主页 for a named speaker. Renaming a label, or merging it into a name the
 // conversation has already, can be undone for 10 s (the server keeps what it changed: POST /api/speakers/undo). A
 // modal <dialog>: Escape or a tap on the dim backdrop closes it. reload: the page loads again what shows the speakers.
+// A typed name is checked first (NameCheck: a person it may be already); after a rename, the label's voice in earlier
+// conversations still unnamed is offered to rename too (一起改: POST /api/speakers/name with those voices); the rename's
+// 撤销 waits till the sheet closes (a toast under the modal sheet is out of reach), or goes into 一起改's, one for both.
 // rename, alias, hear, saving, error: for the page's own suggestion list (the conversation page's ⋯ 建议)
 const props = defineProps<{
   conv: { id: string; device?: string | null; participants: string[]; rows: Row[] } | null;
@@ -24,7 +28,11 @@ const props = defineProps<{
 const dlg = useTemplateRef<HTMLDialogElement>("dlg");
 const editing = ref(""),
   newName = ref(""),
-  names = ref<string[]>([]);
+  names = ref<string[]>([]),
+  ask = ref<{ to: string; check: Check } | null>(null),
+  also = ref<(Also & { to: string; done: Done }) | null>(null),
+  box = useTemplateRef<HTMLInputElement>("box");
+let sure = false; // 是另一个人: the next typed name is not checked again
 const { busy: saving, error, detail, run } = useMutation();
 const named = (p: string) => p !== "我" && !anonymous(p);
 const labels = computed(() => (props.conv?.participants ?? []).filter((p) => p !== "我" && p !== "S?"));
@@ -33,6 +41,8 @@ async function open(label: string) {
   editing.value = label;
   newName.value = "";
   error.value = "";
+  ask.value = also.value = null;
+  sure = false;
   if (!dlg.value?.open) {
     dlg.value?.showModal();
     dlg.value?.focus(); // the sheet, not its ✕ (no focus ring) nor the name box (no keyboard)
@@ -62,35 +72,83 @@ function hear(label: string) {
 }
 const playing = (label: string) => player.playing === `${props.conv?.id}|${label}`;
 
-async function rename(from: string, to: string) {
+type Also = { voices: string[]; n: number; group: string; suggestion?: string };
+type Renamed = { renamed: number; voiceprints: number; learned?: boolean; undo: string; also: Also | null };
+type Done = { msg: string; undo: string; back: string }; // a rename's toast: its undo id, what 撤销 then says
+const done = (d: Done) => toast(d.msg, { undo: () => void undo(d.undo, d.back), ms: 10_000 });
+async function rename(from: string, to: string, check = false) {
   const c = props.conv;
   if (!c) return;
   const merge = c.participants.includes(to) || c.rows.some((r) => r.speaker === to);
   await run(async () => {
-    const r = await post<{ renamed: number; voiceprints: number; learned?: boolean; undo: string }>(
+    const r = await post<Renamed | { check: Check }>(
       `/api/conversation/${encodeURIComponent(c.id)}/rename`,
-      { from, to },
+      { from, to, ...(check && { check: true }) },
     );
-    if (editing.value === from) close(); // not another speaker's sheet opened meanwhile
-    toast(
-      to === "我"
-        ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
-        : merge
-          ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
-          : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
-      { undo: () => void undo(r.undo, from), ms: 10_000 },
-    );
+    if ("check" in r) {
+      ask.value = { to, check: r.check };
+      return;
+    }
+    ask.value = null;
+    const d = {
+      msg:
+        to === "我"
+          ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
+          : merge
+            ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
+            : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
+      undo: r.undo,
+      back: t("conv.renamedBack", { to: speakerLabel(from) }),
+    };
+    // not another speaker's sheet opened meanwhile
+    if (editing.value === from && r.also) [also.value, editing.value] = [{ ...r.also, to, done: d }, ""];
+    else {
+      if (editing.value === from) close();
+      done(d);
+    }
     await props.reload();
   });
 }
-async function undo(id: string, from: string) {
+async function undo(id: string, msg: string) {
   await run(async () => {
     await post("/api/speakers/undo", { undo: id });
-    toast(t("conv.renamedBack", { to: speakerLabel(from) }));
+    toast(msg);
     await props.reload();
   });
 }
-const save = () => rename(editing.value, newName.value.trim());
+const save = () => rename(editing.value, newName.value.trim(), !sure);
+function other(free: string) {
+  [newName.value, ask.value, sure] = [free, null, true];
+  box.value?.focus();
+}
+function closed() {
+  // the sheet closed (✕, 不用了, Escape, the backdrop) with 一起改 not taken: now the rename's 撤销 is in reach
+  if (also.value) done(also.value.done);
+  also.value = null;
+}
+async function together() {
+  const a = also.value;
+  if (!a) return;
+  await run(async () => {
+    const { to, voices, group, suggestion } = a;
+    const r = await post<{ mixed: true } | { renamed: number; undo: string | null }>("/api/speakers/name", {
+      name: to,
+      voices,
+      group,
+      suggestion,
+      undo: a.done.undo, // the rename's: one 撤销 takes back both
+    });
+    if ("mixed" in r) {
+      error.value = t("nameCheck.twoPeople");
+      return;
+    }
+    also.value = null;
+    close();
+    const back = t("common.undone");
+    done({ msg: t("nameCheck.togetherDone", { n: r.renamed }, r.renamed), undo: r.undo ?? a.done.undo, back });
+    await props.reload();
+  });
+}
 async function alias(name: string, of: string) {
   await run(async () => {
     await post("/api/aliases", { alias: name, name: of });
@@ -115,16 +173,28 @@ defineExpose({ open, close, rename, alias, hear, saving, error, detail });
     aria-labelledby="sheet-who"
     tabindex="-1"
     @click.self="close"
+    @close="closed"
   >
     <div class="in">
       <div class="phead">
         <h3 id="sheet-who">
-          <template v-if="editing"><Avatar :name="editing" :size="40" />{{ speakerLabel(editing) }}</template>
+          <template v-if="also"><Avatar :name="also.to" :size="40" />{{ speakerLabel(also.to) }}</template>
+          <template v-else-if="editing"><Avatar :name="editing" :size="40" />{{ speakerLabel(editing) }}</template>
           <template v-else>{{ t("conv.rename") }}</template>
         </h3>
         <button class="btn-ghost x" :aria-label="t('conv.close')" @click="close"><Icon name="x" /></button>
       </div>
-      <div v-if="!editing" class="line">
+      <template v-if="also">
+        <p class="line">{{ t("nameCheck.found", { n: also.n }, also.n) }}</p>
+        <div class="line">
+          <button class="btn-primary" :disabled="saving" @click="together">
+            {{ t("nameCheck.together", { name: speakerLabel(also.to) }) }}
+          </button>
+          <button class="btn-ghost" @click="close">{{ t("nameCheck.skip") }}</button>
+        </div>
+        <p v-if="error" class="bad" role="alert" :title="detail">{{ error }}</p>
+      </template>
+      <div v-else-if="!editing" class="line">
         <span class="muted">{{ t("conv.renameWho") }}</span>
         <button v-for="l in labels" :key="l" class="chip" @click="open(l)">
           <Avatar :name="l" :size="20" />{{ speakerLabel(l) }}
@@ -155,13 +225,23 @@ defineExpose({ open, close, rename, alias, hear, saving, error, detail });
         </div>
         <form class="line" @submit.prevent="newName.trim() && save()">
           <input
+            ref="box"
             v-model="newName"
+            @input="ask = null"
             enterkeyhint="done"
             maxlength="20"
             :placeholder="named(editing) ? t('rowMenu.newName') : t('conv.whoIs', { who: speakerLabel(editing) })"
           />
           <button class="btn-primary" :disabled="saving || !newName.trim()">{{ t("conv.save") }}</button>
         </form>
+        <NameCheck
+          v-if="ask"
+          :to="ask.to"
+          :check="ask.check"
+          :busy="saving"
+          @name="(n) => rename(editing, n)"
+          @other="other"
+        />
         <div v-if="names.length" class="line">
           <template v-for="n in names" :key="n">
             <button v-if="n !== editing" class="chip" @click="newName = n">{{ n }}</button>

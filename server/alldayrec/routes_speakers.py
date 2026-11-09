@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse
 
 from alldayrec import bank
 from alldayrec import db
+from alldayrec import diarist
 from alldayrec import hints
 from alldayrec import profiles
 from alldayrec import routes_audio
@@ -40,14 +41,67 @@ async def names():
 @router.post("/api/conversation/{conv_id}/rename")
 async def rename(conv_id: str, body: dict):
     """One label renamed; with a name the conversation has already, a merge; to 我, its voice learnt too (learn_me).
-    The answer's undo takes it back (POST /api/speakers/undo)."""
+    The answer's undo takes it back (POST /api/speakers/undo); its also, the label's voice in earlier conversations
+    still unnamed (earlier) for 一起改 (POST /api/speakers/name with them). With check, a name typed in: nothing renamed
+    and {check} when there is a person it may be already (name_check)."""
     frm, to = body.get("from", ""), (body.get("to") or "").strip()
     _, to = db.resolve_voice(conv_id, to)
     conv_id, frm = db.resolve_voice(conv_id, frm)
+    if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(conv_id, frm)], to, limiter=threads.DB)):
+        return {"check": q}
+    also = None if speakers.ANON.fullmatch(to) else earlier(conv_id, frm)  # no await: renames in a row queue no stale summary
     me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
-    return {**r, **learn_me(to, me, [before]), "undo": keep_undo([before])}
+    return {**r, **learn_me(to, me, [before]), "undo": keep_undo([before]), "also": also}
+
+
+# 「很像」 another name: what the diarist itself names by. Not the voice check's band under it (PEOPLE_MIN - NEAR, kind
+# b): its replay on one instance's 41 days had a yes for 13 % of those cards, so 0.6-0.7 is mostly another person
+LIKE_MIN = diarist.PEOPLE_MIN
+
+
+def name_check(voices: list[tuple[str, str]], to: str) -> dict | None:
+    """Before a typed name is given to voices (conv, label): the person it may be already. same: the name is in use in
+    other conversations (convs; alike: the voices LIKE_MIN or more near its samples in the people bank, None without
+    either; free: the name with a number, for another person of that name); like: the other names the voices are
+    LIKE_MIN or more near, nearest first, two at most. None: nothing to ask. 我 and S<n> are never asked about."""
+    if to == "我" or speakers.ANON.fullmatch(to):
+        return None
+    es = [v[0] for k in voices if (v := voice_of(*k))]
+    e = selfvoice.unit(sum(selfvoice.unit(x) for x in es)) if es else None
+    near = {k: float(np.max(x @ e)) for k, (_, x) in db.people().items()} if es else {}
+    here, convs, used = {c for c, _ in voices}, 0, db.names()
+    for cid, ps in db.conn().execute("SELECT id, participants FROM conversations"):
+        convs += cid not in here and to in json.loads(ps)
+    q = {}
+    if convs or to in near:
+        free = next(x for i in range(2, 999) if (x := f"{to[:20 - len(str(i))]}{i}") not in used)  # names are 20 at most
+        q["same"] = {"name": to, "convs": convs, "alike": near[to] >= LIKE_MIN if to in near else None, "free": free}
+    mine = {to, *(label for _, label in voices)}  # a named card's own name is near it by its own samples
+    if like := sorted(((round(s, 3), n) for n, s in near.items() if s >= LIKE_MIN and n not in mine), reverse=True)[:2]:
+        q["like"] = [{"name": n, "score": s} for s, n in like]
+    return q or None
+
+
+def earlier(conv_id: str, label: str) -> dict | None:
+    """The label's voice in earlier conversations still unnamed (B3, 「之前 N 段对话里也出现过」): the other voices of its
+    card or of the suggestion it is in, from speaker_groups as last made (a rename since leaves some out, never a wrong
+    one: each is checked against its conversation here). A card that sounds like two people (bank.halves): only this
+    voice's half. voices: conv|label each; group (and suggestion): where they are, for speaker_name to test again; None
+    when there are none."""
+    k, start = f"{conv_id}|{label}", conv_start(conv_id)
+    # shortcut: none before the groups were first made (seconds of work, not here); the conversation page makes them
+    gs = T().speakers["groups"] or []
+    g, x = next(((g, x) for g in gs for x in [g, *g["suggested"]] if any(voice_key(m) == k for m in x["members"])), (None, None))
+    ms = x["members"] if x else []
+    if h := bank.halves(ms, T().speakers["vec"]):  # the card whole yet: after the rename it is made again without it
+        ms = next((y for y in h if any(voice_key(m) == k for m in y)), [])
+    ms = [m for m in ms if m["start"] < start and speakers.ANON.fullmatch(m["label"])]
+    now = {cid: json.loads(ps) for cid, ps in db.conn().execute(
+        f"SELECT id, participants FROM conversations WHERE id IN ({','.join('?' * len(ms))})", [m["conv"] for m in ms])}
+    vs = [voice_key(m) for m in ms if m["label"] in now.get(m["conv"], ())]
+    return {"voices": vs, "n": len(vs), "group": g["id"], **({"suggestion": x["id"]} if x is not g else {})} if vs else None
 
 
 def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dict]:
@@ -221,8 +275,9 @@ async def speaker_undo(body: dict):
             bank.restore(t, b.get("enrolled") or [])
     T().speakers["at"] = 0.0
     bank.sync(*{x for b in bs if "to" in b for x in (b["from"], b["to"])})
-    if k := bs[0].get("me"):  # 「这是我」's centroid
-        forget_me(key=k)
+    for b in bs:  # 「这是我」's centroid: one a click, two for a rename with its 一起改
+        if k := b.get("me"):
+            forget_me(key=k)
     for cid in dict.fromkeys(b["conv"] for b in bs if "conv" in b):
         queue_summary(find_conversation(cid), keep=True)
     b = bs[0]
@@ -437,15 +492,28 @@ async def speaker_halves(gid: str):
 async def speaker_name(body: dict):
     """Every member voice of a group (or of one of its suggestions) takes the name, in all of its conversations; with
     voices (conv|label), only those. A card of bank.MIXED_MIN voices or more that sounds like two people (bank.halves)
-    is not named: the answer is {mixed: true, halves} for the page to ask, unless all is true. The answer comes when the
-    store has it; the voice is learnt after (enroll_soon), 我's before it (learn_me)."""
+    is not named: the answer is {mixed: true, halves} for the page to ask, unless all is true or the voices are of one
+    half; with check (a name typed in), before that, {check} when there is a person it may be already (name_check);
+    without a group, or one no longer there (一起改 after a rename), the voices alone; with voices, undo (the rename's
+    answer) is taken back by this answer's undo too. The answer comes when the store has it; the voice is learnt after
+    (enroll_soon), 我's before it (learn_me)."""
     to = (body.get("name") or "").strip()
     check_name(to)
-    g = await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB)
-    ms = g["members"]
-    if body.get("voices"):
-        ms = chosen(g, body)
-    elif not body.get("all") and (h := two_halves(g))["mixed"]:
+    g, vs = None, body.get("voices")
+    try:
+        g = body.get("group") and await anyio.to_thread.run_sync(find_group, body["group"], body.get("suggestion"), limiter=threads.DB)
+    except HTTPException:
+        if not vs:
+            raise  # with voices, 一起改 after its rename: the card is made again without that voice, its id may be gone
+    if g:
+        ms = chosen(g, body) if vs else g["members"]
+    else:  # voices alone: those, whichever cards they are on now
+        ms = [dict(zip(("conv", "label"), canonical_voice_key(k).split("|", 1))) for k in vs or [] if "|" in k]
+    if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(m["conv"], m["label"]) for m in ms], to, limiter=threads.DB)):
+        return {"check": q}
+    # voices of both halves (一起改 on a card of two people) are not named together; one half is (只命名这一半)
+    if g and not body.get("all") and (h := two_halves(g))["mixed"] and not any(
+            {voice_key(m) for m in ms} <= set(x["voices"]) for x in h["halves"]):
         return h
     rows, befores, me = [], [], []
     for m in ms:
@@ -461,7 +529,9 @@ async def speaker_name(body: dict):
         befores.append(before)
         me.append(v)
     await enroll_soon(to, rows)
-    return {"renamed": len(befores), **learn_me(to, me, befores), "undo": keep_undo(befores) if befores else None}
+    learnt = learn_me(to, me, befores)
+    first = T().undo.pop(body.get("undo"), []) if vs else []  # 一起改: its rename's undo goes into this one's
+    return {"renamed": len(befores), **learnt, "undo": keep_undo(first + befores) if first or befores else None}
 
 
 @router.post("/api/speakers/detach")
