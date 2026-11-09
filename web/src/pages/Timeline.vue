@@ -11,6 +11,7 @@ import LiveCard from "../components/LiveCard.vue";
 import RecapCard from "../components/RecapCard.vue";
 import SelfVoice from "../components/SelfVoice.vue";
 import Skeleton from "../components/Skeleton.vue";
+import VoiceCheck from "../components/VoiceCheck.vue";
 import { t } from "../i18n";
 import {
   errorTitle,
@@ -58,7 +59,8 @@ const ready = ref(false),
   done = ref(false),
   failed = ref<{ msg: string; title: string } | null>(null); // the list did not load: said, with 重试
 const more = useTemplateRef<HTMLElement>("more"),
-  selfCard = useTemplateRef<InstanceType<typeof SelfVoice>>("selfCard");
+  selfCard = useTemplateRef<InstanceType<typeof SelfVoice>>("selfCard"),
+  checkCard = useTemplateRef<InstanceType<typeof VoiceCheck>>("checkCard");
 let seq = 0;
 
 // today unfiltered: the pinned cards; no words or tag: the recaps
@@ -378,6 +380,7 @@ const { connected, send } = useSocket((m) => {
   // summaries arrive every few seconds while old ones are redone: patch the card, never reload the list
   if (m.type === "status") status.value = m;
   else if (m.type === "self") selfCard.value?.load(); // 「哪个是你？」 popped or was answered
+  else if (m.type === "voicecheck") checkCard.value?.load(); // 「这是你吗？」 the same
   else if (m.type === "conversation_removed") {
     items.value = items.value.filter((c) => c.id !== m.id);
     void loadCalendar(true);
@@ -519,6 +522,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         </div>
       </div>
       <SelfVoice v-if="top" ref="selfCard" />
+      <VoiceCheck v-if="top" ref="checkCard" />
       <div v-if="failed" class="empty" :title="failed.title">
         <Icon name="alert-circle" :size="48" />{{ failed.msg }}
         <button class="btn" @click="init">{{ t("common.retry") }}</button>

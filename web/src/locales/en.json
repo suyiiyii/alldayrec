@@ -871,6 +871,20 @@
     "noneMe": "None of these",
     "notNow": "Not now"
   },
+  "voiceCheck": {
+    "titleMe": "Is this you?",
+    "title": "Is this {name}?",
+    "hintMe": "A voice in the {at} conversation sounds like you, but not for sure. Listen to this sentence, then answer.",
+    "hint": "A voice in the {at} conversation sounds a bit like {name}, but not for sure. Listen to this sentence, then answer.",
+    "hintNamed": "In the {at} conversation this voice was taken for {name}. Listen to this sentence and confirm: a yes helps tell {name} later.",
+    "yes": "Yes",
+    "no": "No",
+    "listen": "Listen to the end to answer",
+    "doneYes": "Got it.",
+    "doneNo": "Got it: not them.",
+    "doneLater": "OK, this one will not be asked again.",
+    "stale": "This conversation was just renamed; the card no longer applies."
+  },
   "speakers": {
     "voice": "Voice {n}",
     "quoted": "“{name}”",

@@ -95,6 +95,8 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET", "/api/voice-clip/{name}", "voice_clip"),
     ("GET", "/api/self", "self_get"),
     ("POST", "/api/self", "self_answer"),
+    ("GET", "/api/voice-check", "check_get"),
+    ("POST", "/api/voice-check", "check_answer"),
     ("GET", "/api/audio", "audio_wav"),
     ("GET", "/api/listen", "listen"),
     ("GET", "/api/stars", "stars"),

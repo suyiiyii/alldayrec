@@ -4,8 +4,9 @@ import type { Row } from "./api";
 import { toast } from "./toast";
 import { windowAsk, windowLen, windowStart } from "./track";
 
-// one sound at a time, on every page: a clip (play) stops the conversation player (track), and it a clip
-export const player = reactive({ playing: "", failed: new Set<string>() });
+// one sound at a time, on every page: a clip (play) stops the conversation player (track), and it a clip;
+// heard: the clips played to their end (「这是你吗？」 is answered only after)
+export const player = reactive({ playing: "", failed: new Set<string>(), heard: new Set<string>() });
 let audio: HTMLAudioElement | null = null;
 
 // the online demo has no recordings: a play says so
@@ -21,7 +22,10 @@ export function play(id: string, src: string) {
   }
   audio = new Audio(src);
   player.playing = id;
-  audio.onended = () => (player.playing = "");
+  audio.onended = () => {
+    player.heard.add(id);
+    player.playing = "";
+  };
   audio.onerror = () => {
     player.failed.add(id);
     player.playing = "";

@@ -410,6 +410,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | `GET` | The card while it is up: candidates most likely first (none preselected), each with a tier instead of a %. | — |
 | `POST` | The answer to the card: a candidate's index becomes 我's voiceprint (owner-redimnet2.npz), taken by every pipeline from its next conversation on: the conversations before keep their labels and summaries. "none" (都不是) and "later" (以后再说) put the card away until selfvoice.due brings it again. | body: JSON object |
 
+### `/api/voice-check`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | The card while it is up: the voice (conversation, label, when), the name it is asked about, the clip to hear. | — |
+| `POST` | yes: as a rename by hand (a, b: the label becomes 我 or the name; c: the name's sentences teach its samples); no: the voice kept apart from the name (c: back to a fresh S&lt;n> first), nothing learnt; later: the card away. | body: JSON object |
+
 ### `/api/audio`
 
 | Method | Description | Parameters |

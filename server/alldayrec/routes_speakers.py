@@ -86,20 +86,28 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
             h["names"] = [{**x, **{k: to for k in ("who", "by") if x.get(k) == frm}} for x in h["names"]]
             db.put_name_hints(h, t)
         before["todo_labels"] = db.rename_todos(conv_id, frm, to, t)
+        if to != "我" and not speakers.ANON.fullmatch(to):  # the user's name: never asked about as the diarist's (voice check)
+            # shortcut: one kv list growing a key per rename; a table if it reaches tens of thousands
+            db.put_kv("named", sorted(set(db.kv("named") or []) | {f"{conv_id}|{to}"}), t)
         if frm != "我" and not speakers.ANON.fullmatch(frm):  # what these sentences taught the people bank as frm
             before["enrolled"] = bank.forget(t, frm, before["rows"])
     if before.get("enrolled"):
         bank.sync(frm)
     T().speakers["at"] = 0.0
     queue_summary(c, keep=True)
-    long = []
-    # S<n> means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank
-    if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):
-        long = sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
-                      key=lambda r: r["start"])[:ENROLL]
+    long = learnable(conv_id, to, hit)
     ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
     # voiceprints: the sentences queued to learn from (a history conversation without its recording here gives none)
     return {"participants": c["participants"], "renamed": len(hit), "voiceprints": len(long)}, long, before
+
+
+def learnable(conv_id: str, to: str, hit: list[dict]) -> list[dict]:
+    """The sentences of a label named `to` that teach the people bank: up to ENROLL of bank.LEARN_MIN_S or more. S<n>
+    means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank."""
+    if to == "我" or re.fullmatch(r"S\d+", to) or not state.get("embed"):
+        return []
+    return sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
+                  key=lambda r: r["start"])[:ENROLL]
 
 
 ENROLL = 20
