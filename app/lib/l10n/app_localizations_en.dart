@@ -1026,6 +1026,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'The last Wi‑Fi fast transfer failed: the bean did not answer the request; back on Bluetooth';
 
   @override
+  String get beanWifiBusy =>
+      'The last Wi‑Fi fast transfer failed: the bean kept saying it was busy and sent nothing; back on Bluetooth';
+
+  @override
+  String get beanWifiNoUnits =>
+      'The last Wi‑Fi fast transfer failed: the bean took the request but sent no audio in 30 s; back on Bluetooth';
+
+  @override
+  String get beanWifiJoinTimeout =>
+      'The last Wi‑Fi fast transfer failed: iOS gave no answer on joining the bean\'s hotspot in 2 minutes (its question may be unanswered); back on Bluetooth';
+
+  @override
   String beanWifiFailed(Object detail) {
     return 'The last Wi‑Fi fast transfer failed ($detail); back on Bluetooth';
   }

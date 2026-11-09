@@ -989,6 +989,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanWifiNoAnswer => '上次 Wi‑Fi 快传没成：豆子没回应传输请求，已回到蓝牙';
 
   @override
+  String get beanWifiBusy => '上次 Wi‑Fi 快传没成：豆子一直说在忙，没开始传，已回到蓝牙';
+
+  @override
+  String get beanWifiNoUnits => '上次 Wi‑Fi 快传没成：豆子应了传输请求，但 30 s 没发来录音，已回到蓝牙';
+
+  @override
+  String get beanWifiJoinTimeout =>
+      '上次 Wi‑Fi 快传没成：iOS 2 分钟都没答复要不要加入豆子的热点（它的提问可能没人点），已回到蓝牙';
+
+  @override
   String beanWifiFailed(Object detail) {
     return '上次 Wi‑Fi 快传没成（$detail），已回到蓝牙';
   }

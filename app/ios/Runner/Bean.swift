@@ -30,6 +30,9 @@ enum Bean {
     let description: String, note: String?
     init(_ s: String, note: String? = nil) { description = s; self.note = note }
   }
+  /// wifiLoop()'s ends that, nothing read, the device page says (BeanSync.wifiNote)
+  static let wifiEnds = ["豆子没回音": "beanWifiNoAnswer", "豆子开始录音，回蓝牙": "beanWifiRecording",
+                         "豆子一直忙（code 4）": "beanWifiBusy", "30 s 没收到单元": "beanWifiNoUnits"]
 
   static func isBean(_ name: String?) -> Bool { name?.range(of: "^D3200-[0-9A-F]{4}$", options: .regularExpression) != nil }
 
@@ -342,7 +345,10 @@ final class BeanSync {
 
   // Read by the app's status (main thread) while the session thread writes them
   @Shared var state: [String: Any] = ["code": "encrypting"]
-  @Shared var hw: [String: Any] = [:]  // free_kb stays at the last 01/01 reading while a transfer is live
+  @Shared var hw: [String: Any] = [:] {  // free_kb stays at the last 01/01 reading while a transfer is live
+    // 「豆子正在录音」 says what is now: gone once it is not (its stop, or a connection that finds it stopped)
+    didSet { if !recording, wifiNote?["code"] as? String == "beanWifiRecording" { wifiNote = nil } }
+  }
   @Shared var syncDoneKb: Int64 = 0
   @Shared var syncTotalKb: Int64 = 0
   /// What of the bean's recording this phone lacks, for the status and its reports (owe())
@@ -627,7 +633,7 @@ final class BeanSync {
       reader = Bean.Reader(); inbox = []
       why = try wifiLoop()
     } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)"; note = (error as? Bean.Fail)?.note ?? "beanWifiFailed" }
-    if wifiUnits == 0, let code = note ?? (why == "豆子没回音" ? "beanWifiNoAnswer" : nil) { wifiNote = ["code": code, "detail": why] }
+    if wifiUnits == 0, let code = note ?? Bean.wifiEnds[why] { wifiNote = ["code": code, "detail": why] }
     if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
     overWifi = false
     io.wifiLeave()

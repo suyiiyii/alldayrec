@@ -587,6 +587,9 @@
   "beanWifiNoJoin": "上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次",
   "beanWifiNoSocket": "上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试",
   "beanWifiNoAnswer": "上次 Wi‑Fi 快传没成：豆子没回应传输请求，已回到蓝牙",
+  "beanWifiBusy": "上次 Wi‑Fi 快传没成：豆子一直说在忙，没开始传，已回到蓝牙",
+  "beanWifiNoUnits": "上次 Wi‑Fi 快传没成：豆子应了传输请求，但 30 s 没发来录音，已回到蓝牙",
+  "beanWifiJoinTimeout": "上次 Wi‑Fi 快传没成：iOS 2 分钟都没答复要不要加入豆子的热点（它的提问可能没人点），已回到蓝牙",
   "beanWifiFailed": "上次 Wi‑Fi 快传没成（{detail}），已回到蓝牙",
   "@beanWifiFailed": {
     "placeholders": {

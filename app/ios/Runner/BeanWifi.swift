@@ -60,16 +60,18 @@ final class BeanWifi {
       NEHotspotConfigurationManager.shared.apply(c) { failure = $0 as NSError?; done.signal() }
       guard done.wait(timeout: .now() + 120) == .success else {
         log("bean_wifi_fail", "加入热点 120 s 没有结果", "warn", ["step": "join", "ms": BeanWifi.mono() - t1, "try": n + 1].merging(BeanWifi.context()) { $1 })
-        throw Bean.Fail("joining the hotspot: no answer in 120 s", note: "beanWifiNoJoin")
+        throw Bean.Fail("joining the hotspot: no answer in 120 s", note: "beanWifiJoinTimeout")
       }
       let applied = BeanWifi.mono() - t1  // the person's answer and iOS's join: the address is waited for from here
+      // alreadyAssociated (13): iOS on it already, as joined; onHotspot() below checks it is the bean's
       let ours = failure == nil || failure!.domain == NEHotspotConfigurationErrorDomain && failure!.code == NEHotspotConfigurationError.alreadyAssociated.rawValue
       if let e = failure, !ours {
         let code = NEHotspotConfigurationError(rawValue: e.code).map(BeanWifi.name) ?? "\(e.code)"
-        let last = code == "userDenied" || code == "applicationIsNotInForeground"  // again would not help
+        // again would not help; 16/17 are for accessory networks (the SDK's words), not expected here: beanWifiFailed
+        let last = ["userDenied", "applicationIsNotInForeground", "userUnauthorized", "systemDenied"].contains(code)
         log(last ? "bean_wifi_fail" : "bean_wifi_retry", "没加入豆子的热点（第 \(n + 1) 次）：\(code == "userDenied" ? "主人点了取消" : e.localizedDescription)（\(e.domain) \(e.code) \(code)，\(applied) ms）",
             "warn", ["step": "join", "domain": e.domain, "code": e.code, "name": code, "ms": applied, "try": n + 1].merging(BeanWifi.context()) { $1 })
-        if last { throw Bean.Fail("join: \(code)", note: code == "userDenied" ? "beanWifiDenied" : "beanWifiBackground") }
+        if last { throw Bean.Fail("join: \(code)", note: ["userDenied": "beanWifiDenied", "applicationIsNotInForeground": "beanWifiBackground"][code]) }
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
         continue
       }
@@ -230,7 +232,9 @@ final class BeanWifi {
     case .alreadyAssociated: "alreadyAssociated"
     case .applicationIsNotInForeground: "applicationIsNotInForeground"
     case .invalidSSIDPrefix: "invalidSSIDPrefix"
-    @unknown default: e.rawValue == 13 ? "unableToJoin" : "\(e.rawValue)"  // 13: not in this SDK's enum
+    case .userUnauthorized: "userUnauthorized"
+    case .systemDenied: "systemDenied"
+    @unknown default: "\(e.rawValue)"
     }
   }
 
