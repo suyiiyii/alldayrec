@@ -885,6 +885,20 @@
     "doneLater": "好的，这段不再问了。",
     "stale": "这段对话的名字刚改过，这张卡作废了。"
   },
+  "nameCheck": {
+    "same": "已经有一个「{name}」了，在 {n} 段对话里",
+    "sameBank": "已经有一个「{name}」了",
+    "alike": "，声音也像",
+    "unlike": "，但声音不太像",
+    "like": "这个声音{like}「{name}」",
+    "isName": "是「{name}」，合并",
+    "other": "是另一个人",
+    "anyway": "仍然新建「{name}」",
+    "found": "之前 {n} 段对话里也出现过这个声音",
+    "together": "一起改成「{name}」",
+    "skip": "不用了",
+    "togetherDone": "又改了 {n} 段对话，摘要重新生成中"
+  },
   "speakers": {
     "voice": "声音 {n}",
     "quoted": "「{name}」",

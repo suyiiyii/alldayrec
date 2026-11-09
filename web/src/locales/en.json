@@ -885,6 +885,20 @@
     "doneLater": "OK, this one will not be asked again.",
     "stale": "This conversation was just renamed; the card no longer applies."
   },
+  "nameCheck": {
+    "same": "There is a “{name}” already, in {n} conversation | There is a “{name}” already, in {n} conversations",
+    "sameBank": "There is a “{name}” already",
+    "alike": ", and the voice is similar",
+    "unlike": ", but the voice is not very similar",
+    "like": "This voice is {like} to “{name}”",
+    "isName": "It is “{name}”: merge",
+    "other": "Someone else",
+    "anyway": "Still a new “{name}”",
+    "found": "This voice was in {n} earlier conversation too | This voice was in {n} earlier conversations too",
+    "together": "Rename them to “{name}” too",
+    "skip": "No thanks",
+    "togetherDone": "{n} more conversation renamed, rewriting its summary | {n} more conversations renamed, rewriting their summaries"
+  },
   "speakers": {
     "voice": "Voice {n}",
     "quoted": "“{name}”",

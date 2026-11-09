@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
 import Avatar from "../components/Avatar.vue";
 import Icon from "../components/Icon.vue";
+import NameCheck from "../components/NameCheck.vue";
 import Skeleton from "../components/Skeleton.vue";
 import { lang, t } from "../i18n";
 import {
@@ -10,6 +11,7 @@ import {
   get,
   hhmm,
   post,
+  type NameCheck as Check,
   type Sample,
   type Speaker,
   type SpeakerList,
@@ -113,10 +115,20 @@ const title = (g: Speaker) => (g.name ? speakerLabel(g.name) : t("speakers.voice
 const quoted = (names: string[]) =>
   names.map((name) => t("speakers.quoted", { name })).join(lang() === "zh" ? "" : ", ");
 
+// a typed name is checked first (NameCheck: a person it may be already); 是另一个人 puts a free name in the box (sure:
+// not checked again)
+const ask = ref<{ id: string; to: string; what: string; check: Check } | null>(null);
+let sure = false;
 function edit(id: string) {
   editing.value = id;
   newName.value = "";
   card(id).error.value = "";
+  ask.value = null;
+  sure = false;
+}
+const typed = (g: Speaker) => name(g, newName.value, title(g), undefined, { check: !sure });
+function other(free: string) {
+  [newName.value, ask.value, sure] = [free, null, true];
 }
 function cancel() {
   card(editing.value).error.value = "";
@@ -177,16 +189,20 @@ async function name(
   to: string,
   what: string,
   suggestion?: string,
-  only: { voices?: string[]; all?: boolean } = {},
+  only: { voices?: string[]; all?: boolean; check?: boolean } = {},
 ) {
   to = to.trim();
   if (!to) return;
   await card(g.id).run(async () => {
     flash.value = "";
-    const r = await post<Halves | { renamed: number; learned?: boolean; undo: string | null }>(
-      "/api/speakers/name",
-      { name: to, group: g.id, suggestion, ...only },
-    );
+    const r = await post<
+      Halves | { check: Check } | { renamed: number; learned?: boolean; undo: string | null }
+    >("/api/speakers/name", { name: to, group: g.id, suggestion, ...only });
+    ask.value = null;
+    if ("check" in r) {
+      ask.value = { id: g.id, to, what, check: r.check };
+      return;
+    }
     if ("mixed" in r) {
       sheet.value = { id: g.id, halves: r.halves, to, what, suggestion };
       return;
@@ -353,9 +369,10 @@ async function detach(g: Speaker, v: Voice) {
               v-model="newName"
               :placeholder="t('speakers.namePlaceholder')"
               list="names"
-              @keyup.enter="name(g, newName, title(g))"
+              @input="ask = null"
+              @keyup.enter="typed(g)"
             />
-            <button :disabled="card(g.id).busy.value" @click="name(g, newName, title(g))">
+            <button :disabled="card(g.id).busy.value" @click="typed(g)">
               {{ t("speakers.save") }}
             </button>
             <button class="btn-ghost" @click="cancel">{{ t("speakers.cancel") }}</button>
@@ -376,6 +393,14 @@ async function detach(g: Speaker, v: Voice) {
         <p v-if="card(g.id).error.value" class="error" role="alert" :title="card(g.id).detail.value">
           {{ card(g.id).error.value }}
         </p>
+        <NameCheck
+          v-if="ask && ask.id === g.id"
+          :to="ask.to"
+          :check="ask.check"
+          :busy="card(g.id).busy.value"
+          @name="(n) => name(g, n, ask!.what)"
+          @other="other"
+        />
         <div v-if="sheet && sheet.id === g.id" class="mixed">
           <strong>{{ t("speakers.mixed") }}</strong>
           <p class="meta">{{ t("speakers.mixedWhy") }}</p>

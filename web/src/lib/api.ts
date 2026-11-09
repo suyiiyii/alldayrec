@@ -587,6 +587,13 @@ export interface LabelSuggestions {
     { clip?: string | null; clip_start?: string | null; clip_end?: string | null }
   >;
 }
+// POST rename / speakers/name with check (a name typed in): the person it may be already, when there is one (nothing
+// renamed yet). same: the name in use (convs: other conversations; alike: the voice near its voiceprint, null without
+// one; free: a name for another person of it); like: other names the voice is near
+export interface NameCheck {
+  same?: { name: string; convs: number; alike: boolean | null; free: string };
+  like?: { name: string; score: number }[];
+}
 // one conversation's (the speaker sheet's 可能是, the conversation page's ⋯ 建议); none when it fails
 export const labelSuggestions = (id: string) =>
   get<LabelSuggestions>(`/api/conversation/${encodeURIComponent(id)}/speakers`).catch(() => null);

@@ -1,0 +1,83 @@
+"""B3, naming a voice: a typed name is checked first against the people it may be already (name_check: the same name
+in use, a voice near another name), and a rename says which earlier conversations have the voice still unnamed
+(earlier), for 一起改 to name them by POST /api/speakers/name with the voices alone."""
+import anyio
+
+from alldayrec import db, routes_speakers
+from test_voice_check import E, P, conv, near, store  # noqa: F401  (store: the fixture)
+
+
+def rename(cid, frm, to, **kw):
+    return anyio.run(routes_speakers.rename, cid, {"from": frm, "to": to, **kw})
+
+
+def test_check_same_name_and_like(store):
+    conv(1, "P", near(P, 0.9, E[2]))  # P in another conversation
+    near_p, far = conv(2, "S1", near(P, 0.65, E[3])), conv(3, "S1", E[4])
+    assert "check" not in rename(far, "S1", "R", check=True) and db.conversation(far)["participants"] == ["R"], "nothing to ask: renamed"
+    assert rename(near_p, "S1", "Q", check=True) == {"check": {"like": [{"name": "P", "score": 0.65}]}}
+    assert db.conversation(near_p)["participants"] == ["S1"], "asked: nothing renamed"
+    assert rename(near_p, "S1", "P", check=True) == {"check": {"same": {"name": "P", "convs": 1, "alike": True, "free": "P2"}}}
+    with db.tx() as t:
+        db.insert_conversation(t, {"id": "c-p2", "start": "2026-01-01T00:00:00", "end": "2026-01-01T00:01:00",
+                                   "participants": ["P2"], "sentences": 0, "speech_s": 0, "device": "mic"})
+    got = routes_speakers.name_check([(far, "R")], "P")["same"]
+    assert (got["alike"], got["free"]) == (False, "P3"), "a voice far from P, P2 in use"
+    assert routes_speakers.name_check([(near_p, "S1")], "我") is None
+    assert routes_speakers.name_check([(near_p, "S1")], "S5") is None
+    assert routes_speakers.name_check([("c-none", "S1")], "Z") is None, "no voice, a new name: nothing to ask"
+    assert routes_speakers.name_check([("c-none", "S1")], "P")["same"] == {"name": "P", "convs": 1, "alike": None, "free": "P3"}
+    long = "长" * 20
+    with db.tx() as t:
+        db.insert_conversation(t, {"id": "c-long", "start": "2026-01-02T00:00:00", "end": "2026-01-02T00:01:00",
+                                   "participants": [long], "sentences": 0, "speech_s": 0, "device": "mic"})
+    assert len(routes_speakers.name_check([(near_p, "S1")], long)["same"]["free"]) == 20
+
+
+def test_check_card(store):
+    """The speakers page: a card's typed name checked over its voices; its own name is no 「很像」."""
+    cid = conv(1, "S1", near(P, 0.65, E[3]))
+    gid = f"{cid}|S1"
+    got = anyio.run(routes_speakers.speaker_name, {"name": "Q", "group": gid, "check": True})
+    assert got == {"check": {"like": [{"name": "P", "score": 0.65}]}} and db.conversation(cid)["participants"] == ["S1"]
+    assert anyio.run(routes_speakers.speaker_name, {"name": "Q", "group": gid})["renamed"] == 1
+    cp = conv(2, "P", near(P, 0.9, E[2]))
+    assert "like" not in (routes_speakers.name_check([(cp, "P")], "P2") or {}), "P is its own name"
+
+
+def test_earlier_then_together(store):
+    """Renaming one conversation's S1 tells the earlier ones with its voice unnamed; 一起改 names those, one undo."""
+    v = E[1] + E[2]
+    c1, c2, c3, c4 = conv(1, "S1", v + 0.1 * E[3]), conv(2, "S1", v + 0.1 * E[4]), conv(3, "S2", E[6]), conv(4, "S1", v)
+    c5 = conv(5, "S1", v + 0.1 * E[5])  # later: not 之前
+    r = rename(c4, "S1", "R")
+    assert r["also"] == {"voices": [f"{c2}|S1", f"{c1}|S1"], "n": 2} and c3 not in str(r["also"]) and c5 not in str(r["also"])
+    db.conn().execute("UPDATE sentences SET speaker = 'S7' WHERE speaker = 'S1' AND start < ?", (db.conversation(c2)["start"],))
+    db.conn().execute("UPDATE conversations SET participants = '[\"S7\"]' WHERE id = ?", (c1,))  # renamed since the cards were made
+    assert routes_speakers.earlier(c5, "S1") == {"voices": [f"{c2}|S1"], "n": 1}
+    got = anyio.run(routes_speakers.speaker_name, {"name": "R", "voices": r["also"]["voices"]})
+    assert got["renamed"] == 1 and db.conversation(c2)["participants"] == ["R"] and db.conversation(c1)["participants"] == ["S7"]
+    anyio.run(routes_speakers.speaker_undo, {"undo": got["undo"]})
+    assert db.conversation(c2)["participants"] == ["S1"]
+    assert rename(c5, "S1", "S9")["also"] is None, "an S<n> (a merge into another label): nothing to name together"
+
+
+def test_check_where_the_name_is(store):
+    """The name only in this conversation (a merge of two of its labels): nothing to ask; only in the people bank: asked."""
+    cid = conv(1, "S1", E[4])
+    db.conn().execute("UPDATE conversations SET participants = '[\"S1\", \"Q\"]' WHERE id = ?", (cid,))
+    assert routes_speakers.name_check([(cid, "S1")], "Q") is None
+    assert routes_speakers.name_check([(cid, "S1")], "P")["same"] == {"name": "P", "convs": 0, "alike": False, "free": "P2"}
+
+
+def test_earlier_in_a_suggestion_and_not_named_ones(store):
+    """The voice in an unnamed group offered to a name (a suggestion): its other voices; voices named already: never."""
+    v = E[1] + E[2]
+    conv(1, "P", v), conv(2, "P", v + 0.1 * E[3]), conv(5, "S2", E[6]), conv(6, "S3", E[5])
+    c3, c4 = conv(3, "S1", v + 0.1 * E[4]), conv(4, "S1", v + 0.1 * E[7])
+    gs = routes_speakers.speaker_groups()
+    assert any(f"{c4}|S1" in {routes_speakers.voice_key(m) for m in s["members"]} for g in gs for s in g["suggested"]), "set up as a suggestion"
+    assert routes_speakers.earlier(c4, "S1") == {"voices": [f"{c3}|S1"], "n": 1}
+    rename(c3, "S1", "P")
+    routes_speakers.speaker_groups()
+    assert routes_speakers.earlier(c3, "P") is None, "P's own earlier voices are named already"
