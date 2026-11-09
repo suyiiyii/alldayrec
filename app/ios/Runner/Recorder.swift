@@ -571,8 +571,7 @@ final class Uploader: Thread {
   override func main() { while true { autoreleasepool(invoking: pass) } }
 
   private func pass() {
-    if UploadAnswer.waits(haltedAt: haltedAt, now: Recorder.now()) { Thread.sleep(forTimeInterval: 2); return }
-    if UploadPath.device != nil { Thread.sleep(forTimeInterval: 1); return }  // a bean's Wi-Fi fast transfer on: after it
+    if UploadAnswer.waits(haltedAt: haltedAt, now: Recorder.now(), beanWifi: UploadPath.device != nil) { Thread.sleep(forTimeInterval: 2); return }
     // a recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card)
     let all = Uploader.files(dir), ahead = { (f: URL) in
       Uploader.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false

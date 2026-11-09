@@ -672,6 +672,7 @@ do {
   check(UploadAnswer.waits(haltedAt: t, now: t + 2_000), true, "stopped")
   check(UploadAnswer.waits(haltedAt: t, now: t + UploadAnswer.haltMs - 1), true, "still within the half hour")
   check(UploadAnswer.waits(haltedAt: t, now: t + UploadAnswer.haltMs), false, "half an hour on: once more")
+  check(UploadAnswer.waits(haltedAt: 0, now: t, beanWifi: true), true, "a bean's Wi-Fi fast transfer on: every upload waits")
 }
 
 // the live page open, from an upload's answer (its slice, as the server sends it): a minute from now, else none

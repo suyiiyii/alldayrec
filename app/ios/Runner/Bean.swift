@@ -382,6 +382,7 @@ final class BeanSync {
   private var overWifi = false  // wifi(): the transfers go over the hotspot's WebSocket
   private var wifiNext = false  // asked for: before the next transfer
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
+  private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at BeanSync.tries (wifiOff())
   private var wifiUnits = 0
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
@@ -690,8 +691,16 @@ final class BeanSync {
       let f = try ask(Bean.wifiOff(), 0x1A02, 5000)
       log("bean_wifi_off", "关了热点（1A/02，状态 \(f.status)，" + (f.payload.isEmpty ? "回复不带数据）" : "回复 \(Bean.hex(f.payload))）"),
           fields: ["reply": Bean.hex(f.payload), "status": f.status])
-    } catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn", ["error": "\(error)"]) }
-    wifiOpen = false  // only now: BLE gone before the answer, the next session sends 1A/02 again
+    } catch is Gone {  // the next session sends it again, up to `tries` in all: a bean that never answers blocks no BLE sync
+      wifiOffs += 1
+      if wifiOffs >= BeanSync.tries {
+        log("bean_wifi_off", "关热点 \(wifiOffs) 次都没等到回复（蓝牙先断了），不再发 1A/02", "warn", ["tries": wifiOffs])
+        wifiOpen = false; wifiOffs = 0
+      }
+      // not a link lost (Gone would start the bean on the next connection): a stop by hand holds, as at 1A/05
+      throw Again(description: "BLE went before 1A/02's answer")
+    } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn", ["error": "\(error)"]) }
+    wifiOpen = false; wifiOffs = 0  // only now: BLE gone before the answer, the next session sends 1A/02 again
   }
 
   private func clock() throws {
@@ -970,7 +979,7 @@ final class BeanSync {
       let f = file(x.file, x.file * 1000)
       if f.total < 0 { f.total = x.from }
       xfer = nil; save()
-    case 1: file(x.file, x.file * 1000).tries = BeanSync.tries + 1; failed(x, "no such file")
+    case 1: file(x.file, x.file * 1000).tries = BeanSync.tries + 1; failed(x, "no such file，不再取")
     case 4:  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
       if busy == 0 { log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 豆子还忙（code 4），稍后再要", fields: ["file": x.file]) }
       busy += 1

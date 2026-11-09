@@ -156,8 +156,8 @@ final class FakeBean: BeanIo {
     case 0x0101: push(0x0101, info())
     case 0x1A05:  // 192.168.43.1:443 (ws/soundcore's capture); dropOnWifi: BLE goes before the answer
       if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) } else { push(0x1A05, [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]) }
-    case 0x1A02:  // dropOnWifiOff: BLE goes before the answer, once
-      if dropOnWifiOff { dropOnWifiOff = false; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
+    case 0x1A02:  // dropOnWifiOff: BLE goes before the answer, so many times
+      if dropOnWifiOff > 0 { dropOnWifiOff -= 1; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
     case 0x01A6: push(0x01A6, [])
     case 0x1A0E:
       let page: [UInt8] = Bean.u16(p, 0) > 0 ? Bean.u16le(0) : listed.reduce(Bean.u16le(listed.count)) { $0 + Bean.le32($1.0) + Bean.le32($1.1) }
@@ -204,7 +204,7 @@ final class FakeBean: BeanIo {
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
-  var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = false
+  var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
@@ -688,39 +688,69 @@ do {
   check(got == Array(0..<3000), true, "BLE read it all after: \(got.count)")
 }
 
-/// A closed file BLE cannot get whole, refused (code 2) or ended short: given up after its tries, and said so (refused,
-/// before #262's review it was not).
-for refuse in [true, false] {
+/// A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
+/// tries (code 1: at once), and said so (refused or not there, before #262's reviews it was not).
+for (code, asks) in [(UInt8(2), BeanSync.tries + 1), (0, BeanSync.tries + 1), (1, 1)] {
   let dir = tmp()
   let bean = FakeBean(t0)
   let a = (t0 - 600_000) / 1000
   bean.list(a, 60_000)
-  bean.onTransfer = { file, _, _ in bean.header(file, 3000 * Int64(Bean.unit), code: refuse ? 2 : 0); if !refuse { bean.complete(file) } }
+  bean.onTransfer = { file, _, _ in bean.header(file, 3000 * Int64(Bean.unit), code: code); if code == 0 { bean.complete(file) } }
   bean.script = Array(repeating: {}, count: 10)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers.count, BeanSync.tries + 1)
-  check(bean.logs.filter { $0.1.contains("不再取") }.count, 1)
+  check(bean.transfers.count, asks, "code \(code)")
+  check(bean.logs.filter { $0.1.contains("不再取") }.count, 1, "code \(code)")
 }
 
-/// BLE gone before the bean answered 1A/02 after a fast transfer (#262 review P3-2): the next session sends it again.
-do {
-  let dir = tmp()
+/// BLE gone before the bean answered 1A/02 after a fast transfer (#262 reviews P3-2, P3-3): the next session sends it
+/// again, `tries` in all, then gives that up, said so, and BLE goes on; none of it a link lost (no start after it).
+for drops in [1, BeanSync.tries] {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
-  let a = (t0 - 600_000) / 1000
+  let a = (t0 - 600_000) / 1000, b = (t0 - 300_000) / 1000
   bean.list(a, 60_000); bean.wifiAsk = true
   bean.onTransfer = { file, from, _ in
     bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
   }
   bean.script = Array(repeating: {}, count: 40)
-  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  bean.dropOnWifiOff = true
+  let starts = bean.starts
+  bean.dropOnWifiOff = drops
+  for _ in 0..<drops {
+    let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(again.description.contains("1A/02"), true, again.description)
+  }
+  bean.list(b, 60_000)  // a new file: BLE reads it, not held up by 1A/02
+  bean.script = Array(repeating: {}, count: 5)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x02 }.count, drops == 1 ? 2 : drops, "1A/02 again after BLE went, \(drops) drops")
+  check(bean.logs.contains { $0.0 == "bean_wifi_off" && $0.1.contains("不再发") }, drops == BeanSync.tries)
+  check(bean.starts, starts, "no start for it")
+  check(bean.transfers.last!, [b, 0, 0], "then BLE as before")
+}
+
+/// Over Wi-Fi units came, then none (11-09: the bean stopped 16 units short of the end, no 1A/0A): 10 s on the fast
+/// transfer ends (the whole of it, not that file alone), and BLE reads the rest.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, 3000 * Int64(Bean.unit))
+    if bean.onWifi { bean.units(file, Array(from..<2984), ms: 1) } else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("10 s 没收到单元"), true, again.description)
+  bean.script = Array(repeating: {}, count: 5)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x02 }.count, 2, "1A/02 again after BLE went")
-  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x02 }.count, 2, "answered: not again")
+  check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "then BLE from where Wi-Fi stopped")
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
+  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
 }
 
 /// Asked for while the bean records (11-08 22:36, 23:41, 11-09 10:12: over Wi-Fi it answered no 1A/07, for the file it
