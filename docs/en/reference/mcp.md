@@ -26,6 +26,6 @@ Each request writes one line to the server log: the method, the tool, how many c
 
 `docs/gen-api.py` generates the table below from `mcp_server.TOOL_LIST`. The descriptions are the text the server sends to the agent (in Chinese). An argument name followed by `?` is optional. Every tool except `mark_todo` is read-only (`annotations.readOnlyHint`). A read-only [AI connection link](../how-to/connect-mcp.md) does not list `mark_todo`, and calling it returns an error; the tenant token and links made with todo marking allowed can use it.
 
-`grep` and `conversation` also return `structuredContent` (its `outputSchema` is in `tools/list`): `{"evidence": [...]}`, each piece one sentence: `conversation` (its id), `sentence` (the sentence id), `at` (its start, to the second), `speaker`, `quote`; `conversation`'s also carry `kind` (`todo` / `decision`) and `text` (that todo or decision). When a summary's quote matches no sentence, `sentence`, `at` and `speaker` are `null`. Every page carries all the evidence.
+`grep` and `conversation` also return `structuredContent` (its `outputSchema` is in `tools/list`): `{"evidence": [...]}`, each piece one sentence: `conversation` (its id), `sentence` (the sentence id), `at` (its start, to the second), `speaker`, `quote`; `conversation`'s also carry `kind` (`todo` / `decision`) and `text` (that todo or decision). When a summary's quote is not said in the sentence it cites (or the two after it), `sentence`, `at` and `speaker` are `null`. Every page carries all the evidence.
 
 <!--@include: ../../parts/mcp-tools.md-->

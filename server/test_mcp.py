@@ -28,9 +28,10 @@ def fake():
         db.insert_sentences(c, rows + [dict(id="x", start="2026-10-01T10:00:01.000", end="2026-10-01T10:00:02.000", speaker="我",
                                             text="另一台也录到了", source="LR-X1-567E")])
         db.put_summary({"conversation": CID, "status": "done", "prompt_version": 8, "title": "存储方案", "summary": "定了按小时存。",
-                        "tags": ["存储"], "people": [{"who": "老王", "points": ["建议按小时存"]}], "decisions": [{"text": "按小时存", "at": None}],
+                        "tags": ["存储"], "people": [{"who": "老王", "points": ["建议按小时存"]}],
+                        "decisions": [{"text": "按小时存", "at": None}, {"text": "今天改", "at": "2026-10-01T10:05:01.000", "quote": "我今天改"}],
                         "todos": [{"owner": "我", "to": "老王", "text": "改存储", "due": "今天", "due_date": TODAY, "at": "2026-10-01T10:05:00.000",
-                                   "quote": "我今天改"}]}, c)
+                                   "quote": "第 300 句存储方案细节"}]}, c)
     return t
 
 
@@ -97,7 +98,7 @@ def test_tools_and_paging():
     assert CID in tool("search", q="按小时")[0] and "搜到 0 段" in tool("search", q="按小时", before="2026-10-01")[0]
     assert "搜到 1 段（只列了最新的 1 段；更早的：before 设成 2026-10-01T15:00 再搜）" in tool("search", limit=0)[0], "limit at least 1"
     one, _ = tool("conversation", id=CID)
-    assert "## 老王\n- 建议按小时存" in one and "[我 → 老王] 改存储（今天）  原话 10:05：我今天改" in one and "原文 400 句" in one, one
+    assert "## 老王\n- 建议按小时存" in one and "[我 → 老王] 改存储（今天）  原话 10:05：第 300 句存储方案细节" in one and "原文 400 句" in one, one
     assert tool("conversation", id="c1")[1] and tool("transcript", id="c1")[1]
     assert "老王 12" not in tool("names")[0] and "老王 1" in tool("names")[0]
     assert "- 10-01 10:00 [我 → 老王] 改存储（今天）" in tool("todos", after="2026-10-01", before="2026-10-02")[0]
@@ -107,8 +108,10 @@ def test_tools_and_paging():
     ev = rpc("tools/call", name="grep", arguments={"q": "另一台"})["result"]["structuredContent"]["evidence"]
     assert ev == [{"conversation": None, "sentence": "x", "at": "2026-10-01T10:00:01", "speaker": "我", "quote": "另一台也录到了"}], ev
     ev = rpc("tools/call", name="conversation", arguments={"id": CID})["result"]["structuredContent"]["evidence"]
-    assert ev == [{"conversation": CID, "sentence": "r300", "at": "2026-10-01T10:05:00", "speaker": "我", "quote": "我今天改", "kind": "todo", "text": "改存储"},
-                  {"conversation": CID, "sentence": None, "at": None, "speaker": None, "quote": "", "kind": "decision", "text": "按小时存"}], ev
+    # a quote not said in the sentence it cites (r301 is 「第 301 句…」) gets no sentence
+    assert ev == [{"conversation": CID, "sentence": "r300", "at": "2026-10-01T10:05:00", "speaker": "我", "quote": "第 300 句存储方案细节", "kind": "todo", "text": "改存储"},
+                  {"conversation": CID, "sentence": None, "at": None, "speaker": None, "quote": "", "kind": "decision", "text": "按小时存"},
+                  {"conversation": CID, "sentence": None, "at": None, "speaker": None, "quote": "我今天改", "kind": "decision", "text": "今天改"}], ev
     assert "structuredContent" not in rpc("tools/call", name="day", arguments={"date": "2026-10-01"})["result"]
     schemas = {t["name"]: t.get("outputSchema") for t in m.TOOL_LIST}
     assert schemas["grep"] == schemas["conversation"] == m.EVIDENCE and not schemas["day"]

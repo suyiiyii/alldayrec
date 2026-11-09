@@ -120,9 +120,15 @@ def conversation(id: str) -> tuple[str, dict]:
     if s["tags"]:
         out.append("\n标签：" + "、".join(s["tags"]))
     row = db.conversation(id) or {}
-    by = {r["start"]: r for r in db.sentences(row["start"], row["end"], inclusive=True, source=row.get("device"))} if row else {}
-    ev = [evidence(id, by.get(x.get("at")), x.get("quote"), x.get("at"), kind=k, text=x.get("text", ""))
-          for k, xs in (("todo", s["todos"]), ("decision", s["decisions"])) for x in xs]
+    rows = db.sentences(row["start"], row["end"], inclusive=True, source=row.get("device")) if row else []
+    by = {r["start"]: n for n, r in enumerate(rows)}
+
+    def said(x: dict) -> dict | None:
+        """The sentence a quote cites, only when the quote is said there (or runs on into the next two)."""
+        n = by.get(x.get("at"))
+        return rows[n] if n is not None and summary.grounded(x.get("quote"), x.get("at"), rows[n:n + 3]) else None
+    ev = [evidence(id, r, x.get("quote"), r and x.get("at"), kind=k, text=x.get("text", ""))
+          for k, xs in (("todo", s["todos"]), ("decision", s["decisions"])) for x in xs for r in [said(x)]]
     return "\n".join(out) + f"\n\n（原文 {row.get('sentences')} 句，用 transcript 看）", {"evidence": ev}
 
 
@@ -209,7 +215,7 @@ DATE = {"type": "string", "description": "YYYY-MM-DD"}
 READ = {"readOnlyHint": True, "openWorldHint": False}
 N = {"type": ["string", "null"]}
 EVIDENCE = {"type": "object", "properties": {"evidence": {"type": "array", "items": {"type": "object", "properties": {
-    "conversation": {**N, "description": "对话 id；那台设备那会儿没有对话时为 null"}, "sentence": {**N, "description": "句子 id；摘要里的原话对不上句子时为 null"}, "at": {**N, "description": "那句开始的时间，到秒"},
+    "conversation": {**N, "description": "对话 id；那台设备那会儿没有对话时为 null"}, "sentence": {**N, "description": "句子 id；摘要里的原话不是那句说的时为 null"}, "at": {**N, "description": "那句开始的时间，到秒"},
     "speaker": N, "quote": S, "kind": {"enum": ["todo", "decision"]}, "text": S}, "required": ["conversation", "sentence", "at", "speaker", "quote"]}}},
     "required": ["evidence"]}
 TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [

@@ -26,6 +26,6 @@ description: "AllDayRec 远程 MCP 端点 POST /mcp 的参考：认证、协议�
 
 下表由 `docs/gen-api.py` 从 `mcp_server.TOOL_LIST` 生成。说明是服务器发给 Agent 的原文（中文）。参数名后面带 `?` 的是可选参数。除 `mark_todo` 外都是只读工具（`annotations.readOnlyHint`）。只读的 [AI 连接网址](../how-to/connect-mcp.md#创建-ai-连接网址) 的 `tools/list` 里没有 `mark_todo`，调用它返回错误；租户 token 和勾选了标记待办的网址可以用。
 
-`grep` 和 `conversation` 另外返回 `structuredContent`（`outputSchema` 见 `tools/list`）：`{"evidence": [...]}`，每条证据是一句原话的 `conversation`（对话 id）、`sentence`（句子 id）、`at`（开始时间，到秒）、`speaker`、`quote`；`conversation` 的证据还带 `kind`（`todo` / `decision`）和 `text`（那条待办或决定）。摘要里的原话对不上句子时 `sentence`、`at`、`speaker` 是 `null`。分页时每一页都带全部证据。
+`grep` 和 `conversation` 另外返回 `structuredContent`（`outputSchema` 见 `tools/list`）：`{"evidence": [...]}`，每条证据是一句原话的 `conversation`（对话 id）、`sentence`（句子 id）、`at`（开始时间，到秒）、`speaker`、`quote`；`conversation` 的证据还带 `kind`（`todo` / `decision`）和 `text`（那条待办或决定）。摘要里的原话不是它引用的那句（或接着的两句）说的时，`sentence`、`at`、`speaker` 是 `null`。分页时每一页都带全部证据。
 
 <!--@include: ../parts/mcp-tools.md-->
