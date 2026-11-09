@@ -331,3 +331,12 @@ def test_todo_feedback(tmp_path, monkeypatch):
     plan = " ".join(r[-1] for r in db.conn().execute("EXPLAIN QUERY PLAN SELECT conversation FROM summaries WHERE status = 'done' "
                                                      "AND json_array_length(body, '$.done_hints') > 0"))
     assert "summaries_done_hints" in plan, plan  # only the summaries with hints are read, not every body
+
+
+def test_done_hint_needs_a_word_of_substance():
+    """A done hint's sentences must share more than filler with its todo: 「一下」 in both is no match."""
+    rows = [dict(id="0", start="2026-10-27T10:00:00.000", end="2026-10-27T10:00:00.900", speaker="S1", text="合同那个你看一下……"),
+            dict(id="1", start="2026-10-27T10:00:01.000", end="2026-10-27T10:00:01.900", speaker="我", text="发了。")]
+    opened = [("t1", {"owner": "我", "text": "把报销单交一下"}), ("t2", {"owner": "我", "text": "看合同"})]
+    res = {"done_hints": [{"n": 1, "quote": "发了。", "at": "10:00:01"}, {"n": 2, "quote": "发了。", "at": "10:00:01"}]}
+    assert [h["id"] for h in summary.result({"id": "c1"}, rows, res, {}, opened)["done_hints"]] == ["t2"]

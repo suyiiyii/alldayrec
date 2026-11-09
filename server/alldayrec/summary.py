@@ -237,6 +237,12 @@ def _grams(text) -> set[str]:
     return {text[i:i + 2] for i in range(len(text) - 1) if text[i:i + 2].isalnum()}
 
 
+# two-character pieces that say nothing of what a todo is about: a done hint sharing only these with it is no match
+# ponytail: a fixed list, not segmentation; add a piece here when one is seen to pair unrelated lines
+FILLER = frozenset("一下 一个 一些 一点 这个 那个 哪个 这些 那些 这样 那样 这边 那边 我们 你们 他们 咱们 自己 什么 怎么 就是 然后 已经 "
+                   "可以 没有 还是 还有 现在 今天 明天 时候 东西 的话 一样 给我 给你 我把 你把 把这 把那 帮我 帮你 一起 一定 应该 需要".split())
+
+
 def topic_row(topic: dict, rows: list[dict]) -> str | None:
     """The start of the first row sharing the most two-character pieces with the topic's title and points, at least
     two; None when no row shares that much."""
@@ -338,8 +344,8 @@ def result(conv: dict, rows: list[dict], res: dict, raw: dict, opened: list[tupl
     """A model's reply in the SYSTEM format as the stored summary; a reply that is not an object raises (the worker
     tries again), a field of another type is dropped (typed). A done hint names one of the open todos (todo_context's)
     by its number (n, or "#n" as the list writes it) and a row by its time, and that row or the 3 before it share two
-    characters in a row with that todo (a wrong number seldom does; 「发了。」 alone says nothing, the question before it
-    does): it is kept as {id, quote, at} only then."""
+    characters in a row with that todo, not just filler like 一下 (FILLER; a wrong number seldom does; 「发了。」 alone says
+    nothing, the question before it does): it is kept as {id, quote, at} only then."""
     if not isinstance(res, dict):
         raise ValueError(f"summary reply is a {type(res).__name__}, not an object")
     res, bad = typed(res)
@@ -352,7 +358,7 @@ def result(conv: dict, rows: list[dict], res: dict, raw: dict, opened: list[tupl
     said = lambda x: " ".join([x["quote"], *(r.get("text") or "" for r in rows[max(0, at[x["at"]] - 3):at[x["at"]]])])
     res["done_hints"] = [{"id": i, "quote": x["quote"], "at": x["at"]} for (i, t), x in hints
                          if x["at"] in at and isinstance(x.get("quote"), str)
-                         and _grams(said(x)) & _grams(f'{t.get("text")} {t.get("quote") or ""} {t.get("to") or ""}')]
+                         and _grams(said(x)) & _grams(f'{t.get("text")} {t.get("quote") or ""} {t.get("to") or ""}') - FILLER]
     return {"conversation": conv["id"], "prompt_version": PROMPT_VERSION, "created_at": dt.datetime.now().isoformat(timespec="seconds"),
             "error": None, "status": "done", "model": raw.get("model"), "usage": raw.get("usage"),
             "media_share": media_share(rows, res["media_spans"]),
