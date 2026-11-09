@@ -188,18 +188,26 @@ def read_only(path) -> sqlite3.Connection:
 
 
 @contextmanager
-def tx():
+def tx(durable=False):
+    """durable: the commit is on disk when this returns, for writes a client is told are kept (synchronous=FULL; under
+    WAL, NORMAL's latest commits can be lost to an OS crash or power cut)."""
     c = conn()
     if c.in_transaction:  # inside another tx(): a part of it, committed or rolled back with it
         yield c
         return
-    c.execute("BEGIN IMMEDIATE")
+    if durable:
+        c.execute("PRAGMA synchronous=FULL")
     try:
-        yield c
-    except BaseException:
-        c.execute("ROLLBACK")
-        raise
-    c.execute("COMMIT")
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            yield c
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        c.execute("COMMIT")
+    finally:
+        if durable:
+            c.execute("PRAGMA synchronous=NORMAL")
 
 
 def vec(b: bytes | None) -> np.ndarray | None:
