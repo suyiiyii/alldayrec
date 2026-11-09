@@ -7,7 +7,9 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -286,7 +288,7 @@ class MainActivity : FlutterActivity() {
  *  named by the wall time of their first frame. With the BLE recorder as the source (`ble`) the microphone stays off:
  *  BleLink makes the pieces, as long as sliceS() says, and counts them in `files`. */
 class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: Int, @Volatile var offS: Int,
-             private val ble: Boolean = false) {
+             private val ble: Boolean = false, private val am: AudioManager? = null, private val device: String = "phone") {
     @Volatile var foreground = true
     @Volatile var screenOff = false
     @Volatile private var running = false
@@ -341,6 +343,39 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         part = null
     }
 
+    // What the server's timeline says of this recording (live-record#441), as device-log events of the phone's audio
+    // name: why it heard nothing (mic_lost, its reason, then mic_back), and when the phone played media aloud (media_on/off)
+    private var lost: String? = null  // the mic_lost sent, until its mic_back; the slicer thread's
+    private var aloud = false         // media_on sent, until its media_off
+
+    /** Since Android 10 the system silences a recording while a call or another app holds the microphone (the app gets
+     *  zeros, no error): its recording configuration says so. Media counts as aloud while something plays and no
+     *  headphones are connected; a Bluetooth speaker counts as headphones (no telling them apart), and so does this
+     *  app's own 收听 (isMusicActive cannot tell whose). */
+    private fun watch(rec: AudioRecord) {
+        val am = am ?: return
+        if (rec.activeRecordingConfiguration?.isClientSilenced == true) {
+            if (lost == null) {
+                val call = am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION
+                lost = if (call) "call" else "other_app"  // Android names no app
+                DeviceLog.app(device, "mic_lost", "手机麦克风没在录：${if (call) "通话中" else "麦克风被其他 App 占用"}", "warn", mapOf("reason" to lost))
+            }
+        } else if (lost != null) {
+            lost = null
+            DeviceLog.app(device, "mic_back", "手机麦克风接着录了")
+        }
+        val now = am.isMusicActive && am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).none { it.type in QUIET }
+        if (now != aloud) {
+            aloud = now
+            DeviceLog.app(device, if (now) "media_on" else "media_off", if (now) "手机在外放音乐或视频" else "手机停止外放")
+        }
+    }
+
+    private companion object {
+        val QUIET = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+
     private fun micLoop() {
         val startWall = System.currentTimeMillis()
         val minBuf = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -360,6 +395,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         val pcm = ByteArray(sr * 2 / 50)  // 20 ms
         var samples = 0L                  // fed to the encoder
         val info = MediaCodec.BufferInfo()
+        var reads = 0
 
         fun drain(eos: Boolean) {
             while (true) {
@@ -377,6 +413,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
 
         while (running) {
             val n = rec.read(pcm, 0, pcm.size)
+            if (++reads % 100 == 0) watch(rec)  // every 2 s
             if (n <= 0) continue
             val i = codec.dequeueInputBuffer(100_000)
             if (i >= 0) {
@@ -387,6 +424,8 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
             drain(false)
         }
         rec.stop(); rec.release()
+        if (lost != null) { lost = null; DeviceLog.app(device, "mic_back", "停止录音") }
+        if (aloud) { aloud = false; DeviceLog.app(device, "media_off", "停止录音，不再看手机外放") }
         val i = codec.dequeueInputBuffer(100_000)
         if (i >= 0) codec.queueInputBuffer(i, 0, 0, samples * 1_000_000L / sr, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
         drain(true)

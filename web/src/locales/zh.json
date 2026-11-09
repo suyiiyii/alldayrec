@@ -87,6 +87,16 @@
     "noBacklog": "无积压",
     "uploadFails": "连续失败 {n} 次",
     "lastUpload": "上次成功 {at}",
+    "micGap": "{from}–{to} 手机没录到声音：{why}",
+    "micGapOpen": "{from} 起手机没录到声音：{why}",
+    "micGapShort": "{from}–{to} {why}",
+    "micGapShortOpen": "{from} 起{why}",
+    "micWhy": {
+      "call": "通话中",
+      "other_app": "麦克风被其他 App 占用",
+      "route": "麦克风切换后没能接着录",
+      "system": "系统暂停了录音"
+    },
     "card": {
       "full": "已满，停止离线录音",
       "usb": "U 盘模式，离线录音暂停",
@@ -585,6 +595,7 @@
     "upload": "上传",
     "reported": "上报于",
     "upgrade": "最近升级",
+    "micGaps": "没录到声音",
     "callsTitle": "转写和 AI 调用",
     "balanceTitle": "识别余额（StepFun）",
     "noCalls": "今天还没有调用",

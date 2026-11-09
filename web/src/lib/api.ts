@@ -468,6 +468,23 @@ export function post<T>(path: string, body?: unknown, method = "POST"): Promise<
 }
 
 export const hhmm = (iso: string) => iso.slice(11, 16);
+// GET /api/phone-spans: a phone recording with its microphone heard nothing (kind mic, reason: why) or played media
+// aloud (kind media); to null: still going
+export interface PhoneSpan {
+  device: string;
+  kind: "mic" | "media";
+  reason: string | null;
+  from: string;
+  to: string | null;
+}
+const WHY = ["call", "other_app", "route"];
+// short: without "the phone heard nothing" (进度's row says it)
+export const micGap = (s: PhoneSpan, short = false) =>
+  t(`api.micGap${short ? "Short" : ""}${s.to ? "" : "Open"}`, {
+    from: hhmm(s.from),
+    to: s.to ? hhmm(s.to) : "",
+    why: t(`api.micWhy.${WHY.includes(s.reason ?? "") ? s.reason : "system"}`),
+  });
 // A persisted no-progress expiry, or a hold its phone has not said for 5 min: the phone went away with older audio still on the recorder's card
 // (10-07: LR-P3-116C, unbound at 17:58); the queue waits for it until hold_until, then finalizes what it has
 export const holdLeft = (d: DeviceStatus) =>

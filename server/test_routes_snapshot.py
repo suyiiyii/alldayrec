@@ -38,6 +38,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("POST", "/api/device-status", "device_status_report"),
     ("POST", "/api/device-log", "device_log_upload"),
     ("GET", "/api/device-log", "device_log"),
+    ("GET", "/api/phone-spans", "phone_spans"),
     ("GET", "/api/calls", "calls"),
     ("GET", "/api/perf", "perf_day"),
     ("GET", "/api/upgrades", "upgrades"),

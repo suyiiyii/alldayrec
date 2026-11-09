@@ -1,7 +1,7 @@
 // node --experimental-strip-types web/api.check.ts: a failed call says its HTTP status, 0 when nothing answered. The
 // conversation page shows 找不到这段对话 on a 404 only; any other failure is a load to try again.
 import assert from "node:assert/strict";
-import { ApiError, beanBehind, caseText, get, holdLeft, type DeviceStatus } from "./src/lib/api.ts";
+import { ApiError, beanBehind, caseText, get, holdLeft, micGap, type DeviceStatus } from "./src/lib/api.ts";
 import { i18n } from "./src/i18n.ts";
 
 async function failure(answer: () => Promise<Response>) {
@@ -57,3 +57,9 @@ assert.equal(
   "36 min of D3200-0000's audio is still only on the bean; fetching it, about 18 min",
 );
 console.log("api check ok");
+// a silent stretch of a phone recording with its microphone: why, in words; an unknown reason is the system's
+i18n.global.locale.value = "zh";
+const gap = { device: "p", kind: "mic", reason: "call", from: "2026-10-24T14:05:03.000", to: "2026-10-24T14:32:51.000" } as const;
+assert.equal(micGap(gap), "14:05–14:32 手机没录到声音：通话中");
+assert.equal(micGap({ ...gap, reason: "other_app", to: null }, true), "14:05 起麦克风被其他 App 占用");
+assert.equal(micGap({ ...gap, reason: "new_one" }, true), "14:05–14:32 系统暂停了录音");

@@ -87,6 +87,16 @@
     "noBacklog": "No backlog",
     "uploadFails": "Failed {n} time in a row | Failed {n} times in a row",
     "lastUpload": "Last upload {at}",
+    "micGap": "{from}–{to} the phone heard nothing: {why}",
+    "micGapOpen": "Since {from} the phone hears nothing: {why}",
+    "micGapShort": "{from}–{to} {why}",
+    "micGapShortOpen": "since {from}, {why}",
+    "micWhy": {
+      "call": "on a call",
+      "other_app": "another app has the microphone",
+      "route": "recording did not resume after the microphone changed",
+      "system": "the system paused recording"
+    },
     "card": {
       "full": "Full, offline recording stopped",
       "usb": "USB drive mode, offline recording paused",
@@ -585,6 +595,7 @@
     "upload": "Upload",
     "reported": "Reported",
     "upgrade": "Last update",
+    "micGaps": "Heard nothing",
     "callsTitle": "Transcription and AI calls",
     "balanceTitle": "ASR balance (StepFun)",
     "noCalls": "No calls yet today",

@@ -157,6 +157,14 @@ async def device_log(device: str, since: str, until: str | None = None):
             "audio": audio.minutes(device, ms(since), ms(until) if until else 1 << 62)}
 
 
+@router.get("/api/phone-spans")
+async def phone_spans(since: str, until: str):
+    """When a phone recording with its microphone heard nothing and why (a call, another app holding it), and when it
+    played media aloud, in [since, until) across devices (db.phone_spans): the timeline and 进度 say why a stretch is
+    silent instead of leaving it blank."""
+    return db.phone_spans(since, until)
+
+
 @router.get("/api/calls")
 async def calls(since: str):
     """The ASR and LLM calls since `since`, by kind and engine (db.calls), and the StepFun balance (db.balance)."""
