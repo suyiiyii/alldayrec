@@ -379,7 +379,7 @@ async def recap_get(date: str = ""):
         row = db.conn().execute("SELECT value FROM kv WHERE key LIKE 'recap:%' ORDER BY key DESC LIMIT 1").fetchone()
         r = json.loads(row[0]) if row else None
     if r:
-        closed, al, todos = db.closed_todos(), db.aliases(), []
+        closed, al, hints, todos = db.closed_todos(), db.aliases(), db.done_hints(), []
         for x in r["todos"]:
             c, s = db.conversation(x["conv"]), db.summary(x["conv"]) or {}
             ts = s.get("todos") or []
@@ -392,7 +392,7 @@ async def recap_get(date: str = ""):
             if c and len(matches) == 1:
                 if matches[0][1].get("owner") != "我":  # a resolved action owned by someone else is not an orphan of mine
                     continue
-                v = {**x, **db.todo_view(c, s, *matches[0], closed, al)}
+                v = {**x, **db.todo_view(c, s, *matches[0], closed, al, hints)}
             else:
                 v = {**x, "id": None} if x.get("id") else x
             if v.get("id") not in closed:
@@ -472,8 +472,9 @@ async def conversation(conv_id: str):
         raise HTTPException(404, "no such conversation")
     conv_id = c["id"]
     s, closed = db.summary(conv_id), db.closed_todos()
-    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark)
-        s["todos"] = [{**t, "id": i, "mark": closed.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
+    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark), and a later sentence saying it is done
+        hints = db.done_hints()
+        s["todos"] = [{**t, "id": i, "mark": closed.get(i), "done_hint": hints.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
             "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"])}
 

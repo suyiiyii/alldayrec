@@ -285,3 +285,58 @@ def test_date_table_and_certainty():
                                   {"due": None, "due_date": None, "due_certainty": "confirmed"}]}, rows)["todos"]
     assert [x["due_certainty"] for x in t] == ["tentative", None]
     assert mcp_server.todo({"owner": "我", "text": "交报告", **t[0]}) == "[我] 交报告（下周三大概，暂定）"
+
+
+def test_todo_feedback(tmp_path, monkeypatch):
+    """Prompt v15: the device's todos marked 不对 go back as counter-examples, its open todos numbered; a done hint names
+    one by number (n or "#n") and a row by its time, that row or the 3 before sharing words with it (else it is dropped:
+    a wrong number), and shows on that todo, which stays open."""
+    import anyio
+    db.open_db(tmp_path / "t.db")
+    def conv(cid, start, device="mic"):
+        return {"id": cid, "start": start, "end": start[:14] + "30:00.000", "participants": ["我"], "sentences": 1, "speech_s": 600.0, "device": device}
+    a, other, b = conv("c20261026100000", "2026-10-26T10:00:00.000"), conv("c20261026110000", "2026-10-26T11:00:00.000", "phone"), conv("c20261027100000", "2026-10-27T10:00:00.000")
+    said = [("10:00:00", "S1", "报告呢"), ("10:00:01", "我", "发了。"), ("10:00:10", "S1", "代码改得怎么样"), ("10:00:11", "我", "弄好了"),
+            ("10:00:20", "S1", "材料呢"), ("10:00:21", "我", "已经交了")]
+    rows = [dict(id=str(i), start=f"2026-10-27T{t}.000", end=f"2026-10-27T{t}.900", speaker=who, text=x, source="mic") for i, (t, who, x) in enumerate(said)]
+    with db.tx() as t:
+        for c in (a, other, b):
+            db.insert_conversation(t, c)
+        db.insert_sentences(t, rows)
+        db.put_summary({"conversation": a["id"], "status": "done", "prompt_version": 14, "title": "t", "todos": [
+            {"owner": "我", "text": "让 AI 跑测试", "quote": "帮我跑一下测试", "at": "2026-10-26T10:00:01.000"},
+            {"owner": "我", "to": "老王", "text": "发报告", "due": "明天", "due_date": "2026-10-27", "at": "2026-10-26T10:00:02.000"},
+            {"owner": "我", "text": "改代码", "at": "2026-10-26T10:00:04.000"}, {"owner": "我", "text": "交材料", "at": "2026-10-26T10:00:05.000"},
+            {"owner": "未知", "text": "买菜", "at": "2026-10-26T10:00:03.000"}]}, t)
+        db.put_summary({"conversation": other["id"], "status": "done", "title": "t", "todos": [{"owner": "我", "text": "别的设备", "at": None}]}, t)
+    wrong, report, code, paper, _ = db.todo_ids(a["id"], db.summary(a["id"])["todos"])
+    db.mark_todos([wrong], "wrong")
+    seen = []
+    async def complete(messages, **kwargs):
+        seen.append(messages[0]["content"])
+        # the owner's own words (发了。 弄好了 已经交了) say nothing of what; the question before them does
+        return {"title": "t", "summary": "s", "done_hints": [
+            {"n": "#1", "quote": "发了。", "at": "10:00:01"}, {"n": 2, "quote": "弄好了", "at": "10:00:11"}, {"n": " 3", "quote": "已经交了", "at": "10:00:21"},
+            {"n": 1, "quote": "已经交了", "at": "10:00:21"}, {"n": 2, "quote": "发了。", "at": "10:00:01"},  # wrong numbers: nothing about them near
+            {"n": 4, "quote": "发了。", "at": "10:00:01"}, {"n": 2, "at": "10:00:11"}, {"n": 1, "quote": "发了。", "at": "9:99"}, {"n": "x"}]}, {"model": "m"}
+    monkeypatch.setattr(summary, "complete", complete)
+    s = anyio.run(summary.summarize, b, rows)
+    prompt = seen[0]
+    assert summary.WRONG + "- 让 AI 跑测试（原句：帮我跑一下测试）\n" + summary.OPEN + "#1 我 → 老王：发报告\n#2 我：改代码\n#3 我：交材料\n这段对话开始于" in prompt, prompt[-300:]
+    assert "别的设备" not in prompt and "买菜" not in prompt, "another device's, 未知's and marked todos stay out"
+    assert s["done_hints"] == [{"id": report, "quote": "发了。", "at": rows[1]["start"]}, {"id": code, "quote": "弄好了", "at": rows[3]["start"]},
+                               {"id": paper, "quote": "已经交了", "at": rows[5]["start"]}], s["done_hints"]
+    db.put_summary(s)
+    assert [(t["text"], t["done_hint"]) for t in db.due_todos("2026-10-27")] == [("发报告", {"conv": b["id"], "at": rows[1]["start"], "quote": "发了。"})]
+    plan = " ".join(r[-1] for r in db.conn().execute("EXPLAIN QUERY PLAN SELECT conversation FROM summaries WHERE status = 'done' "
+                                                     "AND json_array_length(body, '$.done_hints') > 0"))
+    assert "summaries_done_hints" in plan, plan  # only the summaries with hints are read, not every body
+
+
+def test_done_hint_needs_a_word_of_substance():
+    """A done hint's sentences must share more than filler with its todo: 「一下」 in both is no match."""
+    rows = [dict(id="0", start="2026-10-27T10:00:00.000", end="2026-10-27T10:00:00.900", speaker="S1", text="合同那个你看一下……"),
+            dict(id="1", start="2026-10-27T10:00:01.000", end="2026-10-27T10:00:01.900", speaker="我", text="发了。")]
+    opened = [("t1", {"owner": "我", "text": "把报销单交一下"}), ("t2", {"owner": "我", "text": "看合同"})]
+    res = {"done_hints": [{"n": 1, "quote": "发了。", "at": "10:00:01"}, {"n": 2, "quote": "发了。", "at": "10:00:01"}]}
+    assert [h["id"] for h in summary.result({"id": "c1"}, rows, res, {}, opened)["done_hints"]] == ["t2"]

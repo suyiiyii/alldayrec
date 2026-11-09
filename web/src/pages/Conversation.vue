@@ -514,6 +514,12 @@ function edit(label: string) {
                   </div>
                   <div v-if="td.quote" class="quote">{{ t("conv.quote", { q: td.quote }) }}</div>
                   <div v-if="td.unsupported" class="unsupported">{{ t("conv.unsupported") }}</div>
+                  <RouterLink
+                    v-if="td.done_hint && !markOf(td)"
+                    class="hint"
+                    :to="{ path: `/c/${td.done_hint.conv}`, query: { tab: 'transcript', at: td.done_hint.at } }"
+                    >{{ t("todoItem.maybeDone", { q: t("conv.quote", { q: td.done_hint.quote ?? "" }) }) }}</RouterLink
+                  >
                 </div>
               </li>
             </ul>
@@ -872,6 +878,11 @@ ul.items > li:last-child {
 .unsupported {
   font-size: var(--fs-xs);
   color: var(--warn);
+}
+.hint {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--ok);
 }
 /* a time to listen from: a finger-sized target around a small label */
 .at {

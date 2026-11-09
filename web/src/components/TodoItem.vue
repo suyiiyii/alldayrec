@@ -80,6 +80,9 @@ function guard(e: MouseEvent) {
           {{ t.short ?? t.text }}<span v-if="when" class="when"> · {{ when }}</span>
         </div>
         <div v-if="context" class="ctx">{{ context }}</div>
+        <div v-if="t.done_hint && !t.mark" class="hint">
+          {{ tr("todoItem.maybeDone", { q: tr("todoItem.quote", { q: cut(t.done_hint.quote ?? "", 40) }) }) }}
+        </div>
       </RouterLink>
     </div>
   </li>
@@ -131,6 +134,10 @@ function guard(e: MouseEvent) {
   color: var(--muted);
   font-size: var(--fs-xs);
   white-space: nowrap; /* 「· 3 days overdue」 in one piece */
+}
+.hint {
+  font-size: var(--fs-xs);
+  color: var(--ok);
 }
 .ctx {
   font-size: var(--fs-xs);

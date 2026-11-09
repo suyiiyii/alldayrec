@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS conversations_start ON conversations(start);
 CREATE TABLE IF NOT EXISTS summaries (        -- body: the summary as the API returns it
     conversation TEXT PRIMARY KEY, status TEXT NOT NULL, prompt_version INTEGER, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- db.done_hints reads these few, not every body
+    WHERE status = 'done' AND json_array_length(body, '$.done_hints') > 0;
 CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; label and e NULL: no recording, not retried
     conv TEXT NOT NULL, label TEXT, device TEXT, n INTEGER, speech_s REAL, k INTEGER, e BLOB,
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
@@ -461,6 +463,40 @@ def closed_todos() -> dict[str, str]:
     return {r[0]: r[1] for r in conn().execute("SELECT id, mark FROM todo_marks")}
 
 
+def wrong_todos(device: str | None, n: int = 20) -> list[dict]:
+    """The last n todos marked 不对 in this device's conversations, the newest mark first: the summary's counter-examples."""
+    out = []
+    for (i,) in conn().execute("SELECT m.id FROM todo_marks m JOIN conversations c ON c.id = m.conv"
+                               " WHERE m.mark = 'wrong' AND c.device IS ? ORDER BY m.at DESC", (device,)):
+        if len(out) == n:
+            break
+        if t := todo(i):
+            out.append(t)
+    return out
+
+
+def open_todos(device: str | None, before: str, days: int = 7, n: int = 30) -> list[tuple[str, dict]]:
+    """Id and todo of the todos not marked in this device's conversations of the days before `before`, the newest
+    first: what a later conversation may say is done (summary done_hints)."""
+    lo, closed, out = (dt.datetime.fromisoformat(before) - dt.timedelta(days=days)).isoformat(), closed_todos(), []
+    for cid, body in conn().execute("SELECT c.id, s.body FROM conversations c JOIN summaries s ON s.conversation = c.id"
+                                    " WHERE c.device IS ? AND c.start >= ? AND c.start < ? AND s.status = 'done' ORDER BY c.start DESC",
+                                    (device, lo, before)):
+        todos = json.loads(body).get("todos") or []
+        out += [(i, t) for i, t in zip(todo_ids(cid, todos), todos) if i not in closed and t.get("owner") != "未知"]
+    return out[:n]
+
+
+def done_hints() -> dict[str, dict]:
+    """Todo id to the latest sentence saying it is done ({conv, at, quote}; summary done_hints): shown, never a mark."""
+    out = {}
+    for cid, body in conn().execute("SELECT conversation, body FROM summaries s JOIN conversations c ON c.id = s.conversation"
+                                    " WHERE s.status = 'done' AND json_array_length(body, '$.done_hints') > 0 ORDER BY c.start"):
+        for h in json.loads(body)["done_hints"]:
+            out[resolve_todo(h["id"])] = {"conv": cid, "at": h.get("at"), "quote": h.get("quote")}
+    return out
+
+
 def mark_todos(ids: list[str], mark: str | None):
     """Mark these todos done or wrong; None drops their marks (the undo)."""
     ids = [resolve_todo(i) for i in ids]
@@ -531,11 +567,12 @@ def undo_todo_rename(conv: str, changed: dict, to: str, c: sqlite3.Connection):
     put_summary(s, c)
 
 
-def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict) -> dict:
+def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict, hints: dict) -> dict:
     """A todo as the pages show it: with its id and mark, the sentence it came from, whom it is to (an alias as its
-    person; none given: the others in the conversation), the conversation's title and start."""
+    person; none given: the others in the conversation), the conversation's title and start, and a later sentence
+    saying it is done (done_hints)."""
     to = al.get(t.get("to"), t.get("to"))
-    return {"id": i, "mark": closed.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
+    return {"id": i, "mark": closed.get(i), "done_hint": hints.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
             **{k: t.get(k) for k in ("due", "due_date", "due_certainty", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
             "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
@@ -544,7 +581,7 @@ def due_todos(day: str) -> list[dict]:
     """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first, each with its age_days past due and
     stale: past due over 7 days, over 3 for a due said as the same or the next day (SAME_DAY). Only summaries from prompt
     v8 on date them."""
-    closed, al, out = closed_todos(), aliases(), []
+    closed, al, hints, out = closed_todos(), aliases(), done_hints(), []
     for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
                             " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
         conv, s = _conversation(r), json.loads(r["body"])
@@ -552,7 +589,7 @@ def due_todos(day: str) -> list[dict]:
         for i, t in zip(todo_ids(conv["id"], todos), todos):
             if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and i not in closed:
                 age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
-                out.append({**todo_view(conv, s, i, t, closed, al), "age_days": age,
+                out.append({**todo_view(conv, s, i, t, closed, al, hints), "age_days": age,
                             "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)})
     return sorted(out, key=lambda t: (t["due_date"], t["conv"]))
 

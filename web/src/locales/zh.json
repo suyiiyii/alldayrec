@@ -964,6 +964,7 @@
     "conv": "对话 {t}",
     "overdue": "过期 {n} 天",
     "tentative": "暂定",
+    "maybeDone": "可能已完成：{q}",
     "done": "完成"
   },
   "todoMarks": {
