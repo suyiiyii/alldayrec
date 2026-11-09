@@ -100,6 +100,14 @@ enum Recorder {
         let on = a["on"] as? Bool ?? false
         guard let l = link else { return result(on ? FlutterError(code: "notStarted", message: nil, details: nil) : nil) }
         do { try l.listen(on); result(nil) } catch { result(FlutterError(code: "listen", message: error.localizedDescription, details: nil)) }
+      case "beanWifi":  // the bean's Wi-Fi fast transfer, by hand (#431): its session takes it before the next transfer
+        guard let b = bean else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
+        b.wifiWanted = true  // while the bean records BeanSync logs bean_wifi_skip and goes on over BLE
+        let vpn = BeanWifi.vpn()  // Shadowrocket's tunnel can take the socket (11-08): say so at the tap
+        let recording = b.hw["recording"] as? Bool == true
+        DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）" + (vpn ? "；开着 VPN" : "") + (recording ? "；豆子在录音" : ""),
+                      fields: ["vpn": vpn, "recording": recording])
+        result(recording ? "recording" : vpn ? "vpn" : "ok")
       case "pause":  // the connected recorder keeps nothing for s seconds (0: records again)
         do {
           guard let l = link else { throw CocoaError(.featureUnsupported) }
@@ -574,11 +582,13 @@ final class Uploader: Thread {
     let b = batch(q)
     // the hold with every upload while there is one: the server lets go when an upload comes without it
     let hold = p.device.flatMap(Recorder.hold).map { "&hold=\($0)" } ?? ""
+    let watch = UploadPath.start(), t0 = Recorder.now()  // a bean's fast transfer on: how each upload goes meanwhile
     do {
       var got: Data?
       let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold,
                           try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac",
-                          reply: { got = $0 })
+                          reply: { got = $0 }, delegate: watch)
+      watch?.done(b.count, Recorder.now() - t0, code / 100 == 2 ? nil : "HTTP \(code)")
       let answer = UploadAnswer.of(code, got)
       if answer == .ok, let got { Uploader.slices(got) }
       switch answer {
@@ -610,6 +620,7 @@ final class Uploader: Thread {
       case .retry: throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "HTTP \(code)"])
       }
     } catch {
+      watch?.done(b.count, Recorder.now() - t0, "\(error)")
       fails += 1
       if fails == 1 {
         failedAt = Recorder.now()
@@ -697,7 +708,7 @@ final class Uploader: Thread {
   }()
 
   /// `reply` gets the body of a 2xx answer.
-  private func post(_ url: String, _ body: Data, _ type: String?, reply: (Data) -> Void = { _ in }) throws -> Int {
+  private func post(_ url: String, _ body: Data, _ type: String?, reply: (Data) -> Void = { _ in }, delegate: URLSessionTaskDelegate? = nil) throws -> Int {
     guard let u = URL(string: url) else { throw URLError(.badURL) }
     var r = URLRequest(url: u, timeoutInterval: 60)
     r.httpMethod = "POST"
@@ -711,9 +722,11 @@ final class Uploader: Thread {
     defer { release() }
     var code = 0, err: Error?, got: Data?
     let done = DispatchSemaphore(value: 0)
-    Uploader.session.uploadTask(with: r, from: body) { data, resp, e in
+    let t = Uploader.session.uploadTask(with: r, from: body) { data, resp, e in
       code = (resp as? HTTPURLResponse)?.statusCode ?? 0; got = data; err = e; done.signal()
-    }.resume()
+    }
+    t.delegate = delegate
+    t.resume()
     done.wait()
     if let err { throw err }
     if let got { reply(got) }  // whatever the code: the upload reads a 400's detail (UploadAnswer)

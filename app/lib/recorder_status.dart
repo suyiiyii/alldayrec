@@ -221,6 +221,7 @@ String nativeText(BuildContext context, Object? v) {
     'joining' => l.linkJoining,
     'connected' => l.linkConnected,
     'beanIdle' => l.linkBeanIdle,
+    'beanWifi' => l.linkBeanWifi,
     'linkError' => l.linkError(detail),
     'synced' => l.lastSynced(time('at'), v['kb']),
     'usbSwitchingOn' => l.usbSwitchingOn,

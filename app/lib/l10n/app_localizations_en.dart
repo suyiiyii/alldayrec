@@ -954,6 +954,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get linkBeanIdle => 'Bean connected · not recording';
 
   @override
+  String get linkBeanWifi => 'Fetching over the bean\'s Wi-Fi';
+
+  @override
   String get beanFeishuBound => 'Bound to Feishu';
 
   @override
@@ -973,6 +976,25 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get beanUnbindSub =>
       'This phone stops connecting to it and uses its own microphone; nothing changes on the bean';
+
+  @override
+  String get beanWifi => 'Wi‑Fi fast transfer (experimental)';
+
+  @override
+  String get beanWifiSub =>
+      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. iOS asks whether to join its network; stay on this page meanwhile';
+
+  @override
+  String get beanWifiRecording =>
+      'The bean is recording: Wi‑Fi fast transfer works once it stops';
+
+  @override
+  String get beanWifiAsked =>
+      'Wi‑Fi fast transfer asked for: it starts once the current transfer stops';
+
+  @override
+  String get beanWifiAskedVpn =>
+      'Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it';
 
   @override
   String get beanUnbindAfterSync =>

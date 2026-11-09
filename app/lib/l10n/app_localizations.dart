@@ -1682,6 +1682,12 @@ abstract class AppLocalizations {
   /// **'录音豆已连上 · 没在录音'**
   String get linkBeanIdle;
 
+  /// No description provided for @linkBeanWifi.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi-Fi 快传中'**
+  String get linkBeanWifi;
+
   /// No description provided for @beanFeishuBound.
   ///
   /// In zh, this message translates to:
@@ -1717,6 +1723,36 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'这台手机不再连它，改用手机麦克风；录音豆本身什么也不改'**
   String get beanUnbindSub;
+
+  /// No description provided for @beanWifi.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi‑Fi 快传（实验）'**
+  String get beanWifi;
+
+  /// No description provided for @beanWifiSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
+  String get beanWifiSub;
+
+  /// No description provided for @beanWifiRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'豆子在录音，Wi‑Fi 快传要停录后用'**
+  String get beanWifiRecording;
+
+  /// No description provided for @beanWifiAsked.
+  ///
+  /// In zh, this message translates to:
+  /// **'已请求 Wi‑Fi 快传，当前传输停下后开始'**
+  String get beanWifiAsked;
+
+  /// No description provided for @beanWifiAskedVpn.
+  ///
+  /// In zh, this message translates to:
+  /// **'已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭'**
+  String get beanWifiAskedVpn;
 
   /// No description provided for @beanUnbindAfterSync.
   ///

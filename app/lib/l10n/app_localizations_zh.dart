@@ -926,6 +926,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get linkBeanIdle => '录音豆已连上 · 没在录音';
 
   @override
+  String get linkBeanWifi => 'Wi-Fi 快传中';
+
+  @override
   String get beanFeishuBound => '已绑定飞书';
 
   @override
@@ -943,6 +946,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanUnbindSub => '这台手机不再连它，改用手机麦克风；录音豆本身什么也不改';
+
+  @override
+  String get beanWifi => 'Wi‑Fi 快传（实验）';
+
+  @override
+  String get beanWifiSub =>
+      '录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
+
+  @override
+  String get beanWifiRecording => '豆子在录音，Wi‑Fi 快传要停录后用';
+
+  @override
+  String get beanWifiAsked => '已请求 Wi‑Fi 快传，当前传输停下后开始';
+
+  @override
+  String get beanWifiAskedVpn => '已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭';
 
   @override
   String get beanUnbindAfterSync => '正在取回录音豆里的录音，取完再解除';
