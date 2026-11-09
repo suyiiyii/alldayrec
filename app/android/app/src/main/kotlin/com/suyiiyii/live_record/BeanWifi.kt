@@ -73,22 +73,26 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         val at = Bean.endpoint(endpoint) ?: "?"
         if (at != "$HOST:$PORT") {
             log("bean_wifi_fail", "热点地址 $at 不是豆子固定的那个，不连", "warn", mapOf("step" to "endpoint", "endpoint" to at))
-            throw IOException("hotspot at $at, not the bean's")
+            throw Bean.Fail("hotspot at $at, not the bean's", "beanWifiNoHotspot")
         }
         val t0 = mono()
         var joined = false
         for ((n, wait) in listOf(0L, 2000, 4000, 8000).withIndex()) {
             Thread.sleep(wait)
             val t1 = mono()
-            when (net.join(ssid, password, 120_000)) {
+            when (net.join(ssid, password, JOIN_MS)) {
                 null -> {
                     log("bean_wifi_fail", "加入热点 120 s 没有结果", "warn", mapOf("step" to "join", "ms" to mono() - t1, "try" to n + 1) + net.context())
-                    throw IOException("joining the hotspot: no answer in 120 s")
+                    throw Bean.Fail("joining the hotspot: no answer in 120 s", "beanWifiJoinTimeout")
                 }
                 false -> {  // the system's own dialog scans again by itself: again here would ask the person again
-                    log("bean_wifi_fail", "没加入豆子的热点（第 ${n + 1} 次，${mono() - t1} ms）：系统弹窗里取消了，或没找到它的网络", "warn",
-                        mapOf("step" to "join", "name" to "unavailable", "ms" to mono() - t1, "try" to n + 1) + net.context())
-                    throw IOException("join: unavailable")
+                    val ms = mono() - t1
+                    val late = ms >= JOIN_MS - 1000  // requestNetwork's own timeout: onUnavailable then too
+                    log("bean_wifi_fail", "没加入豆子的热点（第 ${n + 1} 次，$ms ms）：" +
+                        if (late) "系统弹窗 120 s 没人答复" else "系统弹窗里取消了，或没找到它的网络", "warn",
+                        mapOf("step" to "join", "name" to if (late) "timeout" else "unavailable", "ms" to ms, "try" to n + 1) + net.context())
+                    throw if (late) Bean.Fail("joining the hotspot: no answer in 120 s", "beanWifiJoinTimeout")
+                        else Bean.Fail("join: unavailable", "beanWifiUnavailable")
                 }
                 true -> {}
             }
@@ -105,19 +109,23 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         }
         if (!joined) {
             log("bean_wifi_fail", "试了 4 次都没加入豆子的热点", "warn", mapOf("step" to "join", "tries" to 4) + net.context())
-            throw IOException("join: not on the hotspot after 4 tries")
+            throw Bean.Fail("join: not on the hotspot after 4 tries", "beanWifiNoJoin")
         }
         val joinedAt = mono()
         var tries = 0
         var why = ""
+        val said = mutableMapOf<String, Long>()  // each failure logged once in 10 s: a refused connect comes back at once
         while (mono() - joinedAt < 90_000) {
             tries++
             try { connect(); break } catch (e: Pin) {
                 log("bean_wifi_fail", "豆子的证书不是认得的那张（${e.seen}）", "warn", mapOf("step" to "pin", "pin" to e.seen))
-                throw IOException(e)
+                throw Bean.Fail("certificate ${e.seen}", "beanWifiNoSocket")
             } catch (e: InterruptedException) { throw e } catch (e: Exception) {  // bindSocket refused (a VPN) included: tried again
                 why = "$e"
-                log("bean_wifi_socket", "连豆子的 WebSocket 第 $tries 次没成：$why", "warn", mapOf("tries" to tries, "error" to why) + net.context())
+                if (said[why]?.let { mono() - it < 10_000 } != true) {
+                    said[why] = mono()
+                    log("bean_wifi_socket", "连豆子的 WebSocket 第 $tries 次没成：$why", "warn", mapOf("tries" to tries, "error" to why) + net.context())
+                }
                 Thread.sleep(700)
             }
         }
@@ -125,7 +133,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
             val vpn = net.context()["vpn"] == true
             log("bean_wifi_fail", "连不上豆子的 WebSocket（$tries 次，$why）" + if (vpn) "；检测到 VPN，快传可能失败，可临时关闭" else "", "warn",
                 mapOf("step" to "socket", "tries" to tries) + net.context())
-            throw IOException("socket: $why")
+            throw Bean.Fail("socket: $why", "beanWifiNoSocket")
         }
         log("bean_wifi_socket", "连上豆子的 WebSocket（第 $tries 次，${mono() - joinedAt} ms），证书指纹对上 $PIN", null,
             mapOf("ms" to mono() - joinedAt, "tries" to tries, "pin" to PIN) + net.context())
@@ -140,17 +148,17 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         return null
     }
 
+    /** The socket, its handshake and the keep-alive's: kept (socket set) only once all are up and its threads run. */
     private fun connect() {
         val s = net.connect(HOST, PORT, 15_000)
-        try {
+        val u = try {
             s.soTimeout = 15_000
             handshake(s.getInputStream(), s.getOutputStream())
-            s.soTimeout = 0
+            s.soTimeout = READ_MS
+            net.udp()
         } catch (e: Exception) { s.close(); throw e }
-        socket = s; out = s.getOutputStream()
-        val reader = Thread({ pump(s.getInputStream()) }, "bean-wifi-ws")
-        val u = net.udp()
-        udp = u
+        out = s.getOutputStream(); udp = u
+        val reader = Thread({ pump(s) }, "bean-wifi-ws")
         val keep = Thread({  // ws/soundcore's 100 ms (1 s till 45)
             val p = "soundcore-keep-alive-unicast".toByteArray()
             val to = InetSocketAddress(HOST, 32003)
@@ -158,6 +166,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         }, "bean-wifi-keepalive")
         threads = listOf(reader, keep)
         threads.forEach { it.isDaemon = true; it.start() }
+        socket = s
     }
 
     /** The client's opening handshake (RFC 6455), with the SDK's User-Agent, as the bean knows it. */
@@ -178,11 +187,13 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         if (accept != accept(key)) throw IOException("WebSocket handshake: accept $accept")
     }
 
-    /** Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not); pings answered. */
-    private fun pump(i: InputStream) {
+    /** Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not); pings answered.
+     *  Whatever ends it (a bad frame, READ_MS of silence) closes the socket: a write stuck on it ends too. */
+    private fun pump(s: Socket) {
         try {
+            val i = s.getInputStream()
             var message = ByteArray(0)
-            var type = 0
+            var type = 0  // the message's, 0 between messages
             while (true) {
                 val f = readFrame(i)
                 when (f.op) {
@@ -190,16 +201,21 @@ class BeanWifi(private val ssid: String, private val password: String, private v
                     0x9 -> write(0xA, f.data)
                     0x0, 0x1, 0x2 -> {
                         if (f.op != 0) { type = f.op; message = ByteArray(0) }
+                        else if (type == 0) throw IOException("a continuation of no message")
                         message += f.data
-                        if (message.size > 4 shl 20) throw IOException("a message over 4 MB")
+                        if (message.size > MAX) throw IOException("a message over 4 MB")
                         if (!f.fin) continue
                         bytes += message.size
                         if (type == 2) inbox.put(message) else unhex(String(message, Charsets.US_ASCII))?.let(inbox::put)
+                        message = ByteArray(0); type = 0
                     }
                 }
             }
-        } catch (_: Exception) {}
-        inbox.put(GONE)
+        } catch (_: Throwable) {  // an Error too: on this thread it would end the app
+        } finally {
+            try { s.close() } catch (_: Exception) {}
+            inbox.put(GONE)
+        }
     }
 
     /** A frame BeanSync made, as hex text (the bean ignores binary requests). */
@@ -239,6 +255,10 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         /** SHA-256 of the bean's certificate (DER), as Eliqi797 found it */
         const val PIN = "3f2667135cafff135614944392d6b3bc0e991b2ca55dbe9e469caca44d5a0125"
         private val GONE = ByteArray(0)
+        const val JOIN_MS = 120_000L
+        /** No byte from the bean this long: it or the hotspot is gone (BeanSync's own waits are 30 s at most). */
+        const val READ_MS = 60_000
+        const val MAX = 4 shl 20  // a frame or message
 
         fun sha256(b: ByteArray) = Bean.hex(MessageDigest.getInstance("SHA-256").digest(b))
         fun accept(key: String): String = Base64.getEncoder().encodeToString(
@@ -263,7 +283,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
             var n = (b1 and 0x7F).toLong()
             if (n == 126L) n = ((byte() shl 8) or byte()).toLong()
             else if (n == 127L) n = bytes(8).fold(0L) { a, b -> (a shl 8) or (b.toLong() and 255) }
-            if (n > 4 shl 20) throw IOException("a frame of $n B")
+            if (n < 0 || n > MAX) throw IOException("a frame of $n B")  // n < 0: the top bit of a 64-bit length
             val mask = if (b1 and 0x80 != 0) bytes(4) else null
             val d = bytes(n.toInt())
             if (mask != null) for (k in d.indices) d[k] = (d[k].toInt() xor mask[k % 4].toInt()).toByte()
@@ -277,17 +297,19 @@ class BeanWifi(private val ssid: String, private val password: String, private v
             return try { ByteArray(c.length / 2) { c.substring(2 * it, 2 * it + 2).toInt(16).toByte() } } catch (_: NumberFormatException) { null }
         }
 
-        /** TLS over `s`, trusting the bean's pinned leaf alone (no expiry or name check: it fails both), no SNI. */
-        fun tls(s: Socket, host: String, port: Int): SSLSocket {
+        /** TLS over `s`, trusting the bean's pinned leaf alone (no expiry or name check: it fails both), no SNI; its
+         *  handshake given `ms` for each read (a bean or hotspot gone mid-way would hold it for ever). `pin`: for tests. */
+        fun tls(s: Socket, host: String, port: Int, ms: Int, pin: String = PIN): SSLSocket {
             val tm = object : X509TrustManager {
                 override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = throw CertificateException("no clients")
                 override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
                     val seen = chain.firstOrNull()?.encoded?.let(::sha256) ?: ""
-                    if (seen != PIN) throw Pin(seen)
+                    if (seen != pin) throw Pin(seen)
                 }
                 override fun getAcceptedIssuers() = arrayOf<X509Certificate>()
             }
             val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
+            s.soTimeout = ms
             val t = ctx.socketFactory.createSocket(s, host, port, true) as SSLSocket
             try { t.startHandshake() } catch (e: IOException) {
                 generateSequence<Throwable>(e) { it.cause }.filterIsInstance<Pin>().firstOrNull()?.let { t.close(); throw it }
@@ -333,7 +355,7 @@ class AndroidNet(private val ctx: Context, private val log: (String, String, Str
     override fun connect(host: String, port: Int, ms: Int): java.net.Socket {
         val s = on().socketFactory.createSocket()
         try { s.connect(InetSocketAddress(InetAddress.getByName(host), port), ms) } catch (e: Exception) { s.close(); throw e }
-        return BeanWifi.tls(s, host, port)
+        return BeanWifi.tls(s, host, port, ms)
     }
 
     override fun udp() = DatagramSocket().also { on().bindSocket(it) }

@@ -320,6 +320,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     /** The session is up (its key exchange and first reads done): recording or not. */
     val connected get() = inSession && sync.state["code"] in setOf("beanIdle", "joining", "connected")
     val hw get() = sync.hw + sync.owed + mapOf("name" to name)
+    val wifiNote get() = sync.wifiNote
     val syncDoneKb get() = sync.syncDoneKb
     val syncTotalKb get() = sync.syncTotalKb
 

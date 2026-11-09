@@ -54,6 +54,9 @@ object Bean {
     const val DELETE = 0x1A10
     const val START = 0x1882
 
+    /** A fast transfer's failure, `note` the device page's code for it (BeanSync.wifiNote). */
+    class Fail(why: String, val note: String) : IOException(why)
+
     fun isBean(name: String?) = name != null && Regex("D3200-[0-9A-F]{4}").matches(name)
 
     /** A bean's name from its advertisement's manufacturer data (company id and payload, as the SDK reads them: one
@@ -342,10 +345,17 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     @Volatile var state: Map<String, Any?> = say("encrypting")
     // Immutable status snapshots; free_kb stays at the last 01/01 reading while a transfer is live.
     @Volatile var hw: Map<String, Any?> = emptyMap()
+        set(value) {  // 「豆子正在录音」 says what is now: gone once it is not (its stop, or a connection that finds it stopped)
+            field = value
+            if (value["recording"] != true && wifiNote?.get("code") == "beanWifiRecording") wifiNote = null
+        }
     @Volatile var syncDoneKb = 0L
     @Volatile var syncTotalKb = 0L
     /** What of the bean's recording this phone lacks, for the status and its reports (owe()). */
     @Volatile var owed: Map<String, Any?> = emptyMap()
+    /** Why the last fast transfer got nothing, for the device page (recorder_status.dart), as on iOS: its end only;
+     *  null once one starts. */
+    @Volatile var wifiNote: Map<String, Any?>? = null
     var recording: Boolean
         get() = hw["recording"] == true
         private set(value) { hw = hw + ("recording" to value) }
@@ -578,6 +588,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         io.log("bean_wifi_start", "开始 Wi-Fi 快传（手动）：电量 ${battery?.let { "$it%" } ?: "?"}，没在录音，积压 ${owed["backlog_s"] ?: 0} s",
             fields = mapOf("reason" to "manual", "battery" to battery, "recording" to recording, "open" to listing.open,
                 "backlog_s" to (owed["backlog_s"] ?: 0), "files" to listing.files.size))
+        wifiNote = null
         if (needList) listing = list()  // a file just closed: its length
         owe()
         if (owed.isEmpty()) {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
@@ -586,6 +597,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
         if (battery != null && battery < 30) {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
             io.log("bean_wifi_fail", "电量 $battery% 低于 30%，不开热点，接着用蓝牙", "warn", mapOf("step" to "battery", "battery" to battery))
+            wifiNote = say("beanWifiLowBattery", "battery" to battery)
             return
         }
         wifiBattery = battery
@@ -596,15 +608,17 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         catch (e: IOException) {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
             wifiOpen = true
             io.log("bean_wifi_fail", "问热点时蓝牙先断了（$e），没拿到地址，回蓝牙", "warn", mapOf("step" to "hotspot"))
+            wifiNote = say("beanWifiNoHotspot")
             throw Again("BLE went while asking for the hotspot")
         } catch (e: Again) { throw e } catch (e: InterruptedException) { throw e }
-        catch (e: Exception) { io.log("bean_wifi_fail", "豆子没开热点（$e），接着用蓝牙", "warn", mapOf("step" to "hotspot")); return }
+        catch (e: Exception) { io.log("bean_wifi_fail", "豆子没开热点（$e），接着用蓝牙", "warn", mapOf("step" to "hotspot")); wifiNote = say("beanWifiNoHotspot"); return }
         finally { hotspot = false }
         wifiOpen = true
         val opened = io.monotonicNow() - t0
         val at = Bean.endpoint(a.payload) ?: run {
             io.log("bean_wifi_fail", "豆子没开热点（回了 ${Bean.hex(a.payload)}，状态 ${a.status}），接着用蓝牙", "warn",
                 mapOf("step" to "hotspot", "ms" to opened, "reply" to Bean.hex(a.payload), "status" to a.status))
+            wifiNote = say("beanWifiNoHotspot")
             return
         }
         io.log("bean_wifi_hotspot", "豆子开了热点 $ssid（$opened ms）：回复 ${Bean.hex(a.payload)}，地址 $at",
@@ -612,7 +626,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         overWifi = true; wifiUnits = 0
         files.values.forEach { it.wifiTries = 0 }
         state = say("beanWifi")
-        var t1 = io.monotonicNow(); var why: String; var rollover = false
+        var t1 = io.monotonicNow(); var why: String; var rollover = false; var note: String? = null
         try {
             io.wifiJoin(ssid, password, a.payload)
             t1 = io.monotonicNow()
@@ -620,7 +634,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             why = wifiLoop()
         } catch (e: Again) { why = "豆子换了文件"; rollover = e.naturalRollover }
         catch (e: InterruptedException) { overWifi = false; io.wifiLeave(); throw e }  // the app stops (BeanLink.stop)
-        catch (e: Exception) { why = "$e" }
+        catch (e: Exception) { why = "$e"; note = (e as? Bean.Fail)?.note ?: "beanWifiFailed" }
+        if (wifiUnits == 0) (note ?: WIFI_ENDS[why])?.let { wifiNote = say(it, "detail" to why) }
         xfer?.let { complete(it, -1, "；Wi-Fi 快传结束") }
         overWifi = false
         io.wifiLeave()
@@ -680,6 +695,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
      *  one (iOS 11-08/09: three asks each, nothing), and Anker's SDK demo refuses it (「正在录音中，无法传输文件」). BLE goes on live. */
     private fun wifiRecording() {
         io.log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields = mapOf("recording" to true, "backlog_s" to (owed["backlog_s"] ?: 0)))
+        wifiNote = say("beanWifiRecording")
     }
 
     /** After a fast transfer: the hotspot off, in case it is on still. */
@@ -1196,6 +1212,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     companion object {
         const val TRIES = 3
+        /** wifiLoop()'s ends that, nothing read, the device page says (wifiNote), as on iOS */
+        val WIFI_ENDS = mapOf("豆子没回音" to "beanWifiNoAnswer", "豆子开始录音，回蓝牙" to "beanWifiRecording",
+            "豆子一直忙（code 4）" to "beanWifiBusy", "30 s 没收到单元" to "beanWifiNoUnits")
         const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         /** owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to

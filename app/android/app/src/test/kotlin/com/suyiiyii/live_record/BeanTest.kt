@@ -1453,6 +1453,7 @@ class BeanTest {
         assertArrayEquals(byteArrayOf(1, 0x2B, 0xA8.toByte(), 0xC0.toByte(), 0xBB.toByte(), 1), bean.joins[0].third)
         assertFalse("the hotspot left", bean.onWifi)
         assertFalse(sync.hotspot)
+        assertNull("nothing to say of one that read", sync.wifiNote)
         assertEquals(listOf(Triple(a, 0L, false)), bean.transfers)
         assertEquals("each unit once, in order", (0L until 3000L).toList(), seqs(File(dir, "chunks")))
         assertTrue(bean.logs.any { it.first == "bean_wifi_hotspot" } && bean.logs.any { it.first == "bean_wifi_done" })
@@ -1482,10 +1483,11 @@ class BeanTest {
     @Test fun wifiJoinRefusedBackToBle() {
         val dir = Files.createTempDirectory("bean").toFile()
         val bean = wifiBean(); val a = wt0 / 1000 - 600
-        bean.wifiAsk = true; bean.joinFails = IOException("join: unavailable")
+        bean.wifiAsk = true; bean.joinFails = Bean.Fail("join: unavailable", "beanWifiUnavailable")
         val sync = wifiSync(bean, dir)
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertTrue(again.message, "join: unavailable" in again.message!!)
+        assertEquals("the device page says why", "beanWifiUnavailable", sync.wifiNote?.get("code"))
         assertTrue(bean.transfers.isEmpty())
         assertTrue(bean.logs.any { it.first == "bean_wifi_done" })
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
@@ -1512,6 +1514,9 @@ class BeanTest {
         assertTrue(bean.joins.isEmpty())
         assertEquals("the live read not cut for it", 1, bean.transfers.size)
         assertTrue(bean.logs.any { it.first == "bean_wifi_skip" && "在录音" in it.second })
+        assertEquals("beanWifiRecording", sync.wifiNote?.get("code"))
+        sync.hw = sync.hw + ("recording" to false)
+        assertNull("gone once the bean is not recording", sync.wifiNote)
     }
 
     /** Nothing lacking: no hotspot. */
@@ -1537,6 +1542,7 @@ class BeanTest {
             bean.wifiAsk = true; bean.script.clear(); repeat(40) { bean.script += {} }
             val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
             assertTrue(again.message, "豆子没回音" in again.message!!)
+            assertEquals("beanWifiNoAnswer", sync.wifiNote?.get("code"))
         }
         assertEquals(4, bean.joins.size)
         assertEquals("three asks a tap, all over Wi-Fi", 12, bean.transfers.size)
@@ -1592,6 +1598,18 @@ class BeanTest {
         assertFalse("the hotspot left", bean.onWifi)
         assertEquals(1, bean.transfers.size)
         assertEquals("what came before is kept", (0L until 1500L).toList(), seqs(File(dir, "chunks")))
+    }
+
+    /** The bean below 30% (it opens no hotspot then): no 1A/05, the device page says so; at 30% it is asked for. */
+    @Test fun wifiLowBattery() {
+        for ((byte, pct) in listOf(1 to 20, 2 to 30)) {
+            val dir = Files.createTempDirectory("bean").toFile()
+            val bean = wifiBean(); bean.battery = byte.toByte(); bean.wifiAsk = true
+            val sync = wifiSync(bean, dir)
+            try { sync.session(wt0 - 3_600_000, "") } catch (_: Exception) {}
+            assertEquals("$pct%", pct >= 30, 0x1A05 in bean.sentCmds())
+            if (pct < 30) assertEquals(mapOf("code" to "beanWifiLowBattery", "battery" to 20), sync.wifiNote)
+        }
     }
 
     /** BLE gone before the bean answered 1A/02 (iOS #262 reviews): the next session sends it again, TRIES in all, then
@@ -1711,6 +1729,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var starts = 0  // each 18/82 asked
     var onSend: (Int) -> Unit = {}  // after the bean's answer to each command
     var hotspot: () -> Boolean = { false }  // BeanSync.hotspot: 1A/05 and 1A/02 only while it is set
+    var battery: Byte = 7  // 80% (Bean.pct)
     var wifiAsk = false  // the device page's button (Io.wifiAsked)
     var onWifi = false  // joined (wifiJoin) and not left yet
     var dropOnWifi = false
@@ -1792,7 +1811,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun refused() = refused
 
     fun info() = ByteArray(57).also { b ->
-        b[0] = 1; b[1] = 7; b[38] = 5
+        b[0] = 1; b[1] = battery; b[38] = 5
         "01.00".toByteArray().copyInto(b, 3); "fake000000000001".toByteArray().copyInto(b, 8)
         Bean.le32(30_000_000).copyInto(b, 24); Bean.le32(20_000_000).copyInto(b, 28)
         byteArrayOf(2, 0, 0, 0, 0x0A, 0x0B).copyInto(b, 39)

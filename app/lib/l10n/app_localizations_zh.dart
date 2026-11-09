@@ -975,11 +975,14 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanWifiNoHotspot => '上次 Wi‑Fi 快传没成：没等到豆子的热点，已接着用蓝牙';
 
   @override
-  String get beanWifiDenied => '上次 Wi‑Fi 快传没成：iOS 问要不要加入豆子的网络时点了取消';
+  String get beanWifiDenied => '上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消';
 
   @override
-  String get beanWifiBackground =>
-      '上次 Wi‑Fi 快传没成：App 不在前台，iOS 不让加入热点；快传期间留在这个页面';
+  String get beanWifiUnavailable =>
+      '上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消，或没找到豆子的热点；已回到蓝牙，可以再点一次';
+
+  @override
+  String get beanWifiBackground => '上次 Wi‑Fi 快传没成：App 不在前台，手机不让加入热点；快传期间留在这个页面';
 
   @override
   String get beanWifiNoJoin => '上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次';
@@ -999,7 +1002,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanWifiJoinTimeout =>
-      '上次 Wi‑Fi 快传没成：iOS 2 分钟都没答复要不要加入豆子的热点（它的提问可能没人点），已回到蓝牙';
+      '上次 Wi‑Fi 快传没成：手机问要不要加入豆子的热点，2 分钟没人答复，已回到蓝牙';
 
   @override
   String beanWifiFailed(Object detail) {

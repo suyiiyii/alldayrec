@@ -1011,11 +1011,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiDenied =>
-      'The last Wi‑Fi fast transfer failed: iOS\'s question to join the bean\'s network was cancelled';
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s network was cancelled';
+
+  @override
+  String get beanWifiUnavailable =>
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s network was cancelled, or it did not find the bean\'s hotspot; back on Bluetooth, tap again to retry';
 
   @override
   String get beanWifiBackground =>
-      'The last Wi‑Fi fast transfer failed: iOS joins no hotspot for an app in the background; stay on this page meanwhile';
+      'The last Wi‑Fi fast transfer failed: the phone joins no hotspot for an app in the background; stay on this page meanwhile';
 
   @override
   String get beanWifiNoJoin =>
@@ -1039,7 +1043,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiJoinTimeout =>
-      'The last Wi‑Fi fast transfer failed: iOS gave no answer on joining the bean\'s hotspot in 2 minutes (its question may be unanswered); back on Bluetooth';
+      'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s hotspot went unanswered for 2 minutes; back on Bluetooth';
 
   @override
   String beanWifiFailed(Object detail) {
