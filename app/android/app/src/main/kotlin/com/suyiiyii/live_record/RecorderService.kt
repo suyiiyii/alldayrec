@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.Process
@@ -209,7 +210,8 @@ class RecorderService : Service() {
         if (slicer == null) {
             dir.listFiles { f -> f.name.endsWith(".part") }?.forEach { it.renameTo(File(it.path.removeSuffix(".part") + ".ogg")) }  // cut short by a kill: still valid Ogg
             Log.i("live-record", "starting slicer")
-            slicer = Slicer(dir, prefs.getInt("foreground", 5), prefs.getInt("background", 20), prefs.getInt("screenOff", 60), ble).also {
+            slicer = Slicer(dir, prefs.getInt("foreground", 5), prefs.getInt("background", 20), prefs.getInt("screenOff", 60), ble,
+                getSystemService(AudioManager::class.java), prefs.getString("device", "phone")!!).also {
                 it.foreground = foregroundApp
                 it.screenOff = !(getSystemService(POWER_SERVICE) as PowerManager).isInteractive
                 it.start()

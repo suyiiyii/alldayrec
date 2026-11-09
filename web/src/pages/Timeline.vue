@@ -16,8 +16,10 @@ import {
   errorTitle,
   get,
   isFragment,
+  micGap,
   post,
   type Conversation,
+  type PhoneSpan,
   type Due,
   type Recap,
   type Status,
@@ -49,7 +51,8 @@ const tags = ref<[string, number][]>([]),
   items = ref<Conversation[]>([]),
   status = ref<Status | null>(null),
   due = ref<Due[]>([]),
-  recaps = ref<Record<string, Recap | null>>({});
+  recaps = ref<Record<string, Recap | null>>({}),
+  gaps = ref<Record<string, PhoneSpan[]>>({});
 const ready = ref(false),
   loading = ref(false),
   done = ref(false),
@@ -248,9 +251,27 @@ const unfolded = ref<Record<string, boolean>>({});
 const fold = computed(() => !q.value && !tag.value);
 const shown = (g: (typeof days.value)[number]) =>
   fold.value && !unfolded.value[g.day] ? g.convs.filter((c) => !isFragment(c)) : g.convs;
-// each past day's recap, asked once as the day comes into the list (null: none, or still on its way)
+// a day's conversations with, in their places, when the phone recording with its microphone heard nothing and why
+// (a call, another app holding it): not a blank stretch; newest first
+const feed = (g: (typeof days.value)[number]) =>
+  [
+    ...shown(g).map((c) => ({ key: c.id, at: c.start, c, gap: null })),
+    ...(fold.value ? (gaps.value[g.day] ?? []) : []).map((s) => ({
+      key: "g" + s.from,
+      at: s.from,
+      c: null,
+      gap: s,
+    })),
+  ].sort((a, b) => (a.at < b.at ? 1 : -1));
+// each past day's recap, asked once as the day comes into the list (null: none, or still on its way); its silent
+// stretches too, today's again with each reload of the list
 watch(days, (ds) => {
   if (q.value || tag.value) return;
+  for (const { day: d } of ds)
+    if (d === today() || !(d in gaps.value))
+      get<PhoneSpan[]>("/api/phone-spans", { since: d + "T00:00:00", until: shiftDay(d, 1) + "T00:00:00" })
+        .then((ss) => (gaps.value[d] = ss.filter((s) => s.kind === "mic" && s.from.startsWith(d)))) // on the day it began
+        .catch(() => {});
   for (const { day: d } of ds)
     if (d < today() && !(d in recaps.value)) {
       recaps.value[d] = null;
@@ -522,7 +543,10 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
             t(unfolded[g.day] ? "timeline.fragsHide" : "timeline.frags", { n: g.frags }, g.frags)
           }}
         </button>
-        <ConversationItem v-for="c in shown(g)" :key="c.id" :c="c" />
+        <template v-for="x in feed(g)" :key="x.key">
+          <ConversationItem v-if="x.c" :c="x.c" />
+          <div v-else class="gap"><Icon name="mic-off" :size="16" />{{ micGap(x.gap!) }}</div>
+        </template>
       </section>
       <template v-if="done && !items.length && !reply && !asking">
         <div v-if="q || tag || day" class="empty">
@@ -687,6 +711,24 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
   color: var(--muted);
 }
 /* 另有 3 段零碎对话: a quiet line, not a card */
+/* a silent stretch on the conversations' rail (ConversationItem's), the rail dashed: nothing was heard */
+.gap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 0 var(--space-3) 22px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.gap::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 0;
+  bottom: 0;
+  border-left: 2px dashed var(--line);
+}
 .frags {
   display: flex;
   align-items: center;

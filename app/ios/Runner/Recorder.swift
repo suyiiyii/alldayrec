@@ -387,6 +387,12 @@ final class Slicer {
   private var anchorMs: Int64 = 0, fileSlice = 0
   private var gapFrom: Int64?  // main: the system stopped the recording at this time and it has not resumed yet
   private var observers: [NSObjectProtocol] = []
+  // What the server's timeline says of this recording, as device-log events of the phone's audio name:
+  // why it heard nothing (mic_lost, its reason, then mic_back), and when the phone played media aloud (media_on/off)
+  private let device = Recorder.defaults.string(forKey: "device") ?? "phone"  // the pieces' device (Recorder.upload)
+  private var lost: String?  // main: the reason of the mic_lost sent, until its mic_back
+  private var aloud = false  // q: media_on sent, until its media_off
+  private var mediaTimer: DispatchSourceTimer?  // q
 
   init(dir: URL, fgS: Int, bgS: Int) { self.dir = dir; self.fgS = fgS; self.bgS = bgS }
 
@@ -397,12 +403,22 @@ final class Slicer {
   func start() throws {
     try activate()
     try restart()
+    watchMedia()
     let nc = NotificationCenter.default, session = AVAudioSession.sharedInstance()
     observers = [
       nc.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] n in
         guard let self, let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return }
         // ended: resume whether or not it says shouldResume. It may never come; then the app coming to the front resumes
-        if AVAudioSession.InterruptionType(rawValue: raw) == .began { self.pause() } else { self.resume() }
+        if AVAudioSession.InterruptionType(rawValue: raw) == .began {
+          self.pause()
+          // a call, or another app (or Siri) took the microphone: iOS says neither which nor whose. CallKit's
+          // CXCallObserver would tell a call, but the App Store in China refuses apps that link CallKit
+          self.lose("interrupted")
+        } else { self.resume() }
+      },
+      // the output moved (headphones in or out): whether media is aloud may have changed with it
+      nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: nil) { [weak self] _ in
+        self?.q.async { self?.checkMedia() }
       },
       nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: .main) { [weak self] _ in
         guard let self else { return }
@@ -419,6 +435,12 @@ final class Slicer {
 
   func stop() {
     observers.forEach(NotificationCenter.default.removeObserver)
+    q.sync {
+      mediaTimer?.cancel()
+      mediaTimer = nil
+      if aloud { aloud = false; DeviceLog.app(device, "media_off", "停止录音，不再看手机外放") }
+    }
+    if lost != nil { lost = nil; DeviceLog.app(device, "mic_back", "停止录音") }
     engine.inputNode.removeTap(onBus: 0)
     engine.stop()
     q.sync { finishRun() }
@@ -455,12 +477,45 @@ final class Slicer {
       gapFrom = nil
       error = nil
       Recorder.resumed(after: from)
+      if lost != nil { lost = nil; DeviceLog.app(device, "mic_back", "手机麦克风接着录了") }
     } catch { failed("resumeFailed", error) }
   }
 
   private func failed(_ code: String, _ e: Error) {
     error = ["code": code, "at": gapFrom ?? Recorder.now(), "detail": e.localizedDescription]
+    lose(code == "routeFailed" ? "route" : "system")  // resumeFailed after an interruption: its reason stays
     Recorder.gap(from: gapFrom ?? Recorder.now())
+  }
+
+  /// The microphone heard nothing from now: why (interrupted, route, system), once until it records again.
+  private func lose(_ reason: String) {
+    if lost != nil { return }
+    lost = reason
+    let why = ["interrupted": "通话中，或麦克风被其他 App 或 Siri 占用", "route": "麦克风切换后没能接着录"][reason] ?? "系统暂停了录音"
+    DeviceLog.app(device, "mic_lost", "手机麦克风没在录：\(why)", level: "warn", fields: ["reason": reason])
+  }
+
+  /// Every 2 s while recording: another app plays music or video (not mixable: secondaryAudioShouldBeSilencedHint, so
+  /// not navigation prompts or a silent keep-alive) and not into headphones or another room's speaker (the microphone
+  /// hears it). A Bluetooth speaker, CarPlay, AirPlay and HDMI count as headphones: no telling where they play, and
+  /// leaving media unmarked costs less than marking people as media. Not while interrupted (a call is on the receiver).
+  private func watchMedia() {
+    let t = DispatchSource.makeTimerSource(queue: q)
+    t.schedule(deadline: .now() + 2, repeating: 2, leeway: .seconds(1))
+    t.setEventHandler { [weak self] in self?.checkMedia() }
+    t.resume()
+    q.sync { mediaTimer = t }
+  }
+
+  private static let quiet: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio, .carAudio, .airPlay, .HDMI]
+
+  private func checkMedia() {  // on q
+    let s = AVAudioSession.sharedInstance()
+    if run == nil { return }  // interrupted, or between runs: keep what was said
+    let now = s.secondaryAudioShouldBeSilencedHint && !s.currentRoute.outputs.contains { Slicer.quiet.contains($0.portType) }
+    if now == aloud || mediaTimer == nil { return }
+    aloud = now
+    DeviceLog.app(device, now ? "media_on" : "media_off", now ? "手机在外放音乐或视频" : "手机停止外放")
   }
 
   /// (Re)attach the tap with the input's current format and start a new run at the current wall time. Each tap

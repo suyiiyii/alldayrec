@@ -72,7 +72,8 @@ def seed(t: tenant.Tenant):
             db.put_kv(f"recap:{TODAY}", {"date": TODAY, "headline": mark, "todos": [], "highlights": [], "people": []}, c)
         db.put_profile({"name": f"{mark}人", "facts": [{"text": mark, "src": []}]})
         db.add_feedback(CID, f"{mark} 反馈")
-        db.put_device_log(DEV, [{"src": "app", "seq": 1, "at": AT, "data": {"kind": mark}}])
+        db.put_device_log(DEV, [{"src": "app", "seq": 1, "at": AT, "data": {"kind": mark}},
+                                {"src": "app", "seq": 3, "at": AT, "data": {"kind": "mic_lost", "reason": mark}}])  # GET /api/phone-spans
         db.add_device_status(DEV, AT, {"battery": 50, "note": mark})
         db.add_call("final", f"engine-{mark}", DEV, 100)
         db.add_balance("stepfun", 1.0)
@@ -108,6 +109,7 @@ REQUESTS = {
     ("POST", "/api/device-status"): ("POST", "/api/device-status", dict(params={"device": DEV}, json={"battery": 1})),
     ("POST", "/api/device-log"): ("POST", "/api/device-log", dict(params={"device": DEV}, json=[{"src": "app", "seq": 2, "at": MS, "data": {"kind": "x"}}])),
     ("GET", "/api/device-log"): ("GET", "/api/device-log", dict(params={"device": DEV, "since": TODAY})),
+    ("GET", "/api/phone-spans"): ("GET", "/api/phone-spans", dict(params={"since": TODAY, "until": "9999"})),
     ("GET", "/api/calls"): ("GET", "/api/calls", dict(params={"since": TODAY})),
     ("GET", "/api/perf"): ("GET", "/api/perf", dict(params={"day": TODAY})),
     ("GET", "/api/upgrades"): ("GET", "/api/upgrades", dict(params={"device": DEV, "since": TODAY})),
@@ -263,6 +265,9 @@ def test_routes(two, monkeypatch):
             got = (await c.get(f"/api/conversation/{CID}", headers={"Authorization": "Bearer tb"})).json()
             assert got["summary"]["title"] == "MARKb 标题" and "MARKa" not in json.dumps(got, ensure_ascii=False), "b's token: b's"
             assert (await c.get("/api/status", headers={"Cookie": "token=tb"})).json()["devices"][0]["conversation"]["note"] == "MARKb"
+            for tok, mark in (("ta", "MARKa"), ("tb", "MARKb")):  # each its own silent stretch: the check above is not empty
+                got = (await c.get("/api/phone-spans", params={"since": TODAY, "until": "9999"}, headers={"Authorization": f"Bearer {tok}"})).json()
+                assert [x["reason"] for x in got] == [mark], (tok, got)
             r = await c.get("/?token=tb")
             assert r.status_code == 303 and "token=tb" in r.headers["set-cookie"], "?token= of b: b's cookie"
     anyio.run(run)
@@ -271,7 +276,7 @@ def test_routes(two, monkeypatch):
     assert snapshot(b) == before, "nothing of b's changed"
     assert "split" in kinds and tenant.call(a, lambda: [c["start"][11:19] for c in db.conversations(TODAY, "9999")]) == ["10:00:00", "10:06:00"]
     timed = lambda t: tenant.call(t, lambda: {r[0] for r in db.conn().execute("SELECT route FROM perf_requests")})
-    assert timed(b) == {"/api/status", "/api/conversation/{conv_id}"} and "/api/perf" in timed(a), "each request timed in its own store"
+    assert timed(b) == {"/api/status", "/api/conversation/{conv_id}", "/api/phone-spans"} and "/api/perf" in timed(a), "each request timed in its own store"
     assert b.events[-1]["text"] == "MARKb" and len(b.events) == 1 and b.devices[DEV].conversation["note"] == "MARKb"
     assert a.chunks and b.chunks is None, "the upload is a's"
     assert a.lang == "en" and b.lang == "zh", "a's PUT /api/lang is a's"

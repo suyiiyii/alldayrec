@@ -16,6 +16,7 @@ import {
   hhmmss,
   holdLeft,
   hot,
+  micGap,
   phoneLine,
   phoneState,
   queueLine,
@@ -23,6 +24,7 @@ import {
   type CallSum,
   type DeviceStatus,
   type LogEvent,
+  type PhoneSpan,
   type Status,
   type Upgrade,
 } from "../lib/api";
@@ -76,10 +78,20 @@ const today = () => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
 };
 const loadCalls = async () => (calls.value = await get<Calls>("/api/calls", { since: today() }));
+// today's stretches a phone recording with its microphone heard nothing, and why; the last 3 per device
+const spans = ref<PhoneSpan[]>([]);
+const loadSpans = async () =>
+  (spans.value = await get<PhoneSpan[]>("/api/phone-spans", { since: today(), until: "9999" }));
+const micGaps = (device: string) =>
+  spans.value.filter((s) => s.kind === "mic" && s.device === device).slice(-3);
 let tick = 0;
 onMounted(() => {
   loadCalls();
-  tick = window.setInterval(loadCalls, 60_000);
+  loadSpans().catch(() => {});
+  tick = window.setInterval(() => {
+    loadCalls();
+    loadSpans().catch(() => {});
+  }, 60_000);
 });
 onUnmounted(() => clearInterval(tick));
 const KINDS = ["final", "draft", "late", "summary", "split", "hints", "profile", "recap", "live", "ask"];
@@ -372,6 +384,12 @@ const lateLine = (d: DeviceStatus) =>
           </template>
           <span>{{ t("progress.reported") }}</span
           ><span>{{ at(d.hw.at) }}</span>
+        </template>
+        <template v-if="micGaps(d.device).length">
+          <span>{{ t("progress.micGaps") }}</span
+          ><span :class="{ bad: !micGaps(d.device).at(-1)!.to }">{{
+            micGaps(d.device).map((s) => micGap(s, true)).join(" · ")
+          }}</span>
         </template>
         <template v-if="ups[d.device]">
           <span>{{ t("progress.upgrade") }}</span

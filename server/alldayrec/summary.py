@@ -402,7 +402,22 @@ async def summarize(conv: dict, rows: list[dict], known_tags: list[str] = ()) ->
         first = next((r["text"] for r in rows if r.get("text")), "")
         return {**base, "status": "done", "model": None, "title": first[:20], "summary": "", **{k: [] for k in LISTS}}
     todos, opened = todo_context(conv)
-    return result(conv, rows, *await chat(transcript(rows), list(known_tags), conv["start"], todos), opened)
+    # only a hint: the phone cannot tell its media from people talking over it, the model splits as media_spans says
+    note = "".join(f"\n（手机报告：{x['from'][11:19]} 到 {x['to'][11:19]} 它在外放音乐或视频；这段里在场的人说的话照常算）" for x in played(conv, rows))
+    return result(conv, rows, *await chat(transcript(rows) + note, list(known_tags), conv["start"], todos), opened)
+
+
+def played(conv: dict, rows: list[dict]) -> list[dict]:
+    """The phone's own word that it played media aloud while it recorded (db.phone_spans, kind media): the first and
+    last row inside each span, for the model's note. Not media_spans themselves: people in the room talk over music."""
+    if not conv.get("end") or not conv.get("device"):
+        return []
+    out = []
+    for p in db.phone_spans(conv["start"], conv["end"], conv.get("device")):
+        inside = [r["start"] for r in rows if p["kind"] == "media" and p["from"] <= r["start"] and (p["to"] is None or r["start"] < p["to"])]
+        if inside:
+            out.append({"from": inside[0], "to": inside[-1]})
+    return out
 
 
 def typed(res: dict) -> tuple[dict, list[str]]:

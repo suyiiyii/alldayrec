@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as i
     seq INTEGER NOT NULL, at TEXT,            -- code x a b); any other src: an app's events, seq its own. at: when, put on
     data TEXT NOT NULL, PRIMARY KEY (device, src, seq));  -- the clock by the phone; NULL when it could not be
 CREATE INDEX IF NOT EXISTS device_log_at ON device_log(device, at);
+CREATE INDEX IF NOT EXISTS device_log_app ON device_log(at) WHERE src != 'rec';  -- the apps' events of every device (phone_spans)
 CREATE TABLE IF NOT EXISTS device_status (    -- every status a client read from a BLE recorder (battery, card, firmware)
     device TEXT NOT NULL, at TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS device_status_at ON device_status(device, at);
@@ -694,6 +695,31 @@ def device_log(device: str, lo: str, hi: str | None = None) -> list[dict]:
              AND seq > coalesce((SELECT max(seq) FROM device_log WHERE device = :d AND src = 'rec' AND at < :lo), -1)
              AND seq < coalesce((SELECT min(seq) FROM device_log WHERE device = :d AND src = 'rec' AND at >= :hi), 1 << 62))"""
     return [{**dict(r), "data": json.loads(r["data"])} for r in conn().execute(q, {"d": device, "lo": lo, "hi": hi})]
+
+
+def phone_spans(lo: str, hi: str, device: str | None = None) -> list[dict]:
+    """What the phone apps said of their microphone while recording with it (Slicer in both apps), the spans that
+    overlap [lo, hi), oldest first: {device, kind, reason, from, to}. kind mic: it heard nothing (reason: call, other_app
+    (Android), interrupted (iOS: a call or another app), route, system); media: the phone played media aloud. A span ends at its closing event or at the app's next
+    launch (the process died meanwhile: what came after is unknown); to None: still open."""
+    # shortcut: a span opened over a day before lo is not seen; look further back if gaps that long turn up
+    since = (dt.datetime.fromisoformat(lo) - dt.timedelta(days=1)).isoformat()
+    rows = conn().execute("""SELECT device, src, at, data FROM device_log WHERE src != 'rec' AND at >= ? AND at < ?
+                               AND json_extract(data, '$.kind') IN ('mic_lost', 'mic_back', 'media_on', 'media_off', 'launch')
+                             ORDER BY at, seq""", (since, hi))
+    pairs = {"mic_lost": ("mic", True), "mic_back": ("mic", False), "media_on": ("media", True), "media_off": ("media", False)}
+    open_, out = {}, []
+    for d, src, at, data in rows:
+        e = json.loads(data)
+        for (s, kind), x in list(open_.items()):  # a launch ends both of that install's; a close or a new open ends its own
+            if s == src and (e["kind"] == "launch" or pairs[e["kind"]][0] == kind):
+                x["to"] = at
+                del open_[s, kind]
+        if e["kind"] in pairs and pairs[e["kind"]][1]:
+            kind = pairs[e["kind"]][0]
+            open_[src, kind] = x = {"device": d, "kind": kind, "reason": e.get("reason"), "from": at, "to": None}
+            out.append(x)
+    return [x for x in out if (device is None or x["device"] == device) and (x["to"] is None or x["to"] > lo)]
 
 
 def upgrades(device: str, lo: str) -> list[dict]:
