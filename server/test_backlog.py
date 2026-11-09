@@ -230,7 +230,6 @@ def test_hold_keeps_backlog_final(tmp_path, monkeypatch):
 def test_hold_expires(tmp_path, monkeypatch):
     """A phone that never comes back: a hold not said again for HOLD_MAX_S is let go and the queue goes on; older audio
     arriving after that is kept, not finalized (as before there were holds)."""
-    monkeypatch.setattr(audio, "HOLD_MAX_S", 2)
     db.open_db(tmp_path / "live.db")
     t = lambda m: dt.datetime(2026, 10, 6, 10, m)
     piece = flac(tone(0, 3))
@@ -251,6 +250,8 @@ def test_hold_expires(tmp_path, monkeypatch):
                 with anyio.move_on_after(1) as wait:
                     got.append(await recv.receive())
                 assert wait.cancelled_caught, "held"
+                h = db.kv(f"hold:{DEVICE}")  # HOLD_MAX_S passes: set it back, not waited for on the clock (a slow decode used it up)
+                db.put_kv(f"hold:{DEVICE}", {**h, "since": h["since"] - audio.HOLD_MAX_S})
                 with anyio.fail_after(5):
                     got.append(await recv.receive())
                 assert got == [t(0), t(5)]
