@@ -95,7 +95,7 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
     long = []
     # S<n> means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank
     if to != "我" and not re.fullmatch(r"S\d+", to) and state.get("embed"):
-        long = sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= 1.5),
+        long = sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
                       key=lambda r: r["start"])[:ENROLL]
     ws.note(f"对话 {c['start'][11:19]}：{frm} 改名为 {to}", "state")
     # voiceprints: the sentences queued to learn from (a history conversation without its recording here gives none)
@@ -236,7 +236,7 @@ async def enroll_soon(to: str, rows: list[dict]):
 
 async def enroll(to: str, rows: list[dict]):
     """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists: those
-    bank.pick keeps (alike within their label and to what to sounds like already, at most CAP a click), recorded each in
+    bank.pick keeps (alike within their label, not what 我 could have said, at most CAP a click), recorded each in
     the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py) teaches nothing.
     A failure is logged: it must not end the tenant's tasks beside it."""
     try:
@@ -252,7 +252,7 @@ async def enroll(to: str, rows: list[dict]):
         if labels:
             ls = list(labels.items())
             had = db.people().get(to)
-            keep = bank.pick([[e for _, e in l] for _, l in ls], had and had[1])
+            keep = bank.pick([[e for _, e in l] for _, l in ls], had and had[1], (owner_bank() if T().owner is None else T().owner).values())
             with db.tx() as t:
                 n = sum(bank.learn(t, to, conv, [l[j] for i2, j in keep if i2 == i]) for i, (conv, l) in enumerate(ls))
             bank.sync(to)

@@ -1,7 +1,8 @@
 """Conversation-level speaker labels. Every new sentence re-clusters the open conversation's voiceprints
 (ReDimNet2, average-link cosine) and takes its cluster's label: 我 when that cluster's mean voiceprint is
 close to the owner bank (>= OWNER_MIN; a split owner stays 我 in every piece), else a person's name when that
-close to a voiceprint named by hand on the conversation page (>= PEOPLE_MIN; closer than the bank wins when both pass;
+close to one of a name's voiceprints (its few samples, bank.SAMPLES: the nearest counts) named by hand on the
+conversation page (>= PEOPLE_MIN; closer than the bank wins when both pass;
 by PEOPLE_MARGIN over the next name and 我, else no name), else the S<n> most of the cluster's earlier sentences
 carry, so ids follow membership as clusters grow and merge. Only the new sentence is labelled; earlier
 rows are never rewritten. Case replays 09-29: see artifacts/record/voiceprint.
@@ -14,12 +15,14 @@ import numpy as np
 
 TH = float(os.environ.get("DIAR_TH", "0.5"))  # cosine distance; lower splits one person into several ids (mergeable later), higher merges people (not undoable): 0.6 merged two colleagues in the 05-26 meeting
 OWNER_MIN = 0.7   # ReDimNet2 cluster vs owner bank: my clusters 0.79-0.99, others <= 0.63 (incl. unseen channels)
-MIN_DUR = 1.0     # shorter sentences are not clustered: they join the nearest labelled centroid
+MIN_DUR = 1.0     # shorter sentences are not clustered: they join the nearest labelled centroid (11-09 replay: 0.5
+                  # named 1.1 % of a person's sentences wrong, 1.5 left 2.3 % more unnamed)
 JOIN = float(os.environ.get("DIAR_JOIN", "0.35"))  # ... when at least this close, else S?; also for a lone long sentence
 MIN_ME = 3        # a cluster needs this many sentences before it can be 我 or a name
 PEOPLE_MIN = float(os.environ.get("PEOPLE_MIN", "0.7"))  # same evidence as OWNER_MIN: other people score <= 0.63 against one person's voiceprint
 # a name also beats the next name and 我 by this much: on one instance 25 voices of others passed PEOPLE_MIN against a
-# person's voiceprint, 5 of them the owner's own
+# person's voiceprint, 5 of them the owner's own. 11-09 replay: 0 named 0.3 % of 我's voices someone else, 0.08 and
+# 0.12 named 0.7-6 % fewer of a person's and none less wrong
 PEOPLE_MARGIN = 0.05
 KEEP = 1500       # clustering is O(n^2): a four-hour conversation keeps its latest sentences
 SR = 16000
@@ -35,15 +38,21 @@ def _unit(v):
     return v / np.linalg.norm(v)
 
 
+def _rows(v) -> np.ndarray:
+    """A name's samples (one voiceprint or several, k x dim) as unit rows."""
+    v = np.atleast_2d(np.asarray(v, np.float64))
+    return v / np.linalg.norm(v, axis=1, keepdims=True)
+
+
 def _closest(m: np.ndarray, people: dict[str, np.ndarray]) -> tuple[float, str | None]:
-    return max(((float(m @ v), k) for k, v in people.items()), default=(0.0, None))
+    return max(((float(np.max(v @ m)), k) for k, v in people.items()), default=(0.0, None))
 
 
 def _name(m: np.ndarray, owner: float, people: dict[str, np.ndarray]) -> str | None:
     """The name of a cluster with mean voiceprint m scoring `owner` against the bank: the closest named voice when it
     passes PEOPLE_MIN and is PEOPLE_MARGIN closer than both the next one and the bank (as _me lets a closer name win,
     a name close to 我 or to another name is no name: S<n>, named by hand when it is someone)."""
-    s = sorted(((float(m @ v), k) for k, v in people.items()), reverse=True)
+    s = sorted(((float(np.max(v @ m)), k) for k, v in people.items()), reverse=True)
     if s and s[0][0] >= PEOPLE_MIN and s[0][0] - max(s[1][0] if len(s) > 1 else 0.0, owner) >= PEOPLE_MARGIN:
         return s[0][1]
     return None
@@ -60,7 +69,7 @@ class Diarist:
     def __init__(self, bank: dict[str, np.ndarray], th: float = TH, people: dict[str, np.ndarray] | None = None):
         self.th = th
         self.set_bank(bank)
-        self.people = {k: _unit(v) for k, v in (people or {}).items()}  # the server adds names as they are given
+        self.people = {k: _rows(v) for k, v in (people or {}).items()}  # the server adds names as they are given
         self.reset()
 
     def set_bank(self, bank: dict[str, np.ndarray]):
@@ -145,7 +154,7 @@ def relabel(E: list, dur: list[float], bank: dict[str, np.ndarray], groups: list
     appearance; a sentence in no cluster joins the nearest labelled centroid at JOIN, else S?."""
     from sklearn.cluster import AgglomerativeClustering
     bank_v = [_unit(v) for v in bank.values()]
-    people = {k: _unit(v) for k, v in (people or {}).items()}
+    people = {k: _rows(v) for k, v in (people or {}).items()}
     keys = groups if groups is not None else list(range(len(E)))
     units: dict = {}
     for i, k in enumerate(keys):
