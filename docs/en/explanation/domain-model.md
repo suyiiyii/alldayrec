@@ -337,7 +337,7 @@ Progress kept in the store resumes. State kept only in memory is rebuilt:
 | Where finalization is | `finalized_to:<d>` | The stream is read again from the piece holding that time |
 | The conversation going on | `open_conversation:<d>` | The `Grouper` continues it |
 | Drafts, live analysis | `draft_to:<d>`, `live:<d>` | Used again |
-| A late span being processed | `processing` in `late_spans` | Back to `waiting` with its try count kept; one with 3 tries becomes `failed` (`late_store.recover`) |
+| A late span being processed | `processing` in `late_spans` | Back to `waiting` with its try count kept; one with 3 tries becomes `failed` (`late_store.recover`). One waiting for the infer service is already back to `waiting` at the stop, that try given back, at most 3 times a span (`late_store.stopped`) |
 | Summaries not written | `pending` in `summaries` | Queued again when the summary workers start |
 | Audio, VAD and voiceprint clusters | Memory | Fed again from `finalized_to`. The earlier voiceprints are gone, so relabelling the whole conversation at its close may be skipped |
 | Rename undo | Memory | Lost |

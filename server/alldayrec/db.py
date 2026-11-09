@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS late_spans (
     id INTEGER PRIMARY KEY, device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
     first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting',
     tries INTEGER NOT NULL DEFAULT 0, note TEXT, next_ms INTEGER NOT NULL DEFAULT 0,
-    ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL, seam_ms INTEGER);
+    ready INTEGER NOT NULL DEFAULT 0, done_ms INTEGER, ranges TEXT NOT NULL, seam_ms INTEGER,
+    stops INTEGER NOT NULL DEFAULT 0);  -- stops: claims given back by late_store.stopped()
 CREATE INDEX IF NOT EXISTS late_spans_queue ON late_spans(status, start_ms);
 CREATE INDEX IF NOT EXISTS late_spans_device ON late_spans(device, status);
 CREATE TABLE IF NOT EXISTS processed_audio (  -- layer final / late: transcribed; standby: left to another device (colocate.py)
@@ -159,6 +160,8 @@ def init():
         conn().execute("ALTER TABLE sentences ADD COLUMN late_job INTEGER")
     if "seam_ms" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
         conn().execute("ALTER TABLE late_spans ADD COLUMN seam_ms INTEGER")
+    if "stops" not in {r[1] for r in conn().execute("PRAGMA table_info(late_spans)")}:
+        conn().execute("ALTER TABLE late_spans ADD COLUMN stops INTEGER NOT NULL DEFAULT 0")
     from alldayrec import bank  # 11-09: a name's samples, for a store from before them or written by code before them
     for (name,) in conn().execute("SELECT p.name FROM people p LEFT JOIN people_samples s ON s.name = p.name "
                                   "WHERE s.n IS NOT p.n").fetchall():

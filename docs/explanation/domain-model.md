@@ -337,7 +337,7 @@ flowchart TD
 | 定稿到哪 | `finalized_to:<d>` | 从持有这一刻的上传块开始重读流 |
 | 进行中的对话 | `open_conversation:<d>` | `Grouper` 接着这个对话 |
 | 草稿到哪、实时分析 | `draft_to:<d>`、`live:<d>` | 接着用 |
-| 正在处理的迟到区间 | `late_spans` 的 `processing` | 改回 `waiting`，重试次数保留；已满 3 次的标 `failed`（`late_store.recover`） |
+| 正在处理的迟到区间 | `late_spans` 的 `processing` | 改回 `waiting`，重试次数保留；已满 3 次的标 `failed`（`late_store.recover`）。等推理服务时停服的，停服时已改回 `waiting`、退回这次的重试次数，同一区间最多 3 次（`late_store.stopped`） |
 | 没写完的总结 | `summaries` 的 `pending` | 总结 worker 启动时重新排队 |
 | 内存里的音频、VAD 和声纹聚类 | 内存 | 从 `finalized_to` 重新喂；之前的声纹没了，关闭对话时整段重新认人可能跳过 |
 | 改名撤销 | 内存 | 丢失 |

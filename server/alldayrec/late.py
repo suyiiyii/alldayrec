@@ -218,6 +218,12 @@ async def hold(limit: anyio.CancelScope):
 async def processor():
     late_store.recover()
     while True:
+        r = compute.REMOTE
+        # INFER_URL, the service failing (or unchecked since start): no claim, so no try spent and no ASR paid for a
+        # span that would only wait; claimed once it answers (up() asks /health as the backoff allows)
+        if r is not None and not await anyio.to_thread.run_sync(r.up, abandon_on_cancel=True):
+            await anyio.sleep(1)
+            continue
         span = late_store.claim()
         if not span:
             late_store.queue_summaries()
