@@ -64,6 +64,25 @@ For the accuracy of the local engine against the cloud engines, see [ASR benchma
 
 The voiceprint model ReDimNet2 runs on the local CPU. The server recognizes 「我」 (me: the person recording), and within a conversation it labels the other people S1, S2 and so on; sentences too short to recognize are labeled S?. Once you give a label a name in the web UI, the same voice is recognized in later conversations.
 
+## The compute interface
+
+Voiceprints and music detection are the two heaviest computations in the server, and both sit behind one compute interface (`Compute` in `server/alldayrec/compute.py`). It takes 16 kHz int16 samples and returns a voiceprint or whether they are music. It reads no database and no audio files, and it does not know whose data it is computing.
+
+- **In the process by default**: without `INFER_URL`, the server computes them itself on onnxruntime, exactly as before.
+- **As a separate service**: `alldayrec-infer`, in the same package, offers only these computations, and can run on another machine, one with spare CPU or a GPU. With `INFER_URL` and `INFER_TOKEN` set, the server POSTs the samples to it. When a call times out or fails, the server tries once more, then computes it itself (`INFER_FALLBACK=local`), with a log line and a metric, so the pipeline does not stop.
+
+Speech detection (VAD), ffmpeg decoding and the clustering that tells speakers apart stay in the server process. The VAD runs one stream per device and carries its state from one piece to the next, and one call costs less than a network round trip. Decoding reads the audio on disk, and clustering reads the tenant's voiceprints, so these stay with the database and the audio. To deploy it:
+
+```sh
+# On the inference machine: the same model files as the server's, the missing ones downloaded to MODELS_DIR at the first start
+INFER_TOKEN=<a random token> HOST=0.0.0.0 alldayrec-infer --port 8771
+# In the server's .env: reach it only over a private network, Tailscale or an HTTPS reverse proxy
+INFER_URL=http://infer.example.com:8771
+INFER_TOKEN=<the same token>
+```
+
+`GET /health` needs no token; `GET /metrics` needs it and returns each computation's calls, compute seconds and audio seconds. For the variables, see [Configuration](../reference/configuration.md#other-environment-variables).
+
 ## Conversations, summaries and the recap
 
 Sentences are grouped into conversations by time. A conversation ends after 5 minutes with nobody speaking, when the recorder stops, or when it reaches 4 hours. A conversation with less than 10 seconds of speech is not kept as a conversation (its sentences stay in the transcript).
