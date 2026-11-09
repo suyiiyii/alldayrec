@@ -137,12 +137,31 @@ class Remote:
                 self.failed(op, e)
                 tries += 1
                 continue
-            with self._lock:
-                if self.down_since is not None:
-                    log.warning("infer service back after %.0f s", time.monotonic() - self.down_since)
-                self.down_since, self.next_try, self.wait = None, 0.0, 0.0
+            self._back()
             CALLS[op, "retried" if tries else "remote"] += 1
             return out
+
+    def _back(self):
+        with self._lock:
+            if self.down_since is not None:
+                log.warning("infer service back after %.0f s", time.monotonic() - self.down_since)
+            self.down_since, self.next_try, self.wait = None, 0.0, 0.0
+
+    def up(self) -> bool:
+        """For a caller waiting for the service with no call of its own (the late processor, before it claims a span):
+        True unless it is failing or unchecked since start (ok). Then, a try due, /health asked once (a failure is a
+        failed try, the backoff as for a call)."""
+        if self.ok and self.down_since is None:
+            return True
+        if time.monotonic() < self.next_try:
+            return False
+        try:
+            self.ok = self.same_models()
+        except Exception as e:
+            self.failed("health", e)
+            return False
+        self._back()
+        return True
 
     def embed(self, x: np.ndarray) -> np.ndarray:
         return self._post("embed", x, voiceprint)

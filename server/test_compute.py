@@ -247,6 +247,10 @@ def test_over_the_limit_is_not_tried_again(service, caplog):
     assert isinstance(got.get("error"), httpx2.HTTPStatusError) and got["error"].response.status_code == 413, got
     assert len(tries) == 1 and r.down_seconds() == 0 and compute.CALLS["segment", "error"] == 1
     assert "infer service segment: 413" in caplog.text
+    r.down_since = since = time.monotonic() - 5  # failing before: a 413 is no answer, nor a failure
+    got = background(r.segment, long)
+    got["thread"].join(5)
+    assert got["error"].response.status_code == 413 and r.down_since == since and len(tries) == 2
 
 
 def test_token(service, monkeypatch, caplog):
@@ -410,7 +414,9 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
     """The server stopped while a pipeline and a late span wait for the service: the lifespan ends in a moment (not
     once the service is back, or at a SIGKILL), raising nothing. The span's claim is given back with the try it counted
     (tries go up at the claim): three stops in a row during one outage leave it waiting with no try used, not failed.
-    No more than three (each claim pays the span's ASR again): a fourth stop is an interrupted claim, its try kept."""
+    No more than three (each claim pays the span's ASR again): a fourth stop is an interrupted claim, its try kept.
+    A fallback: with the service down the late processor claims nothing (test_no_claim_while_the_service_is_down), so
+    this span's service (r) is not compute.REMOTE here."""
     rig(tmp_path, monkeypatch, hear)
     monkeypatch.setitem(infer_server.state, "compute", Stub())
     monkeypatch.setitem(infer_server.state, "token", TOKEN)
@@ -441,7 +447,7 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
     monkeypatch.setattr(monitor, "LOOP_STALL_MS", 0)  # no loop_stalls: its lag samples are the process's (test_metrics)
     monkeypatch.setattr(compute, "STOP", threading.Event())
     up = []
-    rescue = threading.Timer(25, lambda: up.append(serve(bound(port))))  # without the fix: back after 15 s, not never
+    rescue = threading.Timer(25, lambda: up.append(serve(bound(port))))  # without the fix: back after 25 s, not never
     rescue.start()
 
     async def run():
@@ -466,6 +472,49 @@ def test_stop_while_the_service_is_down(tmp_path, monkeypatch):
         u.should_exit = True
     late_store.recover()
     assert state() == ("waiting", 1), "not failed: three stops used none of its tries, the fourth one"
+
+
+@pytest.mark.parametrize("start", ["down", "restart"])
+def test_no_claim_while_the_service_is_down(store, monkeypatch, start):
+    """INFER_URL, the service down (a call failed; or a restart, its /health failed at load()): a waiting late span is
+    not claimed, so no try is spent and no ASR is paid (process() is where a span's ASR is) for a span that would only
+    wait. Claimed once the service answers /health, with no call of the server's to bring it back."""
+    monkeypatch.setitem(infer_server.state, "compute", Stub())
+    monkeypatch.setitem(infer_server.state, "token", TOKEN)
+    monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
+    monkeypatch.setattr(compute, "BACKOFF_S", (0.2, 0.4))
+    monkeypatch.setattr(compute, "REMOTE", None)
+    port, url = down()
+    if start == "down":
+        r = compute.Remote(url, TOKEN, 5.0)
+        r.failed("embed", httpx2.ConnectError("refused"))
+        monkeypatch.setattr(compute, "REMOTE", r)
+    else:
+        monkeypatch.setenv("INFER_URL", url)
+        monkeypatch.setenv("INFER_TOKEN", TOKEN)
+        r = compute.load()
+        assert not r.ok and r.down_since is None, "unchecked, not reported down"
+    s, asr = span(0, 20), []
+
+    async def process(sp):
+        asr.append(sp["id"])
+        db.conn().execute("UPDATE late_spans SET status='done' WHERE id=?", (sp["id"],))
+    monkeypatch.setattr(late, "process", process)
+    state = lambda: tuple(db.conn().execute("SELECT status, tries FROM late_spans WHERE id = ?", (s["id"],)).fetchone())
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(late.processor)
+            await anyio.sleep(3)  # down for several backoffs
+            assert state() == ("waiting", 0) and asr == [] and compute.CALLS["health", "error"] >= 2, state()
+            up = await anyio.to_thread.run_sync(serve, bound(port))
+            with anyio.fail_after(5):
+                while state()[0] != "done":
+                    await anyio.sleep(0.1)
+            tg.cancel_scope.cancel()
+        up.should_exit = True
+    anyio.run(run)
+    assert asr == [s["id"]] and state() == ("done", 1) and r.ok and r.down_since is None
 
 
 def test_cancel_with_the_service_up_keeps_the_try(store, monkeypatch):

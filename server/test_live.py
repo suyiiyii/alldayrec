@@ -270,7 +270,7 @@ def test_main_settings(monkeypatch):
 
 def test_main_infer_url(monkeypatch):
     """INFER_URL set: main() puts the service's computations in core.state, the speaker-change frames of turns() too;
-    none is made in this process."""
+    none is made in this process, and their model files are neither downloaded nor checked here."""
     import sys
     import types
 
@@ -290,8 +290,9 @@ def test_main_infer_url(monkeypatch):
 
     def started():
         raise Started
-    monkeypatch.setattr(infer, "fetch", lambda skip=(): None)
-    monkeypatch.setattr(infer, "check", lambda skip=(): None)
+    skips = []
+    monkeypatch.setattr(infer, "fetch", lambda skip=(): skips.append(("fetch", set(skip))))
+    monkeypatch.setattr(infer, "check", lambda skip=(): skips.append(("check", set(skip))))
     monkeypatch.setattr(tenant, "FILE", types.SimpleNamespace(exists=started))  # past the state, before the tenants
     monkeypatch.setattr(sys, "argv", ["alldayrec"])
     for k in ("DASHSCOPE_API_KEY", "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "INFER_TOKEN"):
@@ -311,6 +312,7 @@ def test_main_infer_url(monkeypatch):
         server.main()
     r = compute.REMOTE
     assert isinstance(r, compute.Remote)
+    assert skips == [("fetch", set(compute.models())), ("check", set(compute.models()))]
     assert core.state["embed"] == r.embed and core.state["music"] == r.music
     assert core.state["turns"].func is transcript.turns and core.state["turns"].keywords == {"segment": r.segment}
 
