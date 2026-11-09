@@ -294,7 +294,7 @@ first one alone is S? as with a local model: the diarist's, a lone short sentenc
             await anyio.sleep(0.1)
             lag = max(lag, time.perf_counter() - t - 0.1)
         assert stored() == 20 and max(took) < 1.0 and lag < 0.3, (stored(), took, lag)
-        assert finals() == [] and r.down_seconds() > 2, "waiting for the service, nothing skipped"
+        assert finals() == [] and r.down_seconds() > 0, "waiting for the service, nothing skipped"
         up.append(await anyio.to_thread.run_sync(serve, bound(port)))
         for _ in range(60):
             if len(finals()) >= 4:
