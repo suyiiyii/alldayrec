@@ -19,7 +19,8 @@ from alldayrec import tenant
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS mcp_links (
     id TEXT PRIMARY KEY, label TEXT NOT NULL, secret_hash TEXT NOT NULL UNIQUE,
-    prefix TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
+    prefix TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT,
+    can_write INTEGER NOT NULL DEFAULT 0);  -- 1: the link may call mark_todo
 CREATE TABLE IF NOT EXISTS sentences (       -- final rows; a finalization pass replaces the ones starting in [from, to)
     id TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, speaker TEXT, speaker_confidence REAL, text TEXT,
     source TEXT, engine TEXT, shown_at TEXT, dictation TEXT,  -- dictation: the app dictated into (history rows)
@@ -143,6 +144,8 @@ def init():
                 for mark, prefix in zip(("done", "wrong"), TODO_MARKS):
                     if text.startswith(prefix) and (found := todo_by_text(conv, text[len(prefix):])):
                         c.execute("INSERT OR IGNORE INTO todo_marks VALUES (?, ?, ?, ?)", (found[0], conv, mark, at))
+    if "can_write" not in {r[1] for r in conn().execute("PRAGMA table_info(mcp_links)")}:  # 11-09: links made before could write
+        conn().execute("ALTER TABLE mcp_links ADD COLUMN can_write INTEGER NOT NULL DEFAULT 1")
     if "music" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:  # 10-25: songs kept out of voiceprints
         conn().execute("ALTER TABLE sentences ADD COLUMN music INTEGER")
     if "late" not in {r[1] for r in conn().execute("PRAGMA table_info(sentences)")}:

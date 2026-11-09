@@ -63,7 +63,7 @@ def test_lifecycle_and_storage(tenants, monkeypatch):
         return compare(x, y)
     monkeypatch.setattr(mcp_links.hmac, "compare_digest", compared)
     status, result, headers = request(row["path"], "POST", RPC)
-    assert status == 200 and len(result["result"]["tools"]) == 12
+    assert status == 200 and len(result["result"]["tools"]) == 11 and "mark_todo" not in {t["name"] for t in result["result"]["tools"]}
     assert (stored["secret_hash"], stored["secret_hash"]) in calls
     assert headers[b"cache-control"] == b"no-store"
     listing = request("/api/mcp-links", token=a.token)[1]
@@ -117,3 +117,36 @@ def test_management_validation_and_origin(tenants):
     assert request("/api/mcp-links", "POST", {"label": "ok"}, "tenant-a", {"origin": "https://evil.example"})[0] == 403
     row = create()
     assert request("/api/mcp-links/" + row["id"], "DELETE", token="tenant-a", headers={"origin": "https://evil.example"})[0] == 403
+
+
+def test_read_only_and_writable_links(tenants):
+    """A link is read only unless made with can_write: it is not shown mark_todo and may not call it."""
+    a, _ = tenants
+    ro, rw = create(), request("/api/mcp-links", "POST", {"label": "Codex", "can_write": True}, "tenant-a")[1]
+    assert request("/api/mcp-links", "POST", {"label": "x", "can_write": "yes"}, "tenant-a")[0] == 400
+    assert {r["id"]: r["can_write"] for r in request("/api/mcp-links", token=a.token)[1]} == {ro["id"]: False, rw["id"]: True}
+    names = lambda path: {t["name"] for t in request(path, "POST", RPC)[1]["result"]["tools"]}
+    assert "mark_todo" not in names(ro["path"]) and "mark_todo" in names(rw["path"])
+    mark = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "mark_todo", "arguments": {"id": "c1", "text": "t", "mark": "done"}}}
+    r = request(ro["path"], "POST", mark)[1]["result"]
+    assert r["isError"] and "只读" in r["content"][0]["text"]
+    assert "没有这条待办" in request(rw["path"], "POST", mark)[1]["result"]["content"][0]["text"]  # reached mark_todo itself
+    init = {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
+    assert "这个连接只读" in request(ro["path"], "POST", init)[1]["result"]["instructions"]
+    assert "除了 mark_todo" in request(rw["path"], "POST", init)[1]["result"]["instructions"]
+
+
+def test_links_made_before_can_write_stay_writable(tmp_path):
+    """A store from before can_write: its links keep marking todos; opening it again changes nothing."""
+    import sqlite3
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as c:
+        c.execute("CREATE TABLE mcp_links (id TEXT PRIMARY KEY, label TEXT NOT NULL, secret_hash TEXT NOT NULL UNIQUE, "
+                  "prefix TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT)")
+        c.execute("INSERT INTO mcp_links VALUES ('old', 'agent', 'h', 'p', '2026-10-01', NULL)")
+    for _ in range(2):
+        t = db.open_db(path)
+        rows = tenant.call(t, mcp_links.listing)
+        assert [(r["id"], r["can_write"]) for r in rows] == [("old", True)]
+    tenant.call(t, lambda: mcp_links.create("new"))
+    assert sorted((r["label"], r["can_write"]) for r in tenant.call(t, mcp_links.listing)) == [("agent", True), ("new", False)]

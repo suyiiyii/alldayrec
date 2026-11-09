@@ -331,7 +331,8 @@ def mcp_links_list():
 
 @router.post("/api/mcp-links")
 async def mcp_links_create(request: Request):
-    """Create a revocable MCP-only credential from JSON {label}: returns its path once (201)."""
+    """Create a revocable MCP-only credential from JSON {label, can_write?} (can_write: it may mark todos; read only by
+    default): returns its path once (201)."""
     if not mcp_server.origin_ok(request.headers):
         raise HTTPException(403, "Origin not allowed")
     try:
@@ -341,8 +342,10 @@ async def mcp_links_create(request: Request):
     label = body.get("label") if isinstance(body, dict) else None
     if not isinstance(label, str) or not 1 <= len(label.strip()) <= 80:
         raise HTTPException(400, "Label must contain 1–80 characters")
+    if not isinstance(can_write := body.get("can_write", False), bool):
+        raise HTTPException(400, "can_write must be true or false")
     try:
-        row = await anyio.to_thread.run_sync(mcp_links.create, label.strip(), limiter=threads.DB)
+        row = await anyio.to_thread.run_sync(mcp_links.create, label.strip(), can_write, limiter=threads.DB)
     except mcp_links.LimitReached:
         raise HTTPException(409, "[mcp_link_limit] Revoke a connection link before creating another (limit 20)")
     return JSONResponse(row, status_code=201, headers={"Cache-Control": "no-store"})
