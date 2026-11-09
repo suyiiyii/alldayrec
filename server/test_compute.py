@@ -458,3 +458,25 @@ def test_late_span_waits_out_its_timeout(store, monkeypatch):
     anyio.run(run)
     assert db.conn().execute("SELECT note FROM late_spans WHERE id=?", (s["id"],)).fetchone()[0] != "TimeoutError"
 
+
+def test_late_span_times_out_with_the_service_up(store, monkeypatch):
+    """INFER_URL set, the service answering (no call failing): a span stuck elsewhere (ASR, a decode) still times out at
+    LATE_PROCESS_TIMEOUT_S; only the time the service is down is not the span's."""
+    monkeypatch.setattr(compute, "REMOTE", compute.Remote("http://127.0.0.1:9", TOKEN, 5.0))  # never called: not down
+    monkeypatch.setattr(late, "LATE_PROCESS_TIMEOUT_S", 1.5)
+    s = span(0, 20)
+
+    async def process(sp):
+        await anyio.sleep_forever()
+    monkeypatch.setattr(late, "process", process)
+    note = lambda: db.conn().execute("SELECT note FROM late_spans WHERE id=?", (s["id"],)).fetchone()[0]
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(late.processor)
+            with anyio.fail_after(5):
+                while note() is None:
+                    await anyio.sleep(0.1)
+            tg.cancel_scope.cancel()
+    anyio.run(run)
+    assert note() == "TimeoutError"
