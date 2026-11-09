@@ -271,7 +271,7 @@
   "beanFetching": "Fetching the recordings on the bean",
   "beanSyncHelp": "While the bean is not recording, the phone fetches what it recorded that this phone does not have yet",
   "beanUnbindSub": "This phone stops connecting to it and uses its own microphone; nothing changes on the bean",
-  "beanWifi": "Wi‑Fi fast transfer (experimental)",
+  "beanWifi": "Wi‑Fi fast transfer",
   "beanWifiSub": "While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. iOS asks whether to join its network; stay on this page meanwhile",
   "beanWifiRecording": "The bean is recording: Wi‑Fi fast transfer works once it stops",
   "beanWifiAsked": "Wi‑Fi fast transfer asked for: it starts once the current transfer stops",
