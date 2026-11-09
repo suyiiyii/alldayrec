@@ -470,6 +470,51 @@ class BeanTest {
         assertNull(sync.gap(sync.files[a]!!))
     }
 
+    /** 11-09: the button starts a recording mid catch-up (only 1A/06, no 18/82). No more of the old file comes: the
+     *  session ends at once, not 30 s on and not a try of that file; the next goes live in the new file from its unit 0,
+     *  and once the recording stops the old file goes on from where it stopped. */
+    @Test fun recordingMidCatchUpGoesLiveAtOnce() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val t0 = 1_793_000_000_000L
+        val bean = FakeBean(t0)
+        val a = t0 / 1000 - 600; val b = t0 / 1000 + 10
+        bean.listed[a] = 300 * Bean.FRAME_MS
+        bean.script += {}  // the start: only echoed
+        val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
+        bean.confirmed = { sync.deletable }
+        var pressed = 0L
+        bean.onTransfer = { file, from, realtime ->
+            when {
+                file == a && from == 0L -> {
+                    bean.header(file, 300L * Bean.UNIT)
+                    bean.units(file, (0L..99L).toList())
+                    bean.script += {
+                        pressed = bean.now
+                        bean.recording = true; bean.open = b; bean.openAt = bean.now; bean.listed[b] = 0; bean.rotation(b, wait = 400)
+                    }
+                }
+                file == b && !bean.recording -> bean.header(file, 30L * Bean.UNIT, code = 3)  // closed: its length, nothing after
+                file == b -> {
+                    bean.answer(file, from, realtime); bean.more(30)
+                    bean.script += { bean.push(0x1882, byteArrayOf(0)); bean.complete(b); bean.recording = false; bean.open = 0; bean.listed[b] = 30 * Bean.FRAME_MS }
+                }
+                file == a -> { bean.header(file, 300L * Bean.UNIT); bean.units(file, (from..299L).toList(), last = 299); bean.complete(file) }
+                else -> fail("asked for $file from $from realtime $realtime")
+            }
+        }
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals("file $a: the bean began recording $b", again.message)
+        assertTrue("at once, not after the 30 s guard", bean.now - pressed < 1000)
+        assertEquals("not a try", 0, sync.files[a]!!.tries)
+        assertEquals(listOf(listOf(0L, 100L)), sync.files[a]!!.have.map { it.toList() })
+        assertTrue(bean.logs.any { it.first == "bean_xfer" && "补传文件 $a 停在单元 100" in it.second })
+        assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
+        assertEquals(listOf(a to 0L, b to 0L, a to 100L, b to 30L), bean.transfers.map { it.first to it.second })
+        assertEquals("live in the new file from its unit 0", listOf(listOf(0L, 30L)), sync.files[b]!!.have.map { it.toList() })
+        assertNull("the rest after the stop", sync.gap(sync.files[a]!!))
+        assertEquals(0, sync.files[a]!!.tries)
+    }
+
     @Test fun silentLiveStallReconnects() {
         val dir = Files.createTempDirectory("bean").toFile()
         val chunks = File(dir, "chunks")

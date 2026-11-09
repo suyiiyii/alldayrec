@@ -472,6 +472,48 @@ rollover(late: true)
 rollover(late: false, manual: true)
 rollover(late: false, paused: true)
 
+/// 11-09: the button starts a recording mid catch-up (only 1A/06, no 18/82). No more of the old file comes: the session
+/// ends at once, not 30 s on and not a try of that file; the next goes live in the new file from its unit 0, and once
+/// the recording stops the old file goes on from where it stopped.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = t0 / 1000 - 600, b = t0 / 1000 + 10
+  bean.list(a, 300 * Bean.frameMs)
+  bean.script.append {}  // the start: only echoed
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  var pressed: Int64 = 0
+  bean.onTransfer = { file, from, realtime in
+    switch file {
+    case a where from == 0:
+      bean.header(file, 300 * Int64(Bean.unit))
+      bean.units(file, Array(0...99))
+      bean.script.append {
+        pressed = bean.t
+        bean.recording = true; bean.open = b; bean.openAt = bean.t; bean.list(b, 0); bean.rotation(b, wait: 400)
+      }
+    case b where !bean.recording: bean.header(file, 30 * Int64(Bean.unit), code: 3)  // closed: its length, nothing after
+    case b:
+      bean.answer(file, from, realtime); bean.more(30)
+      bean.script.append { bean.push(0x1882, [0]); bean.complete(b); bean.recording = false; bean.open = 0; bean.list(b, 30 * Bean.frameMs) }
+    case a: bean.header(file, 300 * Int64(Bean.unit)); bean.units(file, Array(from...299), last: 299); bean.complete(file)
+    default: check("asked for \(file) from \(from) realtime \(realtime)", "")
+    }
+  }
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description, "file \(a): the bean began recording \(b)")
+  check(bean.t - pressed < 1000, true, "at once, not after the 30 s guard")
+  check(sync.files[a]!.tries, 0, "not a try")
+  check(sync.files[a]!.have.map { [$0.0, $0.1] }, [[0, 100]])
+  check(bean.logs.contains { $0.0 == "bean_xfer" && $0.1.contains("补传文件 \(a) 停在单元 100") }, true)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers.map { [$0[0], $0[1]] }, [[a, 0], [b, 0], [a, 100], [b, 30]])
+  check(sync.files[b]!.have.map { [$0.0, $0.1] }, [[0, 30]], "live in the new file from its unit 0")
+  check(sync.gap(sync.files[a]!), nil, "the rest after the stop")
+  check(sync.files[a]!.tries, 0)
+}
+
 /// The owner, 10-26: a bean connected records. An idle bean is started once a connection (18/82 01, nothing else of the
 /// button), goes live from its new file; stopped by hand, it is not started again in the connection, nor in the
 /// reconnect that cuts the head's re-pull; the next connection starts it again (here the bean only echoes: logged).
