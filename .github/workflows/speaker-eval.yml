@@ -32,6 +32,8 @@ jobs:
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/pack.tar.gz" "$PACK"
           echo "$PACK_SHA256  $RUNNER_TEMP/pack.tar.gz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/pack.tar.gz" -C "$RUNNER_TEMP"
-      - run: |  # the models infer.fetch() downloads go to MODELS_DIR
-          MODELS_DIR="$RUNNER_TEMP/models" DATA_DIR="$RUNNER_TEMP/data" \
-            uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"
+      - run: |  # the models, into MODELS_DIR; a release download once gave a 504, so three tries
+          echo "MODELS_DIR=$RUNNER_TEMP/models" >> "$GITHUB_ENV"
+          echo "DATA_DIR=$RUNNER_TEMP/data" >> "$GITHUB_ENV"
+          for i in 1 2 3; do MODELS_DIR="$RUNNER_TEMP/models" DATA_DIR="$RUNNER_TEMP/data" uv run python -c "from alldayrec import infer; infer.fetch()" && exit 0; sleep 20; done; exit 1
+      - run: uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"
