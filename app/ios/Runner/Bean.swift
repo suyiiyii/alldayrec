@@ -302,6 +302,7 @@ final class BeanSync {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
     /// (seq, anchor): from that unit on the file is dated by that anchor instead (step()), in order
     var anchors: [(Int64, Int64)]
+    var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
     init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, anchors: [(Int64, Int64)] = []) {
       self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.anchors = anchors
     }
@@ -605,6 +606,7 @@ final class BeanSync {
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
     overWifi = true; wifiUnits = 0
+    files.values.forEach { $0.wifiTries = 0 }
     state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false
     do {
@@ -662,7 +664,10 @@ final class BeanSync {
           failed(x, "Wi-Fi 上要了 3 次都没回音")
           return "豆子没回音"
         }
-        if now - x.seen > 30_000 { complete(x, -1, "；30 s 没收到单元"); return "30 s 没收到单元" }
+        // units came, then none: over Wi-Fi the bean sends far faster than real time, and 11-09 it stopped 16 units
+        // short of the end, sending no 1A/0A either; BLE fills what is left (no 30 s wait for nothing)
+        let idle: Int64 = x.last >= 0 ? 10_000 : 30_000
+        if now - x.seen > idle { complete(x, -1, "；\(idle / 1000) s 没收到单元"); return "\(idle / 1000) s 没收到单元" }
         return nil
       }
       if let why { return why }
@@ -678,7 +683,6 @@ final class BeanSync {
 
   /// After a fast transfer: the hotspot off, in case it is on still.
   private func wifiOff() throws {
-    wifiOpen = false
     let back = wifiEnded > 0 ? io.monotonicNow() - wifiEnded : -1
     log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 \(back / 1000) s；电量 \(wifiBattery) → \(hw["battery"] ?? "?")%",
         fields: ["ms": back, "battery_before": wifiBattery, "battery": hw["battery"] ?? NSNull(), "recording": recording])
@@ -687,6 +691,7 @@ final class BeanSync {
       log("bean_wifi_off", "关了热点（1A/02，状态 \(f.status)，" + (f.payload.isEmpty ? "回复不带数据）" : "回复 \(Bean.hex(f.payload))）"),
           fields: ["reply": Bean.hex(f.payload), "status": f.status])
     } catch let e as Gone { throw e } catch { log("bean_wifi_off", "关热点没有回音（\(error)）", "warn", ["error": "\(error)"]) }
+    wifiOpen = false  // only now: BLE gone before the answer, the next session sends 1A/02 again
   }
 
   private func clock() throws {
@@ -977,9 +982,20 @@ final class BeanSync {
 
   private func failed(_ x: Xfer, _ why: String) {
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 没开始：\(why)", "warn", ["file": x.file, "from": x.from, "realtime": x.realtime])
-    if x.live { liveAgain = io.now() + 30_000; missed(x) } else { file(x.file, x.file * 1000).tries += 1 }
+    if x.live { liveAgain = io.now() + 30_000; missed(x) } else { tried(x.file, file(x.file, x.file * 1000)) }
     xfer = nil
     save()
+  }
+
+  /// A read of a closed file that left it short: a try. Over Wi-Fi one of its own for this fast transfer, so Wi-Fi
+  /// going wrong leaves BLE all of its tries (#262 review: four taps the bean did not answer over Wi-Fi left a file
+  /// unread, and unsaid). Giving it up is logged.
+  private func tried(_ id: Int64, _ f: F) {
+    if overWifi { f.wifiTries += 1 } else { f.tries += 1 }
+    let n = overWifi ? f.wifiTries : f.tries
+    guard n == BeanSync.tries + 1 else { return }
+    log("bean_xfer", "文件 \(id) 从单元 \(gap(f) ?? -1) 起\(overWifi ? "在 Wi-Fi 上" : "")取了 \(n) 次仍不全，" +
+        (overWifi ? "这次快传不再取它，留给蓝牙" : "不再取"), overWifi ? "warn" : "error", ["file": id, "gap": gap(f) ?? -1, "wifi": overWifi])
   }
 
   /// A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole where
@@ -1126,10 +1142,7 @@ final class BeanSync {
     } else if gap(f) == nil {
       pendingEnd = max(pendingEnd, f.at(f.total))
     } else if !(x.cut && gap(f)! > x.from) {  // cut with the hole filled: not a try
-      f.tries += 1
-      if f.tries > BeanSync.tries {
-        log("bean_xfer", "文件 \(x.file) 从单元 \(gap(f)!) 起取了 \(BeanSync.tries) 次仍不全，不再取", "error", ["file": x.file, "gap": gap(f)!])
-      }
+      tried(x.file, f)
     }
     save()
   }
@@ -1173,7 +1186,7 @@ final class BeanSync {
     return f.total >= 0 && f.total <= at ? nil : at
   }
 
-  private func done(_ f: F) -> Bool { gap(f) == nil || f.tries > BeanSync.tries }
+  private func done(_ f: F) -> Bool { gap(f) == nil || f.tries > BeanSync.tries || overWifi && f.wifiTries > BeanSync.tries }
 
   /// Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
   /// than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file). -1: take it all.

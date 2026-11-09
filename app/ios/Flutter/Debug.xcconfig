@@ -1,2 +1,4 @@
+// The Runner target's entitlements (the Hotspot capability, for the bean's Wi-Fi fast transfer); Signing.local.xcconfig may drop them
+LR_ENTITLEMENTS = Runner/Runner.entitlements
 #include? "Signing.local.xcconfig"
 #include "Generated.xcconfig"

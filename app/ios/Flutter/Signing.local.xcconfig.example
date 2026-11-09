@@ -6,3 +6,7 @@ DEVELOPMENT_TEAM = XXXXXXXXXX
 
 // The bundle id com.suyiiyii.liverecord is its author's: with another team, give it a suffix of your own
 // LR_TEST_ID = .yourname
+
+// A team that cannot sign the Hotspot capability (a free Personal Team may not): build without it. Only the
+// Feishu bean's Wi-Fi fast transfer needs it, a developer build's button (BEAN_WIFI); BLE works as before
+// LR_ENTITLEMENTS =
