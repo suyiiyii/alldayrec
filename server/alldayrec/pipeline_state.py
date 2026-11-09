@@ -30,6 +30,7 @@ class PipelineState:
     standby: str | None = None  # the device this one's speech is left to (colocate.py), as of its final layer
 
     piece_in: anyio.Event = field(default_factory=anyio.Event)  # set when a piece comes in (audio.piece_in)
+    read_idle: bool = False  # the queue reader waits for a piece: all audio there is now went to the final layer's feed
     edge_end: dt.datetime | None = None
     last_speech: dt.datetime | None = None
     draft_to: dt.datetime | None = None

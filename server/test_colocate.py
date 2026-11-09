@@ -414,3 +414,38 @@ def test_conversation_lists_who_stood_by(store):
     with db.tx() as t:
         db.record_processed(t, "LR-TEST-C", [[at(100), at(400)]], "standby")
     assert anyio.run(routes_api.conversation, "c1")["standby"] == [Y]
+
+
+def test_takeover_hands_back_a_standby_piece_cut_ahead(tmp_path, monkeypatch):
+    """X alone for 5 min (its piece slow at the engine), then with Y for 5 min (stands by), then elsewhere (takes over,
+    the window it stood by in going to its late layer). Side by side (FINAL_ASR_CONCURRENCY) must not cut the standby
+    piece while the first is at the engine: resume() at the takeover would not see it, and it would be committed as
+    standby after: that speech transcribed by neither."""
+    async def slow(x, partial=None):
+        await anyio.sleep(3)
+        return await hear(x)
+    rig(tmp_path, monkeypatch, slow)
+    t0 = dt.datetime.fromtimestamp(time.time() - 3600).replace(microsecond=0)
+    S = audio.SR
+    xa, xb = np.r_[recording(11, 1)[:600 * S], recording(13, 1, 50, 25)[600 * S:]], recording(11, 2, 100)  # elsewhere: other times
+    for d, x, first in ((X, xa, 0), (Y, xb, 27)):
+        for k in range(first, N):
+            audio.save(d, round((t0 + dt.timedelta(seconds=k * PIECE_S)).timestamp() * 1000),
+                       flac(x[k * PIECE_S * S:(k + 1) * PIECE_S * S]), "audio/flac")
+    db.put_kv(f"end_at:{X}", core.iso(t0 + dt.timedelta(seconds=N * PIECE_S)))
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(device_pipeline.pipeline, X)
+            for _ in range(240):
+                if (st := T().devices.get(X)) and st.done_to and st.done_to >= t0 + dt.timedelta(seconds=N * PIECE_S - 1):
+                    break
+                await anyio.sleep(0.5)
+            tg.cancel_scope.cancel()
+    anyio.run(run)
+    lo, hi = (round((t0 + dt.timedelta(seconds=s)).timestamp() * 1000) for s in (0, N * PIECE_S))
+    final = db.processed(X, lo, hi, "final")
+    assert db.kv(f"standby_left:{X}") and len(final) >= 2, ("stood by, then took over", final)
+    assert db.processed(X, lo, hi, "standby") == [], "the piece it stood by in went back at the takeover"
+    spans = [x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (X,)) for x in json.loads(r[0])]
+    assert late_store.subtract([[final[0][1], final[-1][0]]], spans + final) == [], (final, spans)
