@@ -50,6 +50,7 @@ type: reference
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 必填 | 接口地址，服务器在后面加 `/chat/completions` |
 | `LLM_API_KEY` | 空 | 必填 | 接口的 key；用示例的百炼兼容模式时和 `DASHSCOPE_API_KEY` 是同一把 |
 | `LLM_MODEL` | `qwen-plus` | 必填 | 模型名 |
+| `LLM_FALLBACK_BASE_URL`、`LLM_FALLBACK_API_KEY`、`LLM_FALLBACK_MODEL` | `https://api.deepseek.com`、空、`deepseek-chat` | 不切换 | 备用接口，三个都设了才生效。任何一次大模型调用（摘要、问 AI、回顾等）超时、返回 429 或 5xx、连不上时，改用它再试一次；返回 4xx 时不换（请求本身有问题）。流式回答已经开始输出后不再换。每次调用在调用记录里各占一行，备用的模型名前面加 `fallback:` |
 
 ### 可选
 

@@ -50,6 +50,7 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `LLM_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | required | The endpoint; the server appends `/chat/completions` |
 | `LLM_API_KEY` | empty | required | The endpoint's key; with the example's Bailian compatible mode it is the same key as `DASHSCOPE_API_KEY` |
 | `LLM_MODEL` | `qwen-plus` | required | The model name |
+| `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL` | `https://api.deepseek.com`, empty, `deepseek-chat` | no fallback | A backup endpoint, used only when all three are set. Any LLM call (summaries, 问 AI, recaps and the rest) that times out, gets a 429 or a 5xx, or cannot connect is tried once more there. A 4xx is not (the request itself is wrong), nor a streamed answer that has started. Each try is its own row in the calls log; the backup's model name is prefixed `fallback:` |
 
 ### Optional
 
