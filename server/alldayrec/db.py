@@ -697,9 +697,6 @@ def device_log(device: str, lo: str, hi: str | None = None) -> list[dict]:
     return [{**dict(r), "data": json.loads(r["data"])} for r in conn().execute(q, {"d": device, "lo": lo, "hi": hi})]
 
 
-PHONE_SPANS = {"mic_lost": ("mic", True), "mic_back": ("mic", False), "media_on": ("media", True), "media_off": ("media", False)}
-
-
 def phone_spans(lo: str, hi: str, device: str | None = None) -> list[dict]:
     """What the phone apps said of their microphone while recording with it (Slicer in both apps), the spans that
     overlap [lo, hi), oldest first: {device, kind, reason, from, to}. kind mic: it heard nothing (reason call, other_app,
@@ -710,15 +707,16 @@ def phone_spans(lo: str, hi: str, device: str | None = None) -> list[dict]:
     rows = conn().execute("""SELECT device, src, at, data FROM device_log WHERE src != 'rec' AND at >= ? AND at < ?
                                AND json_extract(data, '$.kind') IN ('mic_lost', 'mic_back', 'media_on', 'media_off', 'launch')
                              ORDER BY at, seq""", (since, hi))
+    pairs = {"mic_lost": ("mic", True), "mic_back": ("mic", False), "media_on": ("media", True), "media_off": ("media", False)}
     open_, out = {}, []
     for d, src, at, data in rows:
         e = json.loads(data)
         for (s, kind), x in list(open_.items()):  # a launch ends both of that install's; a close or a new open ends its own
-            if s == src and (e["kind"] == "launch" or PHONE_SPANS[e["kind"]][0] == kind):
+            if s == src and (e["kind"] == "launch" or pairs[e["kind"]][0] == kind):
                 x["to"] = at
                 del open_[s, kind]
-        if e["kind"] in PHONE_SPANS and PHONE_SPANS[e["kind"]][1]:
-            kind = PHONE_SPANS[e["kind"]][0]
+        if e["kind"] in pairs and pairs[e["kind"]][1]:
+            kind = pairs[e["kind"]][0]
             open_[src, kind] = x = {"device": d, "kind": kind, "reason": e.get("reason"), "from": at, "to": None}
             out.append(x)
     return [x for x in out if (device is None or x["device"] == device) and (x["to"] is None or x["to"] > lo)]

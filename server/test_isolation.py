@@ -108,6 +108,7 @@ REQUESTS = {
     ("POST", "/api/device-status"): ("POST", "/api/device-status", dict(params={"device": DEV}, json={"battery": 1})),
     ("POST", "/api/device-log"): ("POST", "/api/device-log", dict(params={"device": DEV}, json=[{"src": "app", "seq": 2, "at": MS, "data": {"kind": "x"}}])),
     ("GET", "/api/device-log"): ("GET", "/api/device-log", dict(params={"device": DEV, "since": TODAY})),
+    ("GET", "/api/phone-spans"): ("GET", "/api/phone-spans", dict(params={"since": TODAY, "until": "9999"})),
     ("GET", "/api/calls"): ("GET", "/api/calls", dict(params={"since": TODAY})),
     ("GET", "/api/perf"): ("GET", "/api/perf", dict(params={"day": TODAY})),
     ("GET", "/api/upgrades"): ("GET", "/api/upgrades", dict(params={"device": DEV, "since": TODAY})),

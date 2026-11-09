@@ -162,6 +162,10 @@ async def phone_spans(since: str, until: str):
     """When a phone recording with its microphone heard nothing and why (a call, another app holding it), and when it
     played media aloud, in [since, until) across devices (db.phone_spans): the timeline and 进度 say why a stretch is
     silent instead of leaving it blank."""
+    try:
+        dt.datetime.fromisoformat(since)
+    except ValueError:
+        raise HTTPException(400, "since is an ISO time")
     return db.phone_spans(since, until)
 
 
