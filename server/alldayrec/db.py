@@ -212,10 +212,11 @@ def tx(durable=False):
         c.execute("BEGIN IMMEDIATE")
         try:
             yield c
+            c.execute("COMMIT")
         except BaseException:
-            c.execute("ROLLBACK")
+            if c.in_transaction:  # a failed COMMIT may leave it open: the PRAGMA below would fail and hide why
+                c.execute("ROLLBACK")
             raise
-        c.execute("COMMIT")
     finally:
         if durable:
             c.execute("PRAGMA synchronous=NORMAL")

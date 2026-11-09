@@ -1,10 +1,12 @@
 """An upload is answered only once it survives an OS crash: audio bytes fsynced, its pieces row committed with FULL."""
 import os
+import sqlite3
 import stat
 import tempfile
 import wave
 
 import numpy as np
+import pytest
 
 from alldayrec import audio, db
 from alldayrec.tenant import T
@@ -52,3 +54,32 @@ def test_upload_is_durable_before_the_answer(tmp_path, monkeypatch):
         synced.clear()
     db.conn().set_trace_callback(None)
     assert db.conn().execute("PRAGMA synchronous").fetchone()[0] == 1, "other writes stay NORMAL"
+
+
+def test_new_directories_are_durable(tmp_path, monkeypatch):
+    """A new device's first piece: the names of its file and of the directories made for it are fsynced too."""
+    db.open_db(tmp_path / "t.db")
+    synced, fsync = [], os.fsync
+    monkeypatch.setattr(audio.os, "fsync", lambda fd: synced.append(os.fstat(fd).st_ino) or fsync(fd))
+    rec = T().recordings
+    assert audio.save("dev-a", 1700000000000, piece(), "audio/wav") == 1.5
+    f = rec / db.conn().execute("SELECT path FROM pieces").fetchone()["path"]
+    made = [d for d in f.parents if rec in d.parents]  # the hour, device and chunks directories
+    assert {os.stat(d.parent).st_ino for d in [f, *made]} <= set(synced)
+
+
+def test_failed_commit_rolls_back(tmp_path):
+    """A COMMIT that fails is rolled back and raises its own error; the connection is back to NORMAL."""
+    db.open_db(tmp_path / "t.db")
+    c = db.conn()
+    c.execute("PRAGMA foreign_keys=ON")
+    c.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
+    c.execute("CREATE TABLE child (p INTEGER REFERENCES parent (id) DEFERRABLE INITIALLY DEFERRED)")  # checked at COMMIT
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            with db.tx(durable=True) as t:
+                t.execute("INSERT INTO child VALUES (1)")
+        assert not c.in_transaction
+        assert c.execute("PRAGMA synchronous").fetchone()[0] == 1
+    finally:
+        c.execute("PRAGMA foreign_keys=OFF")
