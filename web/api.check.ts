@@ -63,3 +63,4 @@ const gap = { device: "p", kind: "mic", reason: "call", from: "2026-10-24T14:05:
 assert.equal(micGap(gap), "14:05–14:32 手机没录到声音：通话中");
 assert.equal(micGap({ ...gap, reason: "other_app", to: null }, true), "14:05 起麦克风被其他 App 占用");
 assert.equal(micGap({ ...gap, reason: "new_one" }, true), "14:05–14:32 系统暂停了录音");
+assert.equal(micGap({ ...gap, reason: "interrupted" }, true), "14:05–14:32 通话中，或麦克风被其他 App 占用");

@@ -93,6 +93,7 @@
     "micGapShortOpen": "since {from}, {why}",
     "micWhy": {
       "call": "on a call",
+      "interrupted": "a call, or another app has the microphone",
       "other_app": "another app has the microphone",
       "route": "recording did not resume after the microphone changed",
       "system": "the system paused recording"

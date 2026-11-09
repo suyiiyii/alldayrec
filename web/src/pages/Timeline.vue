@@ -270,7 +270,7 @@ watch(days, (ds) => {
   for (const { day: d } of ds)
     if (d === today() || !(d in gaps.value))
       get<PhoneSpan[]>("/api/phone-spans", { since: d + "T00:00:00", until: shiftDay(d, 1) + "T00:00:00" })
-        .then((ss) => (gaps.value[d] = ss.filter((s) => s.kind === "mic")))
+        .then((ss) => (gaps.value[d] = ss.filter((s) => s.kind === "mic" && s.from.startsWith(d)))) // on the day it began
         .catch(() => {});
   for (const { day: d } of ds)
     if (d < today() && !(d in recaps.value)) {

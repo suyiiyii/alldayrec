@@ -699,8 +699,8 @@ def device_log(device: str, lo: str, hi: str | None = None) -> list[dict]:
 
 def phone_spans(lo: str, hi: str, device: str | None = None) -> list[dict]:
     """What the phone apps said of their microphone while recording with it (Slicer in both apps), the spans that
-    overlap [lo, hi), oldest first: {device, kind, reason, from, to}. kind mic: it heard nothing (reason call, other_app,
-    route, system: why); media: the phone played media aloud. A span ends at its closing event or at the app's next
+    overlap [lo, hi), oldest first: {device, kind, reason, from, to}. kind mic: it heard nothing (reason: call, other_app
+    (Android), interrupted (iOS: a call or another app), route, system); media: the phone played media aloud. A span ends at its closing event or at the app's next
     launch (the process died meanwhile: what came after is unknown); to None: still open."""
     # shortcut: a span opened over a day before lo is not seen; look further back if gaps that long turn up
     since = (dt.datetime.fromisoformat(lo) - dt.timedelta(days=1)).isoformat()

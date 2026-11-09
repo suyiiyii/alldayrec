@@ -4,7 +4,6 @@
 // With the BLE recorder as the source (Ble.swift) the microphone stays off: the link makes the pieces, and it comes back
 // by itself at launch, also when iOS relaunches the app in the background for the recorder.
 import AVFoundation
-import CallKit
 import CoreBluetooth
 import Flutter
 import MetricKit
@@ -391,7 +390,6 @@ final class Slicer {
   // What the server's timeline says of this recording, as device-log events of the phone's audio name:
   // why it heard nothing (mic_lost, its reason, then mic_back), and when the phone played media aloud (media_on/off)
   private let device = Recorder.defaults.string(forKey: "device") ?? "phone"  // the pieces' device (Recorder.upload)
-  private let callObserver = CXCallObserver()
   private var lost: String?  // main: the reason of the mic_lost sent, until its mic_back
   private var aloud = false  // q: media_on sent, until its media_off
   private var mediaTimer: DispatchSourceTimer?  // q
@@ -413,8 +411,9 @@ final class Slicer {
         // ended: resume whether or not it says shouldResume. It may never come; then the app coming to the front resumes
         if AVAudioSession.InterruptionType(rawValue: raw) == .began {
           self.pause()
-          // a call answered, else another app (or Siri) took the microphone; iOS names neither app
-          self.lose(self.callObserver.calls.contains { !$0.hasEnded } ? "call" : "other_app")
+          // a call, or another app (or Siri) took the microphone: iOS says neither which nor whose. CallKit's
+          // CXCallObserver would tell a call, but the App Store in China refuses apps that link CallKit
+          self.lose("interrupted")
         } else { self.resume() }
       },
       // the output moved (headphones in or out): whether media is aloud may have changed with it
@@ -488,29 +487,32 @@ final class Slicer {
     Recorder.gap(from: gapFrom ?? Recorder.now())
   }
 
-  /// The microphone heard nothing from now: why (call, other_app, route, system), once until it records again.
+  /// The microphone heard nothing from now: why (interrupted, route, system), once until it records again.
   private func lose(_ reason: String) {
     if lost != nil { return }
     lost = reason
-    let why = ["call": "通话中", "other_app": "麦克风被其他 App 或 Siri 占用", "route": "麦克风切换后没能接着录"][reason] ?? "系统暂停了录音"
+    let why = ["interrupted": "通话中，或麦克风被其他 App 或 Siri 占用", "route": "麦克风切换后没能接着录"][reason] ?? "系统暂停了录音"
     DeviceLog.app(device, "mic_lost", "手机麦克风没在录：\(why)", level: "warn", fields: ["reason": reason])
   }
 
-  /// Every 2 s while recording: another app plays sound, and not into headphones (the microphone hears it). A Bluetooth
-  /// speaker counts as headphones: iOS cannot tell them apart, and marking a person's speech as media loses it.
+  /// Every 2 s while recording: another app plays music or video (not mixable: secondaryAudioShouldBeSilencedHint, so
+  /// not navigation prompts or a silent keep-alive) and not into headphones or another room's speaker (the microphone
+  /// hears it). A Bluetooth speaker, CarPlay, AirPlay and HDMI count as headphones: no telling where they play, and
+  /// leaving media unmarked costs less than marking people as media. Not while interrupted (a call is on the receiver).
   private func watchMedia() {
     let t = DispatchSource.makeTimerSource(queue: q)
-    t.schedule(deadline: .now() + 2, repeating: 2)
+    t.schedule(deadline: .now() + 2, repeating: 2, leeway: .seconds(1))
     t.setEventHandler { [weak self] in self?.checkMedia() }
     t.resume()
     q.sync { mediaTimer = t }
   }
 
-  private static let quiet: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio]
+  private static let quiet: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio, .carAudio, .airPlay, .HDMI]
 
   private func checkMedia() {  // on q
     let s = AVAudioSession.sharedInstance()
-    let now = s.isOtherAudioPlaying && !s.currentRoute.outputs.contains { Slicer.quiet.contains($0.portType) }
+    if run == nil { return }  // interrupted, or between runs: keep what was said
+    let now = s.secondaryAudioShouldBeSilencedHint && !s.currentRoute.outputs.contains { Slicer.quiet.contains($0.portType) }
     if now == aloud || mediaTimer == nil { return }
     aloud = now
     DeviceLog.app(device, now ? "media_on" : "media_off", now ? "手机在外放音乐或视频" : "手机停止外放")

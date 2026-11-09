@@ -477,7 +477,7 @@ export interface PhoneSpan {
   from: string;
   to: string | null;
 }
-const WHY = ["call", "other_app", "route"];
+const WHY = ["call", "other_app", "interrupted", "route"]; // interrupted: iOS, which cannot tell a call
 // short: without "the phone heard nothing" (进度's row says it)
 export const micGap = (s: PhoneSpan, short = false) =>
   t(`api.micGap${short ? "Short" : ""}${s.to ? "" : "Open"}`, {

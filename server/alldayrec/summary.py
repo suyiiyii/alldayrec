@@ -317,16 +317,15 @@ async def summarize(conv: dict, rows: list[dict], known_tags: list[str] = ()) ->
         first = next((r["text"] for r in rows if r.get("text")), "")
         return {**base, "status": "done", "model": None, "title": first[:20], "summary": "", **{k: [] for k in LISTS}}
     todos, opened = todo_context(conv)
-    # the live agent's final summary (summaries.summarize) gets the phone's spans in result() only, not this line
-    note = "".join(f"\n（手机报告：{x['from'][11:19]} 到 {x['to'][11:19]} 它在外放音乐或视频，这段里的声音按外放媒体算）" for x in played(conv, rows))
+    # only a hint: the phone cannot tell its media from people talking over it, the model splits as media_spans says
+    note = "".join(f"\n（手机报告：{x['from'][11:19]} 到 {x['to'][11:19]} 它在外放音乐或视频；这段里在场的人说的话照常算）" for x in played(conv, rows))
     return result(conv, rows, *await chat(transcript(rows) + note, list(known_tags), conv["start"], todos), opened)
 
 
 def played(conv: dict, rows: list[dict]) -> list[dict]:
-    """The phone's own word that it played media aloud while it recorded (db.phone_spans, kind media) as media_spans:
-    the first and last row inside each span. The model's spans may miss music with no words or a video it took for
-    people in the room; these it does not have to guess."""
-    if not conv.get("end"):
+    """The phone's own word that it played media aloud while it recorded (db.phone_spans, kind media): the first and
+    last row inside each span, for the model's note. Not media_spans themselves: people in the room talk over music."""
+    if not conv.get("end") or not conv.get("device"):
         return []
     out = []
     for p in db.phone_spans(conv["start"], conv["end"], conv.get("device")):
@@ -375,7 +374,6 @@ def result(conv: dict, rows: list[dict], res: dict, raw: dict, opened: list[tupl
     res["done_hints"] = [{"id": i, "quote": x["quote"], "at": x["at"]} for (i, t), x in hints
                          if x["at"] in at and isinstance(x.get("quote"), str)
                          and _grams(said(x)) & _grams(f'{t.get("text")} {t.get("quote") or ""} {t.get("to") or ""}') - FILLER]
-    res["media_spans"] += [x for x in played(conv, rows) if x not in res["media_spans"]]
     return {"conversation": conv["id"], "prompt_version": PROMPT_VERSION, "created_at": dt.datetime.now().isoformat(timespec="seconds"),
             "error": None, "status": "done", "model": raw.get("model"), "usage": raw.get("usage"),
             "media_share": media_share(rows, res["media_spans"]),

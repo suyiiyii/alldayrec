@@ -1,6 +1,6 @@
 """What a phone recording with its microphone says of it: when it heard nothing and why (a call,
 another app holding the microphone), and when it played media aloud. Its events pair into spans for the timeline and
-进度, and the media ones become the summary's media_spans (greyed, folded, never a person in the room)."""
+进度, and the media ones are a note for the summary's model (people talking over them still count)."""
 import datetime as dt
 
 import anyio
@@ -37,23 +37,23 @@ def test_spans(tmp_path):
     assert [x["from"] for x in db.phone_spans(at(0), at(60), "phone-a")] == [at(1), at(6), at(20)]
 
 
-def test_media_into_summary(tmp_path):
-    """The phone's media span becomes a media span of the summary even when the model saw none, and the model is told."""
+def test_media_is_a_hint(tmp_path):
+    """The phone's media span is a note for the model, never media_spans by itself: people talking while the phone
+    plays music keep their todos, their place among the people and their voices (not media_labels)."""
     db.open_db(tmp_path / "t.db")
-    anyio.run(device_log_upload, "phone-a", [ev("app:a", 2, "media_on"), ev("app:a", 3, "media_off")])
-    c = {"id": "c20261026100000", "start": at(0), "end": at(10), "speech_s": 600.0, "device": "phone-a"}
-    rows = [dict(start=at(1), end=at(1, 30), speaker="我", text="我们先定一下"),
-            dict(start=at(2, 5), end=at(2, 50), speaker="S1", text="欢迎收看"),
-            dict(start=at(2, 55), end=at(2, 58), speaker="S1", text="下期再见"),
-            dict(start=at(4), end=at(4, 20), speaker="我", text="好")]
-    assert summary.played(c, rows) == [{"from": at(2, 5), "to": at(2, 55)}]
-    assert summary.played({**c, "device": "phone-b"}, rows) == []
-    s = summary.result(c, rows, {"title": "t", "summary": "s"}, {"model": "m"})
-    assert s["media_spans"] == [{"from": at(2, 5), "to": at(2, 55)}] and s["media_share"] == round(48 / (30 + 48 + 20), 2), s
-    assert summary.media_labels(rows, s["media_spans"]) == {"S1"}  # its voice is the media's: not named, not a person
-    # the model's own span over the same rows is not doubled
-    s = summary.result(c, rows, {"media_spans": [{"from": "10:02:05", "to": "10:02:55"}]}, {})
-    assert s["media_spans"] == [{"from": at(2, 5), "to": at(2, 55)}], s
+    anyio.run(device_log_upload, "phone-a", [ev("app:a", 0, "media_on"), ev("app:a", 30, "media_off")])
+    c = {"id": "c20261026100000", "start": at(0), "end": at(30), "speech_s": 600.0, "device": "phone-a"}
+    rows = [dict(start=at(m), end=at(m, 20), speaker=w, text=t)
+            for m, w, t in ((1, "我", "明天下午三点我把合同发给你"), (2, "S1", "好的我等你"), (3, "我", "顺便把报价也带上"), (4, "S1", "行"))]
+    assert summary.played(c, rows) == [{"from": at(1), "to": at(4)}]
+    assert summary.played({**c, "device": "phone-b"}, rows) == [] and summary.played({**c, "device": None}, rows) == []
+    reply = {"title": "t", "summary": "s", "media_spans": [],
+             "people": [{"who": "我", "points": [{"text": "发合同", "at": "10:01:00"}]}, {"who": "S1", "points": ["等合同"]}],
+             "todos": [{"owner": "我", "to": "S1", "text": "把合同发给 S1", "due": "明天下午三点", "quote": "明天下午三点我把合同发给你", "at": "10:01:00"}]}
+    s = summary.result(c, rows, reply, {"model": "m"})
+    assert s["media_spans"] == [] and s["media_share"] == 0.0, s
+    assert [t["text"] for t in s["todos"]] == ["把合同发给 S1"] and [p["who"] for p in s["people"]] == ["我", "S1"], s
+    assert summary.media_labels(rows, s["media_spans"]) == set()  # their voices stay theirs: named, asked 「这是你吗」
 
     said = []
     async def chat(text, tags, start, todos=""):
@@ -64,4 +64,5 @@ def test_media_into_summary(tmp_path):
         anyio.run(summary.summarize, c, rows)
     finally:
         summary.chat = old
-    assert said[0].endswith("\n（手机报告：10:02:05 到 10:02:55 它在外放音乐或视频，这段里的声音按外放媒体算）"), said
+    assert said[0].endswith("\n（手机报告：10:01:00 到 10:04:00 它在外放音乐或视频；这段里在场的人说的话照常算）"), said
+    assert "就在那里断开分成两段" in summary.SYSTEM  # the model's rule for media with people talking over it stays

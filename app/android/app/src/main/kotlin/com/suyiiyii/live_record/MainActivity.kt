@@ -350,8 +350,9 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
 
     /** Since Android 10 the system silences a recording while a call or another app holds the microphone (the app gets
      *  zeros, no error): its recording configuration says so. Media counts as aloud while something plays and no
-     *  headphones are connected; a Bluetooth speaker counts as headphones (no telling them apart), and so does this
-     *  app's own 收听 (isMusicActive cannot tell whose). */
+     *  headphones are connected; a Bluetooth or BLE speaker counts as headphones (no telling them apart: leaving media
+     *  unmarked costs less than marking people as media). This app's own 收听 counts as media (isMusicActive cannot
+     *  tell whose): only a note for the summary's model. */
     private fun watch(rec: AudioRecord) {
         val am = am ?: return
         if (rec.activeRecordingConfiguration?.isClientSilenced == true) {
@@ -360,6 +361,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
                 lost = if (call) "call" else "other_app"  // Android names no app
                 DeviceLog.app(device, "mic_lost", "手机麦克风没在录：${if (call) "通话中" else "麦克风被其他 App 占用"}", "warn", mapOf("reason" to lost))
             }
+            return  // not media meanwhile: a call plays on the receiver
         } else if (lost != null) {
             lost = null
             DeviceLog.app(device, "mic_back", "手机麦克风接着录了")
@@ -373,7 +375,8 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
 
     private companion object {
         val QUIET = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET)
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
+            AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_HEARING_AID)
     }
 
     private fun micLoop() {

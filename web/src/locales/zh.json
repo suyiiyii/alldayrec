@@ -93,6 +93,7 @@
     "micGapShortOpen": "{from} 起{why}",
     "micWhy": {
       "call": "通话中",
+      "interrupted": "通话中，或麦克风被其他 App 占用",
       "other_app": "麦克风被其他 App 占用",
       "route": "麦克风切换后没能接着录",
       "system": "系统暂停了录音"
