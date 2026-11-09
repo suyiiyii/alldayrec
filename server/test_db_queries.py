@@ -209,6 +209,7 @@ def test_edge_reader(tmp_path, monkeypatch):
     1.3 M pieces)."""
     db.open_db(tmp_path / "t.db")
     monkeypatch.setattr(audio, "samples", lambda p: np.zeros(round(p["seconds"] * audio.SR), np.int16))
+    monkeypatch.setattr(audio, "gone", lambda p: False)  # the pieces have no files: the media is replaced
     # Media is outside this query-plan test: long files now expose bounded
     # blocks and the edge reader seeks directly to the newest edge_s.
     from contextlib import contextmanager

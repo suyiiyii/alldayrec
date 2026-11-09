@@ -183,6 +183,7 @@ def test_stream_timeout_retries_are_bounded(tmp_path, monkeypatch):
     async def no_wait(seconds):
         assert seconds == 60
     monkeypatch.setattr(audio, 'piece_blocks', timeout)
+    monkeypatch.setattr(audio, 'gone', lambda p: False)  # the piece has no file: the media is replaced
     monkeypatch.setattr(audio.anyio, 'sleep', no_wait)
     monkeypatch.setattr(audio.ws, 'note', lambda text, level: notes.append(text))
     async def run():

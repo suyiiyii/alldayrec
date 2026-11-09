@@ -297,6 +297,7 @@ WHOLE_S = 300  # keep ordinary device pieces and <=5-minute imports on their exi
 COPY_BYTES = 1024 * 1024
 DECODE_IDLE_S = 300  # no PCM progress, not a limit on the recording's duration
 DECODE_ATTEMPTS = 3
+GONE_RETRY_S = 60  # stream(): how long it waits before looking again for a piece whose file is missing
 
 
 class DecoderTerminated(RuntimeError):
@@ -539,13 +540,14 @@ def piece_window(p, offset, count):
 def gone(p) -> bool:
     """Whether a pieces row's file is missing (a store copied without its recordings, a file deleted by hand): its
     audio reads as none, as where nothing was recorded, and the file is warned of once instead of failing every reader
-    (the speaker loops retry every 5 minutes)."""
+    (the speaker loops retry every 5 minutes). Only for readers that can do without it (playback, voiceprints, listening):
+    stream() holds on a missing file instead, since what it hands the pipeline is finalized for good."""
     f = T().recordings / p["path"]
     if f.exists():
         return False
     if f not in T().gone:
         T().gone.add(f)
-        log.warning("stored audio missing, read as none: %s", f)
+        log.warning("stored audio missing (read as none; the final layer holds on it): %s", f)
     return True
 
 
@@ -791,7 +793,20 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     # from `after` (or the piece holding it), not from the first piece there is now: that one may be held, older
     # audio after `after` still on its way (a pipeline started mid catch-up took 3 such pieces as late)
     at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, float(ms)
-    decode_failures = 0
+    decode_failures, waiting = 0, None
+
+    async def wait_file(p):
+        """The queue reader's piece not yet read whose file is gone: not read as silence (the cursor would move on, the
+        final layer never transcribe it), waited on until the file is back (a directory briefly unavailable, a
+        restore), the final layer cutting what it was fed meanwhile (idle). Said once per piece; a file deleted for
+        good holds until its row goes. A draft reader passes over such a piece (the final layer has it)."""
+        nonlocal waiting
+        if waiting != p["start_ms"]:
+            waiting = p["start_ms"]
+            ws.note(f"{device}：音频文件 {p['path']} 缺失，已暂停在这里；文件补上后自动继续", "warn")
+        with idle(device, True):
+            await anyio.sleep(GONE_RETRY_S)
+
     while True:
         if edge_s is None:
             T().read_to[device] = at  # the reader came back for more, so the piece it had is done
@@ -820,6 +835,15 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
             await wait_piece(device, edge_s is None)
             continue
         if p["seconds"] > WHOLE_S:
+            if p["start_ms"] + p["seconds"] * 1000 <= max(end, ms, lo):
+                at = p["start_ms"]  # adds nothing (fresh): not decoded, its file not opened
+                continue
+            if gone(p):  # piece_blocks would fail on it
+                if edge_s is None:
+                    await wait_file(p)
+                else:
+                    at = p["start_ms"]
+                continue
             # Keep both decode and each read off the loop. The context owns temporary files;
             # cancellation/close releases them even while the consumer is waiting on ASR.
             with contextlib.ExitStack() as stack:
@@ -859,6 +883,9 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
             continue
         with perf.timed(spent, "decode_ms"):
             got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
+        if got is None and edge_s is None and p["start_ms"] + p["seconds"] * 1000 > end and gone(p):  # after the read: gone while read, held too
+            await wait_file(p)
+            continue
         at = p["start_ms"]
         if got is not None:
             s, x = got
@@ -1095,4 +1122,27 @@ if __name__ == "__main__":  # the stream's order, resume point and late pieces, 
     db.put_kv("hold:phone", {"at": M(5), "seen": time.time() - HOLD_MAX_S - 1})
     assert held("phone") is None, "a hold not said again for HOLD_MAX_S is let go"
     assert anyio.run(take, dt.datetime(2026, 10, 2, 10, 4), 2) == [4, 5]
+    async def gone_held():  # a piece's file missing: the stream holds on it (the cursor stays), goes on once the file is back
+        global GONE_RETRY_S
+        GONE_RETRY_S = 0.3
+        for m in (40, 41):
+            assert save("ghost", M(m), tone(20), "audio/ogg") > 19
+        f = T().recordings / db.conn().execute("SELECT path FROM pieces WHERE device = 'ghost'").fetchone()["path"]
+        f.rename(f.with_suffix(".away"))
+        send, got = anyio.create_memory_object_stream()
+        with send, got:
+            async with anyio.create_task_group() as tg:
+                async def ghost():
+                    s = stream("ghost", None)
+                    try:
+                        async for t, x in s:
+                            await send.send(t)
+                    finally:
+                        await s.aclose()
+                tg.start_soon(ghost)
+                assert await next_in(got, 1.5) is None, "a missing file is not read as silence"
+                f.with_suffix(".away").rename(f)
+                assert [await next_in(got, 5) for _ in range(2)] == [40, 41], "heard once the file is back"
+                tg.cancel_scope.cancel()
+    anyio.run(gone_held)
     print("ok")
