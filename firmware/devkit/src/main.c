@@ -109,7 +109,10 @@ void set_led_state()
     static bool tick;
     tick = !tick;
 #ifdef CONFIG_LR_POWER_DEBUG
-    if (lr_debug_led_off) {  // power tests (lr_store.c)
+    if (lr_debug_led_off) {  // power tests (lr_store.c): dark, not left as they were (blue while connected)
+        set_led_red(false);
+        set_led_green(false);
+        set_led_blue(false);
         return;
     }
 #endif
