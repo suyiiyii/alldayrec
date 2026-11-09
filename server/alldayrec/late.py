@@ -210,7 +210,7 @@ async def hold(limit: anyio.CancelScope):
     while True:
         await anyio.sleep(1)
         now = anyio.current_time()
-        if compute.REMOTE is not None and compute.REMOTE.down_since is not None:
+        if compute.REMOTE.down_since is not None:
             limit.deadline += now - t
         t = now
 
@@ -226,7 +226,8 @@ async def processor():
         try:
             with anyio.fail_after(LATE_PROCESS_TIMEOUT_S) as limit:
                 async with anyio.create_task_group() as tg:
-                    tg.start_soon(hold, limit)
+                    if compute.REMOTE is not None:  # INFER_URL; without it as before
+                        tg.start_soon(hold, limit)
                     await process(span)
                     tg.cancel_scope.cancel()
         except Exception as e:
