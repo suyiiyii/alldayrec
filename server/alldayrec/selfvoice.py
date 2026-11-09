@@ -175,3 +175,52 @@ def pick(pool: list[dict], own: np.ndarray, others: list[np.ndarray], n: int = 3
         if len(out) >= n or k == len(TIERS) - 1:
             return out[:n]
     return []
+
+
+# 「这是你吗？」/「这是 P 吗？」: on an instance that knows voices, one voice of a recent conversation the diarist was
+# unsure of, asked about with one clip, answered only once it was heard. Three kinds, asked in this order:
+# c  named by the diarist, not by the user, AUTO_MARGIN or more over the next name and 我: the sample the replay learnt
+#    by itself (84 -> 91 % of the people right, 1 voice more wrong), learnt here only on a yes;
+# b  S<n>, its nearest name NEAR under PEOPLE_MIN, or over it by less than PEOPLE_MARGIN over the next name and 我;
+# a  not 我 and not named by the user, NEAR_ME under OWNER_MIN to 我, with ME_S of speech (less teaches 我 nothing).
+# Replayed on one instance's 41 days (11-09, K=5 bank, at most 4 a day and 1 a): 3.1 cards a day (4 on 28 of them),
+# 93 c, 19 a, 15 b; a yes was the truth for 52 % of the c cards, 53 % of the a, 13 % of the b (all: 47 %; b before a:
+# 43 %, b 1 a day too: 46 %; with a first and 0.6-0.7 it was 11 %: 9 a cards in 10 were a no that changed nothing).
+CHECK_DAY, CHECK_ME_DAY = 4, 1  # cards a day: all kinds, kind a
+CHECK_H = 48     # from conversations that ended this recently
+NEAR = 0.1     # under PEOPLE_MIN: "others <= 0.63" (diarist): the band between
+NEAR_ME = 0.03   # under OWNER_MIN: 0.6-0.7 was a yes 10 % of the time, 0.65-0.7 19 %, 0.67-0.7 28 %
+ME_S = 10.0      # routes_speakers.ME_MIN_S: what 「这是我」 needs to learn 我's voice
+AUTO_MARGIN = 0.08  # c: the replay's auto samples at 0.05 named more strangers, at 0.12 learnt no fewer wrong ones
+
+
+def unsure(vs: list[dict], owner: list[np.ndarray], people: dict[str, np.ndarray], named: set[tuple[str, str]],
+           apart: set[tuple[str, str]]) -> list[dict]:
+    """The voices to ask about, the first to ask first: kind c (smallest margin, latest first), then a, then b (each
+    closest to its threshold first: b, a yes far less often, goes last). vs: voices (conv, label, e, n, speech_s, end); owner: 我's centroids; people: name
+    -> its samples (k x dim, unit rows); named: (conv, name) the user named or taught; apart: (conv|label, name) pins."""
+    from alldayrec import diarist
+    out = []
+    for v in vs:
+        if v["n"] < diarist.MIN_ME or v["label"] == "我":
+            continue
+        e, lab, key = unit(v["e"]), v["label"], f"{v['conv']}|{v['label']}"
+        me = max((float(e @ unit(o)) for o in owner), default=0.0)
+        s = sorted(((float(np.max(x @ e)), k) for k, x in people.items()), reverse=True)
+        anon = lab[:1] == "S" and lab[1:].isdigit()
+        gap = (s[0][0] - max(s[1][0] if len(s) > 1 else 0.0, me)) if s else 0.0
+        q = None
+        if not anon and (v["conv"], lab) not in named and lab in people:
+            if (m := dict((k, x) for x, k in s)[lab] - max([x for x, k in s if k != lab] + [me])) >= AUTO_MARGIN:
+                q = ("c", m, lab)
+        elif anon and s and diarist.PEOPLE_MIN - NEAR <= s[0][0] < diarist.PEOPLE_MIN:
+            q = ("b", diarist.PEOPLE_MIN - s[0][0], s[0][1])
+        elif anon and s and s[0][0] >= diarist.PEOPLE_MIN and gap < diarist.PEOPLE_MARGIN:
+            q = ("b", diarist.PEOPLE_MARGIN - gap, s[0][1])
+        if not q and owner and (anon or (v["conv"], lab) not in named) and (v.get("speech_s") or 0) >= ME_S \
+                and diarist.OWNER_MIN - NEAR_ME <= me < diarist.OWNER_MIN:
+            q = ("a", diarist.OWNER_MIN - me, "我")
+        if q and (key, q[2]) not in apart:
+            out.append({"kind": q[0], "conv": v["conv"], "label": lab, "name": q[2], "score": round(q[1], 3), "end": v["end"]})
+    rank = lambda c: ("cab".index(c["kind"]), c["score"], -_s(c["end"]) if c["kind"] == "c" else 0)
+    return sorted(out, key=rank)

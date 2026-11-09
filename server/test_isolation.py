@@ -161,6 +161,8 @@ REQUESTS = {
     ("GET", "/api/voice-clip/{name}"): ("GET", "/api/voice-clip/MARKb.ogg", {}),  # the other's clip: not found here
     ("GET", "/api/self"): ("GET", "/api/self", {}),
     ("POST", "/api/self"): ("POST", "/api/self", dict(json={"answer": "later"})),
+    ("GET", "/api/voice-check"): ("GET", "/api/voice-check", {}),
+    ("POST", "/api/voice-check"): ("POST", "/api/voice-check", dict(json={"answer": "later"})),
     ("GET", "/api/audio"): ("GET", "/api/audio", dict(params={"start": AT, "end": f"{TODAY}T10:00:06.000", "device": DEV})),
     ("GET", "/api/listen"): ("GET", "/api/listen", dict(params={"device": DEV})),
     ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"conv": CID})),

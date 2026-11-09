@@ -83,7 +83,7 @@ The `kv` keys for a device `<d>`:
 | Person | A named person's voiceprints: up to 5 samples, the nearest one names a cluster | `name` | `people` (the mean), `people_samples` | The first sentence learnt for the name | Remade from `enrolled` after each sentence learnt or taken back: one sample per conversation, the most alike merged down to 5 (`bank.py`) | — |
 | Enrolled sentence | Which sentence taught a person's voiceprint, one row each | None; `row` is the sentence's `rowid` | `enrolled` | Learning after a rename (`enroll`) | Rows are deleted when a rename moves the sentences away or is undone | — |
 | Alias | Another name for a person | `alias` | `aliases` | The web pages | — | — |
-| My voiceprint | The person who records | — | `owner-redimnet2.npz` in the data directory | The 哪个是你 (which one is you) card, or renaming a label to 我 | Same | — |
+| My voiceprint | The person who records | — | `owner-redimnet2.npz` in the data directory | The 哪个是你 (which one is you) card, a yes on the 这是你吗 (is this you) card, or renaming a label to 我 | Same | — |
 
 ## Relationships
 

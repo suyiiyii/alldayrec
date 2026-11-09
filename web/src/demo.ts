@@ -43,6 +43,7 @@ const EMPTY = new Map<string, unknown>([
   ["upgrades", []],
   ["events", []],
   ["calls", { calls: [], balance: null }],
+  ["voice-check", { card: null }],
 ]);
 
 // GET /api/search as db.search does it, over every closed conversation (limit 0): q in its summary (any case) or in
