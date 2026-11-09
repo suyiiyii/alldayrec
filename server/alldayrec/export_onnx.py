@@ -19,6 +19,10 @@ sha256 infer.MODELS pins. Needs torch, only here: the export dependency group.
   samples, float32 in [-1, 1], 16 kHz, any length) through tf2onnx 1.16.1 from_keras, opset 17, with TensorFlow and
   tf_keras 2.15.1 on Python 3.11 in a venv of its own (TensorFlow is not in the export group); its scores are
   TensorFlow's within 2e-6. main() downloads the models-v1 release's file (infer.SOURCES).
+- pyannote-segmentation-3.0.onnx: pyannote/segmentation-3.0 (transcript.turns), MIT, Copyright (c) 2022 CNRS, as
+  k2-fsa/sherpa-onnx exported it to ONNX (model.onnx of sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 in its
+  speaker-segmentation-models release; input "x": 10 s of samples, float32 in [-1, 1], 16 kHz; output: per ~17 ms frame
+  the log-probabilities of the 7 powerset classes of 3 local speakers). main() downloads the models-v1 release's copy.
 """
 import hashlib
 import os
@@ -66,7 +70,7 @@ def redimnet(out: Path):
 def main():
     d = Path(sys.argv[1]) if sys.argv[1:] else infer.DIR
     d.mkdir(parents=True, exist_ok=True)
-    for name in (infer.VAD, infer.CMVN, infer.YAMNET):
+    for name in (infer.VAD, infer.CMVN, infer.YAMNET, infer.SEG):
         urllib.request.urlretrieve(infer.SOURCES[name], d / name)
     redimnet(d / infer.EMB)
     for name, want in infer.MODELS.items():

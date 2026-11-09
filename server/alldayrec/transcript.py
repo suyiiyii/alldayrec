@@ -2,9 +2,11 @@
 final rows of a span, and how drafts and live analyses line up with them."""
 import datetime as dt
 import os
+from functools import cache
 
 import numpy as np
 
+from alldayrec import infer
 from alldayrec.segmenter import SR
 
 
@@ -12,14 +14,26 @@ TURN_GAP_S = float(os.environ.get("TURN_GAP_S", "1.0"))  # same speaker, closer 
 EDGE_S = 3.0                               # rows touching the window edges may be cut: left to the next pass
 
 
-# Two people in one engine sentence (#419: a quick back-and-forth the engine keeps as one): 1.5 s voiceprints every 0.5 s
-# over a sentence of 3 s or more; where the windows in the SPLIT_CTX_S before a time and those in the SPLIT_CTX_S after
-# it are least alike, under SPLIT_COS, it is cut at the nearest word and each part labelled (and cut) on its own. On the
-# five GT cases 0.35 found 71% of two speakers' turns joined, 89% of A-B-A (whole sides instead of 3 s: 18%), and cut
-# 4.6% of single-speaker spans. 0: never cut
+# Two people in one engine sentence (#419: a quick back-and-forth the engine keeps as one), by voice (split_voice):
+# 1.5 s voiceprints every 0.5 s over a sentence of 3 s or more; where the windows in the SPLIT_CTX_S before a time and
+# those in the SPLIT_CTX_S after it are least alike, under SPLIT_COS, it is cut at the nearest word and each part
+# labelled (and cut) on its own. 0: never cut
 SPLIT_COS = float(os.environ.get("SPLIT_COS", "0.35"))
 SPLIT_WIN_S, SPLIT_HOP_S, SPLIT_CTX_S = 1.5, 0.5, 3.0
 SPLIT_MIN_S = 1.0  # a part shorter than this (the word nearest the change is far from it): no cut
+# First, by turns (SPLIT_TURNS): where pyannote-segmentation-3.0 (infer.SEG) hears its local speaker change in a
+# sentence of TURN_MIN_S or more, cut at the nearest word gap; a part under TURN_PART_S joins its neighbour, and a cut
+# stays only where the voiceprints of the <= 3 s before it and the <= 3 s after it are under TURN_VCOS. Then split_voice
+# on each part at TURN_COS, for the long turns pyannote misses. A quick 「对啊」 between two of one person's clauses is too
+# short for 1.5 s windows: of the #419 GT's turns under 1.5 s split_voice alone cuts 31% in place, this 54%, with 4.6%
+# of one-person sentences cut (3.3% before). Measured on that GT (578 spans of 5 reviewed recordings), 7 hand-labelled
+# rows and 3491 spans of a week of recordings (silver: engine and voiceprint agreeing): see PR #288.
+SPLIT_TURNS = os.environ.get("SPLIT_TURNS", "1") != "0"  # 0: by voice only, as before PR #288
+TURN_MIN_S, TURN_PART_S, TURN_VCOS, TURN_COS = 1.0, 0.25, 0.25, 0.3
+TURN_ACT, TURN_RUN_S, TURN_JOIN_S = 0.5, 0.15, 0.5  # a frame's speaker: the local one >= TURN_ACT; runs under TURN_RUN_S dropped
+SEG_N, SEG_SHIFT, SEG_FIELD = 10 * SR, 270, 991  # pyannote's 10 s chunk; its frames' step and receptive field (samples)
+# the 7 powerset classes (none, 1, 2, 3, 1+2, 1+3, 2+3) -> each local speaker's probability
+SEG_MAP = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1]], np.float32)
 
 
 CLIP_JITTER_MS = 300  # a re-cut turn's start moves about this much between passes
@@ -44,12 +58,80 @@ def _part(g: dict, words: list[dict]) -> dict:
     return {**g, "start_ms": words[0]["start_ms"], "end_ms": words[-1]["end_ms"], "text": "".join(w["text"] for w in words), "words": words}
 
 
-def split_speakers(g: dict, x: np.ndarray, embed) -> list[dict]:
-    """g as the parts different people said (SPLIT_COS), each cut again while it is long enough; [g] when it has no
-    words to cut at."""
+@cache
+def _seg():
+    return infer.session(infer.SEG, 1)
+
+
+def turns(x: np.ndarray, a: float, b: float) -> list[float]:
+    """Times (s) in (a, b) of x where pyannote's dominant local speaker changes: one 10 s chunk centred on a shorter
+    span, else chunks every 5 s and one ending at b; within a chunk, a frame's speaker is the local one at TURN_ACT or
+    more, its runs (gaps under TURN_JOIN_S bridged) under TURN_RUN_S dropped; each change comes from the chunk whose
+    middle is nearest it."""
+    starts = [a] if b - a <= 10 else [*np.arange(a, b - 10, 5.0), b - 10]
+    mids = np.array([(c0 + min(b, c0 + 10)) / 2 for c0 in starts])
+    out = set()
+    for k, c0 in enumerate(starts):
+        c1 = min(b, c0 + 10)
+        s0 = max(0, min(len(x) - SEG_N, int((c0 + c1) / 2 * SR) - SEG_N // 2))
+        y = x[s0:s0 + SEG_N].astype(np.float32) / 32768
+        o = _seg().run(None, {"x": np.pad(y, (0, SEG_N - len(y)))[None, None]})[0][0]
+        p = np.exp(o)
+        p = (p / p.sum(1, keepdims=True)) @ SEG_MAP
+        ts = (s0 + np.arange(len(p)) * SEG_SHIFT + SEG_FIELD // 2) / SR
+        runs = []  # [speaker, first, last frame time]
+        for t, q in zip(ts, p):
+            if not c0 <= t < c1 or q.max() < TURN_ACT:
+                continue
+            if runs and runs[-1][0] == q.argmax() and t - runs[-1][2] < TURN_JOIN_S:
+                runs[-1][2] = t
+            else:
+                runs.append([q.argmax(), t, t])
+        runs = [r for r in runs if r[2] - r[1] >= TURN_RUN_S]
+        cs = [(r[2] + q[1]) / 2 for r, q in zip(runs, runs[1:]) if r[0] != q[0]]
+        out |= {round(t, 3) for t in cs if np.abs(mids - t).argmin() == k}  # a chunk's edges hear badly: the most central one decides
+    return sorted(out)
+
+
+def split_speakers(g: dict, x: np.ndarray, embed, turns=None) -> list[dict]:
+    """g as the parts different people said: at the changes turns(x, a, b) finds (None: none) the voiceprints
+    agree with, then each part by voice (split_voice); [g] when it has no words to cut at."""
     words = g.get("words") or []
     a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
-    if SPLIT_COS <= 0 or len(words) < 2 or b - a < 2 * SPLIT_WIN_S or not all(w.get("text") for w in words):
+    if turns is None or len(words) < 2 or b - a < TURN_MIN_S or not all(w.get("text") for w in words):
+        return split_voice(g, x, embed)
+    gaps = [(words[k - 1]["end_ms"] + words[k]["start_ms"]) / 2000 for k in range(1, len(words))]
+    ks = sorted({min(range(len(gaps)), key=lambda j: abs(gaps[j] - t)) + 1 for t in turns(x, a, b)})
+    parts = [words[i:k] for i, k in zip([0] + ks, ks + [len(words)])]
+    j = 0
+    while len(parts) > 1 and j < len(parts):  # a part too short to be a turn joins the one before it (the first: after)
+        if parts[j][-1]["end_ms"] - parts[j][0]["start_ms"] < TURN_PART_S * 1000:
+            i = max(j - 1, 0)
+            parts[i:i + 2] = [parts[i] + parts[i + 1]]
+        else:
+            j += 1
+
+    def edge(ws, end):  # the voiceprint of a part's last (end) or first <= 3 s; None under 0.1 s of audio
+        p, q = (max(ws[0]["start_ms"], ws[-1]["end_ms"] - 3000), ws[-1]["end_ms"]) if end else (ws[0]["start_ms"], min(ws[-1]["end_ms"], ws[0]["start_ms"] + 3000))
+        y = x[max(0, int(p * SR / 1000)):int(q * SR / 1000)]
+        return embed(y) if len(y) >= SR // 10 else None
+    keep = parts[:1]
+    for p in parts[1:]:
+        l, r = edge(keep[-1], True), edge(p, False)
+        if l is not None and r is not None and float(l @ r) >= TURN_VCOS:  # one voice after all: no cut here
+            keep[-1] = keep[-1] + p
+        else:
+            keep.append(p)
+    return [q for p in keep for q in split_voice(_part(g, p) if len(keep) > 1 else g, x, embed, TURN_COS)]
+
+
+def split_voice(g: dict, x: np.ndarray, embed, cos: float = None) -> list[dict]:
+    """g cut where two people's voices meet (SPLIT_COS, or cos), each part cut again while it is long enough; [g] when
+    it has no words to cut at."""
+    cos = SPLIT_COS if cos is None else cos
+    words = g.get("words") or []
+    a, b = g["start_ms"] / 1000, g["end_ms"] / 1000
+    if cos <= 0 or len(words) < 2 or b - a < 2 * SPLIT_WIN_S or not all(w.get("text") for w in words):
         return [g]
     y = x[int(a * SR):int(b * SR)]
     w, h = int(SPLIT_WIN_S * SR), int(SPLIT_HOP_S * SR)
@@ -64,7 +146,7 @@ def split_speakers(g: dict, x: np.ndarray, embed) -> list[dict]:
     for t in np.arange(SPLIT_WIN_S, len(y) / SR - SPLIT_WIN_S + 1e-6, SPLIT_HOP_S):
         left = [e for t0, e in es if t - SPLIT_CTX_S - 1e-6 <= t0 and t0 + SPLIT_WIN_S <= t + 1e-6]
         right = [e for t0, e in es if t - 1e-6 <= t0 and t0 + SPLIT_WIN_S <= t + SPLIT_CTX_S + 1e-6]
-        if left and right and (c := float(unit(np.mean(left, 0)) @ unit(np.mean(right, 0)))) < (best or (SPLIT_COS, 0))[0]:
+        if left and right and (c := float(unit(np.mean(left, 0)) @ unit(np.mean(right, 0)))) < (best or (cos, 0))[0]:
             best = (c, a + t)
     if not best:
         return [g]
@@ -73,10 +155,10 @@ def split_speakers(g: dict, x: np.ndarray, embed) -> list[dict]:
     l, r = _part(g, words[:i]), _part(g, words[i:])
     if min(p["end_ms"] - p["start_ms"] for p in (l, r)) < SPLIT_MIN_S * 1000:
         return [g]
-    return split_speakers(l, x, embed) + split_speakers(r, x, embed)
+    return split_voice(l, x, embed, cos) + split_voice(r, x, embed, cos)
 
 
-def voices(embed, segs: list[dict], x: np.ndarray, music=None) -> list:
+def voices(embed, segs: list[dict], x: np.ndarray, music=None, turns=None) -> list:
     """label_sentences' voiceprints, the diarist untouched: per sentence None (too short to embed, or music: music 1)
     or its parts (split_speakers) each with the voiceprint dia.add takes. Nothing here depends on another piece: the
     final layer runs it for several pieces at once and labels them in order (label)."""
@@ -90,7 +172,7 @@ def voices(embed, segs: list[dict], x: np.ndarray, music=None) -> list:
         if b - a < 0.3 or g.get("music"):
             out.append(None)
             continue
-        parts, es = split_speakers(g, x, embed), []
+        parts, es = split_speakers(g, x, embed, turns), []
         for p in parts:
             if len(parts) > 1:
                 pa, pb = p["start_ms"] / 1000, p["end_ms"] / 1000
@@ -130,9 +212,10 @@ def label(dia, segs: list[dict], vs: list) -> list:
     return marks
 
 
-def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None) -> list:
-    """voices() then label(): music (music.heard, the final layer's) hears a sentence as music."""
-    return label(dia, segs, voices(embed, segs, x, music))
+def label_sentences(dia, embed, segs: list[dict], x: np.ndarray, music=None, turns=None) -> list:
+    """voices() then label(): music (music.heard, the final layer's) hears a sentence as music; turns (the final
+    layer's, SPLIT_TURNS) finds where speakers change in one."""
+    return label(dia, segs, voices(embed, segs, x, music, turns))
 
 
 def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, conf: dict | None = None,

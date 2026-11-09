@@ -92,3 +92,76 @@ def test_sentence_ends_at_its_last_word():
     got = qwen_asr.sentences(tr)
     assert [(s["start_ms"], s["end_ms"], s["speaker"]) for s in got] == [(0, 700, "SPEAKER_0"), (9500, 9900, "SPEAKER_1")], got
     assert "".join(w["text"] for w in got[0]["words"]) == "你好吗？" and "words" not in got[1]
+
+
+def test_quick_turn_cut_by_turns():
+    """PR #288: a 0.5 s 「对啊」 between one person's clauses is too short for the 1.5 s windows; where turns() hears a change
+    and the voiceprints on both sides differ, it is its own part."""
+    x, g = audio((A, 2), (B, 0.5), (A, 2.5))
+    segs = [dict(g)]
+    label_sentences(Dia(), embed, segs, x)
+    assert len(segs) == 1, "by voice alone: not cut"
+    segs = [g]
+    label_sentences(Dia(), embed, segs, x, turns=lambda x, a, b: [2.0, 2.5])
+    assert [(s["speaker"], s["text"]) for s in segs] == [("S1", "甲" * 4), ("S2", "乙"), ("S1", "甲" * 5 + "。")], segs
+
+
+def test_turn_one_voice_hears_not_cut():
+    """A change turns() hears inside one voice (the voiceprints agree) is no cut; nor is one that leaves a part under
+    TURN_PART_S."""
+    x, g = audio((A, 9))
+    segs = [g]
+    label_sentences(Dia(), embed, segs, x, turns=lambda x, a, b: [4.0])
+    assert len(segs) == 1 and "split" not in segs[0], segs
+    x, g = audio((A, 3), (B, 3))
+    g["words"][5]["end_ms"] = g["words"][5]["start_ms"] + 100  # the last 甲 is 0.1 s: too short to be a turn
+    assert len(transcript.split_speakers(g, x, embed, lambda x, a, b: [2.6, 2.75])) == 2, "joined, then cut by voice"
+
+
+def test_turn_split_checks_voice():
+    """split_speakers itself, no diarist to rejoin the parts: a change turns() hears inside one voice is no cut."""
+    x, g = audio((A, 9))
+    assert len(transcript.split_speakers(g, x, embed, lambda x, a, b: [4.0])) == 1
+
+
+def test_turn_split_short_part_joins():
+    """One 0.1 s word of another voice between turns() changes is too short to be a turn: it joins the part before,
+    which then has the same voice as the part after, so nothing is cut."""
+    x, g = audio((A, 3), (B, 0.5), (A, 3))
+    g["words"][6]["end_ms"] = g["words"][6]["start_ms"] + 100
+    assert len(transcript.split_speakers(g, x, embed, lambda x, a, b: [2.95, 3.3])) == 1
+
+
+def test_turn_split_then_by_voice(monkeypatch):
+    """A long turn turns() misses is still cut by voice, at TURN_COS: SPLIT_COS plays no part while SPLIT_TURNS is on."""
+    monkeypatch.setattr(transcript, "SPLIT_COS", 0.0)
+    x, g = audio((A, 3), (B, 3))
+    parts = transcript.split_speakers(g, x, embed, lambda x, a, b: [])
+    assert [p["text"] for p in parts] == ["甲" * 6, "乙" * 6 + "。"], parts
+
+
+def test_turns_reads_the_model(monkeypatch):
+    """turns(): pyannote's frames (log-probabilities of its 7 powerset classes) -> where the dominant local speaker
+    changes; a run shorter than TURN_RUN_S is no turn."""
+    class Seg:
+        def run(self, _, feed):
+            n = (feed["x"].shape[-1] - transcript.SEG_FIELD) // transcript.SEG_SHIFT + 1
+            t = (np.arange(n) * transcript.SEG_SHIFT + transcript.SEG_FIELD // 2) / SR
+            cls = np.where(t < 4, 1, np.where(t < 4.1, 3, 2))  # speaker 1, 0.1 s of speaker 3, speaker 2 from 4.1 s
+            return [np.log(np.eye(7)[cls] * 0.98 + 0.02 / 7)[None]]
+    monkeypatch.setattr(transcript, "_seg", lambda: Seg())
+    got = transcript.turns(np.zeros(10 * SR, np.int16), 0.0, 10.0)
+    assert len(got) == 1 and abs(got[0] - 4.05) < 0.05, got
+
+
+def test_turns_chunk_edges(monkeypatch):
+    """turns() over 13 s: chunks at 0 s and 3 s; a change 1 s into each, at its edge, counts only where that chunk is
+    the most central one (at 1 s, not at 4 s, which the first chunk hears better)."""
+    class Seg:
+        def run(self, _, feed):
+            n = (feed["x"].shape[-1] - transcript.SEG_FIELD) // transcript.SEG_SHIFT + 1
+            t = (np.arange(n) * transcript.SEG_SHIFT + transcript.SEG_FIELD // 2) / SR
+            return [np.log(np.eye(7)[np.where(t < 1, 1, 2)] * 0.98 + 0.02 / 7)[None]]
+    monkeypatch.setattr(transcript, "_seg", lambda: Seg())
+    got = transcript.turns(np.zeros(13 * SR, np.int16), 0.0, 13.0)
+    assert len(got) == 1 and abs(got[0] - 1.0) < 0.05, got

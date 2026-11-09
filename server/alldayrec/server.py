@@ -51,6 +51,7 @@ from alldayrec import routes_upload
 from alldayrec import routes_voices
 from alldayrec import tenant
 from alldayrec import threads
+from alldayrec import transcript
 from alldayrec import ws
 from alldayrec.core import state
 from alldayrec.device_pipeline import pipeline
@@ -217,6 +218,7 @@ def main():
     c = compute.load()  # in this process, or the alldayrec-infer service at INFER_URL
     state["embed"] = c.embed
     state["music"] = c.music if music.ON else None
+    state["turns"] = transcript.turns if transcript.SPLIT_TURNS else None
     if not tenant.FILE.exists():
         token = tenant.create()
         log.info("first start: %s made, one tenant; on this machine open http://127.0.0.1:%d/connect?token=%s",

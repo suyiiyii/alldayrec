@@ -90,7 +90,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
                     speech = speech_in(seg, done, n)
                     segs = await asr.engine_segs(x, speech, kind="late", device=span["device"]) if speech and n >= SR // 40 else []
                     raw = [dict(s) for s in segs]
-                    marks = await anyio.to_thread.run_sync(label_sentences, dia, state["embed"], segs, x, state["music"], limiter=threads.INFER)
+                    marks = await anyio.to_thread.run_sync(label_sentences, dia, state["embed"], segs, x, state["music"], state["turns"], limiter=threads.INFER)
                     # Clamp providers' edge jitter to this exact uncovered range before final_rows.
                     for g in segs:
                         g["start_ms"] = max(0, min(n * 1000 / SR, g["start_ms"]))
