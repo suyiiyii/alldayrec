@@ -237,8 +237,8 @@ class _RecorderPageState extends State<RecorderPage> {
             FirmwareTile(name: name, model: model, fw: fw, dfu: dfu, dfuBusy: st['dfuBusy'] == true),
             const Divider(height: 20),
           ],
-          // #431, a developer build only (flutter build ios --dart-define=BEAN_WIFI=true): by hand while it is measured
-          if (bean && Platform.isIOS && const bool.fromEnvironment('BEAN_WIFI')) ...[
+          // #431: the bean's Wi-Fi fast transfer, by hand
+          if (bean && Platform.isIOS) ...[
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.wifi_rounded),

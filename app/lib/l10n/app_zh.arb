@@ -570,7 +570,7 @@
   "beanFetching": "正在取回录音豆里的录音",
   "beanSyncHelp": "录音豆没在录音时，取回它录下而这台手机还没有的部分",
   "beanUnbindSub": "这台手机不再连它，改用手机麦克风；录音豆本身什么也不改",
-  "beanWifi": "Wi‑Fi 快传（实验）",
+  "beanWifi": "Wi‑Fi 快传",
   "beanWifiSub": "录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面",
   "beanWifiRecording": "豆子在录音，Wi‑Fi 快传要停录后用",
   "beanWifiAsked": "已请求 Wi‑Fi 快传，当前传输停下后开始",

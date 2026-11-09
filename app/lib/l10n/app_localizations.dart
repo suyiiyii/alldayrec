@@ -1727,7 +1727,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifi.
   ///
   /// In zh, this message translates to:
-  /// **'Wi‑Fi 快传（实验）'**
+  /// **'Wi‑Fi 快传'**
   String get beanWifi;
 
   /// No description provided for @beanWifiSub.

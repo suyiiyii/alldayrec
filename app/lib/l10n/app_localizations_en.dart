@@ -978,7 +978,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'This phone stops connecting to it and uses its own microphone; nothing changes on the bean';
 
   @override
-  String get beanWifi => 'Wi‑Fi fast transfer (experimental)';
+  String get beanWifi => 'Wi‑Fi fast transfer';
 
   @override
   String get beanWifiSub =>

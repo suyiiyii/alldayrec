@@ -948,7 +948,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanUnbindSub => '这台手机不再连它，改用手机麦克风；录音豆本身什么也不改';
 
   @override
-  String get beanWifi => 'Wi‑Fi 快传（实验）';
+  String get beanWifi => 'Wi‑Fi 快传';
 
   @override
   String get beanWifiSub =>

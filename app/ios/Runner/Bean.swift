@@ -562,7 +562,7 @@ final class BeanSync {
     log("bean_start", "自动开始录音没成功（\(why)），这次连接不再试", "warn")
   }
 
-  /// Wi-Fi fast transfer (#431; by hand for now: the device page's developer button). The bean opens a hotspot of a new
+  /// Wi-Fi fast transfer (#431; by hand: the device page's button). The bean opens a hotspot of a new
   /// name (1A/05; its BLE goes, ws/soundcore), the phone joins it (io.wifiJoin) and reads what it lacks over its
   /// WebSocket as over BLE, into the same pieces (the same units, dated the same): the backlog, only while the bean is
   /// not recording (wifiRecording()). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case

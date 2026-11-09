@@ -8,5 +8,5 @@ DEVELOPMENT_TEAM = XXXXXXXXXX
 // LR_TEST_ID = .yourname
 
 // A team that cannot sign the Hotspot capability (a free Personal Team may not): build without it. Only the
-// Feishu bean's Wi-Fi fast transfer needs it, a developer build's button (BEAN_WIFI); BLE works as before
+// Feishu bean's Wi-Fi fast transfer needs it (its button then fails); BLE works as before
 // LR_ENTITLEMENTS =
