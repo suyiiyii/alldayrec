@@ -12,6 +12,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 
@@ -213,6 +214,27 @@ def topic_row(topic: dict, rows: list[dict]) -> str | None:
     return best["start"] if best and len(words & _grams(best.get("text"))) >= 2 else None
 
 
+def _plain(text) -> str:
+    """Letters and digits only: a quote and the transcript compared without punctuation or spaces."""
+    return re.sub(r"[\W_]+", "", text if isinstance(text, str) else "")
+
+
+def grounded(quote, at: str | None, rows: list[dict]) -> bool:
+    """The quote is in the transcript (punctuation and spaces aside), or 80% of its two-character pieces are in the rows
+    around the one it cites, 5 before to 20 after (the model drops filler words, joins sentences a few rows apart). No
+    quote: no ground."""
+    q = _plain(quote)
+    if not q:
+        return False
+    if q in _plain("".join(r.get("text") or "" for r in rows)):
+        return True
+    i = next((n for n, r in enumerate(rows) if r["start"] == at), None)
+    near = _grams(_plain("".join(r.get("text") or "" for r in rows[max(0, i - 5):i + 20]))) if i is not None else set()
+    words = _grams(q)
+    # ponytail: overlap, not alignment: one word swapped in a long quote (老王 for 老李) still passes; it catches made-up quotes
+    return len(words & near) >= 0.8 * len(words)
+
+
 def anchor(res: dict, rows: list[dict]) -> dict:
     """The model cites HH:MM:SS; turn each into the start of the row it names (null when none matches), topics in time order.
     A todo's due_date stays only when it is a date and the todo has a due: without words for a time it was made up.
@@ -229,6 +251,8 @@ def anchor(res: dict, rows: list[dict]) -> dict:
     res["topics"] = [{**x, "at": at(x.get("at")) or after(x.get("at")) or topic_row(x, rows)} for x in res.get("topics") or []]
     for k in ("todos", "decisions", "ai_requests"):
         res[k] = [{**x, "at": at(x.get("at"))} for x in res.get(k) or []]
+    for k in ("todos", "decisions"):
+        res[k] = [{**x, **({} if grounded(x.get("quote"), x["at"], rows) else {"unsupported": True})} for x in res[k]]
     res["todos"] = [{**x, "due_date": day(x.get("due_date")) if x.get("due") else None} for x in res["todos"]]
     for k in ("ai_spans", "media_spans"):
         res[k] = [{"from": at(x.get("from")), "to": at(x.get("to"))} for x in res.get(k) or [] if isinstance(x, dict)]
@@ -352,7 +376,13 @@ if __name__ == "__main__":
     s = result({"id": "c1"}, rows, {"title": ["t"], "tags": [{"name": "工作"}, "工作"], "todos": ["买菜", {"text": "a"}], "topics": "t"}, {})
     assert s["title"] == "" and s["tags"] == ["工作"] and [x["text"] for x in s["todos"]] == ["a"] and s["topics"] == [], s
     s = result({"id": "c1"}, rows, {"todos": [{"text": ["买菜"]}, {"text": "b", "due": 1, "owner": "我", "to": None}], "decisions": [{"quote": "q"}]}, {})
-    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "due_date": None}] and s["decisions"] == [], s
+    assert s["todos"] == [{"text": "b", "due": None, "owner": "我", "to": None, "at": None, "unsupported": True, "due_date": None}] and s["decisions"] == [], s
+    # a todo's or decision's quote must be in the transcript, else it is marked unsupported (无原文依据)
+    said = [dict(start=f"2026-09-30T10:00:0{i}.000", text=t, speaker="我") for i, t in enumerate(["嗯，那我周五把报告发给老王。", "好的。", "你发吧"])]
+    g = anchor({"todos": [{"quote": "我周五把报告发给老王", "at": "10:00:00"}, {"quote": "那我周五把报告，发给老王吧", "at": "10:00:00"},
+                          {"quote": "我周五去买菜", "at": "10:00:00"}, {"quote": "我下周交方案"}, {"quote": None}],
+                "decisions": [{"quote": "好的。你发吧", "at": "10:00:01"}]}, said)
+    assert [x.get("unsupported", False) for x in g["todos"] + g["decisions"]] == [False, False, True, True, True, False], g
     try:
         result({"id": "c1"}, rows, ["not an object"], {})
         raise AssertionError("a reply that is not an object was taken")

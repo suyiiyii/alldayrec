@@ -223,6 +223,7 @@
     "renameTo": "Rename to {name}",
     "saveAlias": "Make it an alias of {who}",
     "quote": "“{q}”",
+    "unsupported": "Not found in the transcript",
     "hear": "Listen",
     "hearWho": "Listen to {who}",
     "like": "'s voice is {likeness} to {name}",

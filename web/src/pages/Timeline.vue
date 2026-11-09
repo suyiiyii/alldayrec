@@ -74,11 +74,12 @@ const next = computed(() =>
 const yesterday = shiftDay(today(), -1);
 
 // 问 AI: the words in the search box (or the sheet's) as a question (POST /api/ask, 10-30 s); [c…] in the answer link
-// to the conversation. The answer is kept for the tab: back from a cited conversation it is still there
+// to the conversation, [c… HH:MM:SS] to that sentence in its transcript. The answer is kept for the tab: back from a
+// cited conversation it is still there
 interface Reply {
   q?: string; // the question, as typed or heard
   answer: string;
-  sources: { id: string; start: string; title?: string | null }[];
+  sources: { id: string; start: string; title?: string | null; at?: string; ref?: string }[];
   calls: unknown[];
   secs: number;
 }
@@ -118,10 +119,10 @@ async function askAI(text: string) {
   if (my === asked) asking.value = false;
 }
 const answer = computed(() => {
-  const by = new Map((reply.value?.sources ?? []).map((s) => [s.id, s]));
+  const by = new Map((reply.value?.sources ?? []).map((s) => [s.ref ?? s.id, s]));
   return (reply.value?.answer ?? "")
-    .split(/(c\d{14}(?:-[A-Za-z0-9_]+)?)/)
-    .map((x) => ({ t: x, s: by.get(x) ?? by.get(x.split("-")[0]) }));
+    .split(/(c\d{14}(?:-[A-Za-z0-9_]+)?(?: \d\d:\d\d:\d\d)?)/)
+    .map((x) => ({ t: x, s: by.get(x) ?? by.get(x.split(" ")[0]) ?? by.get(x.split("-")[0]) }));
 });
 
 // a phone (and inside the app): asking is a round button that opens a sheet (a modal <dialog>); the answer comes up
@@ -484,9 +485,14 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         <div v-else-if="askErr" class="bad" :title="askErrTitle">{{ askErr }}</div>
         <div v-else class="answer">
           <template v-for="(p, i) in answer" :key="i"
-            ><RouterLink v-if="p.s" :to="'/c/' + p.s.id" :title="p.s.title ?? ''">{{
-              p.s.start.slice(5, 16).replace("T", " ")
-            }}</RouterLink
+            ><RouterLink
+              v-if="p.s"
+              :to="{
+                path: '/c/' + p.s.id,
+                query: p.s.at ? { tab: 'transcript', at: p.s.at } : {},
+              }"
+              :title="p.s.title ?? ''"
+              >{{ (p.s.at ?? p.s.start).slice(5, p.s.at ? 19 : 16).replace("T", " ") }}</RouterLink
             ><template v-else>{{ p.t }}</template></template
           >
         </div>

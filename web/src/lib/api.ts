@@ -75,6 +75,7 @@ export interface Summary {
     due?: string | null;
     due_date?: string | null; // the due on the calendar (YYYY-MM-DD), from summary prompt v8 on
     quote?: string;
+    unsupported?: boolean; // its quote is not in the transcript (server summary.grounded)
     id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
     mark?: Mark | null;
   })[];
@@ -82,7 +83,7 @@ export interface Summary {
   ai_spans?: Span[];
   media_spans?: Span[]; // media played aloud (video, TV, music): greyed and folded
   media_share?: number; // of the speech, the part in media_spans
-  decisions?: (At & { text: string; quote?: string })[];
+  decisions?: (At & { text: string; quote?: string; unsupported?: boolean })[];
   model?: string | null;
   via?: "live"; // written by the conversation's live agent at its close
   created_at?: string;

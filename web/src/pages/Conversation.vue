@@ -512,6 +512,7 @@ function edit(label: string) {
                     ><QuoteAt :at="td.at" :c="c" @jump="jump" /><span v-if="markOf(td)" class="done">{{ t(`conv.marked.${markOf(td)}`) }}</span>
                   </div>
                   <div v-if="td.quote" class="quote">{{ t("conv.quote", { q: td.quote }) }}</div>
+                  <div v-if="td.unsupported" class="unsupported">{{ t("conv.unsupported") }}</div>
                 </div>
               </li>
             </ul>
@@ -522,6 +523,7 @@ function edit(label: string) {
               <li v-for="(d, i) in s.decisions" :key="i">
                 {{ said(d.text) }}<QuoteAt :at="d.at" :c="c" @jump="jump" />
                 <div v-if="d.quote" class="quote">{{ t("conv.quote", { q: d.quote }) }}</div>
+                <div v-if="d.unsupported" class="unsupported">{{ t("conv.unsupported") }}</div>
               </li>
             </ul>
           </section>
@@ -864,6 +866,11 @@ ul.items > li:last-child {
 .quote {
   font-size: var(--fs-xs);
   color: var(--muted);
+}
+/* its quote is not in the transcript (server summary.grounded) */
+.unsupported {
+  font-size: var(--fs-xs);
+  color: var(--warn);
 }
 /* a time to listen from: a finger-sized target around a small label */
 .at {
