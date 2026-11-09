@@ -7,7 +7,7 @@ whole timeline. When the conversation closes, one more turn asks the same agent 
 """
 import json
 
-from alldayrec.summary import complete, instructions, lang_line, transcript
+from alldayrec.summary import complete, faithful, instructions, lang_line, transcript
 
 FIELDS = ("points", "decisions", "todos", "open_questions")
 SYSTEM = """你在一段正在进行的对话现场（开会、讨论、聊天、日常生活都算），持续整理议题时间线，帮在场的我随时回顾刚才讲了什么。
@@ -126,8 +126,8 @@ async def final(state: dict, rows: list[dict], known_tags: list[str], start: str
     """The closing turn: final_turn, then the final summary in summary.SYSTEM's format. start: the closed conversation's
     (due dates count from it; the draft layer may have started the open one on the other side of midnight); todos:
     summary.todo_context's."""
-    return await complete(state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start, todos)}"}],
-                    kind="live")
+    msgs = state["messages"] + [{"role": "user", "content": f"{final_turn(state, rows)}\n\n{FINAL}{instructions(known_tags, start, todos)}"}]
+    return await faithful(msgs, *await complete(msgs, kind="live"), "\n".join([*(r.get("text") or "" for r in rows), *known_tags, start, todos]), "live")
 
 
 if __name__ == "__main__":

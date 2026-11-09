@@ -340,3 +340,52 @@ def test_done_hint_needs_a_word_of_substance():
     opened = [("t1", {"owner": "我", "text": "把报销单交一下"}), ("t2", {"owner": "我", "text": "看合同"})]
     res = {"done_hints": [{"n": 1, "quote": "发了。", "at": "10:00:01"}, {"n": 2, "quote": "发了。", "at": "10:00:01"}]}
     assert [h["id"] for h in summary.result({"id": "c1"}, rows, res, {}, opened)["done_hints"]] == ["t2"]
+
+
+def test_numbers():
+    """Chinese numerals as said (三百五 is 350), commas dropped, one digit not checked."""
+    assert [summary.cn_number(x) for x in ("十二", "二十五", "一百零五", "三百五", "五千九", "一万二", "一一零", "两千")] == [12, 25, 105, 350, 5900, 12000, 110, 2000]
+    assert summary.numbers("5,900 块，第 3 个，3.5 小时，十二点") == {"5900", "3.5"}
+    assert summary.numbers("十二点 三百五", cn=True) == {"12", "350"}
+    # digits with a Chinese unit, on both sides: 「十五万」 said, 「15万」 written is the same number
+    assert summary.numbers("15万、1.5万、3千、2,000万、5 百") == summary.numbers("十五万、一万五、三千、两千万、五百", cn=True) == {"150000", "15000", "3000", "20000000", "500"}
+    assert summary.numbers("15万", cn=True) == {"150000"}
+
+
+def test_source_lines_kept_apart(tmp_path, monkeypatch):
+    """The transcript, the tags and the start are joined line by line: 「1200」 then the start is not 「12002026…」."""
+    import anyio
+    from alldayrec import live
+    db.open_db(tmp_path / "t.db")
+    calls = []
+    async def complete(messages, **kwargs):
+        calls.append(messages)
+        return {"title": "t", "summary": "预算 1200"}, {"model": "m"}
+    monkeypatch.setattr(summary, "complete", complete)
+    monkeypatch.setattr(live, "complete", complete)
+    anyio.run(summary.chat, "[10:00:00] 预算 1200", [], "2026-10-04T10:00:00.000")
+    rows = [dict(start="2026-10-04T10:00:00.000", end="2026-10-04T10:00:01.000", text="预算 1200", speaker="我")]
+    anyio.run(live.final, {"messages": [], "drafted": True}, rows, [], "2026-10-04T10:00:00.000")
+    assert len(calls) == 2, "no number re-ask"
+
+
+def test_faithful(monkeypatch):
+    """Prompt v16: a number the transcript does not have gets the reply asked again, those numbers named; what still has
+    one is dropped (a todo, a point, a topic by its title), the summary emptied; quotes, times and names are not checked."""
+    import anyio
+    reply = {"title": "报价 5900", "summary": "定了 1200 的预算", "topics": [{"title": "预算", "points": ["5900 元", "共 30 人"], "at": "10:00:00"},
+                                                                       {"title": "第 99 期", "points": []}],
+             "todos": [{"text": "下单 5900 的沙发", "quote": "那个 77 号"}, {"text": "退 40 元"}], "decisions": [{"text": "十二点开会定了 12 点"}],
+             "people": [{"who": "S12", "points": [{"text": "说 30 人", "at": "10:00:00"}]}]}
+    asked = []
+    async def complete(messages, **kwargs):
+        asked.append(messages)
+        return {**reply, "summary": "定了预算"}, {"model": "again"}
+    monkeypatch.setattr(summary, "complete", complete)
+    res, raw = anyio.run(summary.faithful, [{"role": "user", "content": "x"}], reply, {"model": "first"}, "沙发五千九，十二点开会，退 40 元")
+    assert summary.RECHECK.format("1200、30、77、99")[:20] in asked[0][-1]["content"] and "1200、30、99" in asked[0][-1]["content"], asked
+    assert raw == {"model": "again"} and res["title"] == "报价 5900" and res["summary"] == "定了预算"
+    assert res["topics"] == [{"title": "预算", "points": ["5900 元"], "at": "10:00:00"}] and res["people"][0]["points"] == []
+    assert [t["text"] for t in res["todos"]] == ["下单 5900 的沙发", "退 40 元"] and res["decisions"] == reply["decisions"]
+    asked.clear()
+    assert anyio.run(summary.faithful, [], {"title": "好"}, {}, "") == ({"title": "好"}, {}) and not asked, "nothing to check: no second call"
