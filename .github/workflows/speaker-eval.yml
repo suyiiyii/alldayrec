@@ -1,0 +1,37 @@
+name: speaker-eval
+on:
+  schedule:
+    - cron: '30 19 * * *'  # nightly, 03:30 Beijing time
+  workflow_dispatch:
+  pull_request:  # a change to the eval itself shows its run on the PR
+    paths: ['server/alldayrec/speaker_eval.py', '.github/workflows/speaker-eval.yml']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  speaker-eval:  # who-said-it on a made-up day of AISHELL-1 speech; fails on a step back from main's rates (speaker_eval.py)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
+    env:
+      PACK: https://github.com/suyiiyii/alldayrec/releases/download/eval-spk-v1/eval-spk-v1.tar.gz
+      PACK_SHA256: 678ac6930e90d0d7eb83d14a2a921a0857a83c68e3231e9977b5d03ddedf2b4a
+      MODELS_DIR: ${{ runner.temp }}/models
+      DATA_DIR: ${{ runner.temp }}/data
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - run: |  # the pack is Opus, decoded by ffmpeg
+          if command -v ffmpeg >/dev/null; then ffmpeg -version | head -1; exit 0; fi
+          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
+          $APT update && $APT install -yq --no-install-recommends ffmpeg
+      - run: pipx install uv
+      - run: uv sync --locked
+      - run: |  # the eval-spk-v1 release, pinned by its sha256
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/pack.tar.gz" "$PACK"
+          echo "$PACK_SHA256  $RUNNER_TEMP/pack.tar.gz" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/pack.tar.gz" -C "$RUNNER_TEMP"
+      - run: uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"
