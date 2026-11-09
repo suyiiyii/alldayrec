@@ -243,13 +243,14 @@ class _RecorderPageState extends State<RecorderPage> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.wifi_rounded),
               title: Text(l.beanWifi),
-              subtitle: Text(l.beanWifiSub),
+              subtitle: Text(st['wifiNote'] == null ? l.beanWifiSub : nativeText(context, st['wifiNote'])),
               onTap: live
                   ? () {
                       final m = ScaffoldMessenger.of(context);
                       _call(() async {
                         final r = await Recorder.beanWifi();
                         final text = switch (r) { 'recording' => l.beanWifiRecording, 'vpn' => l.beanWifiAskedVpn, _ => l.beanWifiAsked };
+                        m.clearSnackBars();  // taps in a row: one note, not a queue of the same
                         m.showSnackBar(SnackBar(content: Text(text), behavior: SnackBarBehavior.floating));
                       });
                     }

@@ -25,7 +25,11 @@ enum Bean {
   static let deleteCmd = 0x1A10
   static let startCmd = 0x1882
 
-  struct Fail: Error, CustomStringConvertible { let description: String; init(_ s: String) { description = s } }
+  /// `note`: the device page's code for it when it ends a fast transfer (BeanSync.wifiNote)
+  struct Fail: Error, CustomStringConvertible {
+    let description: String, note: String?
+    init(_ s: String, note: String? = nil) { description = s; self.note = note }
+  }
 
   static func isBean(_ name: String?) -> Bool { name?.range(of: "^D3200-[0-9A-F]{4}$", options: .regularExpression) != nil }
 
@@ -343,6 +347,9 @@ final class BeanSync {
   @Shared var syncTotalKb: Int64 = 0
   /// What of the bean's recording this phone lacks, for the status and its reports (owe())
   @Shared var owed: [String: Any] = [:]
+  /// Why the last fast transfer got nothing, for the device page (recorder_status.dart): its end only, never a try of
+  /// the join that a later one got past; nil once one starts
+  @Shared var wifiNote: [String: Any]?
   var recording: Bool {
     get { hw["recording"] as? Bool == true }
     set { var h = hw; h["recording"] = newValue; hw = h }
@@ -574,6 +581,7 @@ final class BeanSync {
         "没在录音，积压 \(owed["backlog_s"] ?? 0) s",
         fields: ["reason": "manual", "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
                  "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
+    wifiNote = nil
     if needList { listing = try list() }  // a file just closed: its length
     owe()
     if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
@@ -582,6 +590,7 @@ final class BeanSync {
     }
     if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
       log("bean_wifi_fail", "电量 \(battery)% 低于 30%，不开热点，接着用蓝牙", "warn", ["step": "battery", "battery": battery])
+      wifiNote = ["code": "beanWifiLowBattery", "battery": battery]
       return
     }
     wifiBattery = battery ?? NSNull()
@@ -594,14 +603,16 @@ final class BeanSync {
     catch let e as Gone {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
       wifiOpen = true
       log("bean_wifi_fail", "问热点时蓝牙先断了（\(e)），没拿到地址，回蓝牙", "warn", ["step": "hotspot"])
+      wifiNote = ["code": "beanWifiNoHotspot"]
       throw Again(description: "BLE went while asking for the hotspot")
     } catch let e as Again { throw e }
-    catch { log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"]); return }
+    catch { log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"]); wifiNote = ["code": "beanWifiNoHotspot"]; return }
     wifiOpen = true
     let opened = io.monotonicNow() - t0
     guard let at = Bean.endpoint(a.payload) else {
       log("bean_wifi_fail", "豆子没开热点（回了 \(Bean.hex(a.payload))，状态 \(a.status)），接着用蓝牙", "warn",
           ["step": "hotspot", "ms": opened, "reply": Bean.hex(a.payload), "status": a.status])
+      wifiNote = ["code": "beanWifiNoHotspot"]
       return
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
@@ -609,13 +620,14 @@ final class BeanSync {
     overWifi = true; wifiUnits = 0
     files.values.forEach { $0.wifiTries = 0 }
     state = ["code": "beanWifi"]
-    var t1 = io.monotonicNow(), why = "", rollover = false
+    var t1 = io.monotonicNow(), why = "", rollover = false, note: String?
     do {
       try io.wifiJoin(ssid, password, a.payload)
       t1 = io.monotonicNow()
       reader = Bean.Reader(); inbox = []
       why = try wifiLoop()
-    } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)" }
+    } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)"; note = (error as? Bean.Fail)?.note ?? "beanWifiFailed" }
+    if wifiUnits == 0, let code = note ?? (why == "豆子没回音" ? "beanWifiNoAnswer" : nil) { wifiNote = ["code": code, "detail": why] }
     if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
     overWifi = false
     io.wifiLeave()
@@ -680,6 +692,7 @@ final class BeanSync {
   /// SDK demo refuses it (「正在录音中，无法传输文件」). BLE goes on live.
   private func wifiRecording() {
     log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields: ["recording": true, "backlog_s": owed["backlog_s"] ?? 0])
+    wifiNote = ["code": "beanWifiRecording"]
   }
 
   /// After a fast transfer: the hotspot off, in case it is on still.

@@ -955,13 +955,43 @@ class AppLocalizationsZh extends AppLocalizations {
       '录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
 
   @override
-  String get beanWifiRecording => '豆子在录音，Wi‑Fi 快传要停录后用';
+  String get beanWifiRecording => '豆子正在录音：先在豆子上停录，再点 Wi‑Fi 快传';
 
   @override
   String get beanWifiAsked => '已请求 Wi‑Fi 快传，当前传输停下后开始';
 
   @override
   String get beanWifiAskedVpn => '已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭';
+
+  @override
+  String beanWifiLowBattery(Object battery) {
+    return '上次 Wi‑Fi 快传没开始：豆子电量 $battery%，低于 30% 时它不开热点';
+  }
+
+  @override
+  String get beanWifiNoHotspot => '上次 Wi‑Fi 快传没成：没等到豆子的热点，已接着用蓝牙';
+
+  @override
+  String get beanWifiDenied => '上次 Wi‑Fi 快传没成：iOS 问要不要加入豆子的网络时点了取消';
+
+  @override
+  String get beanWifiBackground =>
+      '上次 Wi‑Fi 快传没成：App 不在前台，iOS 不让加入热点；快传期间留在这个页面';
+
+  @override
+  String get beanWifiNoJoin => '上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次';
+
+  @override
+  String get beanWifiNoSocket =>
+      '上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试';
+
+  @override
+  String get beanWifiNoAnswer => '上次 Wi‑Fi 快传没成：豆子没回应传输请求，已回到蓝牙';
+
+  @override
+  String beanWifiFailed(Object detail) {
+    return '上次 Wi‑Fi 快传没成（$detail），已回到蓝牙';
+  }
 
   @override
   String get beanUnbindAfterSync => '正在取回录音豆里的录音，取完再解除';
