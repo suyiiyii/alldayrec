@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS enrolled (          -- bank.py: what taught each peop
     name TEXT NOT NULL, conv TEXT, row INTEGER, n INTEGER NOT NULL, e BLOB NOT NULL);  -- n 1, e its voiceprint), or with row
 CREATE INDEX IF NOT EXISTS enrolled_name ON enrolled(name);  -- NULL the people row as it was before this table (n its sentences)
 CREATE TABLE IF NOT EXISTS aliases (alias TEXT PRIMARY KEY, name TEXT NOT NULL);  -- another way a person is called (A哥 = A)
+CREATE TABLE IF NOT EXISTS terms (term TEXT PRIMARY KEY, at TEXT NOT NULL);  -- 热词和术语 the owner keeps (hotwords), at: set
 CREATE TABLE IF NOT EXISTS name_hints (conv TEXT PRIMARY KEY, body TEXT NOT NULL);  -- hints.py: what each label was called; suggestions only
 CREATE TABLE IF NOT EXISTS profiles (name TEXT PRIMARY KEY, body TEXT NOT NULL);  -- profiles.py: a named person's profile, every line with its sources
 CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the ingest queue; size bytes at pos of path (the
@@ -639,6 +640,21 @@ def people() -> dict[str, tuple[int, np.ndarray]]:
 
 def aliases() -> dict[str, str]:
     return {r[0]: r[1] for r in conn().execute("SELECT alias, name FROM aliases")}
+
+
+def terms() -> list[str]:
+    """The 热词和术语 the owner keeps (names, products, jargon), the latest set first."""
+    return [r[0] for r in conn().execute("SELECT term FROM terms ORDER BY at DESC, term")]
+
+
+def hotwords() -> list[str]:
+    """What the ASR engines listen for and the prompts spell by, the most recently used first: the terms (by when each
+    was set) and the names of the people bank but 我 (by the last conversation each was in)."""
+    last = dict(conn().execute("SELECT j.value, max(c.start) FROM conversations c, json_each(c.participants) j GROUP BY j.value"))
+    at = {r[0]: last.get(r[0]) or "" for r in conn().execute("SELECT name FROM people WHERE name != '我'")}
+    for term, t in conn().execute("SELECT term, at FROM terms"):
+        at[term] = max(t, at.get(term, ""))
+    return sorted(at, key=lambda w: (at[w], w), reverse=True)
 
 
 def name_hints(conv_id: str | None = None) -> dict[str, dict]:

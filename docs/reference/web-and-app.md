@@ -25,6 +25,7 @@ type: reference
 | `/connect` | 连接手机 | 安卓 App 下载、扫码登录的二维码（App 扫：填好地址和 Token；手机相机扫：打开已登录的网页），以及接入 AI（MCP）的配置 |
 | `/record` | 网页录音 | 没有 App 时，用浏览器的麦克风或蓝牙录音设备录音 |
 | `/import` | 导入录音 | 选录音文件上传到时间线，列出以前导入的批次。见[如何导入已有录音](../how-to/import-recordings.md) |
+| `/terms` | 热词和术语 | 增删改热词和术语，下面列出自动加入的人名。见[如何添加热词和术语](../how-to/add-terms.md) |
 
 ### 网页录音（`/record`）
 

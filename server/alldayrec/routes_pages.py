@@ -28,6 +28,7 @@ DIST = Path(__file__).resolve().parent / "static/dist"  # the web app (web/: pnp
 @router.get("/calendar")
 @router.get("/progress")
 @router.get("/connect")
+@router.get("/terms")
 @router.get("/p/{name}")
 @router.get("/device/{name}")
 async def page(conv_id: str = "", name: str = ""):

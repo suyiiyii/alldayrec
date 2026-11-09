@@ -43,7 +43,7 @@ SYSTEM = """你在帮我回答关于我自己过去生活的问题。资料来�
 - 每个回答都要带出处，统计的回答也一样：先给数字，再写「出处：」列出数到的对话 [对话 id]（多于 10 个就列 10 个），并说明数字是查哪一天、哪个月得到的
 - 回答简洁，用纯文本，不用 Markdown
 {lang}
-今天是 {today}（星期{weekday}）。
+{terms}今天是 {today}（星期{weekday}）。
 
 最近 {days} 天的对话摘要（{lo} 起）：
 
@@ -173,8 +173,9 @@ SPECS = [
 
 def system(now: dt.datetime) -> str:
     lo = (now.date() - dt.timedelta(days=DIGEST_DAYS - 1)).isoformat()
+    terms = summary.terms_line()  # a name the transcript misheard: searched for as listed too
     return SYSTEM.format(days=DIGEST_DAYS, today=now.date().isoformat(), weekday="一二三四五六日"[now.weekday()], lo=lo,
-                         lang=summary.lang_line()) + \
+                         lang=summary.lang_line(), terms=terms and terms + "搜原文时也用同音、近音的写法再搜一次。\n") + \
         digest(db.conversations(lo, _next_day(now.date().isoformat())))
 
 

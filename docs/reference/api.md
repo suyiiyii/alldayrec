@@ -109,6 +109,12 @@ type: reference
 | `POST` | A batch of a device's events, from the phone that read them; one sent again replaces the one kept. | `device` (query, string)<br>body: JSON DeviceEvent[] {`src`, `seq`, `at`, `data`} |
 | `GET` | A device's events, status reports and audio by the minute (audio.minutes) in [since, until). | `device` (query, string)<br>`since` (query, string)<br>`until?` (query, string) |
 
+### `/api/phone-spans`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | When a phone recording with its microphone heard nothing and why (a call, another app holding it), and when it played media aloud, in [since, until) across devices (db.phone_spans): the timeline and 进度 say why a stretch is silent instead of leaving it blank. | `since` (query, string)<br>`until` (query, string) |
+
 ### `/api/calls`
 
 | 方法 | 说明 | 参数 |
@@ -281,6 +287,13 @@ type: reference
 | 方法 | 说明 | 参数 |
 |---|---|---|
 | `GET` | （无说明） | — |
+
+### `/api/terms`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The 热词和术语 the owner keeps (terms, the latest set first) and the names of the people bank that go with them (names, the most recently in a conversation first): the hotwords the ASR engines and the prompts get (db.hotwords). | — |
+| `POST` | A term added (term), changed (old to term) or dropped (old alone). | body: JSON object |
 
 ### `/api/conversation/{conv_id}`
 

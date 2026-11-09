@@ -32,7 +32,8 @@
     "device": "Device log",
     "record": "AllDayRec recorder",
     "import": "Import recordings",
-    "connect": "Connect a phone"
+    "connect": "Connect a phone",
+    "terms": "Terms"
   },
   "err": {
     "network": "Can't reach the server",
@@ -434,7 +435,9 @@
     "starsEmpty": "Press and hold a sentence to copy it, star it or fix who said it",
     "starsAll": "All {n}",
     "starsLess": "Show less",
-    "older": "Earlier devices ({n})"
+    "older": "Earlier devices ({n})",
+    "terms": "Terms",
+    "termsSub": "Names, companies, products and jargon, spelled right in transcripts and summaries"
   },
   "import": {
     "pick": "Choose audio files",
@@ -1059,5 +1062,17 @@
     "fixed": "This sentence is now {to}",
     "fixedLearn": "This sentence is now {to}; learning their voice from it",
     "fixedBack": "Changed back to {to}"
+  },
+  "terms": {
+    "intro": "Put the names, companies, products and jargon you use here: speech recognition listens for them, and summaries and answers fix words that sound like them.",
+    "add": "Add a term, then Enter",
+    "addButton": "Add",
+    "editing": "Change “{term}” to…",
+    "save": "Save",
+    "edit": "Tap to change",
+    "remove": "Remove this term",
+    "empty": "No terms yet.",
+    "names": "Names added for you",
+    "namesSub": "People you named on the People page are added by themselves."
   }
 }

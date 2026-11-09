@@ -15,6 +15,7 @@ from alldayrec import net
 from alldayrec import qwen_asr
 from alldayrec import squeeze
 from alldayrec import stepfun_asr
+from alldayrec import tenant
 from alldayrec import threads
 from alldayrec.segmenter import SR
 
@@ -36,6 +37,12 @@ async def _http(url, data=None, headers=None, method=None) -> bytes:
 
 
 FILE_MODELS = tuple(os.environ.get("FILE_MODELS", "stepaudio-2.5-asr-8006,doubao-seedasr-2.0").split(","))  # file-mode engines, in order of preference
+
+
+def hotwords(limit: int, fits=lambda w: True) -> list[str]:
+    """The tenant's hotwords (db.hotwords) as an engine takes them: those it accepts (fits), the most recently used
+    first, at most `limit`; none outside a tenant (replay_case's runs)."""
+    return [w for w in db.hotwords() if fits(w)][:limit] if tenant.current.get(None) else []
 
 
 def sent_audio(x: np.ndarray, speech: list[tuple[float, float]]) -> tuple[np.ndarray, list[tuple[float, float]]]:
@@ -82,12 +89,14 @@ def failure(e: Exception) -> str:
 async def volc(x: np.ndarray, partial=None) -> list[dict]:
     from alldayrec import volc_asr
     mark = lambda us: [{"speaker": "SPEAKER_0", **u} for u in us]
-    return mark((await volc_asr.transcribe(x, partial=partial and (lambda us: partial(mark(us)))))[0])
+    return mark((await volc_asr.transcribe(x, partial=partial and (lambda us: partial(mark(us))),
+                                           words=hotwords(volc_asr.HOTWORDS, volc_asr.fits)))[0])
 
 
 async def stepfun_sse(x: np.ndarray, partial=None) -> list[dict]:
     """StepFun's SSE alone: text and character times, sentences cut by punctuation and pauses, no speakers."""
-    return stepfun_asr.sentences(await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds)))))
+    return stepfun_asr.sentences(await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))),
+                                                       hotwords(stepfun_asr.HOTWORDS)))
 
 
 async def stepfun(x: np.ndarray, partial=None) -> list[dict]:
@@ -99,7 +108,7 @@ async def stepfun(x: np.ndarray, partial=None) -> list[dict]:
         file.append(await diarize(x))
     async with anyio.create_task_group() as tg:
         tg.start_soon(job)
-        deltas = await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))))
+        deltas = await stepfun_asr.sse(x, partial and (lambda ds: partial(stepfun_asr.sentences(ds))), hotwords(stepfun_asr.HOTWORDS))
     return stepfun_asr.merge(deltas, file[0])
 
 
@@ -109,7 +118,7 @@ async def stepfun_file(x: np.ndarray, partial=None) -> list[dict]:
 
 async def qwen(x: np.ndarray, partial=None) -> list[dict]:
     """Bailian's Qwen-Audio 3.1 file job (qwen_asr): text, sentences and speakers at once, no partial answers."""
-    return await qwen_asr.transcribe(x)
+    return await qwen_asr.transcribe(x, hotwords(qwen_asr.HOTWORDS, qwen_asr.fits))
 
 
 async def local(x: np.ndarray, partial=None) -> list[dict]:

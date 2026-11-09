@@ -25,6 +25,7 @@ The server serves the web pages (`web/` builds into `server/alldayrec/static/dis
 | `/connect` | 连接手机 (Connect a phone) | The Android app download, the QR code to sign in by scanning (with the app: fills in the address and token; with the phone camera: opens the web UI signed in), and the settings for connecting AI (MCP) |
 | `/record` | 网页录音 (Web recording) | Records with the browser's microphone or a Bluetooth recorder when you have no app |
 | `/import` | 导入录音 (Import recordings) | Uploads the audio files you pick onto the timeline and lists past imports. See [How to import recordings you already have](../how-to/import-recordings.md) |
+| `/terms` | 热词和术语 (Terms) | Add, change and remove terms; the names added for you are listed below them. See [How to add terms](../how-to/add-terms.md) |
 
 ### Web recording (`/record`)
 

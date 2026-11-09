@@ -63,7 +63,7 @@ def test_lifecycle_and_storage(tenants, monkeypatch):
         return compare(x, y)
     monkeypatch.setattr(mcp_links.hmac, "compare_digest", compared)
     status, result, headers = request(row["path"], "POST", RPC)
-    assert status == 200 and len(result["result"]["tools"]) == 11 and "mark_todo" not in {t["name"] for t in result["result"]["tools"]}
+    assert status == 200 and len(result["result"]["tools"]) == 12 and "mark_todo" not in {t["name"] for t in result["result"]["tools"]}
     assert (stored["secret_hash"], stored["secret_hash"]) in calls
     assert headers[b"cache-control"] == b"no-store"
     listing = request("/api/mcp-links", token=a.token)[1]

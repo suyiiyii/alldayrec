@@ -68,6 +68,7 @@ def seed(t: tenant.Tenant):
                                   "clip_start": AT, "clip_end": f"{TODAY}T10:00:07.000", "clip_text": mark}])
             c.execute("INSERT INTO people VALUES (?, 1, ?)", (f"{mark}人", db.blob(VEC)))
             c.execute("INSERT INTO aliases VALUES (?, ?)", (f"{mark}哥", f"{mark}人"))
+            c.execute("INSERT INTO terms VALUES (?, ?)", (f"{mark}词", AT))
             db.put_name_hints({"conv": CID, "names": [{"who": "S1", "name": f"{mark}人", "kind": "self", "at": AT, "by": "S1", "quote": mark}]}, c)
             db.put_kv(f"recap:{TODAY}", {"date": TODAY, "headline": mark, "todos": [], "highlights": [], "people": []}, c)
         db.put_profile({"name": f"{mark}人", "facts": [{"text": mark, "src": []}]})
@@ -158,6 +159,8 @@ REQUESTS = {
     ("GET", "/api/conversation/{conv_id}/speakers"): ("GET", f"/api/conversation/{CID}/speakers", {}),
     ("GET", "/api/aliases"): ("GET", "/api/aliases", {}),
     ("POST", "/api/aliases"): ("POST", "/api/aliases", dict(json={"alias": "王哥", "name": "老王"})),
+    ("GET", "/api/terms"): ("GET", "/api/terms", {}),
+    ("POST", "/api/terms"): ("POST", "/api/terms", dict(json={"term": "灵犀"})),
     ("GET", "/api/person/{name}"): ("GET", "/api/person/MARKa人", {}),
     ("POST", "/api/person/{name}/profile"): ("POST", "/api/person/MARKa人/profile", {}),
     ("GET", "/api/voice-clip/{name}"): ("GET", "/api/voice-clip/MARKb.ogg", {}),  # the other's clip: not found here
@@ -174,7 +177,7 @@ REQUESTS = {
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/import": "page", "/speakers": "page",
-    "/live": "page", "/me": "page", "/todos": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/p/{name}": "page", "/device/{name}": "page",
+    "/live": "page", "/me": "page", "/todos": "page", "/calendar": "page", "/progress": "page", "/connect": "page", "/terms": "page", "/p/{name}": "page", "/device/{name}": "page",
     "/assets/{name}": "the web app's files", "/app.apk": "the Android app: one for all", "/api/app/latest": "the Android app's version",
     "/api/firmware": "the recorders' firmware: one shelf for all", "/api/firmware/{model}/{version}": "firmware",
     "/api/firmware/latest": "firmware", "/api/firmware/{model}/{version}.zip": "firmware",

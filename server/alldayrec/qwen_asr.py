@@ -23,7 +23,15 @@ MODEL = os.environ.get("QWEN_ASR_MODEL") or "qwen-audio-3.1-asr-flash-filetrans"
 BASE = "https://dashscope.aliyuncs.com/api/v1"
 POLL_S = 2
 WAIT_S = 900
+# hotwords (parameters.vocabulary, free, no list made beforehand): at most 2000 a request, weight 1-5 (4 the docs' start);
+# one with a non-ASCII character up to 15 characters, an ASCII one up to 7 words (help.aliyun.com/en/model-studio/improve-asr-accuracy)
+HOTWORDS, WEIGHT = 2000, 4
 NOTHING_SAID = ("ASR_RESPONSE_HAVE_NO_WORDS", "SUCCESS_WITH_NO_VALID_FRAGMENT")  # 10-19: a quiet window; one under a second
+
+
+def fits(w: str) -> bool:
+    """A hotword Bailian takes."""
+    return len(w.split()) <= 7 if w.isascii() else len(w) <= 15
 
 
 def wav(x: np.ndarray) -> bytes:
@@ -67,14 +75,16 @@ async def upload(data: bytes, auth: dict) -> str:
     return f"oss://{key}"
 
 
-async def transcribe(x: np.ndarray) -> list[dict]:
-    """x: 16 kHz int16 PCM. Raises on an HTTP error, a failed task, or one still running after WAIT_S."""
+async def transcribe(x: np.ndarray, words=()) -> list[dict]:
+    """x: 16 kHz int16 PCM; words: hotwords (fits, at most HOTWORDS) to listen for. Raises on an HTTP error, a failed
+    task, or one still running after WAIT_S."""
     auth = {"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}"}
     url = await upload(wav(x), auth)
     auth = {**auth, "Content-Type": "application/json"}
     body = {"model": MODEL, "input": {"file_urls": [url]}, "parameters": {
         "channel_id": [0], "language_hints": ["zh", "en"], "diarization_enabled": True,
-        "special_word_filter": json.dumps({"system_reserved_filter": False})}}
+        "special_word_filter": json.dumps({"system_reserved_filter": False}),
+        **({"vocabulary": dict.fromkeys(words, WEIGHT)} if words else {})}}
     r = await net.request("POST", f"{BASE}/services/audio/asr/transcription", 60, content=json.dumps(body).encode(),
                           headers={**auth, "X-DashScope-Async": "enable", "X-DashScope-OssResourceResolve": "enable"})
     task = json.loads(r.content)["output"]["task_id"]

@@ -172,7 +172,7 @@ def test_engine_call_cut_off(monkeypatch, store):
 def test_errors_in_side_by_side_parts(monkeypatch, store):
     """stepfun runs its SSE and its file job in a TaskGroup: the calls table and the fallback reason keep the failing
     part's own error, as when the file job ran in a thread (not 'ExceptionGroup: unhandled errors in a TaskGroup')."""
-    async def sse(x, on=None):
+    async def sse(x, on=None, words=()):
         raise RuntimeError("stepfun sse HTTP 451: refused")
 
     async def diarize(x):
@@ -191,7 +191,7 @@ def test_errors_in_side_by_side_parts(monkeypatch, store):
     async def boom(x):
         raise RuntimeError("diarization job j still running after 120 s")
 
-    async def slow(x, on=None):
+    async def slow(x, on=None, words=()):
         await anyio.sleep(60)
     monkeypatch.setattr(asr, "diarize", boom)
     monkeypatch.setattr(stepfun_asr, "sse", slow)

@@ -141,13 +141,13 @@ def test_engine_squeeze(monkeypatch):
     squeeze.check()
     sent = []
 
-    async def transcribe(x, partial=None):
+    async def transcribe(x, partial=None, words=()):
         sent.append(len(x) / SR)
         us = [{"text": "一", "start_ms": 1600, "end_ms": 3400}, {"text": "二", "start_ms": 5000, "end_ms": 6000}]
         if partial:
             partial(us[:1])
         return us, {}
-    fake = types.SimpleNamespace(transcribe=transcribe)
+    fake = types.SimpleNamespace(transcribe=transcribe, HOTWORDS=0, fits=bool)
     monkeypatch.setitem(sys.modules, "alldayrec.volc_asr", fake)
     monkeypatch.setattr(alldayrec, "volc_asr", fake, raising=False)  # asr.py: from alldayrec import volc_asr
     got = []
@@ -198,7 +198,7 @@ def test_engine_fallback(monkeypatch):
     assert calls == ["bad"], "no fallback configured: the error goes to the caller"
 
     d = lambda t, a, b: {"delta": t, "start_time": a, "end_time": b}
-    async def sse(x, on):
+    async def sse(x, on, words=()):
         return [d("你好", 100, 400), d("嗯", 5000, 5100)]
 
     async def diarize(x):
@@ -216,7 +216,7 @@ def test_engine_fallback(monkeypatch):
             polled.append(1)
         return []
 
-    async def refused(x, on):
+    async def refused(x, on, words=()):
         await anyio.sleep(0.2)
         raise RuntimeError("stepfun sse HTTP 451")
     monkeypatch.setattr(asr, "diarize", slow)
