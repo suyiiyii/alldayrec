@@ -952,7 +952,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanWifiSub =>
-      '录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面';
+      '录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。手机会问要不要加入它的网络；期间留在这个页面';
 
   @override
   String get beanWifiRecording => '豆子正在录音：先在豆子上停录，再点 Wi‑Fi 快传';
@@ -962,6 +962,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanWifiAskedVpn => '已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭';
+
+  @override
+  String get beanWifiPermission => 'Wi‑Fi 快传要「附近的设备」权限：允许后再点一次（拒绝过的话到系统设置里打开）';
 
   @override
   String beanWifiLowBattery(Object battery) {

@@ -46,9 +46,11 @@ object Bean {
 
     /** The commands a bean is sent: its info (01/01), its clock (01/A6), the key exchange (2E/01), its files (1A/0E),
      *  a file's audio (1A/07); a delete (1A/10, DELETE) only of a file the server has whole (delete()); and the start of
-     *  a recording (18/82 01, START: start()), never its stop (00) or pause (02). Nothing that binds or unbinds (0B/xx),
-     *  turns on Wi-Fi (1A/05), resets, updates firmware (FF/xx, and never the OTA service) or reads device logs. */
+     *  a recording (18/82 01, START: start()), never its stop (00) or pause (02); its Wi-Fi hotspot on (1A/05) and off
+     *  (1A/02, HOTSPOT) only while the fast transfer asks for them (BeanSync.hotspot). Nothing that binds or unbinds
+     *  (0B/xx), resets, updates firmware (FF/xx, and never the OTA service) or reads device logs. */
     val SENDS = setOf(0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07)
+    val HOTSPOT = setOf(0x1A05, 0x1A02)
     const val DELETE = 0x1A10
     const val START = 0x1882
 
@@ -88,8 +90,8 @@ object Bean {
 
     /** A frame on its way to the radio is one of SENDS, the delete of a file in `confirmed`, or the start: checked again
      *  right before the write (BeanSync.send, BeanLink.write). */
-    fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet()) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
-        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || it == DELETE && f.size == 14 && u32(f, 9) in confirmed ||
+    fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet(), hotspot: Boolean = false) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
+        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || hotspot && it in HOTSPOT || it == DELETE && f.size == 14 && u32(f, 9) in confirmed ||
             it == START && f.size == 11 && f[9] == 1.toByte() } &&
         u16(f, 7) == f.size && f.last() == sum(f, 0, f.size - 1)
 
@@ -106,6 +108,17 @@ object Bean {
     fun list(page: Int) = frame(0x1A, 0x0E, u16le(page))
     /** A file's audio from `offset` bytes on (whole units); realtime: the file being recorded, as it is. */
     fun transfer(file: Long, offset: Long, realtime: Boolean) = frame(0x1A, 0x07, le32(offset) + le32(file) + (if (realtime) 1 else 0).toByte())
+    /** Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag. */
+    fun wifiTransfer(file: Long, offset: Long) = frame(0x1A, 0x07, le32(offset) + le32(file))
+    /** The hotspot on, by a name it has not had (a repeated one gets an empty answer and no hotspot): its answer is its
+     *  address, IPv4 reversed and the port LE; off. Sent only while BeanSync.hotspot (allowed()). */
+    fun wifiOn(ssid: String, password: String): ByteArray {
+        val s = ssid.toByteArray(); val p = password.toByteArray()
+        return build(0x1A, 0x05, byteArrayOf(s.size.toByte()) + s + p.size.toByte() + p)
+    }
+    fun wifiOff() = build(0x1A, 0x02, ByteArray(0))
+    /** A 1A/05 answer's address, a.b.c.d:port; null: no hotspot. */
+    fun endpoint(p: ByteArray): String? = if (p.size < 6) null else "${p[3].toInt() and 255}.${p[2].toInt() and 255}.${p[1].toInt() and 255}.${p[0].toInt() and 255}:${u16(p, 4)}"
     /** Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable). */
     fun delete(file: Long, confirmed: Set<Long>): ByteArray {
         require(file in confirmed) { "file $file is not whole on the server: never deleted" }
@@ -281,6 +294,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun trace(what: String, v: Map<String, Any?>) {}
         /** The phone's side of a slow link, for bean_lag and too_slow (diag()): its audio route, a call, power, front. */
         fun phoneState(): Map<String, Any?> = emptyMap()
+        /** The fast transfer was asked for (once: reading it clears it). */
+        fun wifiAsked(): Boolean = false
+        /** Joins the bean's hotspot and opens its WebSocket (`endpoint`: the 1A/05 answer); send and receive go over it
+         *  then, until wifiLeave() (FINISH, the hotspot left). */
+        fun wifiJoin(ssid: String, password: String, endpoint: ByteArray): Unit = throw Exception("no Wi-Fi")
+        fun wifiLeave() {}
     }
 
     /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
@@ -289,6 +308,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         /** A unit's time on the phone's clock: by the anchor in force at its seq. */
         fun at(seq: Long) = (anchors.lastOrNull { it[0] <= seq }?.get(1) ?: anchor) + seq * Bean.FRAME_MS
         val latest get() = anchors.lastOrNull()?.get(1) ?: anchor
+        var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
     }
 
     /** live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
@@ -304,6 +324,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var dupes = 0
         var lost = 0L
         var at = 0L
+        var asked = 1  // over Wi-Fi: how often its 1A/07 went (the bean may ignore the first on a fresh socket, ws/soundcore)
         var seen = 0L  // when its last unit came
         var firstAt = 0L  // when its first unit came (pace)
         var half = -1L  // reanchor(): this half minute's first seq and fastest, the last one's
@@ -330,6 +351,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         private set(value) { hw = hw + ("recording" to value) }
     /** The file being deleted, while it is: the one id a 1A/10 may carry (Bean.allowed). */
     @Volatile var deletable: Set<Long> = emptySet()
+        private set
+    /** While the fast transfer asks for the hotspot on or off: the only time a 1A/05 or 1A/02 may go (Bean.allowed). */
+    @Volatile var hotspot = false
         private set
     private val kept = mutableSetOf<Long>()  // a delete the bean did not confirm: not asked again until the app restarts
     val files = sortedMapOf<Long, F>()
@@ -361,6 +385,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private val fills = mutableMapOf<Long, Int>()  // realtime=0 reads of the open file that came to nothing (missed())
     private var runFile = -1L
     private var runFrom = 0L
+    private var overWifi = false  // wifi(): the transfers go over the hotspot's WebSocket
+    private var wifiNext = false  // asked for: before the next transfer
+    private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
+    private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at TRIES (wifiOff())
+    private var wifiUnits = 0
+    private var wifiEnded = 0L
+    private var wifiBattery: Any? = null  // for the log of the way back (wifiOff())
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                    // pressed): a stop by hand holds until the link goes (an IOException), not across the
                                    // app's own reconnects (a cut re-pull, a stalled transfer)
@@ -411,6 +442,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             val p = step("status", "读设备信息") { ask(Bean.info(), 0x0101).payload }
             hw = Bean.info(p)
             step("clock", "对时") { clock() }
+            if (wifiOpen) wifiOff()
             listing = step("status", "读文件列表") { list() }
             io.log("connect", "连上：$t；固件 ${hw["fw"]}，序列号 ${Bean.serial(p)}，电量 ${hw["battery"]}%，" +
                 (if (recording) "在录音（文件 ${listing.open}）" else "没在录音") + "，豆子上 ${listing.files.size} 个文件",
@@ -433,6 +465,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var reported = io.now()
         var settled = 0L
         while (true) {
+            if (io.wifiAsked()) {  // a transfer cannot be stopped but by the link going: Wi-Fi first in the next session
+                if (recording) wifiRecording() else {
+                    wifiNext = true
+                    if (xfer != null) { flush(); xfer = null; throw Again("Wi-Fi asked for: the transfer stops") }
+                }
+            }
+            if (xfer == null && wifiNext) { wifiNext = false; wifi() }
             if (xfer == null && io.now() >= quietUntil) {
                 if (needList || recording && listing.open == 0L && io.now() - listedAt > 10_000) listing = list()
                 val open = listing.open
@@ -527,6 +566,145 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         } catch (e: IOException) { throw e } catch (e: InterruptedException) { throw e } catch (e: Exception) { e.message }
         io.log("bean_start", "自动开始录音没成功（$why），这次连接不再试", "warn")
     }
+
+    /** Wi-Fi fast transfer (#431; by hand: the device page's button), as on iOS (Bean.swift). The bean opens a hotspot of
+     *  a new name (1A/05; its BLE goes, ws/soundcore), the phone joins it (io.wifiJoin) and reads what it lacks over its
+     *  WebSocket as over BLE, into the same pieces (the same units, dated the same): the backlog, only while the bean is
+     *  not recording (wifiRecording()). Then back to BLE (Again), whose next session turns the hotspot off (1A/02) in case
+     *  it is on still. */
+    private fun wifi() {
+        if (recording) return wifiRecording()
+        val battery = hw["battery"] as Int?
+        io.log("bean_wifi_start", "开始 Wi-Fi 快传（手动）：电量 ${battery?.let { "$it%" } ?: "?"}，没在录音，积压 ${owed["backlog_s"] ?: 0} s",
+            fields = mapOf("reason" to "manual", "battery" to battery, "recording" to recording, "open" to listing.open,
+                "backlog_s" to (owed["backlog_s"] ?: 0), "files" to listing.files.size))
+        if (needList) listing = list()  // a file just closed: its length
+        owe()
+        if (owed.isEmpty()) {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
+            io.log("bean_wifi_skip", "没有积压，不开热点", fields = mapOf("battery" to battery, "recording" to recording))
+            return
+        }
+        if (battery != null && battery < 30) {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
+            io.log("bean_wifi_fail", "电量 $battery% 低于 30%，不开热点，接着用蓝牙", "warn", mapOf("step" to "battery", "battery" to battery))
+            return
+        }
+        wifiBattery = battery
+        val r = ByteArray(12).also(java.security.SecureRandom()::nextBytes)
+        val ssid = "LR-" + Bean.hex(r.copyOfRange(0, 4)); val password = Bean.hex(r.copyOfRange(4, 12))
+        val t0 = io.monotonicNow()
+        val a = try { hotspot = true; ask(Bean.wifiOn(ssid, password), 0x1A05, 45_000) }
+        catch (e: IOException) {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
+            wifiOpen = true
+            io.log("bean_wifi_fail", "问热点时蓝牙先断了（$e），没拿到地址，回蓝牙", "warn", mapOf("step" to "hotspot"))
+            throw Again("BLE went while asking for the hotspot")
+        } catch (e: Again) { throw e } catch (e: InterruptedException) { throw e }
+        catch (e: Exception) { io.log("bean_wifi_fail", "豆子没开热点（$e），接着用蓝牙", "warn", mapOf("step" to "hotspot")); return }
+        finally { hotspot = false }
+        wifiOpen = true
+        val opened = io.monotonicNow() - t0
+        val at = Bean.endpoint(a.payload) ?: run {
+            io.log("bean_wifi_fail", "豆子没开热点（回了 ${Bean.hex(a.payload)}，状态 ${a.status}），接着用蓝牙", "warn",
+                mapOf("step" to "hotspot", "ms" to opened, "reply" to Bean.hex(a.payload), "status" to a.status))
+            return
+        }
+        io.log("bean_wifi_hotspot", "豆子开了热点 $ssid（$opened ms）：回复 ${Bean.hex(a.payload)}，地址 $at",
+            fields = mapOf("ms" to opened, "reply" to Bean.hex(a.payload), "endpoint" to at, "ssid" to ssid))
+        overWifi = true; wifiUnits = 0
+        files.values.forEach { it.wifiTries = 0 }
+        state = say("beanWifi")
+        var t1 = io.monotonicNow(); var why: String; var rollover = false
+        try {
+            io.wifiJoin(ssid, password, a.payload)
+            t1 = io.monotonicNow()
+            reader = Bean.Reader(); inbox.clear()
+            why = wifiLoop()
+        } catch (e: Again) { why = "豆子换了文件"; rollover = e.naturalRollover }
+        catch (e: InterruptedException) { overWifi = false; io.wifiLeave(); throw e }  // the app stops (BeanLink.stop)
+        catch (e: Exception) { why = "$e" }
+        xfer?.let { complete(it, -1, "；Wi-Fi 快传结束") }
+        overWifi = false
+        io.wifiLeave()
+        wifiEnded = io.monotonicNow()
+        val ms = maxOf(1L, wifiEnded - t1); val kb = wifiUnits.toLong() * Bean.UNIT / 1024
+        val audio = wifiUnits * Bean.FRAME_MS; val x = audio.toDouble() / ms
+        val q = queued().size  // what is still to go up: the bean gives faster than the phone uploads (11-08: 200× vs 40×)
+        io.log("bean_wifi_done", "Wi-Fi 快传结束（$why）：$wifiUnits 个单元（${audio / 1000} s 音频），$kb KB，用时 ${ms / 1000} s，" +
+            "%.0f KB/s，%.1f 倍实时".format(Locale.US, kb * 1000.0 / ms, x) + "；上传队列还有 $q 块", if (wifiUnits == 0) "warn" else null,
+            mapOf("why" to why, "units" to wifiUnits, "kb" to kb, "ms" to ms, "kbps" to kb * 1000.0 / ms, "x" to x, "queued" to q))
+        throw Again("Wi-Fi transfer over: $why", rollover)
+    }
+
+    /** wifi()'s transfers, one at a time as over BLE, until the backlog is in or the bean records. The reason they ended. */
+    private fun wifiLoop(): String {
+        var at = io.monotonicNow(); var was = 0
+        while (true) {
+            val t = io.monotonicNow()
+            if (io.wifiAsked()) io.log("bean_wifi_ask", "已在 Wi-Fi 快传，这次请求忽略")  // not kept for after it (11-08)
+            if (t - at >= 10_000) {  // progress: what came in the last 10 s, and the upload queue (does it drain meanwhile?)
+                val n = wifiUnits - was; val kbps = n * Bean.UNIT / 1.024 / (t - at); val x = n * Bean.FRAME_MS.toDouble() / (t - at)
+                val q = queued().size
+                io.log("bean_wifi_progress", "Wi-Fi 快传：共 %d 个单元，近 10 s %.0f KB/s，%.1f 倍实时，".format(Locale.US, wifiUnits, kbps, x) +
+                    "文件 ${xfer?.file ?: 0} 到单元 ${xfer?.last ?: -1}，上传队列 $q 块",
+                    fields = mapOf("units" to wifiUnits, "kb" to wifiUnits.toLong() * Bean.UNIT / 1024, "kbps" to kbps, "x" to x,
+                        "file" to (xfer?.file ?: 0), "seq" to (xfer?.last ?: -1), "lag_s" to xfer?.lag?.let { it / 1000 }, "queued" to q))
+                at = t; was = wifiUnits
+            }
+            if (recording) return "豆子开始录音，回蓝牙"  // its button: it answers nothing over Wi-Fi then (wifiRecording())
+            if (xfer == null) {
+                if (io.now() < quietUntil) { next(quietUntil - io.now())?.let(::take); continue }
+                if (busy > 20) return "豆子一直忙（code 4）"
+                begin(backlog() ?: return "都取到了")
+            }
+            next(1000)?.let(::take)
+            val x = xfer ?: continue
+            val now = io.now()
+            if (x.key == null && now - x.at > 8000) {  // ws/soundcore: 3 asks 8 s apart
+                if (x.asked < 3) {
+                    x.asked++; x.at = now
+                    io.log("bean_xfer", "补传文件 ${x.file} Wi-Fi 上 8 s 没回音，第 ${x.asked} 次再要", "warn",
+                        mapOf("file" to x.file, "from" to x.from, "asked" to x.asked, "recording" to recording))
+                    send(Bean.wifiTransfer(x.file, x.from * Bean.UNIT))
+                    continue
+                }
+                failed(x, "Wi-Fi 上要了 3 次都没回音")
+                return "豆子没回音"
+            }
+            // units came, then none: over Wi-Fi the bean sends far faster than real time, and 11-09 (iOS) it stopped 16
+            // units short of the end, sending no 1A/0A either; BLE fills what is left (no 30 s wait for nothing)
+            val idle = if (x.last >= 0) 10_000L else 30_000L
+            if (now - x.seen > idle) { complete(x, -1, "；${idle / 1000} s 没收到单元"); return "${idle / 1000} s 没收到单元" }
+        }
+    }
+
+    /** No fast transfer while the bean records: over Wi-Fi it answers no 1A/07 then, for the file it records or a closed
+     *  one (iOS 11-08/09: three asks each, nothing), and Anker's SDK demo refuses it (「正在录音中，无法传输文件」). BLE goes on live. */
+    private fun wifiRecording() {
+        io.log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields = mapOf("recording" to true, "backlog_s" to (owed["backlog_s"] ?: 0)))
+    }
+
+    /** After a fast transfer: the hotspot off, in case it is on still. */
+    private fun wifiOff() {
+        val back = if (wifiEnded > 0) io.monotonicNow() - wifiEnded else -1
+        io.log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 ${back / 1000} s；电量 ${wifiBattery ?: "?"} → ${hw["battery"] ?: "?"}%",
+            fields = mapOf("ms" to back, "battery_before" to wifiBattery, "battery" to hw["battery"], "recording" to recording))
+        try {
+            val f = try { hotspot = true; ask(Bean.wifiOff(), 0x1A02, 5000) } finally { hotspot = false }
+            io.log("bean_wifi_off", "关了热点（1A/02，状态 ${f.status}，" + (if (f.payload.isEmpty()) "回复不带数据）" else "回复 ${Bean.hex(f.payload)}）"),
+                fields = mapOf("reply" to Bean.hex(f.payload), "status" to f.status))
+        } catch (e: IOException) {  // the next session sends it again, up to TRIES in all: a bean that never answers blocks no BLE sync
+            if (++wifiOffs >= TRIES) {
+                io.log("bean_wifi_off", "关热点 $wifiOffs 次都没等到回复（蓝牙先断了），不再发 1A/02", "warn", mapOf("tries" to wifiOffs))
+                wifiOpen = false; wifiOffs = 0
+            }
+            // not a link lost (an IOException would start the bean on the next connection): a stop by hand holds, as at 1A/05
+            throw Again("BLE went before 1A/02's answer")
+        } catch (e: InterruptedException) { throw e }
+        catch (e: Exception) { io.log("bean_wifi_off", "关热点没有回音（$e）", "warn", mapOf("error" to "$e")) }
+        wifiOpen = false; wifiOffs = 0  // only now: BLE gone before the answer, the next session sends 1A/02 again
+    }
+
+    /** This bean's pieces still in the upload queue, by start. */
+    private fun queued() = Uploader.queue(chunks).filter { Uploader.deviceOf(it) == tag }.map(Uploader::startMs)
 
     private fun clock() {
         val now = io.now()
@@ -662,9 +840,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun begin(x: Xfer) {
         xfer = x; x.at = io.now(); x.seen = x.at; marked = false
         if (x.live && liveFile != x.file) { liveFile = x.file; liveSeen = x.at }
-        state = say(if (x.live) "joining" else "beanIdle")
+        if (!overWifi) state = say(if (x.live) "joining" else "beanIdle")
         if (x.live) { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
-        send(Bean.transfer(x.file, x.from * Bean.UNIT, x.realtime))
+        send(if (overWifi) Bean.wifiTransfer(x.file, x.from * Bean.UNIT) else Bean.transfer(x.file, x.from * Bean.UNIT, x.realtime))
     }
 
     /** Closed files still to fetch. The bean reads them only after recording stops. */
@@ -767,13 +945,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 if (x.live) liveSeen = io.now()
                 if (!x.live || h.size != 0xFFFFFFFFL) {
                     if (h.size % Bean.UNIT != 0L) return failed(x, "file of ${h.size} B")
-                    file(x.file, x.file * 1000).let { f -> f.total = h.size / Bean.UNIT; if (!x.live) x.until = rest(f, x.from) }
+                    file(x.file, x.file * 1000).let { f -> f.total = h.size / Bean.UNIT; if (!x.live && !overWifi) x.until = rest(f, x.from) }  // over Wi-Fi a cut would cost more than the rest
                 }
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> if (x.live) failed(x, "code 3")  // the file being recorded goes on: never its end
                 else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = x.from }; xfer = null; save() }  // nothing after `from`: all of it is here
-            1 -> { file(x.file, x.file * 1000).tries = TRIES + 1; failed(x, "no such file") }
+            1 -> { file(x.file, x.file * 1000).tries = TRIES + 1; failed(x, "no such file，不再取") }
             4 -> {  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
                 if (busy++ == 0) io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 豆子还忙（code 4），稍后再要", fields = mapOf("file" to x.file))
                 quietUntil = io.now() + minOf(5000L, PACE_MS * busy)
@@ -786,9 +964,19 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun failed(x: Xfer, why: String) {
         io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 没开始：$why", "warn",
             mapOf("file" to x.file, "from" to x.from, "realtime" to x.realtime))
-        if (x.live) { liveAgain = io.now() + 30_000; missed(x) } else file(x.file, x.file * 1000).tries++
+        if (x.live) { liveAgain = io.now() + 30_000; missed(x) } else tried(x.file, file(x.file, x.file * 1000))
         xfer = null
         save()
+    }
+
+    /** A read of a closed file that left it short: a try. Over Wi-Fi one of its own for this fast transfer, so Wi-Fi going
+     *  wrong leaves BLE all of its tries (iOS #262 review: four taps the bean did not answer over Wi-Fi left a file unread). */
+    private fun tried(id: Long, f: F) {
+        if (overWifi) f.wifiTries++ else f.tries++
+        val n = if (overWifi) f.wifiTries else f.tries
+        if (n != TRIES + 1) return
+        io.log("bean_xfer", "文件 $id 从单元 ${gap(f) ?: -1} 起${if (overWifi) "在 Wi-Fi 上" else ""}取了 $n 次仍不全，" +
+            (if (overWifi) "这次快传不再取它，留给蓝牙" else "不再取"), if (overWifi) "warn" else "error", mapOf("file" to id, "gap" to (gap(f) ?: -1), "wifi" to overWifi))
     }
 
     /** A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole
@@ -821,6 +1009,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 mapOf("file" to x.file, "from" to x.last, "to" to s.seq))
         }
         x.units++; x.last = maxOf(x.last, s.seq); x.seen = now
+        if (overWifi) wifiUnits++
         // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
         if (!x.realtime && x.lag == null && s.seq - x.first >= REST_UNITS && now > x.firstAt)
             pace = (s.seq - x.first) * Bean.FRAME_MS.toDouble() / (now - x.firstAt)
@@ -929,9 +1118,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.at(x.last + 1))
         } else if (gap(f) == null) {
             pendingEnd = maxOf(pendingEnd, f.at(f.total))
-        } else if (!(x.cut && gap(f)!! > x.from) && ++f.tries > TRIES) {  // cut with the hole filled: not a try
-            io.log("bean_xfer", "文件 ${x.file} 从单元 ${gap(f)} 起取了 $TRIES 次仍不全，不再取", "error", mapOf("file" to x.file, "gap" to gap(f)))
-        }
+        } else if (!(x.cut && gap(f)!! > x.from)) tried(x.file, f)  // cut with the hole filled: not a try
         save()
     }
 
@@ -967,7 +1154,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         return if (f.total in 0..at) null else at
     }
 
-    private fun done(f: F) = gap(f) == null || f.tries > TRIES
+    private fun done(f: F) = gap(f) == null || f.tries > TRIES || overWifi && f.wifiTries > TRIES
 
     /** Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
      *  than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file, 10-25: 1831
@@ -978,7 +1165,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     class Again(why: String, val naturalRollover: Boolean = false) : Exception(why)
 
     private fun send(frame: ByteArray) {
-        check(Bean.allowed(frame, deletable)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
+        check(Bean.allowed(frame, deletable, hotspot)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
         io.trace("tx", mapOf("hex" to Bean.hex(frame)))
         io.send(frame)
     }

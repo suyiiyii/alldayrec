@@ -1733,7 +1733,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiSub.
   ///
   /// In zh, this message translates to:
-  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。iOS 会问要不要加入它的网络；期间留在这个页面'**
+  /// **'录音豆没在录音时可用：让它开热点，手机连上去快速取回还没有的录音，取完回到蓝牙。手机会问要不要加入它的网络；期间留在这个页面'**
   String get beanWifiSub;
 
   /// No description provided for @beanWifiRecording.
@@ -1753,6 +1753,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭'**
   String get beanWifiAskedVpn;
+
+  /// No description provided for @beanWifiPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi‑Fi 快传要「附近的设备」权限：允许后再点一次（拒绝过的话到系统设置里打开）'**
+  String get beanWifiPermission;
 
   /// No description provided for @beanWifiLowBattery.
   ///

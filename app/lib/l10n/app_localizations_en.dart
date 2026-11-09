@@ -982,7 +982,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiSub =>
-      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. iOS asks whether to join its network; stay on this page meanwhile';
+      'While the bean is not recording: it opens a hotspot, the phone joins it to fetch what it lacks fast, then goes back to Bluetooth. The phone asks whether to join its network; stay on this page meanwhile';
 
   @override
   String get beanWifiRecording =>
@@ -995,6 +995,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get beanWifiAskedVpn =>
       'Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it';
+
+  @override
+  String get beanWifiPermission =>
+      'Wi‑Fi fast transfer needs the Nearby devices permission: allow it, then tap again (if you refused it before, turn it on in the system settings)';
 
   @override
   String beanWifiLowBattery(Object battery) {
