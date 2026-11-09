@@ -32,6 +32,7 @@ SPLIT_TURNS = os.environ.get("SPLIT_TURNS", "1") != "0"  # 0: by voice only, as 
 TURN_MIN_S, TURN_PART_S, TURN_VCOS, TURN_COS = 1.0, 0.25, 0.25, 0.3
 TURN_ACT, TURN_RUN_S, TURN_JOIN_S = 0.5, 0.15, 0.5  # a frame's speaker: the local one >= TURN_ACT; runs under TURN_RUN_S dropped
 SEG_N, SEG_SHIFT, SEG_FIELD = 10 * SR, 270, 991  # pyannote's 10 s chunk; its frames' step and receptive field (samples)
+SEG_FRAMES = (SEG_N - SEG_FIELD) // SEG_SHIFT + 1  # 589 frames a chunk
 # the 7 powerset classes (none, 1, 2, 3, 1+2, 1+3, 2+3) -> each local speaker's probability
 SEG_MAP = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1]], np.float32)
 
@@ -63,20 +64,25 @@ def _seg():
     return infer.session(infer.SEG, 1)
 
 
-def turns(x: np.ndarray, a: float, b: float) -> list[float]:
+def segment(x: np.ndarray) -> np.ndarray:
+    """int16 samples, at most SEG_N (padded to it) -> pyannote's frames: log-probabilities of its 7 powerset classes,
+    (SEG_FRAMES, 7) float32. Compute.segment in this process."""
+    y = np.pad(x.astype(np.float32) / 32768, (0, SEG_N - len(x)))
+    return _seg().run(None, {"x": y[None, None]})[0][0]
+
+
+def turns(x: np.ndarray, a: float, b: float, segment=segment) -> list[float]:
     """Times (s) in (a, b) of x where pyannote's dominant local speaker changes: one 10 s chunk centred on a shorter
     span, else chunks every 5 s and one ending at b; within a chunk, a frame's speaker is the local one at TURN_ACT or
     more, its runs (gaps under TURN_JOIN_S bridged) under TURN_RUN_S dropped; each change comes from the chunk whose
-    middle is nearest it."""
+    middle is nearest it. segment: the frames of a chunk (Compute.segment: here, or the infer service)."""
     starts = [a] if b - a <= 10 else [*np.arange(a, b - 10, 5.0), b - 10]
     mids = np.array([(c0 + min(b, c0 + 10)) / 2 for c0 in starts])
     out = set()
     for k, c0 in enumerate(starts):
         c1 = min(b, c0 + 10)
         s0 = max(0, min(len(x) - SEG_N, int((c0 + c1) / 2 * SR) - SEG_N // 2))
-        y = x[s0:s0 + SEG_N].astype(np.float32) / 32768
-        o = _seg().run(None, {"x": np.pad(y, (0, SEG_N - len(y)))[None, None]})[0][0]
-        p = np.exp(o)
+        p = np.exp(segment(x[s0:s0 + SEG_N]))
         p = (p / p.sum(1, keepdims=True)) @ SEG_MAP
         ts = (s0 + np.arange(len(p)) * SEG_SHIFT + SEG_FIELD // 2) / SR
         runs = []  # [speaker, first, last frame time]

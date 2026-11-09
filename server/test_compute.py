@@ -28,15 +28,17 @@ from alldayrec import late
 from alldayrec import monitor
 from alldayrec import server
 from alldayrec import threads
+from alldayrec import transcript
 from test_backlog import DEVICE, SR, flac, hear, rig, tone
 from test_late_audio import span, store  # noqa: F401 (store: a fixture)
 
 TOKEN = "test-token"
-MODELS = all((infer.DIR / n).is_file() for n in (infer.EMB, infer.YAMNET))
+MODELS = all((infer.DIR / n).is_file() for n in (infer.EMB, infer.YAMNET, infer.SEG))
 
 
 class Stub:
-    """A stand-in model: a fixed projection of the samples, unit; music when the mean is positive."""
+    """A stand-in model: a fixed projection of the samples, unit; music when the mean is positive; frames of the
+    samples."""
     delay = 0.0
 
     def embed(self, x):
@@ -47,6 +49,11 @@ class Stub:
     def music(self, x):
         time.sleep(self.delay)
         return bool(x.mean() > 0)
+
+    def segment(self, x):
+        time.sleep(self.delay)
+        y = np.resize(np.pad(x, (0, transcript.SEG_N - len(x))), (transcript.SEG_FRAMES, 7))
+        return (y / 32768 - np.log(7)).astype(np.float32)
 
 
 def serve(sock: socket.socket) -> uvicorn.Server:
@@ -124,13 +131,20 @@ def test_remote_same_as_local(service):
         a, b = local.embed(x), r.embed(x)
         assert b.dtype == np.float32 and b.shape == a.shape and float(a @ b) >= 0.9999
         assert r.music(x) == local.music(x) and r.music(-x) == local.music(-x)
+        x = x[:transcript.SEG_N]  # a chunk of turns(), padded to 10 s
+        assert np.array_equal(r.segment(x), local.segment(x)), "the frames as they are"
+    x = np.concatenate([speech(5.0, 4), speech(5.0, 5)[::-1] // 2, speech(3.0, 6)])  # 13 s: two chunks
+    assert transcript.turns(x, 0.0, 13.0, r.segment) == transcript.turns(x, 0.0, 13.0, local.segment)
     assert compute.CALLS["embed", "remote"] == 3 and compute.CALLS["embed", "error"] == 0
+    assert compute.CALLS["segment", "remote"] == 5 and compute.CALLS["segment", "error"] == 0
     assert r.down_seconds() == 0
 
 
-def test_waits_for_a_service_down(monkeypatch, caplog):
+@pytest.mark.parametrize("op", ["embed", "segment"])
+def test_waits_for_a_service_down(monkeypatch, caplog, op):
     """Refused for a while: the call waits, trying again after the backoff, and gets the service's answer when it is
-    back; nothing is computed here; one error line, the down time while it lasts."""
+    back; nothing is computed here; one error line, the down time while it lasts. A voiceprint and a chunk's frames
+    alike."""
     monkeypatch.setitem(infer_server.state, "compute", Stub())
     monkeypatch.setitem(infer_server.state, "token", TOKEN)
     monkeypatch.setattr(compute, "CALLS", type(compute.CALLS)())
@@ -139,17 +153,17 @@ def test_waits_for_a_service_down(monkeypatch, caplog):
     port, url = down()
     r, x = compute.Remote(url, TOKEN, 5.0), speech()
     tries = counted(r)
-    got = background(r.embed, x)
+    got = background(getattr(r, op), x)
     time.sleep(1.5)
     assert "out" not in got and r.down_seconds() > 1, "waiting"
     server = serve(bound(port))
     got["thread"].join(5)
     server.should_exit = True
-    assert float(got["out"] @ Stub().embed(x)) >= 0.9999
+    assert np.allclose(got["out"], getattr(Stub(), op)(x), atol=1e-6)
     gaps = np.diff(tries)
     assert len(tries) >= 4 and gaps[0] >= 0.18 and gaps[-1] >= 0.38, gaps  # 0.2 s, then 0.4 s between tries
-    assert compute.CALLS["embed", "retried"] == 1 and compute.CALLS["embed", "error"] == len(tries) - 1
-    assert r.down_seconds() == 0 and sum("infer service embed" in m for m in caplog.messages) == 1, caplog.messages
+    assert compute.CALLS[op, "retried"] == 1 and compute.CALLS[op, "error"] == len(tries) - 1
+    assert r.down_seconds() == 0 and sum(f"infer service {op}" in m for m in caplog.messages) == 1, caplog.messages
 
 
 def test_hung_service_one_try_a_backoff(monkeypatch):
@@ -178,7 +192,8 @@ def test_hung_service_one_try_a_backoff(monkeypatch):
 
 
 def test_wrong_answer_is_tried_again(service, monkeypatch):
-    """Not a unit 192-float voiceprint (another model's, a broken one): never taken, tried again."""
+    """Not a unit 192-float voiceprint, not 589 x 7 finite frames (another model's, a broken one): never taken, tried
+    again."""
     x, bad = speech(), [np.ones(191, np.float32) / np.sqrt(191), np.ones(192, np.float32)]
     stub = Stub()
     real = stub.embed
@@ -187,6 +202,9 @@ def test_wrong_answer_is_tried_again(service, monkeypatch):
     r = compute.Remote(service, TOKEN, 5.0)
     assert float(r.embed(x) @ Stub().embed(x)) >= 0.9999
     assert compute.CALLS["embed", "error"] == 2 and compute.CALLS["embed", "retried"] == 1
+    frames, bad = stub.segment, [np.zeros((588, 7), np.float32), np.full((589, 7), np.nan, np.float32)]
+    stub.segment = lambda x: bad.pop() if bad else frames(x)
+    assert np.allclose(r.segment(x), Stub().segment(x), atol=1e-6) and compute.CALLS["segment", "error"] == 2
 
 
 def test_token(service, monkeypatch, caplog):
@@ -228,7 +246,7 @@ def test_service_holds_nothing_of_a_tenant(tmp_path):
                           "sys.argv = ['alldayrec', '--infer', '--port', '9']; import alldayrec.__main__ as m; m.main()"],
                          capture_output=True, text=True, check=True, env=env).stdout
     mods, argv, routes = out.splitlines()
-    assert eval(routes) == ["/embed", "/health", "/metrics", "/music"] and eval(argv) == ["--port", "9"]
+    assert eval(routes) == ["/embed", "/health", "/metrics", "/music", "/segment"] and eval(argv) == ["--port", "9"]
     usage = subprocess.run([sys.executable, "-m", "alldayrec", "--infer", "--help"], capture_output=True, text=True,
                            check=True, env=env).stdout
     assert usage.startswith("usage: alldayrec --infer [-h] [--port PORT]"), usage
@@ -242,7 +260,7 @@ def test_load(service, monkeypatch, caplog, tmp_path):
     monkeypatch.setattr(compute, "REMOTE", None)
     assert isinstance(compute.load(), Stub) and not compute.served(), "INFER_URL unset: in this process, as before"
     monkeypatch.setenv("INFER_URL", service)
-    assert compute.served() == {infer.EMB, infer.YAMNET}, "nor downloaded or checked at start"
+    assert compute.served() == {infer.EMB, infer.YAMNET, infer.SEG}, "nor downloaded or checked at start"
     infer.fetch(tmp_path, skip=set(infer.MODELS))  # nothing to download, nothing missing
     infer.check(tmp_path, skip=set(infer.MODELS))
     with pytest.raises(SystemExit, match=infer.VAD):
