@@ -133,6 +133,7 @@ async function together() {
   const a = also.value;
   if (!a || saving.value) return;
   joining = true;
+  let ok = false;
   await run(async () => {
     const { to, voices, group, suggestion } = a;
     const r = await post<{ mixed: true } | { renamed: number; undo: string | null }>("/api/speakers/name", {
@@ -146,15 +147,25 @@ async function together() {
       error.value = t("nameCheck.twoPeople");
       return;
     }
-    also.value = null;
-    close();
+    ok = true;
+    if (also.value === a) {
+      // not another speaker's sheet opened meanwhile
+      also.value = null;
+      close();
+    }
     const undo = r.undo ?? a.done.undo; // the rename's taken into it
     // none renamed (named meanwhile): the rename's toast, its 撤销 the one undo
     done(r.renamed ? { msg: t("nameCheck.togetherDone", { n: r.renamed }, r.renamed), undo, back: t("common.undone") } : { ...a.done, undo });
     await props.reload();
   });
   joining = false;
-  if (!dlg.value?.open) closed(); // closed while it was on its way, and not taken (mixed, an error)
+  if (ok) return;
+  // not taken (mixed, an error): with another speaker's sheet opened meanwhile, not its error, the rename's 撤销 now;
+  // with the sheet closed while it was on its way, the same (closed)
+  if (also.value !== a) {
+    error.value = detail.value = "";
+    done(a.done);
+  } else if (!dlg.value?.open) closed();
 }
 async function alias(name: string, of: string) {
   await run(async () => {

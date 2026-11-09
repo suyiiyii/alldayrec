@@ -4,8 +4,9 @@ in use, a voice near another name), and a rename says which earlier conversation
 import time
 
 import anyio
+import anyio.to_thread
 
-from alldayrec import bank, db, routes_speakers
+from alldayrec import bank, db, routes_speakers, threads
 from test_voice_check import E, P, conv, near, store  # noqa: F401  (store: the fixture)
 
 
@@ -96,6 +97,48 @@ def test_earlier_keeps_the_loop_free(store, monkeypatch):
     assert got == {"voices": [f"{c1}|S1"], "n": 1, "group": f"{c1}|S1"} and ticks >= 20, ticks
     monkeypatch.setattr(bank, "halves", lambda ms, vec: 1 / 0)
     assert anyio.run(routes_speakers.earlier, named, "P") is None, "nothing to offer: no k-means"
+
+
+async def ticking(f, *a):
+    """f(*a)'s answer, and how many 10 ms ticks the event loop ran meanwhile."""
+    ticks = 0
+
+    async def tick():
+        nonlocal ticks
+        while True:
+            await anyio.sleep(0.01)
+            ticks += 1
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(tick)
+        r = await f(*a)
+        tg.cancel_scope.cancel()
+    return r, ticks
+
+
+def test_k_means_neither_waits_on_infer_nor_holds_the_loop(store, monkeypatch):
+    """Both INFER slots held (a backlog's voiceprints, a remote infer retrying while down): earlier() and the halves
+    test do not wait for one; the halves test (both ways in) runs in a thread, the other requests go on meanwhile."""
+    v = E[1] + E[2]
+    c1, c2, _ = conv(1, "S1", v + 0.1 * E[3]), conv(2, "S1", v + 0.1 * E[4]), conv(3, "P", E[6])
+    routes_speakers.speaker_groups()
+    monkeypatch.setattr(bank, "halves", lambda ms, vec: time.sleep(0.5))
+
+    async def busy_infer():
+        took = {}
+        async with anyio.create_task_group() as tg:
+            for _ in range(threads.INFER.total_tokens):
+                tg.start_soon(lambda: anyio.to_thread.run_sync(time.sleep, 3.0, limiter=threads.INFER))
+            await anyio.sleep(0.05)
+            for name, f, a in (("earlier", routes_speakers.earlier, (c2, "S1")), ("halves", routes_speakers.speaker_halves, (f"{c1}|S1",))):
+                t0 = time.monotonic()
+                took[name] = (await ticking(f, *a))[1], round(time.monotonic() - t0, 2)
+            tg.cancel_scope.cancel()
+        return took
+    took = anyio.run(busy_infer)
+    assert all(t >= 20 and s < 1.5 for t, s in took.values()), took
+    # in tests enroll_soon awaits enroll (INFER) itself, so with INFER free here
+    r, ticks = anyio.run(ticking, routes_speakers.speaker_name, {"group": f"{c1}|S1", "name": "Q"})
+    assert r["renamed"] == 2 and ticks >= 20, (r, ticks)
 
 
 def test_check_where_the_name_is(store):
