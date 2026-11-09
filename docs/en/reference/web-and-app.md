@@ -39,7 +39,7 @@ Of the app's four bottom tabs, **时间线** (Timeline), **实时** (Live) and *
 
 | Entry | Content |
 |---|---|
-| 录音设备 (Recorder) | The bound Bluetooth recorder: battery (a Feishu recorder bean also shows its charging case's), card, pause, live listening, offline recording sync, USB disk mode, firmware update, unbind (a Feishu recorder bean has no pause, live listening, USB disk mode or firmware update) |
+| 录音设备 (Recorder) | The bound Bluetooth recorder: battery (a Feishu recorder bean also shows its charging case's), card, pause, live listening, offline recording sync, USB disk mode, firmware update, unbind (a Feishu recorder bean has no pause, live listening, USB disk mode or firmware update; on an iPhone it has Wi‑Fi fast transfer instead: while it does not record, its hotspot fetches the audio not sent yet, fast) |
 | 设备状态与更多 (Device status and more) | The web page `/me`: battery, card, progress, connecting AI |
 | 上传 (Upload) | The phone's upload queue, and how far the server has processed this device's audio |
 | 设置 (Settings) | See below |
