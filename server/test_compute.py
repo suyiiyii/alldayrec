@@ -105,7 +105,9 @@ def test_fallback_on_timeout_and_error(service, monkeypatch, caplog):
     dead.bind(("127.0.0.1", 0))
     port = dead.getsockname()[1]
     dead.close()  # nothing there: refused
-    assert float(remote(f"http://127.0.0.1:{port}", timeout=0.5).embed(x) @ want) >= 0.9999
+    gone = remote(f"http://127.0.0.1:{port}", timeout=0.5)
+    gone._local = r._local
+    assert float(gone.embed(x) @ want) >= 0.9999
     assert compute.CALLS["embed", "local"] == 2
 
 
