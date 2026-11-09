@@ -17,7 +17,8 @@ import NameCheck from "./NameCheck.vue";
 // conversation has already, can be undone for 10 s (the server keeps what it changed: POST /api/speakers/undo). A
 // modal <dialog>: Escape or a tap on the dim backdrop closes it. reload: the page loads again what shows the speakers.
 // A typed name is checked first (NameCheck: a person it may be already); after a rename, the label's voice in earlier
-// conversations still unnamed is offered to rename too (一起改: POST /api/speakers/name with those voices).
+// conversations still unnamed is offered to rename too (一起改: POST /api/speakers/name with those voices); the rename's
+// 撤销 waits till the sheet closes (a toast under the modal sheet is out of reach), or goes into 一起改's, one for both.
 // rename, alias, hear, saving, error: for the page's own suggestion list (the conversation page's ⋯ 建议)
 const props = defineProps<{
   conv: { id: string; device?: string | null; participants: string[]; rows: Row[] } | null;
@@ -29,7 +30,7 @@ const editing = ref(""),
   newName = ref(""),
   names = ref<string[]>([]),
   ask = ref<{ to: string; check: Check } | null>(null),
-  also = ref<{ to: string; voices: string[]; n: number } | null>(null),
+  also = ref<(Also & { to: string; done: Done }) | null>(null),
   box = useTemplateRef<HTMLInputElement>("box");
 let sure = false; // 是另一个人: the next typed name is not checked again
 const { busy: saving, error, detail, run } = useMutation();
@@ -71,13 +72,10 @@ function hear(label: string) {
 }
 const playing = (label: string) => player.playing === `${props.conv?.id}|${label}`;
 
-type Renamed = {
-  renamed: number;
-  voiceprints: number;
-  learned?: boolean;
-  undo: string;
-  also: { voices: string[]; n: number } | null;
-};
+type Also = { voices: string[]; n: number; group: string; suggestion?: string };
+type Renamed = { renamed: number; voiceprints: number; learned?: boolean; undo: string; also: Also | null };
+type Done = { msg: string; undo: string; back: string }; // a rename's toast: its undo id, what 撤销 then says
+const done = (d: Done) => toast(d.msg, { undo: () => void undo(d.undo, d.back), ms: 10_000 });
 async function rename(from: string, to: string, check = false) {
   const c = props.conv;
   if (!c) return;
@@ -92,19 +90,22 @@ async function rename(from: string, to: string, check = false) {
       return;
     }
     ask.value = null;
-    if (editing.value === from) {
-      // not another speaker's sheet opened meanwhile
-      if (r.also) [also.value, editing.value] = [{ to, ...r.also }, ""];
-      else close();
+    const d = {
+      msg:
+        to === "我"
+          ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
+          : merge
+            ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
+            : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
+      undo: r.undo,
+      back: t("conv.renamedBack", { to: speakerLabel(from) }),
+    };
+    // not another speaker's sheet opened meanwhile
+    if (editing.value === from && r.also) [also.value, editing.value] = [{ ...r.also, to, done: d }, ""];
+    else {
+      if (editing.value === from) close();
+      done(d);
     }
-    toast(
-      to === "我"
-        ? t(r.learned ? "speaker.toMe" : "speaker.toMeShort")
-        : merge
-          ? t("conv.merged", { from: speakerLabel(from), to: speakerLabel(to) })
-          : t(r.voiceprints ? "conv.renamedLearn" : "conv.renamed", { to: speakerLabel(to), n: r.renamed }, r.renamed),
-      { undo: () => void undo(r.undo, t("conv.renamedBack", { to: speakerLabel(from) })), ms: 10_000 },
-    );
     await props.reload();
   });
 }
@@ -120,19 +121,31 @@ function other(free: string) {
   [newName.value, ask.value, sure] = [free, null, true];
   box.value?.focus();
 }
+function closed() {
+  // the sheet closed (✕, 不用了, Escape, the backdrop) with 一起改 not taken: now the rename's 撤销 is in reach
+  if (also.value) done(also.value.done);
+  also.value = null;
+}
 async function together() {
   const a = also.value;
   if (!a) return;
   await run(async () => {
-    const r = await post<{ renamed: number; undo: string | null }>("/api/speakers/name", {
-      name: a.to,
-      voices: a.voices,
+    const { to, voices, group, suggestion } = a;
+    const r = await post<{ mixed: true } | { renamed: number; undo: string | null }>("/api/speakers/name", {
+      name: to,
+      voices,
+      group,
+      suggestion,
+      undo: a.done.undo, // the rename's: one 撤销 takes back both
     });
+    if ("mixed" in r) {
+      error.value = t("nameCheck.twoPeople");
+      return;
+    }
+    also.value = null;
     close();
-    toast(
-      t("nameCheck.togetherDone", { n: r.renamed }, r.renamed),
-      r.undo ? { undo: () => void undo(r.undo!, t("common.undone")), ms: 10_000 } : {},
-    );
+    const back = t("common.undone");
+    done({ msg: t("nameCheck.togetherDone", { n: r.renamed }, r.renamed), undo: r.undo ?? a.done.undo, back });
     await props.reload();
   });
 }
@@ -160,6 +173,7 @@ defineExpose({ open, close, rename, alias, hear, saving, error, detail });
     aria-labelledby="sheet-who"
     tabindex="-1"
     @click.self="close"
+    @close="closed"
   >
     <div class="in">
       <div class="phead">

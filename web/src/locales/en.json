@@ -897,7 +897,8 @@
     "found": "This voice was in {n} earlier conversation too | This voice was in {n} earlier conversations too",
     "together": "Rename them to “{name}” too",
     "skip": "No thanks",
-    "togetherDone": "{n} more conversation renamed, rewriting its summary | {n} more conversations renamed, rewriting their summaries"
+    "togetherDone": "{n} more conversation renamed, rewriting its summary | {n} more conversations renamed, rewriting their summaries",
+    "twoPeople": "These sound like two people: split the card on the People page first"
   },
   "speakers": {
     "voice": "Voice {n}",

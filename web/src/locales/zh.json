@@ -897,7 +897,8 @@
     "found": "之前 {n} 段对话里也出现过这个声音",
     "together": "一起改成「{name}」",
     "skip": "不用了",
-    "togetherDone": "又改了 {n} 段对话，摘要重新生成中"
+    "togetherDone": "又改了 {n} 段对话，摘要重新生成中",
+    "twoPeople": "这几段像是两个人，先到「人物」页把这张卡拆开再改"
   },
   "speakers": {
     "voice": "声音 {n}",
