@@ -936,6 +936,16 @@ final class BeanSync {
         liveAgain = 0
         throw Again(description: "file \(x.file): rolled over to \(open)", naturalRollover: naturalRollover)
       }
+      if let x, !x.live {
+        // Recording began mid catch-up: the bean sends no more of it. Live at once on a new connection, not a try.
+        flush()
+        log("bean_xfer", "豆子开始录音，补传文件 \(x.file) 停在单元 \(max(x.last + 1, x.from))，停录后接着补",
+            fields: ["file": x.file, "open": open, "units": x.units, "last": x.last])
+        xfer = nil
+        liveAgain = 0
+        save()
+        throw Again(description: "file \(x.file): the bean began recording \(open)")
+      }
       recording = true
       listing.open = open
       let pre = p.count > 8 ? Int(p[8]) : p.count > 4 ? Int(p[4]) : -1

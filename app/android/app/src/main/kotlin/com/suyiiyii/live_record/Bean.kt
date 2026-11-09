@@ -729,6 +729,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                     liveAgain = 0
                     throw Again("file ${x.file}: rolled over to $open", naturalRollover = naturalRollover)
                 }
+                if (x != null && !x.live) {
+                    // Recording began mid catch-up: the bean sends no more of it. Live at once on a new connection, not a try.
+                    flush()
+                    io.log("bean_xfer", "豆子开始录音，补传文件 ${x.file} 停在单元 ${maxOf(x.last + 1, x.from)}，停录后接着补",
+                        fields = mapOf("file" to x.file, "open" to open, "units" to x.units, "last" to x.last))
+                    xfer = null
+                    liveAgain = 0
+                    save()
+                    throw Again("file ${x.file}: the bean began recording $open")
+                }
                 recording = true
                 listing = Bean.Listing(listing.files, open)
                 io.log("bean_file", "豆子开始录新文件 ${listing.open}", fields = mapOf("file" to listing.open, "pre" to (p.getOrNull(if (p.size > 8) 8 else 4)?.toInt() ?: -1)))
