@@ -56,7 +56,7 @@ def snapshot(store: str, recordings: str, device: str, a: str, b: str):
 
 def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
     import anyio
-    from alldayrec import asr, core, db, device_pipeline, infer, music, perf
+    from alldayrec import asr, core, db, device_pipeline, infer, music, perf, transcript
     from alldayrec.diarist import load_embedder
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -102,6 +102,7 @@ def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
     infer.check()
     core.state["embed"] = load_embedder()
     core.state["music"] = music.heard if music.ON else None
+    core.state["turns"] = transcript.turns if transcript.SPLIT_TURNS else None
 
     t0, c0, peak = time.monotonic(), sum(os.times()[:2]), [0.0]
 

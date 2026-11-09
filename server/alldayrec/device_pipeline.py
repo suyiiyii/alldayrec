@@ -396,7 +396,7 @@ async def pipeline(device: str):
                 segs = await asr.engine_segs(j["x"], j["speech"], device=device)
             async with embeds:
                 with perf.timed(j["cost"], "embed_ms"):  # with music.py's YAMNet when on
-                    j["vs"] = await anyio.to_thread.run_sync(voices, embed, segs, j["x"], state["music"], limiter=threads.INFER)
+                    j["vs"] = await anyio.to_thread.run_sync(voices, embed, segs, j["x"], state["music"], state["turns"], limiter=threads.INFER)
             j["segs"] = segs
         except Exception as e:
             j["error"] = e

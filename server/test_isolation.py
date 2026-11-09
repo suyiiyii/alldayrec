@@ -386,6 +386,7 @@ def test_nothing_per_person_in_a_module():
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
                "music": {"@cache _yamnet"},  # the music model, loaded once for everyone like the VAD
+               "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)
                "compute": {"CALLS"}, "infer_server": {"state"}}  # calls to the inference service by op and result; its model and token
     here = Path(server.__file__).parent
