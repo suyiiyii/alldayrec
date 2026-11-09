@@ -3,11 +3,11 @@ nothing of a tenant's (no database, no files, no names). Every caller reaches th
 from a thread under threads.INFER, so a backend is only a blocking function.
 
 - local (the default, INFER_URL unset): in this process on onnxruntime, exactly as before (infer.embedder, music.heard).
-- remote (INFER_URL=https://infer.example.com): POSTs the samples to alldayrec-infer (infer_server.py) with INFER_TOKEN,
-  2 s to connect and INFER_TIMEOUT s to answer. This process then never loads those models (nor downloads them, served()).
-  A call that fails (refused, a timeout, any 4xx or 5xx, an answer that is no unit DIM-float voiceprint) waits for the
-  service: it tries again after BACKOFF_S, doubling to its last, until one is answered; no sentence is lost or skipped,
-  its device's pipeline waits (uploads are still taken and stored). Calls meanwhile sleep to the next try instead of
+- remote (INFER_URL=https://infer.example.com): POSTs the samples to alldayrec --infer (infer_server.py) with
+  INFER_TOKEN, 2 s to connect and INFER_TIMEOUT s to answer. This process then never loads those models (nor downloads
+  them, served()). A call that fails (refused, a timeout, any 4xx or 5xx, an answer that is no unit DIM-float
+  voiceprint) waits for the service: it tries again after BACKOFF_S, doubling to its last, until one is answered; no
+  sentence is lost or skipped, its device's pipeline waits (uploads are still taken and stored). Calls meanwhile sleep to the next try instead of
   each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
   service has been failing, lr_infer_calls_total{op,result} counts calls (remote, retried) and failed tries (error).
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,

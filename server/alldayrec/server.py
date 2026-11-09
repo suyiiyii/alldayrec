@@ -1,6 +1,7 @@
 """Live transcript of the phone's recording.
 
     alldayrec [--port 8770]            installed (pip install alldayrec, uvx alldayrec)
+    alldayrec --infer [--port 8771]    the inference service instead (infer_server.py, for INFER_URL)
     set -a; . ../.env; set +a; uv run alldayrec [--port 8770]       in server/ of a checkout
 (variables: .env.example; tenants: DATA_DIR/tenants.json, tenant.py, one made at the first start)
 
@@ -188,8 +189,10 @@ class TenantTag(logging.Filter):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(prog="alldayrec")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8770")))
+    ap.add_argument("--infer", action="store_true", help="start the inference service instead (for INFER_URL: "
+                    "INFER_TOKEN, INFER_HOST, INFER_PORT; --port is then its own)")  # never set here: __main__ takes it
     args = ap.parse_args()
     missing = []
     engines = {e for e in (asr.ENGINE, asr.DRAFT_ENGINE, asr.ENGINE_FALLBACK) if e}
@@ -220,7 +223,7 @@ def main():
     infer.check(skip=skip)  # every model file there and the pinned one, before anything starts
     log.info("models ok: %d files in %s", len(infer.MODELS) - len(skip), infer.DIR)
     # before the event loop: building the session keeps the GIL ~0.3 s, which in a thread held up the loop at each start
-    c = compute.load()  # in this process, or the alldayrec-infer service at INFER_URL
+    c = compute.load()  # in this process, or the inference service (alldayrec --infer) at INFER_URL
     state["embed"] = c.embed
     state["music"] = c.music if music.ON else None
     if not tenant.FILE.exists():

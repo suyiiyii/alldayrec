@@ -218,14 +218,20 @@ def test_token(service, monkeypatch, caplog):
 
 
 def test_service_holds_nothing_of_a_tenant(tmp_path):
-    """Pure computation: the service loads no database, audio, tenant-pipeline or server module, and its only routes
-    are these. (alldayrec.tenant comes in through infer.py, for MODELS_DIR's default path only.)"""
+    """Pure computation: alldayrec --infer (its main here, as the alldayrec command runs it) has loaded no database,
+    audio, tenant-pipeline or server module, gets --port, and its only routes are these. (alldayrec.tenant comes in
+    through infer.py, for MODELS_DIR's default path only.)"""
+    env = {"DATA_DIR": str(tmp_path / "data"), "PATH": ""}
     out = subprocess.run([sys.executable, "-c", "import sys, alldayrec.infer_server as s; "
-                          "print(sorted(m for m in sys.modules if m.startswith('alldayrec.'))); "
-                          "print(sorted(r.path for r in s.app.routes))"],
-                         capture_output=True, text=True, check=True, env={"DATA_DIR": str(tmp_path / "data"), "PATH": ""}).stdout
-    mods, routes = out.splitlines()
-    assert eval(routes) == ["/embed", "/health", "/metrics", "/music"]
+                          "s.main = lambda: print(sorted(m for m in sys.modules if m.startswith('alldayrec.')), "
+                          "sys.argv[1:], sorted(r.path for r in s.app.routes), sep='\\n'); "
+                          "sys.argv = ['alldayrec', '--infer', '--port', '9']; import alldayrec.__main__ as m; m.main()"],
+                         capture_output=True, text=True, check=True, env=env).stdout
+    mods, argv, routes = out.splitlines()
+    assert eval(routes) == ["/embed", "/health", "/metrics", "/music"] and eval(argv) == ["--port", "9"]
+    usage = subprocess.run([sys.executable, "-m", "alldayrec", "--infer", "--help"], capture_output=True, text=True,
+                           check=True, env=env).stdout
+    assert usage.startswith("usage: alldayrec --infer [-h] [--port PORT]"), usage
     assert not {"alldayrec.db", "alldayrec.audio", "alldayrec.core", "alldayrec.bank", "alldayrec.server"} & set(eval(mods))
     assert not (tmp_path / "data").exists()
 

@@ -1,6 +1,6 @@
-"""alldayrec-infer: the server's heavy pure computations (compute.Local) as a small HTTP service, for INFER_URL.
+"""alldayrec --infer: the server's heavy pure computations (compute.Local) as a small HTTP service, for INFER_URL.
 
-    INFER_TOKEN=... alldayrec-infer [--port 8771]          (or python -m alldayrec.infer_server)
+    INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
 POST /embed and /music: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most MAX_S s),
 with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]} or {"music": bool}.
@@ -101,7 +101,7 @@ async def metrics(request: Request):
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p = argparse.ArgumentParser(prog="alldayrec --infer", description=__doc__.splitlines()[0])
     p.add_argument("--port", type=int, default=int(os.environ.get("INFER_PORT", "8771")))
     args = p.parse_args()
     if not os.environ.get("INFER_TOKEN"):
@@ -114,7 +114,3 @@ def main():
     logging.getLogger(__name__).info("ready on %s:%d", host, args.port)
     import uvicorn
     uvicorn.run(app, host=host, port=args.port, log_level="warning", access_log=False)
-
-
-if __name__ == "__main__":
-    main()
