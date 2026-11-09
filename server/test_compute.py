@@ -278,33 +278,42 @@ first one alone is S? as with a local model: the diarist's, a lone short sentenc
     finals = lambda: db.sentences(core.iso(t0), core.iso(t0 + dt.timedelta(seconds=60)), source=DEVICE)
     stored = lambda: db.conn().execute("SELECT COUNT(*) FROM pieces WHERE device = ?", (DEVICE,)).fetchone()[0]
 
+    up = []  # the service, once brought up
+
+    async def checks():
+        took = []
+        for k in range(20):  # 1 s pieces, as an app sends them, the service down
+            t = time.perf_counter()
+            await anyio.to_thread.run_sync(audio.save, DEVICE, int((t0 + dt.timedelta(seconds=k)).timestamp() * 1000),
+                                           flac(x[k * SR:(k + 1) * SR]), "audio/flac")
+            took.append(time.perf_counter() - t)
+        db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=20)))
+        lag = 0.0
+        for _ in range(30):  # 3 s down after the last upload: the loop is free, the final layer waits
+            t = time.perf_counter()
+            await anyio.sleep(0.1)
+            lag = max(lag, time.perf_counter() - t - 0.1)
+        assert stored() == 20 and max(took) < 1.0 and lag < 0.3, (stored(), took, lag)
+        assert finals() == [] and r.down_seconds() > 2, "waiting for the service, nothing skipped"
+        up.append(await anyio.to_thread.run_sync(serve, bound(port)))
+        for _ in range(60):
+            if len(finals()) >= 4:
+                break
+            await anyio.sleep(0.5)
+        rows = finals()
+        assert [s["text"] for s in rows] == ["0", "1", "2", "3"], rows
+        assert len(called) == 4 and rows[-1]["speaker"] == "S1", (len(called), rows)  # each sentence's voiceprint, once
+        assert sum(n for (_, k), n in compute.CALLS.items() if k == "error") > 0, "it was down"
+
     async def run():
         async with anyio.create_task_group() as tg:
             tg.start_soon(device_pipeline.pipeline, DEVICE)
-            took = []
-            for k in range(20):  # 1 s pieces, as an app sends them, the service down
-                t = time.perf_counter()
-                await anyio.to_thread.run_sync(audio.save, DEVICE, int((t0 + dt.timedelta(seconds=k)).timestamp() * 1000),
-                                               flac(x[k * SR:(k + 1) * SR]), "audio/flac")
-                took.append(time.perf_counter() - t)
-            db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=20)))
-            lag = 0.0
-            for _ in range(30):  # 3 s down after the last upload: the loop is free, the final layer waits
-                t = time.perf_counter()
-                await anyio.sleep(0.1)
-                lag = max(lag, time.perf_counter() - t - 0.1)
-            assert stored() == 20 and max(took) < 1.0 and lag < 0.3, (stored(), took, lag)
-            assert finals() == [] and r.down_seconds() > 2, "waiting for the service, nothing skipped"
-            server = await anyio.to_thread.run_sync(serve, bound(port))
-            for _ in range(60):
-                if len(finals()) >= 4:
-                    break
-                await anyio.sleep(0.5)
-            server.should_exit = True
-            rows = finals()
-            assert [s["text"] for s in rows] == ["0", "1", "2", "3"], rows
-            assert len(called) == 4 and rows[-1]["speaker"] == "S1", (len(called), rows)  # each sentence's voiceprint, once
-            assert sum(n for (_, k), n in compute.CALLS.items() if k == "error") > 0, "it was down"
-            tg.cancel_scope.cancel()
+            try:
+                await checks()
+            finally:  # the service up before the cancel: it waits for a call in a thread, which waits for the service
+                if not up:
+                    up.append(await anyio.to_thread.run_sync(serve, bound(port)))
+                tg.cancel_scope.cancel()
+        up[0].should_exit = True
 
     anyio.run(run)
