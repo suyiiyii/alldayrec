@@ -19,7 +19,7 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 
 ## Why
 
-- **Use the devices you already have.** The [Feishu recorder bean](../how-to/bind-recorder.md#feishu-recorder-bean) (Android only) and the [open-source recorder](../reference/hardware.md) connect to the app and sync live; recordings from other devices can be [imported](../how-to/import-recordings.md); with no device at all, the Android app, the iPhone app and a browser record directly.
+- **Use the devices you already have.** The [Feishu recorder bean](../how-to/bind-recorder.md#feishu-recorder-bean) and the [open-source recorder](../reference/hardware.md) connect to the app and sync live; recordings from other devices can be [imported](../how-to/import-recordings.md); with no device at all, the Android app, the iPhone app and a browser record directly.
 - **The original audio stays.** Every line plays back, and old days can be transcribed again when a better model comes along.
 - **Your data lives on your server.** Audio goes only to the ASR service you pick and transcripts only to the LLM you pick.
 - **Free software, pay by use.** You pay the services you pick for ASR and the LLM by use; the default Qwen transcription costs about ¥0.05 per hour of audio.
@@ -27,7 +27,7 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 
 ## What it does
 
-- **Use the devices you already have.** The [Feishu recorder bean](../how-to/bind-recorder.md#feishu-recorder-bean) (Android only) and the [open-source recorder](../reference/hardware.md) connect to the app and sync live; recordings from other devices can be [imported](../how-to/import-recordings.md); with no device at all, the Android app, the iPhone app and a browser record directly.
+- **Use the devices you already have.** The [Feishu recorder bean](../how-to/bind-recorder.md#feishu-recorder-bean) and the [open-source recorder](../reference/hardware.md) connect to the app and sync live; recordings from other devices can be [imported](../how-to/import-recordings.md); with no device at all, the Android app, the iPhone app and a browser record directly.
 - **Transcribes in two layers.** The final transcript comes from a cloud ASR engine (default: Alibaba Cloud Bailian Qwen, about ¥0.05 per hour of audio), and drafts show within seconds while a page is open; `ENGINE=local` transcribes on your machine instead.
 - **Knows who spoke.** It learns your own voice and remembers the names you give others.
 - **Remembers.** Conversation summaries, to-dos with due dates, a daily recap, and full-text search.
@@ -41,7 +41,7 @@ The Live page: captions come up as people speak, and the AI live summary keeps u
 | | **AllDayRec** | Anker × Feishu AI recorder (录音豆) | OPPO AI 心力球 | DingTalk A1 | Plaud | Bee (Amazon) | Omi |
 |---|---|---|---|---|---|---|---|
 | **Price / subscription** | Free software; ASR paid by use, Qwen about ¥0.05/h; LLM extra | From ¥899; 6 months of AI credits, then ¥69/month membership[^lrd]; the membership transcribes about 50 h a month[^lrd3] | ¥499 trial price, invitation only, bought with an invite code[^xlq2][^xlq3]; OPPO, OnePlus and realme phones only[^xlq]; software pricing due at the end of November[^xlq4] | ¥499 / ¥799[^a1c]; membership ¥599 or ¥1499/year[^a1] | NotePin S $179[^plaud-dev]; free 300 min/month, Pro $17.99/month[^plaud-plan] | Relaunched 2026-10-15: Frontier $74.99, on sale in the US; Eclipse $99.99, no release date; Pro $11.99/month[^bee] | Pendant $179 ($129 on offer); free 300 cloud min/month, Pro $269/year[^omi-price] |
-| **All-day wear** | Yes: the phone app, a Feishu recorder bean (Android), or a home-built recorder that writes to its card | 8 h per charge, 32 h with the case[^lrd] | 24 h of continuous recording[^xlq] | A card on the back of the phone, 45 h of recording[^a1] | NotePin S about 20 h[^plaud-dev] | Frontier on the wrist or clipped on, 7 days[^bee-x] | Pendant |
+| **All-day wear** | Yes: the phone app, a Feishu recorder bean, or a home-built recorder that writes to its card | 8 h per charge, 32 h with the case[^lrd] | 24 h of continuous recording[^xlq] | A card on the back of the phone, 45 h of recording[^a1] | NotePin S about 20 h[^plaud-dev] | Frontier on the wrist or clipped on, 7 days[^bee-x] | Pendant |
 | **Keeps the original audio** | Yes: every line plays back and can be transcribed again | Deleted from the device after upload, kept in the cloud; download only one by one on the Minutes web page[^lrd] | No: "text only, no original audio"[^xlq] | Unknown | Yes, exports MP3 / WAV[^plaud-exp] | No, deleted after processing[^bee] | Optional, off by default[^omi-audio] |
 | **Where the data lives** | Your own server | Feishu cloud[^lrd] | OPPO's PCC private cloud[^xlq] | 64 GB on the device + DingTalk cloud[^a1] | Plaud cloud[^plaud-plan] | Bee's cloud (Bee Private Compute)[^bee] | Omi cloud, or your own backend[^omi-docs] |
 | **Speaker recognition** | Local voiceprints: knows your voice, remembers the names you give | Voiceprints tell speakers apart[^lrd2] | Voiceprint tells the wearer apart[^xlq] | Names after a voiceprint is registered[^a1b] | Speakers, renamable with find & replace[^plaud-rn] | Knows the wearer; names other people only after they do a voice training with the wearer[^bee-gw] | Speaker identification[^omi-docs] |
