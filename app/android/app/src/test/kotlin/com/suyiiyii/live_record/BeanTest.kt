@@ -1586,6 +1586,21 @@ class BeanTest {
         assertEquals("each unit once", (0L until 3000L).toList(), seqs(File(dir, "chunks")))
     }
 
+    /** Writing the last piece fails as the fast transfer ends (a full disk): the hotspot is left all the same, so BLE
+     *  does not go on over a dead Wi-Fi. */
+    @Test fun wifiLeftWhenTheLastPieceFails() {
+        val dir = Files.createTempDirectory("bean").toFile(); val chunks = File(dir, "chunks")
+        val bean = wifiBean()
+        bean.wifiAsk = true
+        bean.onTransfer = { file, from, _ ->
+            bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 2984L).toList(), ms = 1)
+            bean.script.addFirst { chunks.renameTo(File(dir, "gone")); chunks.writeText("") }  // once those are in: no dir to write to
+        }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertFalse("the hotspot left", bean.onWifi)
+    }
+
     /** The bean starts recording during a fast transfer (its button): Wi-Fi ends there, what came is kept. */
     @Test fun wifiEndsWhenTheBeanRecords() {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -1608,7 +1623,12 @@ class BeanTest {
             val sync = wifiSync(bean, dir)
             try { sync.session(wt0 - 3_600_000, "") } catch (_: Exception) {}
             assertEquals("$pct%", pct >= 30, 0x1A05 in bean.sentCmds())
-            if (pct < 30) assertEquals(mapOf("code" to "beanWifiLowBattery", "battery" to 20), sync.wifiNote)
+            if (pct < 30) {
+                assertEquals(mapOf("code" to "beanWifiLowBattery", "battery" to 20), sync.wifiNote)
+                bean.battery = 7; bean.wifiAsk = true; bean.script.clear(); repeat(40) { bean.script += {} }
+                try { sync.session(wt0 - 3_600_000, "") } catch (_: Exception) {}
+                assertNull("asked again: the note of the one before gone", sync.wifiNote)
+            }
         }
     }
 
