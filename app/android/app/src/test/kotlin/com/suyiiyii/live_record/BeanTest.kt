@@ -304,6 +304,7 @@ class BeanTest {
         assertEquals("no jump from the resend", emptyList<String>(),
             bean.logs.filter { it.first == "bean_clock" && !it.second.contains("起点") }.map { it.second })
         assertEquals(0, sync.files[a]!!.anchors.size)
+        assertEquals("units sent again are not late", 0, bean.logs.count { it.first == "bean_gap_time" })
         val late = piecesIn(chunks).filter { it.second >= 31_500 }.maxOf { kotlin.math.abs(it.first - (openAt + it.second * 20)) }
         assertTrue("dated by seq as before: $late ms off", late <= 100)
     }

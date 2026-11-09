@@ -800,7 +800,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
         val now = io.now()
         val late = now - x.seen - (s.seq - x.last) * Bean.FRAME_MS
-        if (x.live && x.last >= 0 && late > 5000)  // the bean paused mid-file (the app never asks it to) or the link stalled
+        // the bean paused mid-file (the app never asks it to) or the link stalled; a unit sent again (seq ≤ the highest seen)
+        // is not late, else a resend logs one warn per unit (11-08 16:42 would have been ~20,000)
+        if (x.live && x.last >= 0 && s.seq > x.last && late > 5000)
             io.log("bean_gap_time", "文件 ${x.file} 实时单元 ${x.last}→${s.seq} 之间过了 ${(now - x.seen) / 1000} s：豆子若暂停过，" +
                 "之后的单元按序号排会早 ${late / 1000} s", "warn", mapOf("file" to x.file, "seq" to s.seq, "late_ms" to late))
         if (x.live && x.last >= 0 && s.seq <= x.last && !x.resent) {  // 11-08 16:42 (iOS): 20704→0, then 41 s behind all along
