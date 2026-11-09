@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
+import kotlin.concurrent.thread
 
 /*
  * The Feishu recorder bean's Wi-Fi fast transfer (#431) on Android, as BeanWifi.swift on iOS: its hotspot joined (a
@@ -38,7 +39,7 @@ import javax.net.ssl.X509TrustManager
  * bytes here meanwhile. Only these sockets are bound to the hotspot (never the process): uploads keep the phone's own
  * network. What it needs of Android is `Net` (AndroidNet below; a fake in the tests).
  */
-class BeanWifi(private val ssid: String, private val password: String, private val net: Net,
+class BeanWifi(private val ssid: String, private val password: String, private val net: Net, private val readMs: Int = READ_MS,
                private val log: (kind: String, text: String, level: String?, fields: Map<String, Any?>) -> Unit) {
     interface Net {
         /** Asks to join the hotspot (the system asks the person): true once on it, false refused or not found (Android
@@ -154,7 +155,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         val u = try {
             s.soTimeout = 15_000
             handshake(s.getInputStream(), s.getOutputStream())
-            s.soTimeout = READ_MS
+            s.soTimeout = readMs
             net.udp()
         } catch (e: Exception) { s.close(); throw e }
         out = s.getOutputStream(); udp = u
@@ -188,7 +189,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
     }
 
     /** Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not); pings answered.
-     *  Whatever ends it (a bad frame, READ_MS of silence) closes the socket: a write stuck on it ends too. */
+     *  Whatever ends it (a bad frame, readMs of silence) closes the socket: a write stuck on it ends too. */
     private fun pump(s: Socket) {
         try {
             val i = s.getInputStream()
@@ -198,7 +199,9 @@ class BeanWifi(private val ssid: String, private val password: String, private v
                 val f = readFrame(i)
                 when (f.op) {
                     0x8 -> break
-                    0x9 -> write(0xA, f.data)
+                    // the pong on a thread of its own: a write stuck on a bean that reads nothing (the lock, or the socket
+                    // itself full) would hold this one, and readMs could not end it
+                    0x9 -> thread(isDaemon = true, name = "bean-wifi-pong") { try { write(0xA, f.data) } catch (_: Exception) {} }
                     0x0, 0x1, 0x2 -> {
                         if (f.op != 0) { type = f.op; message = ByteArray(0) }
                         else if (type == 0) throw IOException("a continuation of no message")

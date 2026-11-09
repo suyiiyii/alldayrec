@@ -2,6 +2,7 @@ package com.suyiiyii.live_record
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -12,11 +13,15 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.nio.file.Files
 import java.security.KeyStore
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLServerSocket
@@ -27,14 +32,15 @@ import kotlin.concurrent.thread
 class BeanWifiTest {
     private val endpoint = byteArrayOf(1, 0x2B, 0xA8.toByte(), 0xC0.toByte(), 0xBB.toByte(), 1)  // 192.168.43.1:443
 
-    private class Net(val joined: Boolean?, val port: Int = 0, val pin: String? = null, var udpFails: Int = 0) : BeanWifi.Net {
+    private class Net(val joined: Boolean?, val port: Int = 0, val pin: String? = null, var udpFails: Int = 0,
+                      val sendBuffer: Int? = null) : BeanWifi.Net {
         var joins = 0; var connects = 0; var leaves = 0
         override fun join(ssid: String, password: String, ms: Long): Boolean? { joins++; return joined }
         override fun address() = "192.168.43.7"
         override fun connect(host: String, port: Int, ms: Int): Socket {
             connects++
             pin?.let { throw BeanWifi.Pin(it) }
-            return Socket(InetAddress.getLoopbackAddress(), this.port)
+            return Socket().apply { sendBuffer?.let { sendBufferSize = it }; connect(InetSocketAddress(InetAddress.getLoopbackAddress(), this@Net.port)) }
         }
         override fun udp(): DatagramSocket {
             if (udpFails > 0) { udpFails--; throw IOException("bindSocket refused") }  // a VPN's
@@ -44,7 +50,8 @@ class BeanWifiTest {
     }
 
     private val logs = mutableListOf<Pair<String, String>>()
-    private fun wifi(net: Net) = BeanWifi("LR-00000000", "0123456789abcdef", net) { k, t, _, _ -> synchronized(logs) { logs += k to t } }
+    private fun wifi(net: Net, readMs: Int = BeanWifi.READ_MS) =
+        BeanWifi("LR-00000000", "0123456789abcdef", net, readMs) { k, t, _, _ -> synchronized(logs) { logs += k to t } }
 
     @Test fun onlyTheBeansEndpoint() {
         val net = Net(true)
@@ -226,5 +233,43 @@ class BeanWifiTest {
         }
         assertTrue("ended in about 500 ms", (System.nanoTime() - t0) / 1_000_000 < 2500)
         bean.join(5000)
+    }
+
+    /** The bean silent readMs once the socket is up (it or its hotspot gone, the socket still open): the reader ends,
+     *  receive() says so. */
+    @Test fun silenceEndsTheReader() {
+        val done = CountDownLatch(1)
+        val bean = thread { serve(server) { _, _ -> done.await(10, TimeUnit.SECONDS) } }
+        val w = wifi(Net(true, server.localPort), readMs = 500)
+        w.open(endpoint)
+        assertThrows("ended within the 2 s asked, not a null", IOException::class.java) { w.receive(2000) }
+        done.countDown(); w.close(); bean.join(5000)
+    }
+
+    /** A write stuck on a bean that reads nothing (small buffers: stuck at once), pinged once it is or not: the reader
+     *  still ends readMs on (the pong not on its thread), closing the socket, and the stuck write ends with it. */
+    @Test fun stuckWriteEndsWithTheReader() {
+        server.receiveBufferSize = 4096
+        for (ping in listOf(false, true)) {
+            val stuck = CountDownLatch(1); val done = CountDownLatch(1)
+            val bean = thread {
+                serve(server) { _, o ->
+                    if (ping) { stuck.await(5, TimeUnit.SECONDS); o.write(BeanWifi.frame(0x9, "hi".toByteArray(), null)); o.flush() }
+                    done.await(15, TimeUnit.SECONDS)
+                }
+            }
+            val w = wifi(Net(true, server.localPort, sendBuffer = 4096), readMs = 2000)
+            w.open(endpoint)
+            var ended: Exception? = null; val sent = AtomicInteger()
+            val writer = thread { try { while (true) { w.send(ByteArray(1 shl 16)); sent.incrementAndGet() } } catch (e: Exception) { ended = e } }
+            var was = -1
+            while (sent.get() != was) { was = sent.get(); Thread.sleep(300) }  // no send done in 300 ms: stuck
+            stuck.countDown()
+            writer.join(8000)
+            assertFalse("ping $ping: the stuck write ended", writer.isAlive)
+            assertTrue("$ended", ended is IOException)
+            assertThrows(IOException::class.java) { w.receive(1000) }
+            done.countDown(); w.close(); bean.join(5000)
+        }
     }
 }

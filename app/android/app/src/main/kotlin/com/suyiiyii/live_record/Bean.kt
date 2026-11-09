@@ -628,17 +628,20 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         state = say("beanWifi")
         var t1 = io.monotonicNow(); var why: String; var rollover = false; var note: String? = null
         try {
-            io.wifiJoin(ssid, password, a.payload)
-            t1 = io.monotonicNow()
-            reader = Bean.Reader(); inbox.clear()
-            why = wifiLoop()
-        } catch (e: Again) { why = "豆子换了文件"; rollover = e.naturalRollover }
-        catch (e: InterruptedException) { overWifi = false; io.wifiLeave(); throw e }  // the app stops (BeanLink.stop)
-        catch (e: Exception) { why = "$e"; note = (e as? Bean.Fail)?.note ?: "beanWifiFailed" }
-        if (wifiUnits == 0) (note ?: WIFI_ENDS[why])?.let { wifiNote = say(it, "detail" to why) }
-        xfer?.let { complete(it, -1, "；Wi-Fi 快传结束") }
-        overWifi = false
-        io.wifiLeave()
+            try {
+                io.wifiJoin(ssid, password, a.payload)
+                t1 = io.monotonicNow()
+                reader = Bean.Reader(); inbox.clear()
+                why = wifiLoop()
+            } catch (e: Again) { why = "豆子换了文件"; rollover = e.naturalRollover }
+            catch (e: InterruptedException) { throw e }  // the app stops (BeanLink.stop)
+            catch (e: Exception) { why = e.message ?: "$e"; note = (e as? Bean.Fail)?.note ?: "beanWifiFailed" }  // as iOS: no class name
+            if (wifiUnits == 0) (note ?: WIFI_ENDS[why])?.let { wifiNote = say(it, "detail" to why) }
+            xfer?.let { complete(it, -1, "；Wi-Fi 快传结束") }
+        } finally {  // complete() writes files and may throw (a full disk): the hotspot is left all the same
+            overWifi = false
+            io.wifiLeave()
+        }
         wifiEnded = io.monotonicNow()
         val ms = maxOf(1L, wifiEnded - t1); val kb = wifiUnits.toLong() * Bean.UNIT / 1024
         val audio = wifiUnits * Bean.FRAME_MS; val x = audio.toDouble() / ms
