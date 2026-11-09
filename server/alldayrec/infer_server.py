@@ -2,8 +2,9 @@
 
     INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
-POST /embed and /music: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most MAX_S s),
-with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]} or {"music": bool}.
+POST /embed, /music and /segment: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
+MAX_S s; /segment at most 10 s), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
+{"music": bool} or {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment).
 GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM (the server checks them at
 start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
 no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
@@ -79,6 +80,11 @@ async def embed(request: Request):
 @app.post("/music")
 async def music_(request: Request):
     return await run("music", request, lambda x: {"music": bool(state["compute"].music(x))})
+
+
+@app.post("/segment")
+async def segment(request: Request):
+    return await run("segment", request, lambda x: {"frames": state["compute"].segment(x).tolist()})
 
 
 @app.get("/health")

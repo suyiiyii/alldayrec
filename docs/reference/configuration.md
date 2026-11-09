@@ -116,7 +116,7 @@ type: reference
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
 | `FINAL_ASR_CONCURRENCY`、`FINAL_EMBED_CONCURRENCY` | `4`、`2` | 按设备算：一个设备积压时，同时送引擎的定稿块数，和其中同时算声纹的块数。两个设备同时积压，各送各的，合计可到两倍；全进程的声纹计算仍共用 `INFER_CALLS` 名额。块照旧按时间顺序认人、切对话、写库，结果和逐块处理一样。不积压时始终只有一块，延迟不变；同一时段还有别的录音设备有音频，或本设备正给它当备用（同处备用）时，也是一块一块来 | `device_pipeline.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
-| `INFER_URL` | 空 | 独立推理服务（`alldayrec --infer` 启动）的地址，例如 `https://infer.example.com`。设了以后声纹和音乐检测只在那里算，服务器不下载、也不加载这两个模型；服务失败时调用等它恢复，按 2 秒起、翻倍到 60 秒的间隔一直重试。空：在服务器进程里算 | `compute.py` |
+| `INFER_URL` | 空 | 独立推理服务（`alldayrec --infer` 启动）的地址，例如 `https://infer.example.com`。设了以后声纹、音乐检测和换人检测只在那里算，服务器不下载、也不加载这三个模型；服务失败时调用等它恢复，按 2 秒起、翻倍到 60 秒的间隔一直重试。空：在服务器进程里算 | `compute.py` |
 | `INFER_TOKEN` | 空 | 推理服务的令牌。设了 `INFER_URL` 时必填，服务器和 `alldayrec --infer` 两边设成同一个值 | `compute.py`、`infer_server.py` |
 | `INFER_TIMEOUT` | `30` | 每次尝试等推理服务回答的秒数（连接：2 秒） | `compute.py` |
 | `INFER_HOST`、`INFER_PORT` | `127.0.0.1`、`8771` | `alldayrec --infer` 监听的地址和端口（`--port` 也只改它的端口；它自己的变量，共用 `.env` 时不会拿到服务器的 `HOST`、`PORT`） | `infer_server.py` |

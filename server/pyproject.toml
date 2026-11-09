@@ -23,7 +23,7 @@ dependencies = [
 local = ["sherpa-onnx>=2.0.0", "sherpa-onnx-core>=2.0.0"]
 
 [project.scripts]
-alldayrec = "alldayrec.__main__:main"  # as python -m alldayrec; --infer: voiceprints and music as a service (INFER_URL)
+alldayrec = "alldayrec.__main__:main"  # as python -m alldayrec; --infer: the heavy models as a service (INFER_URL)
 
 [project.urls]
 Homepage = "https://github.com/suyiiyii/alldayrec"

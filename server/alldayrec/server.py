@@ -12,6 +12,7 @@ each pause for the minutes not final yet; all state is in data/live.db.
 """
 import argparse
 import contextlib
+import functools
 import logging
 import importlib.util
 import os
@@ -219,7 +220,7 @@ def main():
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
-    skip = compute.served()  # INFER_URL: the voiceprint and music models are the service's, never here
+    skip = compute.served()  # INFER_URL: the voiceprint, music and speaker-change models are the service's, never here
     infer.fetch(skip=skip)  # a first start: the missing model files, downloaded
     infer.check(skip=skip)  # every model file there and the pinned one, before anything starts
     log.info("models ok: %d files in %s", len(infer.MODELS) - len(skip), infer.DIR)
@@ -227,7 +228,7 @@ def main():
     c = compute.load()  # in this process, or the inference service (alldayrec --infer) at INFER_URL
     state["embed"] = c.embed
     state["music"] = c.music if music.ON else None
-    state["turns"] = transcript.turns if transcript.SPLIT_TURNS else None
+    state["turns"] = functools.partial(transcript.turns, segment=c.segment) if transcript.SPLIT_TURNS else None
     if not tenant.FILE.exists():
         token = tenant.create()
         log.info("first start: %s made, one tenant; on this machine open http://127.0.0.1:%d/connect?token=%s",

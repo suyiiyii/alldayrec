@@ -1,14 +1,16 @@
-"""The heavy pure computations behind one interface (Compute): int16 16 kHz samples in, a voiceprint or a yes/no out,
-nothing of a tenant's (no database, no files, no names). Every caller reaches them as core.state's "embed" and "music"
-from a thread under threads.INFER, so a backend is only a blocking function.
+"""The heavy pure computations behind one interface (Compute): int16 16 kHz samples in, a voiceprint, a yes/no or a
+chunk's speaker-change frames out, nothing of a tenant's (no database, no files, no names). Every caller reaches them as
+core.state's "embed", "music" and "turns" (transcript.turns over segment) from a thread under threads.INFER, so a
+backend is only a blocking function.
 
-- local (the default, INFER_URL unset): in this process on onnxruntime, exactly as before (infer.embedder, music.heard).
+- local (the default, INFER_URL unset): in this process on onnxruntime, exactly as before (infer.embedder, music.heard,
+  transcript.segment).
 - remote (INFER_URL=https://infer.example.com): POSTs the samples to alldayrec --infer (infer_server.py) with
   INFER_TOKEN, 2 s to connect and INFER_TIMEOUT s to answer. This process then never loads those models (nor downloads
   them, served()). A call that fails (refused, a timeout, any 4xx or 5xx, an answer that is no unit DIM-float
-  voiceprint) waits for the service: it tries again after BACKOFF_S, doubling to its last, until one is answered; no
-  sentence is lost or skipped, its device's pipeline waits (uploads are still taken and stored). Calls meanwhile sleep to the next try instead of
-  each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
+  voiceprint, no SEG_FRAMES x 7 frames) waits for the service: it tries again after BACKOFF_S, doubling to its last,
+  until one is answered; no sentence is lost or skipped, its device's pipeline waits (uploads are still taken and
+  stored). Calls meanwhile sleep to the next try instead of each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
   service has been failing, lr_infer_calls_total{op,result} counts calls (remote, retried) and failed tries (error).
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,
   every call fails as above until the service is fixed (each try asks again: no restart needed). The server stopping
@@ -45,17 +47,21 @@ class Compute(Protocol):
     def music(self, x: np.ndarray) -> bool:
         """int16 samples -> whether they are music (music.heard)."""
 
+    def segment(self, x: np.ndarray) -> np.ndarray:
+        """int16 samples, at most 10 s -> pyannote's frames (transcript.segment)."""
+
 
 class Local:
     def __init__(self):
-        from alldayrec import infer, music
+        from alldayrec import infer, music, transcript
         self.embed, self.music = infer.embedder(), music.heard  # the session built here, before the event loop starts
+        self.segment = transcript.segment  # its session at the first call, as before
 
 
 def models() -> dict:
     """The model files behind Compute and their sha256: the service's must be this server's."""
     from alldayrec import infer
-    return {n: infer.MODELS[n] for n in (infer.EMB, infer.YAMNET)}
+    return {n: infer.MODELS[n] for n in (infer.EMB, infer.YAMNET, infer.SEG)}
 
 
 def served() -> set:
@@ -68,6 +74,14 @@ def voiceprint(r: dict) -> np.ndarray:
     if v.shape != (DIM,) or not np.isfinite(v).all() or abs(float(np.linalg.norm(v)) - 1) > 1e-3:
         raise ValueError(f"not a unit {DIM}-float voiceprint: shape {v.shape}")
     return v
+
+
+def frames(r: dict) -> np.ndarray:
+    from alldayrec.transcript import SEG_FRAMES
+    f = np.asarray(r["frames"], np.float32)
+    if f.shape != (SEG_FRAMES, 7) or not np.isfinite(f).all():
+        raise ValueError(f"not {SEG_FRAMES} x 7 frames: shape {f.shape}")
+    return f
 
 
 class Remote:
@@ -129,6 +143,9 @@ class Remote:
 
     def music(self, x: np.ndarray) -> bool:
         return self._post("music", x, lambda r: bool(r["music"]))
+
+    def segment(self, x: np.ndarray) -> np.ndarray:
+        return self._post("segment", x, frames)
 
     def same_models(self) -> bool:
         """GET /health with the token; ValueError when its model files or DIM are not this server's."""
