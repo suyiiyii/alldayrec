@@ -47,13 +47,14 @@ from alldayrec import routes_pages
 from alldayrec import routes_sentences
 from alldayrec import routes_speakers
 from alldayrec import routes_upload
+from alldayrec import routes_voices
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import state
 from alldayrec.device_pipeline import pipeline
 from alldayrec.monitor import balance_loop, loop_stalls, metrics_loop, status_loop
-from alldayrec.routes_speakers import voices_loop
+from alldayrec.routes_voices import voices_loop
 from alldayrec.summaries import RECAP_AT, recap_loop, summary_worker
 from alldayrec.late import processor as late_processor
 from alldayrec.tenant import T
@@ -163,6 +164,7 @@ app.include_router(routes_pages.router)
 app.include_router(routes_upload.router)
 app.include_router(routes_api.router)
 app.include_router(routes_speakers.router)
+app.include_router(routes_voices.router)
 app.include_router(routes_audio.router)
 app.include_router(routes_sentences.router)
 app.include_router(ws.router)

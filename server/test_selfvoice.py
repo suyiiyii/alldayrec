@@ -13,7 +13,7 @@ from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
 from alldayrec import routes_audio
-from alldayrec import routes_speakers
+from alldayrec import routes_voices
 from alldayrec import selfvoice as sv
 from alldayrec import tenant
 from alldayrec import ws
@@ -132,11 +132,11 @@ def test_card_round_trip(tmp_path, monkeypatch):
 
     npz = tmp_path / "owner-redimnet2.npz"
     np.savez(npz, mic=FR)  # a voiceprint already (the main instance): no card, nothing written
-    anyio.run(routes_speakers.self_round)
-    assert db.kv("selfvoice") is None and anyio.run(routes_speakers.self_get) == {"card": None}
+    anyio.run(routes_voices.self_round)
+    assert db.kv("selfvoice") is None and anyio.run(routes_voices.self_get) == {"card": None}
     npz.unlink()
 
-    anyio.run(routes_speakers.self_round)
+    anyio.run(routes_voices.self_round)
     st = db.kv("selfvoice")
     card = st["card"]
     assert card["why"] == "rule" and card["convs"] == 4 and not npz.exists(), "nothing is taken before the user picks"
@@ -144,27 +144,27 @@ def test_card_round_trip(tmp_path, monkeypatch):
     assert c0["tier"] == "很可能" and c0["convs"] == 4 and float(np.asarray(c0["bank"]) @ ME) > 0.95
     assert len(c0["clips"]) == 3 and len({c["start"][:16] for c in c0["clips"]}) == 3, "3 clips from 3 conversations"
     assert all(amp[c["start"]] == 3000 and c["device"] == "mic" and c["text"] for c in c0["clips"])
-    shown = anyio.run(routes_speakers.self_get)["card"]
+    shown = anyio.run(routes_voices.self_get)["card"]
     assert "bank" not in shown["candidates"][0] and "p" not in shown["candidates"][0], "no % on the card"
 
-    anyio.run(routes_speakers.self_answer, {"answer": "later"})
+    anyio.run(routes_voices.self_answer, {"answer": "later"})
     st = db.kv("selfvoice")
     assert st["card"] is None and "until" in st["wait"] and st["log"][-1]["answer"] == "later"
-    anyio.run(routes_speakers.self_round)
+    anyio.run(routes_voices.self_round)
     assert db.kv("selfvoice")["card"] is None, "a day later"
     db.put_kv("selfvoice", {**st, "wait": {"until": T(0)}})
-    anyio.run(routes_speakers.self_round)
+    anyio.run(routes_voices.self_round)
     assert db.kv("selfvoice")["card"]["why"] == "again"
     with pytest.raises(HTTPException):
-        anyio.run(routes_speakers.self_answer, {"answer": 7})
+        anyio.run(routes_voices.self_answer, {"answer": 7})
 
-    anyio.run(routes_speakers.self_answer, {"answer": 0})
+    anyio.run(routes_voices.self_answer, {"answer": 0})
     assert float(np.load(npz)["self"] @ ME) > 0.95 and float(tenant.T().owner["self"] @ ME) > 0.95
     st = db.kv("selfvoice")
     assert st["confirmed"]["pick"] == 0 and st["card"] is None and [x["answer"] for x in st["log"]] == ["later", 0]
-    assert anyio.run(routes_speakers.self_get) == {"card": None}
+    assert anyio.run(routes_voices.self_get) == {"card": None}
     with pytest.raises(HTTPException):
-        anyio.run(routes_speakers.self_answer, {"answer": 0})
+        anyio.run(routes_voices.self_answer, {"answer": 0})
 
 
 def test_pick_reaches_next_conversation(tmp_path, monkeypatch):
@@ -189,7 +189,7 @@ def test_pick_reaches_next_conversation(tmp_path, monkeypatch):
                     break
                 await anyio.sleep(0.5)
             assert "1" in texts() and db.kv(f"open_conversation:{DEVICE}"), "A is open"
-            await routes_speakers.self_answer({"answer": 0})
+            await routes_voices.self_answer({"answer": 0})
             for i in range(1, 16):
                 save(t0 + dt.timedelta(seconds=PIECE_S * i), pieces.get(i) or flac(silence))
             db.put_kv(f"end_at:{DEVICE}", core.iso(t0 + dt.timedelta(seconds=16 * PIECE_S)))  # the recorder stopped: B closes
