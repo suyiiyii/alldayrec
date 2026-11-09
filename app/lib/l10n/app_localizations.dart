@@ -1739,7 +1739,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiRecording.
   ///
   /// In zh, this message translates to:
-  /// **'豆子在录音，Wi‑Fi 快传要停录后用'**
+  /// **'豆子正在录音：先在豆子上停录，再点 Wi‑Fi 快传'**
   String get beanWifiRecording;
 
   /// No description provided for @beanWifiAsked.
@@ -1753,6 +1753,72 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'已请求 Wi‑Fi 快传。检测到 VPN，快传可能失败，可临时关闭'**
   String get beanWifiAskedVpn;
+
+  /// No description provided for @beanWifiLowBattery.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没开始：豆子电量 {battery}%，低于 30% 时它不开热点'**
+  String beanWifiLowBattery(Object battery);
+
+  /// No description provided for @beanWifiNoHotspot.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：没等到豆子的热点，已接着用蓝牙'**
+  String get beanWifiNoHotspot;
+
+  /// No description provided for @beanWifiDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：iOS 问要不要加入豆子的网络时点了取消'**
+  String get beanWifiDenied;
+
+  /// No description provided for @beanWifiBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：App 不在前台，iOS 不让加入热点；快传期间留在这个页面'**
+  String get beanWifiBackground;
+
+  /// No description provided for @beanWifiNoJoin.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次'**
+  String get beanWifiNoJoin;
+
+  /// No description provided for @beanWifiNoSocket.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试'**
+  String get beanWifiNoSocket;
+
+  /// No description provided for @beanWifiNoAnswer.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：豆子没回应传输请求，已回到蓝牙'**
+  String get beanWifiNoAnswer;
+
+  /// No description provided for @beanWifiBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：豆子一直说在忙，没开始传，已回到蓝牙'**
+  String get beanWifiBusy;
+
+  /// No description provided for @beanWifiNoUnits.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：豆子应了传输请求，但 30 s 没发来录音，已回到蓝牙'**
+  String get beanWifiNoUnits;
+
+  /// No description provided for @beanWifiJoinTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：iOS 2 分钟都没答复要不要加入豆子的热点（它的提问可能没人点），已回到蓝牙'**
+  String get beanWifiJoinTimeout;
+
+  /// No description provided for @beanWifiFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成（{detail}），已回到蓝牙'**
+  String beanWifiFailed(Object detail);
 
   /// No description provided for @beanUnbindAfterSync.
   ///

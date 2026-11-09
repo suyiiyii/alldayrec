@@ -54,6 +54,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   /// The session is up (its key exchange and first reads done): recording or not.
   var connected: Bool { inSession && ["beanIdle", "joining", "connected"].contains(sync.state["code"] as? String ?? "") }  // beanWifi: BLE is down
   var hw: [String: Any] { sync.hw.merging(sync.owed) { $1 }.merging(["name": name]) { $1 } }
+  var wifiNote: [String: Any]? { sync.wifiNote }
   var syncDoneKb: Int64 { sync.syncDoneKb }
   var syncTotalKb: Int64 { sync.syncTotalKb }
 

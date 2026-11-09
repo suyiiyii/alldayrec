@@ -143,7 +143,7 @@ enum Recorder {
             "note": uploader?.note ?? NSNull(), "interruptedAt": interruptedAt ?? NSNull(),
             "source": (slicer != nil ? "mic" : l != nil || b != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? b?.state ?? NSNull(),
             "connected": l?.state["code"] as? String == "connected" || b?.connected == true, "tag": l?.tag ?? b?.name ?? NSNull(),
-            "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
+            "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
             "syncDone": l?.syncDoneKb ?? b?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? b?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
             "dfu": Dfu.state ?? NSNull(), "dfuBusy": Dfu.busy, "listen": l?.listening?.lines ?? NSNull()]
   }

@@ -155,7 +155,7 @@ final class FakeBean: BeanIo {
       push(0x2E01, Bean.pub(keys) + s)
     case 0x0101: push(0x0101, info())
     case 0x1A05:  // 192.168.43.1:443 (ws/soundcore's capture); dropOnWifi: BLE goes before the answer
-      if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) } else { push(0x1A05, [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]) }
+      if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) } else if let hotspot { push(0x1A05, hotspot) }
     case 0x1A02:  // dropOnWifiOff: BLE goes before the answer, so many times
       if dropOnWifiOff > 0 { dropOnWifiOff -= 1; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
     case 0x01A6: push(0x01A6, [])
@@ -205,15 +205,22 @@ final class FakeBean: BeanIo {
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
   var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0
+  var hotspot: [UInt8]? = [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]  // 1A/05's answer (nil: none)
+  var battery: UInt8 = 7  // 01/01's level: 7 is 80%
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
-  func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { joins.append((ssid, password, endpoint)); onWifi = true }
+  var joinFails: [Error] = []  // the next joins' ends, one each (BeanWifi.open's, its own tries all done)
+  func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
+    joins.append((ssid, password, endpoint))
+    if !joinFails.isEmpty { throw joinFails.removeFirst() }
+    onWifi = true
+  }
   func wifiLeave() { onWifi = false }
 
   func info() -> [UInt8] {
     var b = [UInt8](repeating: 0, count: 57)
-    b[0] = 1; b[1] = 7; b[38] = 5
+    b[0] = 1; b[1] = battery; b[38] = 5
     b.replaceSubrange(3..<8, with: Array("01.00".utf8)); b.replaceSubrange(8..<24, with: Array("fake000000000001".utf8))
     b.replaceSubrange(24..<28, with: Bean.le32(30_000_000)); b.replaceSubrange(28..<32, with: Bean.le32(20_000_000))
     b.replaceSubrange(39..<45, with: [2, 0, 0, 0, 0x0A, 0x0B])
@@ -720,6 +727,7 @@ do {
     bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 40)
     let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
     check(again.description.contains("豆子没回音"), true, again.description)
+    check(sync.wifiNote?["code"] as? String, "beanWifiNoAnswer")
   }
   check(bean.joins.count, 4)
   check(bean.transfers.count, 12, "three asks a tap, all over Wi-Fi")
@@ -788,6 +796,7 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("10 s 没收到单元"), true, again.description)
+  check(sync.wifiNote == nil, true, "units came: no failure for the page")
   bean.script = Array(repeating: {}, count: 5)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "then BLE from where Wi-Fi stopped")
@@ -814,6 +823,33 @@ do {
   check(bean.joins.count, 0)
   check(bean.transfers.count, 1, "the live read not cut for it")
   check(bean.logs.contains { $0.0 == "bean_wifi_skip" && $0.1.contains("在录音") }, true)
+  check(sync.wifiNote?["code"] as? String, "beanWifiRecording", "the page says to stop it first")
+}
+
+/// The join given up (BeanWifi.open: iOS's tries are its own, a try a later one got past is no failure): the page gets
+/// that reason, nothing read; the next fast transfer, joined, clears it.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.joinFails = [Bean.Fail("join: not on the hotspot after 4 tries", note: "beanWifiNoJoin"), Bean.Fail("socket: no answer in 15 s", note: "beanWifiNoSocket"),
+                    BeanSync.Gone("Wi-Fi socket closed")]
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  for want in ["beanWifiNoJoin", "beanWifiNoSocket", "beanWifiFailed"] {
+    bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 40)
+    _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(sync.wifiNote?["code"] as? String, want)
+  }
+  check(sync.wifiNote?["detail"] as? String, "Wi-Fi socket closed", "anything else: what it was")
+  check(bean.transfers.count, 0, "nothing asked for over a hotspot not joined")
+  bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(sync.wifiNote == nil, true, "a fast transfer that went: the last one's failure gone")
 }
 
 /// Over Wi-Fi the bean may let a 1A/07 go unanswered (ws/soundcore: "the first request on a fresh socket is sometimes
@@ -851,6 +887,62 @@ do {
   check(bean.onWifi, false, "the hotspot left")
   check(bean.transfers.count, 1)
   check(queue(chunks).flatMap { packets($0).dropFirst(2) }.count, 1500, "what came before is kept")
+  check(sync.wifiNote == nil, true, "units came: no failure for the page")
+}
+
+/// Fast transfers that end with nothing read, each with its reason for the page: the bean began recording (gone from
+/// the page once a connection finds it stopped), it stayed busy (code 4), its header and no unit in 30 s.
+for (end, want) in [("recording", "beanWifiRecording"), ("busy", "beanWifiBusy"), ("silent", "beanWifiNoUnits")] {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, _, _ in
+    switch end {
+    case "recording": bean.header(file, 3000 * Int64(Bean.unit)); bean.push(0x1882, [1])
+    case "busy": bean.header(file, 0, code: 4)
+    default: bean.header(file, 3000 * Int64(Bean.unit))
+    }
+  }
+  bean.script = Array(repeating: {}, count: 200)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(sync.wifiNote?["code"] as? String, want, "\(end): \(again.description)")
+  if end == "recording" {
+    bean.onTransfer = { _, _, _ in }; bean.script = []
+    _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(sync.wifiNote == nil, true, "a connection that finds it stopped: 「正在录音」 gone")
+  }
+}
+
+/// 「豆子正在录音」 (the tap while it records) goes at the bean's stop, not at the next tap.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.recording = true; bean.open = a; bean.list(a, 0)
+  bean.onTransfer = { file, _, _ in bean.header(file, 0xFFFF_FFFF); bean.units(file, Array(0..<300), ms: 1) }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  var said: String?
+  bean.script = [{ bean.wifiAsk = true }, {}, { said = sync.wifiNote?["code"] as? String; bean.push(0x1882, [0]); bean.recording = false }, {}]
+  do { try sync.session(since: t0 - 3_600_000, steps: "") } catch {}
+  check(said, "beanWifiRecording")
+  check(sync.wifiNote == nil, true, "stopped: gone")
+}
+
+/// No fast transfer below 30% (the bean opens no hotspot), nor when its hotspot does not come up (an answer without
+/// its address, or none): the page says which.
+for (battery, reply, want) in [(UInt8(1), [UInt8]?([]), "beanWifiLowBattery"), (7, [], "beanWifiNoHotspot"), (7, nil, "beanWifiNoHotspot")] {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true; bean.battery = battery; bean.hotspot = reply
+  bean.script = Array(repeating: {}, count: 60)  // 1A/05 waited for 45 s
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  do { try sync.session(since: t0 - 3_600_000, steps: "") } catch {}
+  check(sync.wifiNote?["code"] as? String, want, "\(reply.map(Bean.hex) ?? "no answer")")
+  check(bean.joins.count, 0, "no join")
+  if battery == 1 { check(sync.wifiNote?["battery"] as? Int, 20) }
 }
 
 /// Nothing lacking: no hotspot.
@@ -886,6 +978,7 @@ for dropFirst in [false, true] {
   bean.dropOnWifi = dropFirst
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains(dropFirst ? "BLE went" : "都取到了"), true, again.description)
+  check(sync.wifiNote?["code"] as? String, dropFirst ? "beanWifiNoHotspot" : nil)
   check(bean.starts, 0, "it was recording: no start")
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.starts, 0, "stopped by hand: the reconnect after Wi-Fi starts nothing")

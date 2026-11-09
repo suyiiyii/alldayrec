@@ -986,7 +986,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiRecording =>
-      'The bean is recording: Wi‑Fi fast transfer works once it stops';
+      'The bean is recording: stop it on the bean first, then tap Wi‑Fi fast transfer';
 
   @override
   String get beanWifiAsked =>
@@ -995,6 +995,52 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get beanWifiAskedVpn =>
       'Wi‑Fi fast transfer asked for. A VPN is on: it may fail, turn the VPN off for it';
+
+  @override
+  String beanWifiLowBattery(Object battery) {
+    return 'The last Wi‑Fi fast transfer did not start: the bean is at $battery%, below 30% it opens no hotspot';
+  }
+
+  @override
+  String get beanWifiNoHotspot =>
+      'The last Wi‑Fi fast transfer failed: the bean\'s hotspot did not come up; Bluetooth goes on';
+
+  @override
+  String get beanWifiDenied =>
+      'The last Wi‑Fi fast transfer failed: iOS\'s question to join the bean\'s network was cancelled';
+
+  @override
+  String get beanWifiBackground =>
+      'The last Wi‑Fi fast transfer failed: iOS joins no hotspot for an app in the background; stay on this page meanwhile';
+
+  @override
+  String get beanWifiNoJoin =>
+      'The last Wi‑Fi fast transfer failed: the phone did not get onto the bean\'s hotspot in 4 tries; back on Bluetooth, tap again to retry';
+
+  @override
+  String get beanWifiNoSocket =>
+      'The last Wi‑Fi fast transfer failed: the phone is on the bean\'s hotspot but cannot reach the bean; turn a VPN off and try again';
+
+  @override
+  String get beanWifiNoAnswer =>
+      'The last Wi‑Fi fast transfer failed: the bean did not answer the request; back on Bluetooth';
+
+  @override
+  String get beanWifiBusy =>
+      'The last Wi‑Fi fast transfer failed: the bean kept saying it was busy and sent nothing; back on Bluetooth';
+
+  @override
+  String get beanWifiNoUnits =>
+      'The last Wi‑Fi fast transfer failed: the bean took the request but sent no audio in 30 s; back on Bluetooth';
+
+  @override
+  String get beanWifiJoinTimeout =>
+      'The last Wi‑Fi fast transfer failed: iOS gave no answer on joining the bean\'s hotspot in 2 minutes (its question may be unanswered); back on Bluetooth';
+
+  @override
+  String beanWifiFailed(Object detail) {
+    return 'The last Wi‑Fi fast transfer failed ($detail); back on Bluetooth';
+  }
 
   @override
   String get beanUnbindAfterSync =>

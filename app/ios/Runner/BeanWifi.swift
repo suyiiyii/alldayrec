@@ -41,13 +41,14 @@ final class BeanWifi {
     let at = Bean.endpoint(endpoint) ?? "?"
     guard at == "\(BeanWifi.host):\(BeanWifi.port)" else {
       log("bean_wifi_fail", "热点地址 \(at) 不是豆子固定的那个，不连", "warn", ["step": "endpoint", "endpoint": at])
-      throw Bean.Fail("hotspot at \(at), not the bean's")
+      throw Bean.Fail("hotspot at \(at), not the bean's", note: "beanWifiNoHotspot")
     }
     watch()
     let t0 = BeanWifi.mono()
-    // 11-08 22:10: asked 7 ms after the bean's answer, iOS said joined but was not (its own 「无法加入网络」), the
-    // phone still on the Wi-Fi before: give the hotspot time to come up, then check what iOS says it joined
-    Thread.sleep(forTimeInterval: 2.5)
+    // iOS joins once the person taps 加入 on its question; joined before about 4.5 s after the bean's answer it often
+    // says joined and is not (its own 「无法加入网络」 then, the phone still on the Wi-Fi before; 11-08 to 11-10: 4 of
+    // 6 such, none of 4 later), the hotspot not up yet; a second try, asking nothing, joined each time: wait for it
+    Thread.sleep(forTimeInterval: 5)
     var joinedOnce = false
     for (n, wait) in [0.0, 2, 4, 8].enumerated() {
       if wait > 0 { Thread.sleep(forTimeInterval: wait) }
@@ -59,32 +60,36 @@ final class BeanWifi {
       NEHotspotConfigurationManager.shared.apply(c) { failure = $0 as NSError?; done.signal() }
       guard done.wait(timeout: .now() + 120) == .success else {
         log("bean_wifi_fail", "加入热点 120 s 没有结果", "warn", ["step": "join", "ms": BeanWifi.mono() - t1, "try": n + 1].merging(BeanWifi.context()) { $1 })
-        throw Bean.Fail("joining the hotspot: no answer in 120 s")
+        throw Bean.Fail("joining the hotspot: no answer in 120 s", note: "beanWifiJoinTimeout")
       }
+      let applied = BeanWifi.mono() - t1  // the person's answer and iOS's join: the address is waited for from here
+      // alreadyAssociated (13): iOS on it already, as joined; onHotspot() below checks it is the bean's
       let ours = failure == nil || failure!.domain == NEHotspotConfigurationErrorDomain && failure!.code == NEHotspotConfigurationError.alreadyAssociated.rawValue
       if let e = failure, !ours {
         let code = NEHotspotConfigurationError(rawValue: e.code).map(BeanWifi.name) ?? "\(e.code)"
-        log("bean_wifi_fail", "没加入豆子的热点（第 \(n + 1) 次）：\(code == "userDenied" ? "主人点了取消" : e.localizedDescription)（\(e.domain) \(e.code) \(code)，\(BeanWifi.mono() - t1) ms）",
-            "warn", ["step": "join", "domain": e.domain, "code": e.code, "name": code, "ms": BeanWifi.mono() - t1, "try": n + 1].merging(BeanWifi.context()) { $1 })
-        if code == "userDenied" || code == "applicationIsNotInForeground" { throw Bean.Fail("join: \(code)") }  // again would not help
+        // again would not help; 16/17 are for accessory networks (the SDK's words), not expected here: beanWifiFailed
+        let last = ["userDenied", "applicationIsNotInForeground", "userUnauthorized", "systemDenied"].contains(code)
+        log(last ? "bean_wifi_fail" : "bean_wifi_retry", "没加入豆子的热点（第 \(n + 1) 次）：\(code == "userDenied" ? "主人点了取消" : e.localizedDescription)（\(e.domain) \(e.code) \(code)，\(applied) ms）",
+            "warn", ["step": "join", "domain": e.domain, "code": e.code, "name": code, "ms": applied, "try": n + 1].merging(BeanWifi.context()) { $1 })
+        if last { throw Bean.Fail("join: \(code)", note: ["userDenied": "beanWifiDenied", "applicationIsNotInForeground": "beanWifiBackground"][code]) }
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
         continue
       }
       if let mine = onHotspot() {
-        log("bean_wifi_join", "加入了豆子的热点（第 \(n + 1) 次，\(BeanWifi.mono() - t1) ms\(failure != nil ? "，本来就连着" : "")，手机拿到了热点的地址 \(mine)）", nil,
-            ["ms": BeanWifi.mono() - t1, "try": n + 1, "ip": mine].merging(BeanWifi.context()) { $1 })
+        log("bean_wifi_join", "加入了豆子的热点（第 \(n + 1) 次，iOS 答复 \(applied) ms\(failure != nil ? "，本来就连着" : "")，再 \(BeanWifi.mono() - t1 - applied) ms 手机拿到了热点的地址 \(mine)）", nil,
+            ["ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "ip": mine].merging(BeanWifi.context()) { $1 })
         joinedOnce = true
         break
       } else {
         let other = BeanWifi.wifiAddress() != nil
-        log("bean_wifi_fail", "iOS 说加入了，20 s 内手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次，\(BeanWifi.mono() - t1) ms）", "warn",
-            ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
+        log("bean_wifi_retry", "iOS 说加入了（\(applied) ms），之后 10 s 手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次）", "warn",
+            ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
       }
     }
     guard joinedOnce else {
       log("bean_wifi_fail", "试了 4 次都没加入豆子的热点", "warn", ["step": "join", "tries": 4].merging(BeanWifi.context()) { $1 })
-      throw Bean.Fail("join: not on the hotspot after 4 tries")
+      throw Bean.Fail("join: not on the hotspot after 4 tries", note: "beanWifiNoJoin")
     }
     let joined = BeanWifi.mono() - t0
     var tries = 0, why = ""
@@ -98,7 +103,7 @@ final class BeanWifi {
             ["tries": tries, "error": why, "path": waitingWhy, "states": trail, "via": lastVia].merging(BeanWifi.context()) { $1 })
         if let s = seen, s != BeanWifi.pin {
           log("bean_wifi_fail", "豆子的证书不是认得的那张（\(s)）", "warn", ["step": "pin", "pin": s])
-          throw Bean.Fail("certificate \(s)")
+          throw Bean.Fail("certificate \(s)", note: "beanWifiNoSocket")
         }
         Thread.sleep(forTimeInterval: 0.7)
       }
@@ -107,7 +112,7 @@ final class BeanWifi {
       let vpn = BeanWifi.vpn()
       log("bean_wifi_fail", "连不上豆子的 WebSocket（\(tries) 次，\(why)）" + (vpn ? "；检测到 VPN，快传可能失败，可临时关闭" : ""), "warn",
           ["step": "socket", "tries": tries].merging(BeanWifi.context()) { $1 })
-      throw Bean.Fail("socket: \(why)")
+      throw Bean.Fail("socket: \(why)", note: "beanWifiNoSocket")
     }
     let ms = BeanWifi.mono() - t0 - joined
     let via = ws?.currentPath?.availableInterfaces.map { "\($0.name)(\($0.type))" }.joined(separator: ",") ?? "?"
@@ -174,11 +179,11 @@ final class BeanWifi {
     keepAlive = timer
   }
 
-  /// The phone's address on the hotspot (its DHCP gives 192.168.43.x), within 20 s; nil: iOS said joined and is not. No
-  /// entitlement needed, unlike NEHotspotNetwork.fetchCurrent. 11-09: 8 s went by on the first join and the second got
-  /// it at 8.2 s: waiting longer costs less than joining again (iOS asks the person each time)
+  /// The phone's address on the hotspot (its DHCP gives 192.168.43.x), within 10 s of iOS's answer; nil: iOS said joined
+  /// and is not. No entitlement needed, unlike NEHotspotNetwork.fetchCurrent. Waiting longer does not help: 11-10 the
+  /// phone stayed on the Wi-Fi before for all of 20 s, as for 8 s twice on 11-08/09; the second try asks nothing
   private func onHotspot() -> String? {
-    for _ in 0..<40 {
+    for _ in 0..<20 {
       if let a = BeanWifi.wifiAddress(), a.hasPrefix("192.168.43.") { return a }
       Thread.sleep(forTimeInterval: 0.5)
     }
@@ -227,7 +232,9 @@ final class BeanWifi {
     case .alreadyAssociated: "alreadyAssociated"
     case .applicationIsNotInForeground: "applicationIsNotInForeground"
     case .invalidSSIDPrefix: "invalidSSIDPrefix"
-    @unknown default: e.rawValue == 13 ? "unableToJoin" : "\(e.rawValue)"  // 13: not in this SDK's enum
+    case .userUnauthorized: "userUnauthorized"
+    case .systemDenied: "systemDenied"
+    @unknown default: "\(e.rawValue)"
     }
   }
 
