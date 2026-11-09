@@ -49,7 +49,7 @@ async def rename(conv_id: str, body: dict):
     conv_id, frm = db.resolve_voice(conv_id, frm)
     if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(conv_id, frm)], to, limiter=threads.DB)):
         return {"check": q}
-    also = None if speakers.ANON.fullmatch(to) else earlier(conv_id, frm)  # no await: renames in a row queue no stale summary
+    also = None if speakers.ANON.fullmatch(to) else await earlier(conv_id, frm)
     me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
@@ -84,18 +84,21 @@ def name_check(voices: list[tuple[str, str]], to: str) -> dict | None:
     return q or None
 
 
-def earlier(conv_id: str, label: str) -> dict | None:
+async def earlier(conv_id: str, label: str) -> dict | None:
     """The label's voice in earlier conversations still unnamed (B3, 「之前 N 段对话里也出现过」): the other voices of its
     card or of the suggestion it is in, from speaker_groups as last made (a rename since leaves some out, never a wrong
     one: each is checked against its conversation here). A card that sounds like two people (bank.halves): only this
     voice's half. voices: conv|label each; group (and suggestion): where they are, for speaker_name to test again; None
-    when there are none."""
+    when there are none. No await unless there are some: then the k-means (0.5 s for 3000 voices, 2 s more for
+    sklearn's first import) in a DB thread, not INFER's: a rename never waits on voiceprints or a remote infer down."""
     k, start = f"{conv_id}|{label}", conv_start(conv_id)
     # shortcut: none before the groups were first made (seconds of work, not here); the conversation page makes them
-    gs = T().speakers["groups"] or []
+    gs, vec = T().speakers["groups"] or [], T().speakers["vec"]  # the card whole yet: after the rename it is made again without it
     g, x = next(((g, x) for g in gs for x in [g, *g["suggested"]] if any(voice_key(m) == k for m in x["members"])), (None, None))
     ms = x["members"] if x else []
-    if h := bank.halves(ms, T().speakers["vec"]):  # the card whole yet: after the rename it is made again without it
+    if not any(m["start"] < start and speakers.ANON.fullmatch(m["label"]) for m in ms):
+        return None  # a named card's voices, say: nothing to offer, no k-means
+    if h := await anyio.to_thread.run_sync(bank.halves, ms, vec, limiter=threads.DB):
         ms = next((y for y in h if any(voice_key(m) == k for m in y)), [])
     ms = [m for m in ms if m["start"] < start and speakers.ANON.fullmatch(m["label"])]
     now = {cid: json.loads(ps) for cid, ps in db.conn().execute(
@@ -485,7 +488,7 @@ def two_halves(g: dict) -> dict:
 @router.get("/api/speakers/{gid}/halves")
 async def speaker_halves(gid: str):
     """The two-half test of a card (bank.halves): mixed, and its two halves when it sounds like two people."""
-    return two_halves(await anyio.to_thread.run_sync(find_group, gid, limiter=threads.DB))
+    return await anyio.to_thread.run_sync(lambda: two_halves(find_group(gid)), limiter=threads.DB)
 
 
 @router.post("/api/speakers/name")
@@ -512,7 +515,7 @@ async def speaker_name(body: dict):
     if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(m["conv"], m["label"]) for m in ms], to, limiter=threads.DB)):
         return {"check": q}
     # voices of both halves (一起改 on a card of two people) are not named together; one half is (只命名这一半)
-    if g and not body.get("all") and (h := two_halves(g))["mixed"] and not any(
+    if g and not body.get("all") and (h := await anyio.to_thread.run_sync(two_halves, g, limiter=threads.DB))["mixed"] and not any(
             {voice_key(m) for m in ms} <= set(x["voices"]) for x in h["halves"]):
         return h
     rows, befores, me = [], [], []
