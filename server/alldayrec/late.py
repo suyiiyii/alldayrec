@@ -9,7 +9,7 @@ from contextlib import nullcontext
 import anyio
 import numpy as np
 
-from alldayrec import asr, audio, colocate, db, late_merge, late_store, threads, ws
+from alldayrec import asr, audio, colocate, compute, db, late_merge, late_store, threads, ws
 from alldayrec.conversations import GAP_S
 from alldayrec.core import conversation_rows, iso, owner_npz, state
 from alldayrec.diarist import Diarist, relabel
@@ -203,6 +203,18 @@ async def process(span: dict):
         await ws.broadcast({"type": "conversation", **c})
 
 
+async def hold(limit: anyio.CancelScope):
+    """limit's deadline pushed on while the infer service is down: waiting for it is no time of the span's (a timeout
+    would spend one of its tries and the ASR already paid for)."""
+    t = anyio.current_time()
+    while True:
+        await anyio.sleep(1)
+        now = anyio.current_time()
+        if compute.REMOTE.down_since is not None:
+            limit.deadline += now - t
+        t = now
+
+
 async def processor():
     late_store.recover()
     while True:
@@ -212,9 +224,14 @@ async def processor():
             await anyio.sleep(2)
             continue
         try:
-            with anyio.fail_after(LATE_PROCESS_TIMEOUT_S):
-                await process(span)
+            with anyio.fail_after(LATE_PROCESS_TIMEOUT_S) as limit:
+                async with anyio.create_task_group() as tg:
+                    if compute.REMOTE is not None:  # INFER_URL; without it as before
+                        tg.start_soon(hold, limit)
+                    await process(span)
+                    tg.cancel_scope.cancel()
         except Exception as e:
+            e = threads.first(e)
             late_store.failed(span, e)
             log.warning("late span %s: %s", span["id"], type(e).__name__)
         late_store.queue_summaries()
