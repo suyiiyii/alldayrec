@@ -20,8 +20,6 @@ jobs:
     env:
       PACK: https://github.com/suyiiyii/alldayrec/releases/download/eval-spk-v1/eval-spk-v1.tar.gz
       PACK_SHA256: 678ac6930e90d0d7eb83d14a2a921a0857a83c68e3231e9977b5d03ddedf2b4a
-      MODELS_DIR: ${{ runner.temp }}/models
-      DATA_DIR: ${{ runner.temp }}/data
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - run: |  # the pack is Opus, decoded by ffmpeg
@@ -34,4 +32,6 @@ jobs:
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/pack.tar.gz" "$PACK"
           echo "$PACK_SHA256  $RUNNER_TEMP/pack.tar.gz" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/pack.tar.gz" -C "$RUNNER_TEMP"
-      - run: uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"
+      - run: |  # the models infer.fetch() downloads go to MODELS_DIR
+          MODELS_DIR="$RUNNER_TEMP/models" DATA_DIR="$RUNNER_TEMP/data" \
+            uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"
