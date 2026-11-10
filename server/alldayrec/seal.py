@@ -104,19 +104,36 @@ def placed(t, path: str, start_ms: int, size: int, received: int, whole: bool):
               (path, h - 3600_000, h + 7200_000, seal_at))
 
 
-def intent(r) -> dict | None:
-    return json.loads(r["intent"]) if r["intent"] else None
+INTENTS = 5  # the uploads under way kept: one may land after the next began (a PUT answered too late)
 
 
-def matches(path: str, it: dict) -> str | None:
-    """The object's ETag when it is what the intent says (its size, and the SHA-256 its PUT was signed with)."""
-    h = store.s3().head(path)
-    return h[2] if h is not None and h[:2] == (it["size"], it["sha256"]) else None
+def matches(path: str, it: dict, h=False) -> str | None:
+    """The object's ETag when it is what the intent says (its size, and the SHA-256 its PUT was signed with); h: its
+    HEAD, already asked. A store that gives no ETag cannot be used (a merge replaces only the version it read)."""
+    h = store.s3().head(path) if h is False else h
+    if h is None or h[:2] != (it["size"], it["sha256"]):
+        return None
+    if not h[2]:
+        raise store.NoETag(f"{path}: the object store gives no ETag (HEAD): merges could not be kept off others' objects")
+    return h[2]
 
 
-def set_intent(path: str, it: dict | None):
+def landed(r) -> tuple[dict, str] | None:
+    """The upload under way (r's intents, the newest first) the object turned out to be, and its ETag; None when
+    the object is none of them (no upload got there: the object is as before)."""
+    intents = json.loads(r["intent"]) if r["intent"] else []
+    h = store.s3().head(r["path"]) if intents else None
+    for it in reversed(intents):
+        if etag := matches(r["path"], it, h):
+            return it, etag
+    return None
+
+
+def add_intent(path: str, it: dict):
+    """What the upload about to start makes the object, kept beside those still under way (INTENTS of them)."""
     with db.tx(durable=True) as t:
-        t.execute("UPDATE store_objects SET intent = ? WHERE path = ?", (it and json.dumps(it), path))
+        v = t.execute("SELECT intent FROM store_objects WHERE path = ?", (path,)).fetchone()[0]
+        t.execute("UPDATE store_objects SET intent = ? WHERE path = ?", (json.dumps(((json.loads(v) if v else []) + [it])[-INTENTS:]), path))
 
 
 def release(path: str, sealed: tuple | None = None):
@@ -149,9 +166,10 @@ def seal(path: str):
             if r["state"] == "open":
                 with db.tx(durable=True) as t:
                     t.execute("UPDATE store_objects SET state = 'sealing' WHERE path = ?", (path,))
-        it = intent(r)
-        etag = it and matches(path, it)
-        if not etag:
+        got = landed(r)
+        if got:
+            it, etag = got
+        else:
             f = T().recordings / path
             size = f.stat().st_size
             if size > store.PUT_MAX:
@@ -161,13 +179,15 @@ def seal(path: str):
                 return
             with open(f, "rb") as h:
                 it = {"size": size, "sha256": store.file_sha(h, size)}
-                set_intent(path, it)
+                add_intent(path, it)
                 store.s3().write(path, h, it["sha256"])  # only a new key: never over another instance's object
             if not (etag := matches(path, it)):
                 raise store.Unreachable(f"{path}: the object does not match what was uploaded")
         with db.tx(durable=True) as t:
-            t.execute("UPDATE pieces SET path = ? WHERE start_ms BETWEEN ? AND ? AND path = ?",
-                      ("s3:" + path, r["lo_ms"], r["hi_ms"], path))
+            # only rows the object holds: one appended after the upload (STORAGE=local meanwhile) stays on the file,
+            # and the file with it (release: not the object's bytes)
+            t.execute("UPDATE pieces SET path = ? WHERE start_ms BETWEEN ? AND ? AND path = ? AND pos + size <= ?",
+                      ("s3:" + path, r["lo_ms"], r["hi_ms"], path, it["size"]))
             t.execute("UPDATE store_objects SET state = 'sealed', size = ?, sha256 = ?, etag = ?, intent = NULL, seal_at = NULL WHERE path = ?",
                       (it["size"], it["sha256"], etag, path))
         release(path, (it["size"], it["sha256"]))
@@ -217,7 +237,9 @@ def step():
         except Exception as e:
             n = retry.get(path, (0, 0))[0] + 1
             retry[path] = (n, time.monotonic() + min(RETRY_MAX_S, 30 * 2 ** (n - 1)))
-            log.warning("store: %s %s failed (%d): %s", what, path, n, e)
+            # refused or unusable (the key taken, no ETag): no retry mends it, unlike the store down
+            log.log(logging.ERROR if store.kind(e) in ("conflict", "no_etag") else logging.WARNING,
+                    "store: %s %s failed (%d): %s", what, path, n, e)
 
 
 def staged(r, below: int | None = None) -> list:
@@ -237,11 +259,10 @@ def merge(path: str):
         r = row(path)
         if r is None or r["state"] != "sealed":
             return
-        it = intent(r)
-        etag = it and matches(path, it)
-        if not etag:
-            it = None  # the upload never happened (the object is as before): from the start
-        if it is None:
+        got = landed(r)
+        if got:  # one under way got there (perhaps not the newest): only its transaction is left
+            it, etag = got
+        else:  # no upload got there (the object is as before): from the start
             with audio._append:  # the pieces still to come go to the next staging file
                 with db.tx(durable=True) as t:
                     t.execute("UPDATE store_objects SET gen = gen + 1 WHERE path = ?", (path,))
@@ -263,7 +284,7 @@ def merge(path: str):
                     f.write(data)
                 size = f.tell()
                 it = {"size": size, "sha256": store.file_sha(f, size), "moves": moves}
-                set_intent(path, it)
+                add_intent(path, it)
                 store.s3().write(path, f, it["sha256"], replaces=r["etag"])  # only over the version it was made from
             if not (etag := matches(path, it)):
                 raise store.Unreachable(f"{path}: the object does not match what was uploaded")

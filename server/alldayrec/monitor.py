@@ -197,7 +197,8 @@ def metrics() -> str:
         for name, v in seal.pending().items():
             m(f"lr_store_{name}", v)
         for op, (n, failed, sec) in list(T().store_calls.items()):
-            m("lr_store_errors_total", failed, op=op)
+            for kind, k in list(failed.items()):
+                m("lr_store_errors_total", k, op=op, kind=kind)
             m("lr_store_seconds_count", n, op=op)
             m("lr_store_seconds_sum", round(sec, 3), op=op)
     b = s["balance"] or {}

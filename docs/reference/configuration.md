@@ -86,12 +86,12 @@ type: reference
 
 | 变量 | 示例值 | 不设时 | 说明 |
 |---|---|---|---|
-| `STORAGE` | `s3` | `local` | `local`：录音都在本地磁盘；`s3`：封存进兼容 S3 的对象存储（MinIO、Cloudflare R2、阿里云 OSS、火山引擎 TOS 等） |
-| `S3_ENDPOINT` | `https://s3.example.com` | `STORAGE=s3` 时必填 | 接口地址，可以带端口和路径。按路径访问（`<地址>/<桶>/<键>`），不用桶名开头的域名。存储要支持条件写入（`If-None-Match`、`If-Match`）：MinIO、AWS S3、Cloudflare R2 都支持 |
+| `STORAGE` | `s3` | `local` | `local`：录音都在本地磁盘；`s3`：封存进兼容 S3、支持条件写入的对象存储（见 `S3_ENDPOINT`） |
+| `S3_ENDPOINT` | `https://s3.example.com` | `STORAGE=s3` 时必填 | 接口地址，可以带端口和路径。按路径访问（`<地址>/<桶>/<键>`），不用桶名开头的域名。存储要支持条件写入（`If-None-Match`、`If-Match`），HEAD 要返回 ETag：MinIO（2024-11 及以后的版本实测过）、AWS S3、Cloudflare R2 支持；阿里云 OSS、火山引擎 TOS 未验证 |
 | `S3_BUCKET` | `alldayrec` | `STORAGE=s3` 时必填 | 桶名，要先建好 |
 | `S3_ACCESS_KEY`、`S3_SECRET_KEY` | 空 | `STORAGE=s3` 时必填 | 访问密钥，要有这个桶的读、写、删和 HEAD 权限 |
 | `S3_REGION` | `us-east-1` | `us-east-1` | 签名用的区域；MinIO 一般就是 `us-east-1` |
-| `S3_PREFIX` | `alldayrec/` | 空 | 键的前缀。每个租户的对象在 `<S3_PREFIX><租户 id>/` 下面。一个服务器实例用一个前缀，几个实例共用一个桶时各用各的。租户第一次用对象存储时把这个前缀记进自己的数据库，之后一直用它，所以租户被合并进另一个实例（`tenants.sh merge`）以后照样读得到自己的对象 |
+| `S3_PREFIX` | `alldayrec/` | 空 | 键的前缀。每个租户的对象在 `<S3_PREFIX><租户 id>/` 下面。一个服务器实例用一个前缀，几个实例共用一个桶时各用各的。租户第一次用对象存储时把这个前缀记进自己的数据库，之后一直用它，所以租户被合并进另一个实例（`tenants.sh merge`）以后照样读得到自己的对象；合并进去的实例要用同一个 `S3_ENDPOINT` 和 `S3_BUCKET`（库里只记了前缀） |
 | `SEAL_IDLE_S` | `600` | `600` | 一小时过去后，等最后一块到达这么多秒才封存 |
 | `MERGE_IDLE_S` | `90` | `90` | 一个已封存的小时这么多秒没有再来迟到的块，就把暂存的块合并进对象 |
 | `MERGE_MAX_BYTES` | `33554432` | 32 MiB | 暂存的块加起来到这么多字节就马上合并 |

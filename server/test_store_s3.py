@@ -312,7 +312,7 @@ def test_store_down(s3, monkeypatch):
     seal.step()
     assert T().store_retry[rows()[-1]["path"]][0] == 1, "not tried again before its time"
     m = monitor.metrics()
-    assert 'lr_store_pending_seal{instance="local"} 1.0' in m and 'lr_store_errors_total{instance="local",op="seal"}' in m
+    assert 'lr_store_pending_seal{instance="local"} 1.0' in m and 'lr_store_errors_total{instance="local",op="seal",kind="unreachable"} 1.0' in m
     with pytest.raises(store.Unreachable, match="unreachable"):
         audio.read(rows()[0])
     with pytest.raises(Exception) as e:
@@ -410,7 +410,8 @@ def test_seal_verified(s3, monkeypatch):
     monkeypatch.setattr(store.S3, "write", write)
     T().store_retry.clear()
     seal.step()
-    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == 2, "not overwritten: refused again"
+    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == {"unreachable": 1, "conflict": 1}, "not overwritten: refused"
+    assert 'lr_store_errors_total{instance="local",op="seal",kind="conflict"} 1.0' in monitor.metrics(), "refused, told apart from the store down"
     same(kept)
     store.s3().delete(HOUR)
     T().store_retry.clear()
@@ -513,7 +514,7 @@ def test_two_instances_same_prefix(s3, tmp_path):
     other = {H10: tone(2, 900)}
     audio.save("phone", H10, other[H10], "audio/ogg")
     seal.step()
-    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == 1, "refused (store.Conflict)"
+    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == {"conflict": 1}, "refused (store.Conflict)"
     same(other)
     tenant.enter(a)
     same(kept)
@@ -645,3 +646,65 @@ def test_snapshot_reads_objects(s3, monkeypatch):
         hour = t.extractfile(f"recordings/{HOUR}").read()
         pieces = json.loads(t.extractfile("pieces.json").read())["pieces"]
     assert {p["start_ms"]: hour[p["pos"]:p["pos"] + p["size"]] for p in pieces} == kept and {p["path"] for p in pieces} == {HOUR}
+
+
+def test_sealing_then_rollback(s3, monkeypatch):
+    """Killed after a seal's upload (before its check), then STORAGE=local for a while (a piece appended to the hour
+    file past the uploaded bytes), then s3 again: the seal moves only the rows the object holds; the later one stays
+    on the file, and the file with it."""
+    kept = {H10: tone(2, 300)}
+    audio.save("phone", H10, kept[H10], "audio/ogg")
+    crash_once(monkeypatch, seal, "matches")
+    seal.step()
+    monkeypatch.setattr(store, "STORAGE", "local")
+    kept[H10 + 60_000] = tone(2, 700)
+    audio.save("phone", H10 + 60_000, kept[H10 + 60_000], "audio/ogg")
+    monkeypatch.setattr(store, "STORAGE", "s3")
+    T().store_retry.clear()
+    seal.sweep()
+    seal.step()
+    assert [p["path"] for p in rows()] == ["s3:" + HOUR, HOUR] and (T().recordings / HOUR).exists()
+    same(kept)
+
+
+def test_merge_put_landing_late(s3, monkeypatch):
+    """A merge PUT answered too late (a timeout) that lands only as the next attempt starts, a late piece between:
+    the next attempt is refused (the object changed), and the one after finds the first upload there, commits it,
+    then merges the rest."""
+    kept = sealed_hour()
+    kept[H10 + 60_000] = tone(2, 600)
+    audio.save("phone", H10 + 60_000, kept[H10 + 60_000], "audio/ogg")
+    write, held = store.S3.write, []
+
+    def timed_out(self, path, data, sha=None, replaces=None):
+        if not held:  # the store keeps it, the answer comes too late
+            data.seek(0)
+            held.append((path, data.read(), sha, replaces))
+            raise store.Unreachable("object store unreachable: PUT: ReadTimeout")
+        if len(held) == 1:  # it lands just before the retry's PUT
+            p, body, s, r = held[0]
+            write(self, p, body, s, r)
+            held.append(1)
+        return write(self, path, data, sha, replaces)
+    monkeypatch.setattr(store.S3, "write", timed_out)
+    seal.step()
+    kept[H10 + 62_000] = tone(2, 700)
+    audio.save("phone", H10 + 62_000, kept[H10 + 62_000], "audio/ogg")
+    for _ in range(3):
+        T().store_retry.clear()
+        seal.step()
+        same(kept)
+    assert {p["path"] for p in rows()} == {"s3:" + HOUR} and seal.row(HOUR)["late_bytes"] == 0
+    assert not list((T().recordings / "staging").rglob("*.ogg"))
+
+
+def test_no_etag(s3, monkeypatch):
+    """A store whose HEAD gives no ETag: the seal stops with a clear error of its own kind (lr_store_errors_total
+    kind="no_etag"), the hour stays local and readable."""
+    kept = {H10: tone(1)}
+    audio.save("phone", H10, kept[H10], "audio/ogg")
+    head = store.S3.head
+    monkeypatch.setattr(store.S3, "head", lambda self, path: (h := head(self, path)) and (*h[:2], None))
+    seal.step()
+    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == {"no_etag": 1}
+    same(kept)

@@ -86,12 +86,12 @@ Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as
 
 | Variable | Example value | When unset | Description |
 |---|---|---|---|
-| `STORAGE` | `s3` | `local` | `local`: recordings on local disk; `s3`: sealed into an S3-compatible object store (MinIO, Cloudflare R2, Alibaba Cloud OSS, Volcengine TOS and the like) |
-| `S3_ENDPOINT` | `https://s3.example.com` | required with `STORAGE=s3` | The endpoint, a port and a path allowed. Path-style requests (`<endpoint>/<bucket>/<key>`), not bucket-named hosts. The store must take conditional writes (`If-None-Match`, `If-Match`): MinIO, AWS S3 and Cloudflare R2 do |
+| `STORAGE` | `s3` | `local` | `local`: recordings on local disk; `s3`: sealed into an S3-compatible object store that takes conditional writes (see `S3_ENDPOINT`) |
+| `S3_ENDPOINT` | `https://s3.example.com` | required with `STORAGE=s3` | The endpoint, a port and a path allowed. Path-style requests (`<endpoint>/<bucket>/<key>`), not bucket-named hosts. The store must take conditional writes (`If-None-Match`, `If-Match`) and give an ETag on HEAD: MinIO (tested from 2024-11 releases on), AWS S3 and Cloudflare R2 do; Alibaba Cloud OSS and Volcengine TOS are untested |
 | `S3_BUCKET` | `alldayrec` | required with `STORAGE=s3` | The bucket; create it first |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | empty | required with `STORAGE=s3` | The access key, allowed to read, write, delete and HEAD in that bucket |
 | `S3_REGION` | `us-east-1` | `us-east-1` | The region requests are signed for; for MinIO usually `us-east-1` |
-| `S3_PREFIX` | `alldayrec/` | empty | The keys' prefix. Each tenant's objects are under `<S3_PREFIX><tenant id>/`. One prefix per server instance; instances sharing a bucket each use their own. A tenant records the prefix in its own store the first time it uses the object store and keeps it, so a tenant moved into another instance (`tenants.sh merge`) still reads its own objects |
+| `S3_PREFIX` | `alldayrec/` | empty | The keys' prefix. Each tenant's objects are under `<S3_PREFIX><tenant id>/`. One prefix per server instance; instances sharing a bucket each use their own. A tenant records the prefix in its own store the first time it uses the object store and keeps it, so a tenant moved into another instance (`tenants.sh merge`) still reads its own objects; the instance it moves into must use the same `S3_ENDPOINT` and `S3_BUCKET` (the store records only the prefix) |
 | `SEAL_IDLE_S` | `600` | `600` | Once an hour is over, it is sealed this many seconds after its last piece came |
 | `MERGE_IDLE_S` | `90` | `90` | A sealed hour's staged late pieces are merged into its object once none has come for this many seconds |
 | `MERGE_MAX_BYTES` | `33554432` | 32 MiB | ... or as soon as they add up to this many bytes |

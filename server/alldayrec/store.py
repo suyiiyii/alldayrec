@@ -108,12 +108,12 @@ class Local:
 
 @contextlib.contextmanager
 def timed(op: str):
-    """op's time and failure, for the metrics (monitor.metrics): the tenant's store_calls."""
-    c, t0 = T().store_calls.setdefault(op, [0, 0, 0.0]), time.monotonic()
+    """op's time and failures by kind, for the metrics (monitor.metrics): the tenant's store_calls."""
+    c, t0 = T().store_calls.setdefault(op, [0, {}, 0.0]), time.monotonic()
     try:
         yield
-    except BaseException:
-        c[1] += 1
+    except BaseException as e:
+        c[1][kind(e)] = c[1].get(kind(e), 0) + 1
         raise
     finally:
         c[0], c[2] = c[0] + 1, c[2] + time.monotonic() - t0
@@ -125,6 +125,16 @@ class Unreachable(OSError):
 
 class Conflict(OSError):
     """A conditional PUT refused (412): the key holds an object this one was not to replace (another instance's)."""
+
+
+class NoETag(OSError):
+    """The object store's HEAD gives no ETag: without it a merge cannot replace only the version it read."""
+
+
+def kind(e: BaseException) -> str:
+    """A failure's kind, for lr_store_errors_total: the store down (unreachable, retried till it is back), a write
+    refused (conflict) or a store without ETags (no_etag), neither mended by retrying, or anything else."""
+    return {Conflict: "conflict", NoETag: "no_etag", Unreachable: "unreachable"}.get(type(e), "other")
 
 
 class S3:
