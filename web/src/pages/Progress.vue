@@ -12,6 +12,7 @@ import {
   caughtUp,
   engines,
   get,
+  post,
   hhmm,
   hhmmss,
   holdLeft,
@@ -28,9 +29,11 @@ import {
   type Status,
   type Upgrade,
 } from "../lib/api";
+import { useMutation } from "../lib/mutation";
 import { upgradeText } from "../lib/recorderLog";
 import { useSocket } from "../lib/socket";
 import { importLine, showLiveLag } from "../lib/progress";
+import { toast } from "../lib/toast";
 
 // What the server is doing per device: how far its audio has arrived, how far it is finalized, what is left and
 // when it should be done; refreshed by the status the socket sends every 2 s.
@@ -209,6 +212,15 @@ const lateLine = (d: DeviceStatus) =>
     .filter(([, v]) => v.spans > 0)
     .map(([s, v]) => t(`progress.late.${s}`, { n: v.spans, m: v.minutes.toFixed(1) }, v.spans) + (v.note ? ` (${v.note})` : ""))
     .join(" · ");
+// 重试: the device's failed late spans queued again (three new tries); the status the socket sends shows them waiting.
+// One per device: an error or a retry under way shows on its own row only
+const retries = new Map<string, ReturnType<typeof useMutation>>();
+const retry = (device: string) => retries.get(device) ?? retries.set(device, useMutation()).get(device)!;
+const retryLate = (device: string) =>
+  retry(device).run(async () => {
+    const r = await post<{ requeued: number }>(`/api/late-requeue?device=${encodeURIComponent(device)}`);
+    toast(t("progress.late.requeued", { n: r.requeued }, r.requeued));
+  });
 </script>
 
 <template>
@@ -316,7 +328,18 @@ const lateLine = (d: DeviceStatus) =>
         >
         <template v-if="lateLine(d)">
           <span>{{ t("progress.late.title") }}</span>
-          <span :class="{ bad: d.late?.failed?.spans }">{{ lateLine(d) }}</span>
+          <span :class="{ bad: d.late?.failed?.spans }" :title="retry(d.device).detail.value"
+            >{{ lateLine(d) }}
+            <button
+              v-if="d.late?.failed?.spans"
+              class="chip retry"
+              :disabled="retry(d.device).busy.value"
+              @click="retryLate(d.device)"
+            >
+              {{ t("progress.late.retry") }}
+            </button>
+            <template v-if="retry(d.device).error.value">{{ retry(d.device).error.value }}</template></span
+          >
         </template>
         <span>{{ t("progress.speed") }}</span
         ><span>{{ d.rate ? t("progress.speedVal", { rate: d.rate }) : "—" }}</span>
@@ -500,6 +523,9 @@ main {
 }
 .events .error {
   color: var(--err);
+}
+.retry {
+  margin-left: var(--space-2);
 }
 .grid span:nth-child(odd) {
   color: var(--muted);

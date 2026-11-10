@@ -111,7 +111,7 @@ def test_part_four_timeout_keeps_commits_and_retry_bridges_seams(store, monkeypa
             await anyio.sleep_forever()
         rs = [row(i, i+20) for i in range(0, 10800, 60)
               if any(a <= ms(i) < ms(i+20) <= b for a,b in json.loads(s["ranges"]))]
-        return rs, {"S1": E1}
+        return rs, {"S1": E1}, []
     async def vectors(s):
         return {c["id"]: {"S1": E1} for c in db.conversations()}
     monkeypatch.setattr(late, "transcribe", transcribe)
@@ -193,8 +193,8 @@ def test_split_transcription_reads_seam_samples_once(store, monkeypatch):
     audio.save(D, ms(0), flac(x), "audio/flac")
     span(0, 60)
     read, lookahead, exact, choosing = [], [], late.read_exact, False
-    def read_exact(device, a, b):
-        y = exact(device, a, b)
+    def read_exact(device, a, b, bad=None):
+        y = exact(device, a, b, bad)
         if choosing:
             lookahead.append((a, b))
         else:

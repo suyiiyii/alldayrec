@@ -617,7 +617,9 @@
       "deferred": "After conversation closes: {n} span · {m} min | After conversation closes: {n} spans · {m} min",
       "processing": "Processing: {n} span · {m} min | Processing: {n} spans · {m} min",
       "failed": "Failed: {n} span · {m} min | Failed: {n} spans · {m} min",
-      "done": "Done today: {n} span · {m} min | Done today: {n} spans · {m} min"
+      "done": "Done today: {n} span · {m} min | Done today: {n} spans · {m} min",
+      "retry": "Retry",
+      "requeued": "Queued {n} span again | Queued {n} spans again"
     }
   },
   "rec": {

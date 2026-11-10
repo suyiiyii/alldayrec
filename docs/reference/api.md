@@ -76,7 +76,13 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean) |
+| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean)<br>`include_failed?` (query, boolean) |
+
+### `/api/late-requeue`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | Failed late spans (of one device when given; the progress page's Retry) waiting again with three new tries. | `device?` (query, string) |
 
 ### `/api/chunks`
 

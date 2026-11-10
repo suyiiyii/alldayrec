@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 from contextlib import nullcontext
 
 import anyio
@@ -21,10 +22,11 @@ log = logging.getLogger("live")
 LATE_PROCESS_TIMEOUT_S = float(os.environ.get("LATE_PROCESS_TIMEOUT_S", "1800"))
 
 
-def read_exact(device: str, a: int, b: int) -> np.ndarray:
-    """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want)."""
+def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarray:
+    """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want). A piece
+    that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone)."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
-    end = a
+    end, missed, filled = a, [], []
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",
                                (device, b, a)).fetchall():
         if p["start_ms"] + p["seconds"] * 1000 <= end:
@@ -35,19 +37,33 @@ def read_exact(device: str, a: int, b: int) -> np.ndarray:
         if i >= len(x):
             break
         # Long imports decode only this window; short pieces retain codec priming/dehum.
-        y = audio.piece_window(p, offset, len(x) - i)
+        try:
+            y = audio.piece_window(p, offset, len(x) - i)
+        except subprocess.TimeoutExpired:
+            if bad is None:
+                raise
+            y = None
         if y is None:
-            raise ValueError("stored late audio could not be decoded")
+            if bad is None:
+                raise ValueError("stored late audio could not be decoded")
+            lo, hi = round(max(a, end, p["start_ms"])), min(b, round(p["start_ms"] + p["seconds"] * 1000))
+            log.warning("late audio of %s: piece %s (%s) would not decode, %.1f s", device, p["start_ms"], p["path"], (hi - lo) / 1000)
+            missed.append([lo, hi])
+            continue  # end stays: a later piece overlapping this one may have its audio
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
+            filled.append([round(start), round(end)])
+    if missed:
+        bad += late_store.subtract(missed, filled)
     return x
 
 
-async def transcribe(span: dict) -> tuple[list[dict], dict]:
+async def transcribe(span: dict) -> tuple[list[dict], dict, list]:
+    """Its rows, its speakers' vectors and the ranges of its pieces that would not decode (read_exact's bad)."""
     if not await quiet_seam(span):
-        return [], {}  # the final reader invalidated this claim during lookahead
+        return [], {}, []  # the final reader invalidated this claim during lookahead
     ranges = json.loads(span["ranges"])
     # another device in the same place has it (attach: not this span's)
     if skip := await anyio.to_thread.run_sync(colocate.left, span["device"], ranges, limiter=threads.MEDIA):
@@ -60,7 +76,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
     with np.load(vp) if vp.exists() else nullcontext({}) as bank:
         owner = dict(bank)
         dia = Diarist(owner, people={k: e for k, (_, e) in db.people().items()})
-    rows, embeddings, windows = [], {}, []
+    rows, embeddings, windows, bad = [], {}, [], []
     # Renames during model calls teach this diarist just like a live one.
     T().dias.append(dia)
     try:
@@ -72,7 +88,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
             while pos < b or done < seg.samples:
                 if pos < b:
                     end = min(b, pos + 30_000)
-                    x = await anyio.to_thread.run_sync(read_exact, span["device"], pos, end, limiter=threads.MEDIA)
+                    x = await anyio.to_thread.run_sync(read_exact, span["device"], pos, end, bad, limiter=threads.MEDIA)
                     utts += [(u[0], u[1]) for u in await seg.apush(dt.datetime.fromtimestamp(pos / 1000), x)]
                     pos = end
                 while done < seg.samples:
@@ -121,7 +137,7 @@ async def transcribe(span: dict) -> tuple[list[dict], dict]:
             for r in rs:
                 r.update(source=span["device"], engine=segs[0]["engine"], shown_at=iso(dt.datetime.now()))
             rows += rs
-        return rows, {k: late_merge.unit(np.mean(es, 0)) for k, es in embeddings.items()}
+        return rows, {k: late_merge.unit(np.mean(es, 0)) for k, es in embeddings.items()}, bad
     finally:
         T().dias.remove(dia)
 
@@ -140,7 +156,7 @@ async def quiet_seam(span):
     a = max(a, b - round(CUT_SEARCH_S * 1000))
     if b - a < 2 * late_store.MIN_LATE_MS:
         return True
-    x = await anyio.to_thread.run_sync(read_exact, span["device"], a, b, limiter=threads.MEDIA)
+    x = await anyio.to_thread.run_sync(read_exact, span["device"], a, b, [], limiter=threads.MEDIA)  # transcribe() notes bad pieces
     seg = Segmenter()
     await seg.apush(dt.datetime.fromtimestamp(a / 1000), x)
     # A VAD max-utterance split ends at a frame's start and resumes at the next frame.
@@ -188,9 +204,9 @@ async def conversation_vectors(span: dict) -> dict:
 
 
 async def process(span: dict):
-    rows, vectors = await transcribe(span)
+    rows, vectors, bad = await transcribe(span)
     existing = await conversation_vectors(span) if rows else {}
-    changed, removed = late_merge.attach(span, rows, vectors, existing)
+    changed, removed = late_merge.attach(span, rows, vectors, existing, bad)
     # One range update replaces drafts and refreshes an open transcript with existing edited rows included.
     if changed:
         lo = min(c["start"] for c in changed)

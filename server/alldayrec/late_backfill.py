@@ -1,6 +1,6 @@
 """Find historical late speech and enqueue it on the running instance. A dry run writes nothing.
 
-    uv run python -m alldayrec.late_backfill --days 30 --dry-run
+    uv run python -m alldayrec.late_backfill --days 30 --dry-run [--include-failed]
 
 LIVE_RECORD_URL selects the server. LIVE_RECORD_TOKEN, else stdin's first line, supplies its token.
 """
@@ -160,8 +160,13 @@ def estimates(plans) -> dict:
             "estimated_recaps": sum(bool(db.kv(f"recap:{day}")) for day in days)}
 
 
-async def scan(days: int, dry_run: bool = True) -> dict:
+async def scan(days: int, dry_run: bool = True, include_failed: bool = False) -> dict:
     grouped, info = await anyio.to_thread.run_sync(candidates, days, limiter=threads.DB)
+    if include_failed:  # their ranges are in the ledger, so candidates() never offers them again: queue the rows themselves
+        first = dt.date.today() - dt.timedelta(days=days - 1)
+        lo = round(dt.datetime.combine(first, dt.time()).timestamp() * 1000)
+        info["requeued_failed"] = await anyio.to_thread.run_sync(
+            lambda: late_store.requeue(lo_ms=lo, dry_run=dry_run), limiter=threads.DB)
     plans = []
     for device, spans in grouped.items():
         for ranges in spans:
@@ -210,12 +215,14 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--days", type=int, default=30)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--include-failed", action="store_true", help="also queue the failed late spans of those days again")
     a = p.parse_args(argv)
     if not 1 <= a.days <= 366:
         p.error("days must be between 1 and 366")
     url = os.environ.get("LIVE_RECORD_URL") or sys.exit("LIVE_RECORD_URL is not set")
     token = os.environ.get("LIVE_RECORD_TOKEN") or ("" if sys.stdin.isatty() else sys.stdin.readline().strip())
-    query = urllib.parse.urlencode({"days": a.days, "dry_run": str(a.dry_run).lower()})
+    query = urllib.parse.urlencode({"days": a.days, "dry_run": str(a.dry_run).lower(),
+                                    "include_failed": str(a.include_failed).lower()})
     req = urllib.request.Request(url.rstrip("/") + "/api/late-backfill?" + query, method="POST",
                                  headers={"Authorization": "Bearer " + token} if token else {})
     # VAD over history may take minutes. An uncertain result is never automatically retried.
@@ -226,6 +233,8 @@ def main(argv=None):
     print(f"Estimated summaries: {result['estimated_conversations']}; estimated recaps: {result['estimated_recaps']}")
     print("Skipped NULL received_ms days: " + (", ".join(result["skipped_null_received_days"]) or "none"))
     print(f"Skipped ambiguous legacy spans: {result['skipped_ambiguous_spans']}; enqueued: {result['enqueued']}")
+    if "requeued_failed" in result:
+        print(f"Failed spans queued again: {result['requeued_failed']}")
     return result
 
 

@@ -28,12 +28,19 @@ router = APIRouter()
 
 
 @router.post("/api/late-backfill")
-async def late_backfill(days: int = 30, dry_run: bool = True):
-    """Inspect historical missed speech, or enqueue it. Authenticated by the same tenant token as uploads."""
+async def late_backfill(days: int = 30, dry_run: bool = True, include_failed: bool = False):
+    """Inspect historical missed speech, or enqueue it. Authenticated by the same tenant token as uploads.
+    include_failed: failed late spans of those days are queued again too (late_store.requeue)."""
     if not 1 <= days <= 366:
         raise HTTPException(400, "days must be between 1 and 366")
     from alldayrec.late_backfill import scan
-    return await scan(days, dry_run)
+    return await scan(days, dry_run, include_failed)
+
+
+@router.post("/api/late-requeue")
+async def late_requeue(device: str | None = None):
+    """Failed late spans (of one device when given; the progress page's Retry) waiting again with three new tries."""
+    return {"requeued": await anyio.to_thread.run_sync(late_store.requeue, device, limiter=threads.DB)}
 
 
 SLICE_FOREGROUND_S = int(os.environ.get("SLICE_FOREGROUND_S", "1"))   # the apps' piece seconds with the app in front: 1 s

@@ -281,6 +281,30 @@ def failed(span, error: Exception, now_ms: int | None = None):
                        now_ms + 30_000 * 2 ** (span["tries"] - 1), span["id"]))
 
 
+def undecodable(t, span, ranges, bad, now_ms: int | None = None) -> list:
+    """Inside attach's commit: span keeps only what of its ranges lay in pieces that would not decode (late.read_exact's
+    `bad`), with its tries and failed()'s backoff, so those alone are retried and fail; the rest is committed. Returns
+    what is left of the span ([]: nothing, it is done)."""
+    now_ms = round(time.time() * 1000) if now_ms is None else now_ms
+    left = substantial([[max(a, x), min(b, y)] for a, b in ranges for x, y in union(bad) if x < b and y > a])
+    if left:
+        t.execute("UPDATE late_spans SET status=?, note='undecodable audio', next_ms=?, start_ms=?, end_ms=?, ranges=? WHERE id=?",
+                  ("failed" if span["tries"] >= 3 else "waiting", now_ms + 30_000 * 2 ** (span["tries"] - 1),
+                   left[0][0], left[-1][1], json.dumps(left), span["id"]))
+    return left
+
+
+def requeue(device: str | None = None, lo_ms: int | None = None, hi_ms: int | None = None, dry_run: bool = False) -> int:
+    """Failed spans (of one device, overlapping [lo_ms, hi_ms) when given) waiting again with a fresh retry budget."""
+    where = ("status='failed' AND (? IS NULL OR device=?) AND (? IS NULL OR end_ms > ?) AND (? IS NULL OR start_ms < ?)",
+             (device, device, lo_ms, lo_ms, hi_ms, hi_ms))
+    if dry_run:
+        return db.conn().execute("SELECT count(*) FROM late_spans WHERE " + where[0], where[1]).fetchone()[0]
+    with db.tx() as t:
+        return t.execute("UPDATE late_spans SET status='waiting', tries=0, stops=0, next_ms=0, ready=1, note=NULL WHERE "
+                         + where[0], where[1]).rowcount
+
+
 def ready_work(device: str, now_ms: int | None = None) -> bool:
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
     return db.conn().execute("SELECT 1 FROM late_spans WHERE device=? AND status IN ('waiting','processing') "

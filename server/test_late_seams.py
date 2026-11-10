@@ -144,7 +144,7 @@ def test_seam_lookahead_is_bounded_and_preserves_budget(store, monkeypatch, sile
     reads = []
     monkeypatch.setattr(infer, "StreamVad", EnergyVad)
 
-    def read(device, a, b):
+    def read(device, a, b, bad=None):
         reads.append((a, b))
         x = tone(1, (b-a)/1000)
         if silence:
@@ -178,12 +178,12 @@ def test_seam_lookahead_cannot_revive_reader_owned_audio(store, monkeypatch):
     s = late_store.claim()
     monkeypatch.setattr(infer, "StreamVad", EnergyVad)
 
-    def read(device, a, b):
+    def read(device, a, b, bad=None):
         late_store.reset_reader(D, ms(60))
         return np.zeros(round((b-a)*audio.SR/1000), np.int16)
 
     monkeypatch.setattr(late, "read_exact", read)
-    assert anyio.run(late.transcribe, s) == ([], {})
+    assert anyio.run(late.transcribe, s) == ([], {}, [])
     rs = list(db.conn().execute("SELECT ranges,status FROM late_spans"))
     assert len(rs) == 1 and json.loads(rs[0][0]) == [[ms(0), ms(60)]]
     assert rs[0][1] == "waiting"

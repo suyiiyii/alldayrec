@@ -520,6 +520,11 @@ def piece_window(p, offset, count):
     if gone(p):
         return None
     if p["path"].endswith(".aac"):
+        # Not past its registered length: the last frame's padding (save_file cut half a frame, 32 ms) is no audio
+        # and would stand in for the start of the next piece. Other formats end at their audio: EOF decides there.
+        count = min(count, round(p["seconds"] * SR) - offset)
+        if count <= 0:
+            return np.zeros(0, np.int16)
         offset += AAC_DELAY
     seek = max(0, offset // SR - 2)
     with piece_file(p) as source, tempfile.TemporaryFile() as pcm:

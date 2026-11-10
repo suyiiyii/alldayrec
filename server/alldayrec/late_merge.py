@@ -225,11 +225,12 @@ def components(rows: list[dict], convs: list[dict]) -> list[dict]:
     return out
 
 
-def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) -> tuple[list[dict], list[str]]:
+def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, bad=()) -> tuple[list[dict], list[str]]:
     """Insert-only late rows, attach their connected groups, then move references atomically.
 
     Existing conversations are intervals; late speech connects them only across gaps shorter than GAP_S.
     Disconnected rows use the same Grouper MIN/MAX rules as the live layer.
+    bad: ranges of pieces that would not decode (heard as silence): not committed as processed, the span keeps them.
     """
     device = span["device"]
     changed, removed = [], []
@@ -237,7 +238,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
         current = t.execute("SELECT * FROM late_spans WHERE id=?", (span["id"],)).fetchone()
         if not current or current["status"] in ("done", "failed") or any(current[k] != span[k] for k in ("status", "tries", "ranges")):
             return [], []  # restarted reader/processor invalidated this ASR snapshot, or its commit already succeeded
-        from alldayrec.late_store import substantial, subtract
+        from alldayrec.late_store import substantial, subtract, undecodable
         remaining = substantial(subtract(json.loads(current["ranges"]), db.processed(device, current["start_ms"], current["end_ms"])))
         # An open conversation may have appeared while model calls ran: caller retries after it closes.
         from alldayrec.late_store import blocked
@@ -359,9 +360,10 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict) 
                 if recap := db.kv(f"recap:{day}"):
                     db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
                     db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
-        db.record_processed(t, device, remaining, "late")
-        t.execute("UPDATE late_spans SET status = 'done', done_ms = ?, note = NULL WHERE id = ?",
-                  (round(dt.datetime.now().timestamp() * 1000), span["id"]))
+        db.record_processed(t, device, subtract(remaining, bad), "late")
+        if not undecodable(t, current, remaining, bad):
+            t.execute("UPDATE late_spans SET status = 'done', done_ms = ?, note = NULL WHERE id = ?",
+                      (round(dt.datetime.now().timestamp() * 1000), span["id"]))
     # An undo snapshot predating a merge could restore obsolete voice rows and participant lists. Expire it.
     touched = {c["id"] for c in changed} | set(removed)
     for key, bs in list(T().undo.items()):
