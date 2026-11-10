@@ -1,7 +1,7 @@
 // node --experimental-strip-types web/api.check.ts: a failed call says its HTTP status, 0 when nothing answered. The
 // conversation page shows 找不到这段对话 on a 404 only; any other failure is a load to try again.
 import assert from "node:assert/strict";
-import { ApiError, beanBehind, caseText, get, holdLeft, micGap, type DeviceStatus } from "./src/lib/api.ts";
+import { ApiError, beanBehind, card, caseText, get, holdLeft, micGap, type DeviceStatus } from "./src/lib/api.ts";
 import { i18n } from "./src/i18n.ts";
 
 async function failure(answer: () => Promise<Response>) {
@@ -24,6 +24,10 @@ i18n.global.locale.value = "zh";
 assert.equal(caseText({ at: "", battery: 50, case_battery: 80 }), "充电仓 80%");
 assert.equal(caseText({ at: "", battery: 50 }), "");
 assert.equal(caseText(null), "");
+// the recorder's card: blank (the app formats it), foreign (a GPT card, a damaged volume: a computer's job, never formatted)
+assert.equal(card({ at: "", store: -19, total_kb: 0, card: "blank" }), "未格式化，可以在 App 的录音设备页格式化；在那之前只能实时上传");
+assert.match(card({ at: "", store: -19, total_kb: 0, card: "foreign" }), /^无法识别/);
+assert.equal(card({ at: "", store: -19, total_kb: 0, card: "none" }), "没插卡或没插好，只能实时上传");
 const expired = { hold: null, hold_expired: { reason: "stale", seconds: 1200 } } as DeviceStatus;
 assert.equal(holdLeft(expired), "补传等了 20 分钟没有进展，先定稿；之后到的更早录音会补转写");
 i18n.global.locale.value = "en";

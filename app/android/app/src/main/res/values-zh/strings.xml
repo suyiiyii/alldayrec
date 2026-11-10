@@ -48,4 +48,6 @@
     <string name="card_usb">存储卡在 U 盘模式</string>
     <string name="card_none">没插存储卡</string>
     <string name="card_error">存储卡出错</string>
+    <string name="card_blank">存储卡未格式化</string>
+    <string name="card_foreign">存储卡无法识别，请接到电脑上处理</string>
 </resources>

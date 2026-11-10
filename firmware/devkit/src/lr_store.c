@@ -524,7 +524,7 @@ static void put_sync(uint32_t frame, uint64_t epoch)
 //
 // Commands, handled on the store's own thread: SD access and notifications may block, the BT RX thread must not
 //
-enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20, DEBUG = 0x30 };
+enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, FORMAT = 9, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20, DEBUG = 0x30 };
 struct cmd {
     uint8_t op;
     uint32_t file, offset;
@@ -572,11 +572,22 @@ void k_sys_fatal_error_handler(unsigned int reason, const z_arch_esf_t *esf)
     NVIC_SystemReset();
 }
 
+static bool formatting;  // FORMAT going on (the store thread): TIME's card state 5
+
+/* The card as TIME's features bits 1-3 say it (0: firmware older than this field): 1 it takes the stream, or is full
+ * or lent; 2 none answers (no card, not seated, or dead); 3 it answers and fails (its mount, a write); 4 it answers and
+ * holds no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it); 5 being formatted; 6 it answers, does not mount
+ * and shows a volume all the same (GPT, a FAT/exFAT volume FatFs cannot take: sdcard.c lr_sd_foreign), never formatted */
+static uint8_t card_state(void)
+{
+    return formatting ? 5 : !store_err || store_err == -ENOSPC || store_err == -EBUSY ? 1 : lr_sd_blank ? 4 : lr_sd_foreign ? 6 : lr_sd_sectors ? 3 : 2;
+}
+
 static ssize_t time_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                          uint16_t offset)
 {
     extern int16_t usb_diag[4];
-    uint8_t v[49];
+    uint8_t v[53];
     sys_put_le16(boot, v);
     sys_put_le32(transport_frame_no, v + 2);
     sys_put_le16(store_err, v + 6);
@@ -594,7 +605,8 @@ static ssize_t time_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
     v[42] = MIN(lr_bond_count(), UINT8_MAX);
     sys_put_le32(lr_pause_left(), v + 43);
     v[47] = lr_charge();  // a phone reads this byte every few seconds while it reads no backlog
-    v[48] = IS_ENABLED(CONFIG_LR_STORE_PHONE);  // bit 0: ACK taken (phone mode); an app acks only then
+    v[48] = IS_ENABLED(CONFIG_LR_STORE_PHONE) | card_state() << 1;  // bit 0: ACK taken (phone mode); an app acks only then
+    sys_put_le32(lr_sd_sectors / 2, v + 49);  // the card's size, KB, as it answered: FORMAT's code
     return bt_gatt_attr_read(conn, attr, buf, len, offset, v, sizeof(v));
 }
 
@@ -809,7 +821,7 @@ static void list(struct bt_conn *conn)
     notify(conn, CTRL_ATTR, end, sizeof(end));
 }
 
-static uint8_t chunk[CHUNK];
+static uint8_t chunk[CHUNK];  // FORMAT's f_mkfs buffer too: the same thread
 static uint8_t pkt[4 + 512];
 
 /* Bytes of file at off still in the ring (SD mutex held: the tail stays), up to n; 0: none there */
@@ -1287,6 +1299,35 @@ static void debug(struct bt_conn *conn, uint8_t sub, uint16_t a, uint16_t b, uin
 }
 #endif
 
+/* FORMAT code: a card that answers and holds no FAT or exFAT volume formatted (sdcard.c format_sd_card), then taken
+ * as a card put in now (retry_card): its DIR, the boot's count if there was no card at boot, a new segment. Never a card
+ * that mounts or shows a volume (foreign): format_sd_card tries it again from scratch first. The code is the card's KB as TIME read it, the size the
+ * app asked the user about: a FORMAT that was not asked for, or for another card, is turned down. Meanwhile the card
+ * takes nothing (store_err), the stream goes on to LIVE; the main loop feeds the watchdog as ever (prio 0, above this
+ * thread). 0, or -EEXIST it has a file system, -EINVAL a wrong code, -ENODEV it does not answer, -EIO the format or
+ * the mount after it failed. FORMAT event: x 0 done or the error (positive), a sectors, b ms. */
+static int format_card(uint32_t code)
+{
+    if (!lr_sd_blank) {
+        return lr_sd_sectors ? -EEXIST : -ENODEV;
+    }
+    if (code != lr_sd_sectors / 2) {
+        return -EINVAL;
+    }
+    k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+    int64_t t0 = k_uptime_get();
+    formatting = true;
+    int err = format_sd_card(code, chunk, sizeof(chunk));  // the code checked again on the card probed afresh
+    formatting = false;
+    uint32_t ms = k_uptime_get() - t0;
+    k_mutex_unlock(&write_sdcard_mutex);
+    LOG_INF("format: %d in %u ms", err, ms);
+    lr_log(LR_FORMAT, -err, lr_sd_sectors, ms);
+    retries = 0;
+    retry_card();  // a card that mounts after all is taken as it is too
+    return err ?: store_err ? -EIO : 0;
+}
+
 static void store_thread(void)
 {
     struct cmd c;
@@ -1350,6 +1391,9 @@ static void store_thread(void)
         } else if (c.op == LOG) {
             uint16_t max = MIN(bt_gatt_get_mtu(conn) - 3 - 4, sizeof(pkt) - 4) / 16;
             reply(conn, 0x87, lr_log_read(c.file, pkt + 4, max, send_log, conn), 0, 0);
+        } else if (c.op == FORMAT) {
+            int err = format_card(c.file);
+            reply(conn, 0x89, total_kb, (uint8_t) err, 1);
 #ifdef CONFIG_LR_POWER_DEBUG
         } else if (c.op == DEBUG) {
             debug(conn, c.file, c.offset & 0xFFFF, c.offset >> 16, c.epoch & 0xFFFF, c.epoch >> 16);

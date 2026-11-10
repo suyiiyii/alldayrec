@@ -92,6 +92,12 @@ object Ble {
     fun charge(status: ByteArray): String? = status.getOrNull(47)?.toInt()?.let { listOf("battery", "charging", "full").getOrNull(it) }
     const val CHARGE_EVERY_MS = 5_000L  // that byte read this often while no READ runs: a plug or unplug shows within seconds
 
+    /** The card as the board sees it (byte 48 bits 1-3, firmware lr_store.h): "ok" (it records to it, or it is full or
+     *  lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting",
+     *  "foreign" (GPT, or a FAT/exFAT volume it cannot mount: never formatted); null: an older firmware. */
+    fun card(status: ByteArray): String? =
+        if (status.size > 52) listOf("ok", "none", "failing", "blank", "formatting", "foreign").getOrNull((status[48].toInt() shr 1 and 7) - 1) else null
+
     /** The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk). */
     fun store(status: ByteArray): Int = ByteBuffer.wrap(status).order(ByteOrder.LITTLE_ENDIAN).getShort(6).toInt()
 
@@ -523,11 +529,29 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         }
     }
 
-    /** A CTRL command and its reply (op), other replies passed over; null: none in 15 s. */
-    private fun reply(g: BluetoothGatt, cmd: ByteArray, op: Int): ByteArray? {
+    /** A card with no file system (hw card "blank") formatted by the board (CTRL 0x09, its card_kb as the code): its
+     *  answer, 0 done (hw has the new size then), -17 it has a file system after all, -22 the card changed, -19 no card
+     *  answers, -5 the format failed; null: not connected, or no answer in 3 minutes (a 128 GB card takes tens of seconds). */
+    fun formatCard(code: Long): Int? {
+        if (gatt == null) return null
+        val done = CompletableFuture<Int?>()
+        jobs.put { g ->
+            try {
+                val err = reply(g, le(ByteArray(5)).put(9).putInt(code.toInt()).array(), 0x89, 180_000)?.get(5)?.toInt()
+                Log.i("live-record", "ble format card: ${err ?: "no answer"}")
+                if (err != null) DeviceLog.app(mirrorName, "format", if (err == 0) "格式化存储卡：完成" else "格式化存储卡：没有完成（$err）")
+                status(g, prefs.getString("bleName", null) ?: g.device.name ?: g.device.address)  // the new size, the card's state
+                done.complete(err)
+            } finally { done.complete(null) }
+        }
+        return try { done.get(200, TimeUnit.SECONDS) } catch (e: Exception) { null }
+    }
+
+    /** A CTRL command and its reply (op), other replies passed over; null: none in [waitMs]. */
+    private fun reply(g: BluetoothGatt, cmd: ByteArray, op: Int, waitMs: Long = 15_000): ByteArray? {
         ctrl.removeIf { it[0] == op.toByte() }
         write(g, Ble.STORE, Ble.CTRL, cmd)
-        val until = System.currentTimeMillis() + 15_000
+        val until = System.currentTimeMillis() + waitMs
         while (System.currentTimeMillis() < until) {
             val r = ctrl.poll(1, TimeUnit.SECONDS) ?: continue
             if (r[0] == op.toByte()) return r
@@ -548,7 +572,9 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val rate = if (caughtSince > 0) caught * 1000.0 / maxOf(1000L, android.os.SystemClock.elapsedRealtime() - caughtSince) else 0.0
         val h = mutableMapOf<String, Any?>("name" to name, "store" to s.store, "free_kb" to (t.getInt(8).toLong() and 0xffffffffL),
             "total_kb" to (t.getInt(12).toLong() and 0xffffffffL), "battery" to read(g, Ble.BAS, Ble.BATTERY).firstOrNull()?.toInt(),
-            "charge" to Ble.charge(raw),
+            "charge" to Ble.charge(raw), "card" to Ble.card(raw),
+            // the card's size as it answered, file system or not: formatCard's code
+            "card_kb" to if (raw.size > 52) t.getInt(49).toLong() and 0xffffffffL else null,
             // a backlog read in the background: what is left, and when it is done at this pace
             "backlog_kb" to left, "backlog_eta_s" to if (rate > 0 && left > 0) (left * 1024 / rate).toLong() else null,
             "live_gaps" to liveGaps,  // holes in LIVE the card could not fill this session (follow())

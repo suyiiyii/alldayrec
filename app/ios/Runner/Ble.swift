@@ -53,6 +53,14 @@ enum Ble {
   }
   static let chargeEvery: TimeInterval = 5  // that byte read this often while no READ runs: a plug or unplug shows within seconds
 
+  /// The card as the board sees it (byte 48 bits 1-3, firmware lr_store.h): "ok" (it records to it, or it is full or
+  /// lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting", "foreign"
+  /// (GPT, or a FAT/exFAT volume it cannot mount: never formatted); nil: an older firmware.
+  static func card(_ status: [UInt8]) -> String? {
+    let c = status.count > 52 ? Int(status[48] >> 1 & 7) : 0
+    return c >= 1 && c <= 6 ? ["ok", "none", "failing", "blank", "formatting", "foreign"][c - 1] : nil
+  }
+
   /// The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk).
   static func store(_ status: [UInt8]) -> Int { Int(Int16(truncatingIfNeeded: Store.le(status, 6, 2))) }
 
@@ -606,7 +614,9 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                             "battery": (try? read(p, Ble.bas, Ble.battery))?.first.map { Int($0) } ?? NSNull(),
                             "live_gaps": liveGaps,  // holes in LIVE the card could not fill this session (follow())
                             "rssi": dbm ?? NSNull(),
-                            "charge": Ble.charge(t) ?? NSNull()]
+                            "charge": Ble.charge(t) ?? NSNull(), "card": Ble.card(t) ?? NSNull(),
+                            // the card's size as it answered, file system or not: formatCard's code
+                            "card_kb": t.count > 52 ? Ble.u32(t, 49) : NSNull()]
     if t.count >= 47 {
       let left = Int64(Int32(truncatingIfNeeded: Store.le(t, 43, 4)))
       pausedUntil = left > 0 ? Recorder.now() + left * 1000 : 0
@@ -681,11 +691,28 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
   }
 
-  /// A CTRL command and its reply (op), other replies passed over; nil: none in 15 s.
-  private func reply(_ p: Conn, _ cmd: [UInt8], _ op: UInt8) throws -> [UInt8]? {
+  /// A card with no file system (hw card "blank") formatted by the board (CTRL 0x09, its card_kb as the code): its
+  /// answer, 0 done (hw has the new size then), -17 it has a file system after all, -22 the card changed, -19 no card
+  /// answers, -5 the format failed; nil: not connected, or no answer in 3 minutes (a 128 GB card takes tens of seconds).
+  func formatCard(_ code: Int64) -> Int? {
+    guard peripheral?.state == .connected else { return nil }
+    let done = DispatchSemaphore(value: 0)
+    var err: Int?
+    jobs.put { [self] p in
+      defer { done.signal() }
+      err = try reply(p, [9] + Store.le(UInt32(truncatingIfNeeded: code)), 0x89, wait: 180).map { Int(Int8(bitPattern: $0[5])) }
+      Ble.log("format card: \(err.map { "\($0)" } ?? "no answer")")
+      if let e = err { DeviceLog.app(tag ?? "", "format", e == 0 ? "格式化存储卡：完成" : "格式化存储卡：没有完成（\(e)）") }
+      _ = try status(p, prefs.string(forKey: "bleName") ?? p.p.identifier.uuidString)  // the new size, the card's state
+    }
+    return done.wait(timeout: .now() + 200) == .success ? err : nil
+  }
+
+  /// A CTRL command and its reply (op), other replies passed over; nil: none in `wait` seconds.
+  private func reply(_ p: Conn, _ cmd: [UInt8], _ op: UInt8, wait: TimeInterval = 15) throws -> [UInt8]? {
     ctrl.clear { $0.first == op }
     try write(p, Ble.ctrl, cmd)
-    let until = Date(timeIntervalSinceNow: 15)
+    let until = Date(timeIntervalSinceNow: wait)
     while Date() < until && alive(p) {
       if let r = ctrl.poll(1), r.first == op { return r }
     }

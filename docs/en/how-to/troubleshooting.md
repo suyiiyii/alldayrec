@@ -58,3 +58,25 @@ Yes. The server decodes the audio for playback and live listening on the web pag
 The app's **录音设备 › U 盘模式 › 存储卡当 U 盘** (Recorder › USB disk mode › Card as a USB disk) gives the recorder's card to the computer as a USB drive. Normally the OMI drive appears after about 20 seconds.
 
 What the maintainer measured on macOS 26: the system allows about 20 seconds to mount a FAT32 volume, so a large FAT32 card that reads slowly (such as 32 GB) may never mount; the same card formatted as exFAT mounts in about 2 seconds. The firmware reads both FAT32 and exFAT. Also, macOS mounts no disks while the Mac is locked.
+
+## The card says "Not formatted"
+
+The recorder can reach the card, but it holds no FAT32 or exFAT file system the recorder can use, nor any sign of one (see "Not readable" below): a new blank card, say, or one formatted as ext4 or NTFS on a computer. Until it is formatted, recording goes to live upload only, so nothing is recorded while the phone is away.
+
+On the app's **录音设备** (Recorder) page, tap **格式化存储卡** (Format card) and confirm. The recorder formats the card in tens of seconds, then records to it: FAT32 for cards up to 32 GB, exFAT for larger ones. Everything on the card is erased. The recorder formats only such a card; for a card that reads fine, or one shown as "Not readable" (below), the app shows no such button. This needs the new firmware.
+
+A 32 GB card formatted as FAT32 may not mount on a Mac in USB disk mode (see the previous section).
+
+## The card says "Not readable"
+
+The recorder can reach the card, and the card shows a partition or traces of FAT32 or exFAT, but it does not mount. Two common causes:
+
+- macOS Disk Utility erases a whole card with a GUID partition map (GPT) by default, and the recorder does not read GPT.
+- The card's file system is damaged, for example by a power cut while recording.
+
+Such a card may still hold recordings or other files, so the recorder never formats it and the app shows no format button. Take the card out and put it in a computer. Copy off anything you want to keep, then format it:
+
+- with the Master Boot Record (MBR) scheme, or no partition at all;
+- as FAT32 (cards up to 32 GB) or exFAT.
+
+Until then, recording goes to live upload only.

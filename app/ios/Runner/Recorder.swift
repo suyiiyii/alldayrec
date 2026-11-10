@@ -83,6 +83,13 @@ enum Recorder {
         guard let l = link else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
         l.usbDisk(a["on"] as? Bool ?? false)
         result(nil)
+      case "formatCard":  // the connected board's card with no file system formatted: its answer (Ble.formatCard)
+        guard let l = link else { return result(FlutterError(code: "notConnected", message: nil, details: nil)) }
+        let code = (a["code"] as? NSNumber)?.int64Value ?? -1
+        Thread.detachNewThread {
+          let err = l.formatCard(code)
+          DispatchQueue.main.async { result(err ?? FlutterError(code: "notConnected", message: nil, details: nil)) }
+        }
       case "unbind":  // the recorder forgets every phone (when connected); this iPhone's keys stay (no API: Settings)
         Thread.detachNewThread {
           let name = defaults.string(forKey: "bleName")

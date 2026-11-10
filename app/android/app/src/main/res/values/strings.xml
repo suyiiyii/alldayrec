@@ -50,4 +50,6 @@
     <string name="card_usb">Card in USB disk mode</string>
     <string name="card_none">No card in</string>
     <string name="card_error">Card error</string>
+    <string name="card_blank">Card not formatted</string>
+    <string name="card_foreign">Card not readable: sort it out on a computer</string>
 </resources>

@@ -85,6 +85,9 @@
  *                   time << 16; why: 1 the link gone or LIVE unsubscribed, 2 no ACK for 8 s, 3 3/4 of the RAM ring not
  *                   acked, 4 a restart or the card lent to USB, 6 the card did not come back on. x 5: at boot, a bytes
  *                   a crash or watchdog reset left in RAM, written to the card as file b
+ *    36 FORMAT      FORMAT (lr_store.c): a card with no file system made FAT32 (up to 32 GB) or exFAT; x 0 done,
+ *                   else the error (positive errno: 17 it mounted after all, never formatted; 19 it did not answer; 5
+ *                   the format failed), a its 512 B sectors, b ms it took
  *
  * Each record has a sequence number, one more than the last, across boots: a reader asks for those from the last
  * it has. Records gather in RAM (__noinit: a crash or watchdog reset keeps them for the next boot) and go to flash
@@ -97,7 +100,7 @@ enum {
     LR_BOOT = 1, LR_FAULT, LR_MOUNT, LR_STORE, LR_SLOW, LR_APPEND_ERR, LR_CARD_FULL, LR_USB_DISK, LR_CONNECT,
     LR_DISCONNECT, LR_PARAM, LR_MTU, LR_PHY, LR_TIME, LR_SECURITY, LR_PAIRED, LR_PAIR_FAIL, LR_FORGET, LR_DROPPED,
     LR_SEGMENT, LR_DFU, LR_HEARTBEAT, LR_STACKS, LR_SD_RESET, LR_SD_WRITES, LR_READ, LR_READ_TIME, LR_SWITCH,
-    LR_POWER, LR_LIVE_LOST, LR_HEALTH, LR_CARD_ID, LR_CARD_SIZE, LR_SD_ERRORS, LR_PHONE,
+    LR_POWER, LR_LIVE_LOST, LR_HEALTH, LR_CARD_ID, LR_CARD_SIZE, LR_SD_ERRORS, LR_PHONE, LR_FORMAT,
     LR_UPTIME = 0x80,
 };
 

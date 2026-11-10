@@ -774,6 +774,68 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cardErrorSub => '重插或换一张卡；实时上传照常';
 
   @override
+  String get cardBlankTile => '未格式化';
+
+  @override
+  String get cardBlankSub =>
+      '卡上没有录音设备能用的 FAT32 或 exFAT 文件系统（全新的空白卡，或者 ext4、NTFS 的卡），下面可以格式化；在那之前只能实时上传';
+
+  @override
+  String get cardForeignTile => '无法识别';
+
+  @override
+  String get cardForeignSub =>
+      '卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再格式化成 FAT32 或 exFAT（用 MBR 分区方案，或者不分区）；在那之前只能实时上传';
+
+  @override
+  String get cardFormattingTile => '格式化中';
+
+  @override
+  String get formatCard => '格式化存储卡';
+
+  @override
+  String get formatCardTitle => '格式化存储卡？';
+
+  @override
+  String formatCardBody(String size, String fs) {
+    String _temp0 = intl.Intl.selectLogic(fs, {
+      'FAT32': '\n\n电脑认 FAT32；不过用录音设备的 U 盘模式接 Mac 时，32 GB 的 FAT32 卡可能挂不上。',
+      'other': '',
+    });
+    return '卡上原有的内容会全部清空，没法恢复。\n\n容量 $size，格式化成 $fs，约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。$_temp0';
+  }
+
+  @override
+  String get formatCardGo => '清空并格式化';
+
+  @override
+  String get formatCardWait => '正在格式化，约需几十秒，请让手机待在录音设备旁边';
+
+  @override
+  String formatCardDone(String size) {
+    return '格式化完成，容量 $size。录音设备已开始往卡上录音。';
+  }
+
+  @override
+  String get formatFailHasFs => '没有格式化：卡上现在有文件系统或分区，卡上的内容都还在。';
+
+  @override
+  String get formatFailChanged => '没有格式化：录音设备里的卡换过了。请再看一眼卡的容量，重新点格式化。';
+
+  @override
+  String get formatFailNoCard => '没有格式化：录音设备读不到卡。请把卡拔出来重新插好再试。';
+
+  @override
+  String get formatFailWrite => '格式化没有成功：卡写不进去，可能坏了。请换一张卡。';
+
+  @override
+  String get formatFailNoAnswer =>
+      '录音设备没有回应，可能断开了。等它重新连上后看存储卡状态：显示“未格式化”就再试一次。';
+
+  @override
+  String get ok => '知道了';
+
+  @override
   String advBattery(Object volts) {
     return '电池 $volts V';
   }

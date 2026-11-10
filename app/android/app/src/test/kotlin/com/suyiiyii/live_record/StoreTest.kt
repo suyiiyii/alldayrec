@@ -306,6 +306,11 @@ class UsbDiskTest {
         assertEquals(false, Ble.acks(status(0) + byteArrayOf(0)))
         assertEquals(true, Ble.acks(status(0) + byteArrayOf(1)))
         assertEquals(true, Ble.acks(status(0) + byteArrayOf(3, 9)))  // more bits, more bytes later
+        assertEquals(null, Ble.card(status(0) + byteArrayOf(1)))  // older firmware: no card state, no card_kb
+        assertEquals("blank", Ble.card(status(-19) + byteArrayOf(9) + ByteArray(4)))  // ACK | card 4 << 1: no file system
+        assertEquals("ok", Ble.card(status(0) + byteArrayOf(2) + ByteArray(4)))  // card 1 << 1
+        assertEquals("foreign", Ble.card(status(-19) + byteArrayOf(13) + ByteArray(4)))  // ACK | card 6 << 1: GPT, a volume it cannot mount
+        assertEquals(null, Ble.card(status(0) + byteArrayOf(14) + ByteArray(4)))  // card 7 << 1: a state this app does not know
         assertEquals(listOf(8, 0x02, 0x00, 0x03, 0x00, 0x10, 0x32, 0x54, 0x00),  // file 0003_0002 up to 0x543210
                      Ble.ack(0x00030002, 0x543210).map { it.toInt() and 0xff })
         assertEquals(listOf(8) + List(8) { 0xff }, Ble.ack(0xffffffffL, 0xffffffffL).map { it.toInt() and 0xff })

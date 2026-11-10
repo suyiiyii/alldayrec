@@ -1,4 +1,5 @@
 #include "sdcard.h"
+#include "card_marks.h"
 #include "lr_log.h"
 #include "wdog_facade.h"
 
@@ -194,6 +195,41 @@ static void sd_power_cycle(void)
     sd_power_on();
 }
 
+bool lr_sd_blank, lr_sd_foreign;
+uint32_t lr_sd_sectors;
+
+/* After fs_mount's -ENODEV: does the card show a volume all the same (card_marks.h)? Then it is never blank */
+static int read_sector(uint32_t lba, uint8_t *s)
+{
+    return disk_access_read("SD", s, lba, 1);
+}
+
+static bool marked(void)
+{
+    static uint8_t s[512];
+    return !lr_card_blank(read_sector, lr_sd_sectors, s);
+}
+
+/* disk init, then the mount; what they say of the card kept for TIME's read (sdcard.h). FatFs's FR_NO_FILESYSTEM is
+ * fs_mount's -ENODEV (zephyr/subsys/fs/fat_fs.c translate_error; its other -ENODEVs, a bad drive name and no work area,
+ * cannot be ours): sector 0 read back fine and FatFs took no FAT or exFAT volume from it. Blank only if the card shows
+ * none either (marked: its boot sectors and their backups, the MBR's partitions); a GPT card or a FAT/exFAT volume
+ * FatFs cannot mount is foreign. A read that fails is FR_DISK_ERR, -EIO. */
+static int mount_try(void)
+{
+    int err = disk_access_init("SD");
+    lr_sd_sectors = 0;
+    if (!err) {
+        // the disk's own card from here (__wrap_sdmmc_ioctl) for mount_sd_card_reset's sd_init: a card that never
+        // mounted (no file system) had none, and a reset left it uninitialised for good, read as -EIO
+        disk_access_ioctl("SD", DISK_IOCTL_GET_SECTOR_COUNT, &lr_sd_sectors);
+    }
+    err = err ?: fs_mount(&mount_point);
+    lr_sd_foreign = lr_sd_sectors && err == -ENODEV && marked();
+    lr_sd_blank = lr_sd_sectors && err == -ENODEV && !lr_sd_foreign;
+    return err;
+}
+
 int mount_sd_card(void)
 {
     // the card reset at boot only: NCS 2.7's SD disk has no deinit, it would not initialise the card again (mounted back
@@ -205,7 +241,6 @@ int mount_sd_card(void)
         booted = true;
     }
 
-    const char *disk_pdrv = "SD";
     // after a warm reset the card (never powered off) may still be mid-command: give it a few tries
     mount_point.mnt_point = "/SD:";
     mount_point.flags = FS_MOUNT_FLAG_NO_FORMAT;  // a card that reads badly once must not be formatted, recordings and all
@@ -215,7 +250,7 @@ int mount_sd_card(void)
             k_msleep(200 * i);
         }
         watchdog_feed();  // a card that never answers takes seconds per try; the watchdog allows 30 s for all of boot
-        err = disk_access_init(disk_pdrv) ?: fs_mount(&mount_point);
+        err = mount_try();
         LOG_INF("SD mount try %d: %d", i + 1, err);
         lr_log(LR_MOUNT, i + 1, err, 0);
     }
@@ -229,7 +264,7 @@ int mount_sd_card(void)
 /* One try, no waiting: the store tries a failed card again (lr_store.c retry_card). Logged when it works. */
 int mount_sd_card_once(void)
 {
-    int err = disk_access_init("SD") ?: fs_mount(&mount_point);
+    int err = mount_try();
     if (!err) {
         lr_log(LR_MOUNT, 0, 0, 0);
         log_card();
@@ -251,12 +286,66 @@ int mount_sd_card_reset(void)
     }
     sd_power_cycle();
     sd_spi_reset();
-    int err = disk_card ? sd_init(disk_card->sdhc, disk_card) : 0;  // none: it never mounted, disk_access_init inits it
+    int err = disk_card ? sd_init(disk_card->sdhc, disk_card) : 0;  // none: it never answered, disk_access_init inits it
+    if (err) {
+        lr_sd_sectors = 0;
+        lr_sd_blank = lr_sd_foreign = false;
+    }
     err = err ?: mount_sd_card_once();
     if (err) {
         lr_log(LR_MOUNT, 0, err, 0);
     }
     return err;
+}
+
+/* FORMAT (lr_store.c): the card tried again from scratch first, and formatted only if it still answers and still holds
+ * no file system and still has the size the user confirmed (kb, its KB; else -EINVAL: a card swapped in since); one that
+ * mounts now, or shows a volume all the same (foreign), is never formatted (-EEXIST), one that does not answer neither
+ * (-ENODEV).
+ * As the owner agreed (11-08): FAT32 up to 32 GB (SDHC, as the SD spec has it), exFAT above (SDXC). FAT32 because an
+ * exFAT file's directory entry set spans two sectors for ~1 in 8 of our files and every f_sync rewrites it whole: cut
+ * between the two writes, it is torn and the whole /LR takes no new file (#247, not fixed in main); FAT32's sync
+ * rewrites one 32 B entry. The cost: macOS 26 reads a FAT32 volume's whole FAT before it mounts and gives up after 20 s
+ * (32 GB at 32 KB clusters: a 3.9 MB FAT, 20-78 s at the 50-190 KB/s the card is read at over USB from LR-X1), so a
+ * 32 GB card lent to a Mac may not mount there. Clusters 32 KB up to 32 GB (FatFs picks smaller ones for a card under
+ * ~2 GB, too small for FAT32 at 32 KB), 128 KB above, the SD spec's and FatFs's own choice; one FAT; the data area on
+ * the card's allocation unit (4 MB, 16 MB above 32 GB: FatFs aligns it on the card's own sector numbers).
+ * A format cut short (power, a reset) leaves a blank card, formatted again from the app: no volume shows before the
+ * rest is written. exFAT writes its boot region (sectors 0-23) after its bitmap, up-case table and root, so it goes
+ * without a partition table (FM_SFD; mounted on macOS, X1 10-18); a cut inside those 24 writes may leave sector 0 in
+ * and its checksum or backup not, a whole volume a Mac may call damaged. FAT32 writes its boot sector first and its 3.9 MB FAT after: without a partition table a cut left
+ * a FAT32 volume that mounted with half of its FAT the card's old data. So FAT32 goes in an MBR partition (from sector
+ * 63; its FAT off the allocation units, the data area on them), whose table FatFs writes last, on a sector 0 zeroed
+ * before. work: f_mkfs's buffer, a multiple of 512 B: the FAT is written that much at a time (4 KB: ~1000 writes). */
+int format_sd_card(uint32_t kb, void *work, uint32_t len)
+{
+    unmount_sd_card();
+    int err = mount_sd_card_reset();
+    if (!lr_sd_blank) {
+        return !err || lr_sd_foreign ? -EEXIST : -ENODEV;
+    }
+    if (lr_sd_sectors / 2 != kb) {
+        return -EINVAL;
+    }
+    // the first 32 sectors zeroed first: sector 0 stays blank until f_mkfs's last write (above), and nothing of an old
+    // volume is left there (an exFAT card's backup boot region, 12-23, made macOS take a new FAT32 card for exFAT, 11-10;
+    // marked() looks at the backups at 6 and 12)
+    memset(work, 0, len);
+    for (uint32_t s = 0; s < 32; s += len / 512) {
+        if (disk_access_write("SD", work, s, MIN(len / 512, 32 - s))) {
+            return -EIO;
+        }
+    }
+    bool sdxc = lr_sd_sectors >= 0x4000000;  // over 32 GB
+    MKFS_PARM opt = {.fmt = sdxc ? FM_EXFAT | FM_SFD : FM_FAT32, .n_fat = 1, .align = sdxc ? 32768 : 8192,
+                     .au_size = sdxc ? 128 * 1024 : 32 * 1024};
+    FRESULT res = f_mkfs("SD:", &opt, work, len);
+    if (res == FR_MKFS_ABORTED && !sdxc) {
+        opt.au_size = 0;  // too few 32 KB clusters for FAT32: FatFs halves them until it fits
+        res = f_mkfs("SD:", &opt, work, len);
+    }
+    LOG_INF("SD format: %d", res);
+    return res ? -EIO : 0;
 }
 
 void unmount_sd_card(void)

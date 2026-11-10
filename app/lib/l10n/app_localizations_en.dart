@@ -797,6 +797,73 @@ class AppLocalizationsEn extends AppLocalizations {
       'Reseat or replace the card; live upload carries on';
 
   @override
+  String get cardBlankTile => 'Not formatted';
+
+  @override
+  String get cardBlankSub =>
+      'The card has no FAT32 or exFAT file system the recorder can use (a new blank card, or one with ext4 or NTFS); format it below. Until then, live upload only';
+
+  @override
+  String get cardForeignTile => 'Not readable';
+
+  @override
+  String get cardForeignSub =>
+      'The card has a partition or file system the recorder can\'t use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT (with an MBR partition map, or none). Until then, live upload only';
+
+  @override
+  String get cardFormattingTile => 'Formatting';
+
+  @override
+  String get formatCard => 'Format card';
+
+  @override
+  String get formatCardTitle => 'Format the card?';
+
+  @override
+  String formatCardBody(String size, String fs) {
+    String _temp0 = intl.Intl.selectLogic(fs, {
+      'FAT32': '\n\nComputers read FAT32, but through the recorder\'s USB disk mode a 32 GB FAT32 card may not mount on a Mac.',
+      'other': '',
+    });
+    return 'Everything on the card will be erased and can\'t be recovered.\n\nCapacity $size, formatted as $fs; takes tens of seconds. Meanwhile recording goes to live upload only, so keep the phone near the recorder.$_temp0';
+  }
+
+  @override
+  String get formatCardGo => 'Erase and format';
+
+  @override
+  String get formatCardWait =>
+      'Formatting, this takes tens of seconds. Keep the phone near the recorder';
+
+  @override
+  String formatCardDone(String size) {
+    return 'Formatted: $size. The recorder now records to the card.';
+  }
+
+  @override
+  String get formatFailHasFs =>
+      'Not formatted: the card now has a file system or partition, and everything on it is still there.';
+
+  @override
+  String get formatFailChanged =>
+      'Not formatted: the card in the recorder was swapped. Check its capacity and tap Format again.';
+
+  @override
+  String get formatFailNoCard =>
+      'Not formatted: the recorder can\'t reach the card. Take it out, put it back firmly, and try again.';
+
+  @override
+  String get formatFailWrite =>
+      'Formatting failed: the card won\'t take writes and may be broken. Try another card.';
+
+  @override
+  String get formatFailNoAnswer =>
+      'The recorder didn\'t answer and may have disconnected. Once it reconnects, check the card: if it still says Not formatted, try again.';
+
+  @override
+  String get ok => 'OK';
+
+  @override
   String advBattery(Object volts) {
     return 'Battery $volts V';
   }
