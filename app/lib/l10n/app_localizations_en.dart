@@ -801,7 +801,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardBlankSub =>
-      'The card has no file system the recorder can use; format it below. Until then, live upload only';
+      'The card has no partition and no file system (a new blank card, or one with ext4 or NTFS); format it below. Until then, live upload only';
+
+  @override
+  String get cardForeignTile => 'Not readable';
+
+  @override
+  String get cardForeignSub =>
+      'The card has a partition or file system the recorder can\'t use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT without partitions. Until then, live upload only';
 
   @override
   String get cardFormattingTile => 'Formatting';
@@ -813,8 +820,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get formatCardTitle => 'Format the card?';
 
   @override
-  String formatCardBody(String size) {
-    return 'Everything on the card will be erased and can\'t be recovered.\n\nCapacity $size, formatted as exFAT (computers and phones can read it); takes tens of seconds. Meanwhile recording goes to live upload only, so keep the phone near the recorder.';
+  String formatCardBody(String size, String fs) {
+    return 'Everything on the card will be erased and can\'t be recovered.\n\nCapacity $size, formatted as $fs (computers and phones can read it); takes tens of seconds. Meanwhile recording goes to live upload only, so keep the phone near the recorder.';
   }
 
   @override
@@ -831,7 +838,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get formatFailHasFs =>
-      'Not formatted: the card reads fine now, and everything on it is still there.';
+      'Not formatted: the card now has a file system or partition, and everything on it is still there.';
 
   @override
   String get formatFailChanged =>

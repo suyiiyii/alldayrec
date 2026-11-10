@@ -1,4 +1,5 @@
 #include "sdcard.h"
+#include "card_marks.h"
 #include "lr_log.h"
 #include "wdog_facade.h"
 
@@ -194,12 +195,32 @@ static void sd_power_cycle(void)
     sd_power_on();
 }
 
-bool lr_sd_blank;
+bool lr_sd_blank, lr_sd_foreign;
 uint32_t lr_sd_sectors;
+
+/* After fs_mount's -ENODEV: whether the card shows a volume all the same (card_marks.h), so it is never taken for blank.
+ * A sector that cannot be read counts as one too: nothing is formatted on a guess. */
+static bool marked(void)
+{
+    static uint8_t s[512];
+    uint32_t lba[4];
+    int n;
+    if (disk_access_read("SD", s, 0, 1) || lr_card_marked(s, lba, &n)) {
+        return true;
+    }
+    for (int i = 0; i < n; i++) {
+        if (lba[i] >= lr_sd_sectors || disk_access_read("SD", s, lba[i], 1) || lr_fat_vbr(s)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /* disk init, then the mount; what they say of the card kept for TIME's read (sdcard.h). FatFs's FR_NO_FILESYSTEM is
  * fs_mount's -ENODEV (zephyr/subsys/fs/fat_fs.c translate_error; its other -ENODEVs, a bad drive name and no work area,
- * cannot be ours): sector 0 read back fine and holds no FAT or exFAT volume. A read that fails is FR_DISK_ERR, -EIO. */
+ * cannot be ours): sector 0 read back fine and FatFs took no FAT or exFAT volume from it. Blank only if sector 0 shows
+ * none either (marked); a GPT card or a FAT/exFAT volume FatFs cannot mount is foreign. A read that fails is
+ * FR_DISK_ERR, -EIO. */
 static int mount_try(void)
 {
     int err = disk_access_init("SD");
@@ -210,7 +231,8 @@ static int mount_try(void)
         disk_access_ioctl("SD", DISK_IOCTL_GET_SECTOR_COUNT, &lr_sd_sectors);
     }
     err = err ?: fs_mount(&mount_point);
-    lr_sd_blank = lr_sd_sectors && err == -ENODEV;
+    lr_sd_foreign = lr_sd_sectors && err == -ENODEV && marked();
+    lr_sd_blank = lr_sd_sectors && err == -ENODEV && !lr_sd_foreign;
     return err;
 }
 
@@ -273,7 +295,7 @@ int mount_sd_card_reset(void)
     int err = disk_card ? sd_init(disk_card->sdhc, disk_card) : 0;  // none: it never answered, disk_access_init inits it
     if (err) {
         lr_sd_sectors = 0;
-        lr_sd_blank = false;
+        lr_sd_blank = lr_sd_foreign = false;
     }
     err = err ?: mount_sd_card_once();
     if (err) {
@@ -284,28 +306,44 @@ int mount_sd_card_reset(void)
 
 /* FORMAT (lr_store.c): the card tried again from scratch first, and formatted only if it still answers and still holds
  * no file system and still has the size the user confirmed (kb, its KB; else -EINVAL: a card swapped in since); one that
- * mounts now is never formatted (-EEXIST), one that does not answer neither (-ENODEV).
- * exFAT at any size, not FAT32 up to 32 GB as the SD spec has it: macOS 26 reads a FAT32 volume's whole FAT before
- * it mounts and gives up after 20 s (32 GB at 32 KB clusters: a 3.9 MB FAT, 20-78 s at the 50-190 KB/s the card is read
- * at over USB from LR-X1), and mounted an exFAT 32 GB card from it in 2.1 s. Clusters as the SD spec's (SDXC) and
- * FatFs's own choice: 32 KB up to 32 GB, 128 KB above; the data area on the card's allocation unit (4 MB, 16 MB
- * above 32 GB). No partition table (FM_SFD): FatFs's MBR puts the volume at sector 63, off the allocation units; an
- * exFAT card without one mounted on macOS (X1 10-18). work: f_mkfs's buffer, a multiple of 512 B: the FAT is written that
- * much at a time (4 KB: ~1000 writes for a 4 MB FAT). */
+ * mounts now, or shows a volume all the same (foreign), is never formatted (-EEXIST), one that does not answer neither
+ * (-ENODEV).
+ * As the owner agreed (11-08): FAT32 up to 32 GB (SDHC, as the SD spec has it), exFAT above (SDXC). FAT32 because an
+ * exFAT file's directory entry set spans two sectors for ~1 in 8 of our files and every f_sync rewrites it whole: cut
+ * between the two writes, it is torn and the whole /LR takes no new file (#247, not fixed in main); FAT32's sync
+ * rewrites one 32 B entry. The cost: macOS 26 reads a FAT32 volume's whole FAT before it mounts and gives up after 20 s
+ * (32 GB at 32 KB clusters: a 3.9 MB FAT, 20-78 s at the 50-190 KB/s the card is read at over USB from LR-X1), so a
+ * 32 GB card lent to a Mac may not mount there. Clusters 32 KB up to 32 GB (FatFs picks smaller ones for a card under
+ * ~2 GB, too small for FAT32 at 32 KB), 128 KB above, the SD spec's and FatFs's own choice; one FAT; the data area on
+ * the card's allocation unit (4 MB, 16 MB above 32 GB). No partition table (FM_SFD): FatFs's MBR puts the volume at
+ * sector 63, off the allocation units; a card without one mounted on macOS (exFAT, X1 10-18). work: f_mkfs's buffer, a
+ * multiple of 512 B: the FAT is written that much at a time (4 KB: ~1000 writes for a 4 MB FAT). */
 int format_sd_card(uint32_t kb, void *work, uint32_t len)
 {
     unmount_sd_card();
     int err = mount_sd_card_reset();
     if (!lr_sd_blank) {
-        return !err ? -EEXIST : -ENODEV;
+        return !err || lr_sd_foreign ? -EEXIST : -ENODEV;
     }
     if (lr_sd_sectors / 2 != kb) {
         return -EINVAL;
     }
+    // the first 32 sectors zeroed first: FatFs's FAT32 writes only sectors 0, 1, 6 and 7 of them, and an exFAT card's
+    // backup boot region (12-23) left behind made macOS take the new FAT32 card for exFAT and fail to mount it (11-10)
+    memset(work, 0, len);
+    for (uint32_t s = 0; s < 32; s += len / 512) {
+        if (disk_access_write("SD", work, s, MIN(len / 512, 32 - s))) {
+            return -EIO;
+        }
+    }
     bool sdxc = lr_sd_sectors >= 0x4000000;  // over 32 GB
-    MKFS_PARM opt = {.fmt = FM_EXFAT | FM_SFD, .n_fat = 1, .align = sdxc ? 32768 : 8192,
+    MKFS_PARM opt = {.fmt = (sdxc ? FM_EXFAT : FM_FAT32) | FM_SFD, .n_fat = 1, .align = sdxc ? 32768 : 8192,
                      .au_size = sdxc ? 128 * 1024 : 32 * 1024};
     FRESULT res = f_mkfs("SD:", &opt, work, len);
+    if (res == FR_MKFS_ABORTED && !sdxc) {
+        opt.au_size = 0;  // too few 32 KB clusters for FAT32: FatFs halves them until it fits
+        res = f_mkfs("SD:", &opt, work, len);
+    }
     LOG_INF("SD format: %d", res);
     return res ? -EIO : 0;
 }

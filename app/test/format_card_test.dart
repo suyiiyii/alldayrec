@@ -41,6 +41,7 @@ void main() {
     await tester.pump();
     expect(find.textContaining('Everything on the card will be erased'), findsOneWidget);
     expect(find.textContaining('29.72 GB'), findsOneWidget);
+    expect(find.textContaining('formatted as FAT32'), findsOneWidget);  // the board's choice up to 32 GB
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     expect(asked, isEmpty);
@@ -69,7 +70,7 @@ void main() {
     await tester.tap(find.text('Erase and format'));
     await tester.pump(const Duration(seconds: 21));
     await tester.pump();
-    expect(find.text('Not formatted: the card reads fine now, and everything on it is still there.'), findsOneWidget);
+    expect(find.text('Not formatted: the card now has a file system or partition, and everything on it is still there.'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
   });
@@ -80,6 +81,27 @@ void main() {
       await open(tester);
       expect(find.text('Format card'), findsNothing);
     }
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('a card the board cannot mount but shows a volume is never offered a format', (tester) async {
+    hw = {...hw, 'card': 'foreign'};  // GPT, a damaged FAT/exFAT volume: may hold files, a computer's job
+    await open(tester);
+    expect(find.text('Not readable'), findsOneWidget);
+    expect(find.text('Format card'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('a card over 32 GB is to be exFAT', (tester) async {
+    hw = {...hw, 'card_kb': 62367744};
+    await open(tester);
+    await tester.scrollUntilVisible(find.text('Format card'), 200);
+    await tester.tap(find.text('Format card'));
+    await tester.pump();
+    expect(find.textContaining('formatted as exFAT'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));
   });

@@ -212,7 +212,7 @@ void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
 }
 uint32_t lr_log_read(uint32_t from, uint8_t *buf, uint16_t max, bool (*send)(uint32_t, uint16_t, void *), void *arg) { return 0; }
 void unmount_sd_card(void) {}
-bool lr_sd_blank;  // sdcard.h: the last mount's card had no file system; its sectors
+bool lr_sd_blank, lr_sd_foreign;  // sdcard.h: the last mount's card had no file system, or one FatFs cannot take; its sectors
 uint32_t lr_sd_sectors;
 static int formats, format_err;  // format_sd_card's calls; what the next returns
 static uint32_t format_kb;       // the code the last one was given
@@ -1175,6 +1175,10 @@ int main(void)
     int fe;
     store_err = -ENODEV, lr_sd_sectors = 62333952, n_logged = 0;  // a 32 GB card, a file system that did not mount
     assert(format_card(31166976) == -EEXIST && !formats);
+    lr_sd_foreign = true;  // GPT, or a FAT/exFAT volume FatFs cannot take: never formatted, shown apart
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert(status[48] >> 1 == 6 && sys_get_le32(status + 49) == 31166976 && format_card(31166976) == -EEXIST && !formats);
+    lr_sd_foreign = false;
     lr_sd_sectors = 0;  // none answers
     time_read(&the_conn, 0, 0, 0, 0);
     assert(status[48] >> 1 == 2 && sys_get_le32(status + 49) == 0 && format_card(0) == -ENODEV && !formats);

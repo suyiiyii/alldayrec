@@ -777,7 +777,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get cardBlankTile => '未格式化';
 
   @override
-  String get cardBlankSub => '卡上没有能用的文件系统，下面可以格式化；在那之前只能实时上传';
+  String get cardBlankSub =>
+      '卡上没有分区，也没有文件系统（全新的空白卡，或者 ext4、NTFS 的卡），下面可以格式化；在那之前只能实时上传';
+
+  @override
+  String get cardForeignTile => '无法识别';
+
+  @override
+  String get cardForeignSub =>
+      '卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再不分区格式化成 FAT32 或 exFAT；在那之前只能实时上传';
 
   @override
   String get cardFormattingTile => '格式化中';
@@ -789,8 +797,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get formatCardTitle => '格式化存储卡？';
 
   @override
-  String formatCardBody(String size) {
-    return '卡上原有的内容会全部清空，没法恢复。\n\n容量 $size，格式化成 exFAT（电脑和手机都能读），约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。';
+  String formatCardBody(String size, String fs) {
+    return '卡上原有的内容会全部清空，没法恢复。\n\n容量 $size，格式化成 $fs（电脑和手机都能读），约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。';
   }
 
   @override
@@ -805,7 +813,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get formatFailHasFs => '没有格式化：这张卡现在能正常读出来，卡上的内容都还在。';
+  String get formatFailHasFs => '没有格式化：卡上现在有文件系统或分区，卡上的内容都还在。';
 
   @override
   String get formatFailChanged => '没有格式化：录音设备里的卡换过了。请再看一眼卡的容量，重新点格式化。';

@@ -54,11 +54,11 @@ enum Ble {
   static let chargeEvery: TimeInterval = 5  // that byte read this often while no READ runs: a plug or unplug shows within seconds
 
   /// The card as the board sees it (byte 48 bits 1-3, firmware lr_store.h): "ok" (it records to it, or it is full or
-  /// lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting"; nil: an
-  /// older firmware.
+  /// lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting", "foreign"
+  /// (GPT, or a FAT/exFAT volume it cannot mount: never formatted); nil: an older firmware.
   static func card(_ status: [UInt8]) -> String? {
     let c = status.count > 52 ? Int(status[48] >> 1 & 7) : 0
-    return c >= 1 && c <= 5 ? ["ok", "none", "failing", "blank", "formatting"][c - 1] : nil
+    return c >= 1 && c <= 6 ? ["ok", "none", "failing", "blank", "formatting", "foreign"][c - 1] : nil
   }
 
   /// The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk).

@@ -29,6 +29,7 @@ jobs:
           cc -o $d/led_check test/led_check.c && $d/led_check  # the one-LED boards' flash codes (src/led_code.h)
           cc -o $d/power_check test/power_check.c && $d/power_check  # when a low battery turns it off (src/lr_power.h)
           cc -o $d/switch_check test/switch_check.c && $d/switch_check  # LR-P3's switch debounce (src/lr_switch.h)
+          cc -o $d/card_check test/card_check.c && $d/card_check  # a card that does not mount: blank or a volume all the same (src/card_marks.h)
           cc -o $d/health_check test/health_check.c && $d/health_check  # the mic's HEALTH counts (src/mic_health.h)
           cc -o $d/mic_ring_check test/mic_ring_check.c && $d/mic_ring_check  # the mic's buffers left out are a gap in the frame numbers (src/mic_ring.h)
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)

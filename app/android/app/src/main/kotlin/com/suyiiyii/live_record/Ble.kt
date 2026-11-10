@@ -93,10 +93,10 @@ object Ble {
     const val CHARGE_EVERY_MS = 5_000L  // that byte read this often while no READ runs: a plug or unplug shows within seconds
 
     /** The card as the board sees it (byte 48 bits 1-3, firmware lr_store.h): "ok" (it records to it, or it is full or
-     *  lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting"; null:
-     *  an older firmware. */
+     *  lent), "none" (no card answers), "failing", "blank" (no file system: formatCard takes it), "formatting",
+     *  "foreign" (GPT, or a FAT/exFAT volume it cannot mount: never formatted); null: an older firmware. */
     fun card(status: ByteArray): String? =
-        if (status.size > 52) listOf("ok", "none", "failing", "blank", "formatting").getOrNull((status[48].toInt() shr 1 and 7) - 1) else null
+        if (status.size > 52) listOf("ok", "none", "failing", "blank", "formatting", "foreign").getOrNull((status[48].toInt() shr 1 and 7) - 1) else null
 
     /** The card's state in a status read (bytes 6-7): 0 storing, else -errno (-16: lent as a USB disk). */
     fun store(status: ByteArray): Int = ByteBuffer.wrap(status).order(ByteOrder.LITTLE_ENDIAN).getShort(6).toInt()

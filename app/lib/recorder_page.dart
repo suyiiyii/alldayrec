@@ -61,7 +61,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final l = AppLocalizations.of(context);
     final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: Text(l.formatCardTitle),
-      content: Text(l.formatCardBody(sizeText(kb))),
+      content: Text(l.formatCardBody(sizeText(kb), kb >= 0x2000000 ? 'exFAT' : 'FAT32')),  // the board's choice: FAT32 up to 32 GB
       actions: [
         TextButton(onPressed: () => Navigator.pop(c, false), child: Text(l.cancel)),
         TextButton(onPressed: () => Navigator.pop(c, true), style: TextButton.styleFrom(foregroundColor: Theme.of(c).colorScheme.error),

@@ -137,7 +137,11 @@ const phoneMode = (r: Rec) =>
 // x 0 done, else the error as a positive errno: 17 it mounted, 19 no card answered, 5 the format failed (lr_log.h FORMAT)
 const format = (r: Rec) =>
   r.x === 0
-    ? t("rec.formatDone", { gb: ((r.a * 512) / 1e9).toFixed(2), s: (r.b / 1000).toFixed(1) })
+    ? t("rec.formatDone", {
+        gb: ((r.a * 512) / 1e9).toFixed(2),
+        fs: r.a >= 0x4000000 ? "exFAT" : "FAT32", // FAT32 up to 32 GB (sdcard.c format_sd_card)
+        s: (r.b / 1000).toFixed(1),
+      })
     : t("rec.formatFail", {
         gb: ((r.a * 512) / 1e9).toFixed(2),
         why: [5, 17, 19].includes(r.x) ? t(`rec.formatWhy.${r.x}`) : r.x,

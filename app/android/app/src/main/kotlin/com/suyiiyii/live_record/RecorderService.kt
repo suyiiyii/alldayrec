@@ -75,6 +75,7 @@ class RecorderService : Service() {
             store == -28 -> R.string.card_full
             store == -16 -> R.string.card_usb
             card == "blank" || card == "formatting" -> R.string.card_blank  // a card with no file system (Ble.card)
+            card == "foreign" -> R.string.card_foreign  // GPT, or a volume the board cannot mount
             (totalKb ?: 0L) == 0L -> R.string.card_none
             else -> R.string.card_error
         }

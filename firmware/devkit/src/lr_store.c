@@ -576,10 +576,11 @@ static bool formatting;  // FORMAT going on (the store thread): TIME's card stat
 
 /* The card as TIME's features bits 1-3 say it (0: firmware older than this field): 1 it takes the stream, or is full
  * or lent; 2 none answers (no card, not seated, or dead); 3 it answers and fails (its mount, a write); 4 it answers and
- * holds no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it); 5 being formatted */
+ * holds no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it); 5 being formatted; 6 it answers, does not mount
+ * and shows a volume all the same (GPT, a FAT/exFAT volume FatFs cannot take: sdcard.c lr_sd_foreign), never formatted */
 static uint8_t card_state(void)
 {
-    return formatting ? 5 : !store_err || store_err == -ENOSPC || store_err == -EBUSY ? 1 : lr_sd_blank ? 4 : lr_sd_sectors ? 3 : 2;
+    return formatting ? 5 : !store_err || store_err == -ENOSPC || store_err == -EBUSY ? 1 : lr_sd_blank ? 4 : lr_sd_foreign ? 6 : lr_sd_sectors ? 3 : 2;
 }
 
 static ssize_t time_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
@@ -1298,9 +1299,9 @@ static void debug(struct bt_conn *conn, uint8_t sub, uint16_t a, uint16_t b, uin
 }
 #endif
 
-/* FORMAT code: a card that answers and holds no FAT or exFAT volume made exFAT (sdcard.c format_sd_card), then taken
+/* FORMAT code: a card that answers and holds no FAT or exFAT volume formatted (sdcard.c format_sd_card), then taken
  * as a card put in now (retry_card): its DIR, the boot's count if there was no card at boot, a new segment. Never a card
- * that mounts: format_sd_card tries it again from scratch first. The code is the card's KB as TIME read it, the size the
+ * that mounts or shows a volume (foreign): format_sd_card tries it again from scratch first. The code is the card's KB as TIME read it, the size the
  * app asked the user about: a FORMAT that was not asked for, or for another card, is turned down. Meanwhile the card
  * takes nothing (store_err), the stream goes on to LIVE; the main loop feeds the watchdog as ever (prio 0, above this
  * thread). 0, or -EEXIST it has a file system, -EINVAL a wrong code, -ENODEV it does not answer, -EIO the format or
