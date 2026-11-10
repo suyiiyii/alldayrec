@@ -8,17 +8,20 @@
 
 和 `firmware/blerelay`（ESP32-S3，Mac 经蓝牙连它）比：这块占一个 USB 口，但 Mac 那一侧没有蓝牙链路，也没有自定义协议，现成的 Bumble 工具和 API 都能直接用。
 
+下面的命令都在仓库根目录下执行。`SERIAL` 是这块板的 USB 序列号（16 位十六进制，就是芯片的 DEVICEID），`ioreg -p IOUSB -l -w0 | grep -A1 '"USB Product Name"'` 能看到。
+
 ```bash
-# 编译（NCS v2.7.0，和 lr.sh、selftest 一样），输出 build/zephyr/zephyr.uf2
-cd /opt/nordic/ncs/v2.7.0
-nrfutil sdk-manager toolchain launch --ncs-version v2.7.0 -- \
-  west build -b xiao_ble/nrf52840 -d "$OLDPWD/build" "$OLDPWD" -- -DNCS_TOOLCHAIN_VERSION=NONE
-# 刷入：板子在跑自检固件，或停在 UF2 盘时
+# 编译（NCS v2.7.0，和 lr.sh、selftest 一样），输出 firmware/hcirelay/build/zephyr/zephyr.uf2
+(cd /opt/nordic/ncs/v2.7.0 && nrfutil sdk-manager toolchain launch --ncs-version v2.7.0 -- \
+  west build -b xiao_ble/nrf52840 -d "$OLDPWD/firmware/hcirelay/build" "$OLDPWD/firmware/hcirelay" -- -DNCS_TOOLCHAIN_VERSION=NONE)
+# 刷入：板子在跑自检固件、停在 UF2 盘，或者已经在跑这个中继（先 1200 bps 触碰进 UF2 盘）时都能按序列号刷
 uv run firmware/selftest/selftest.py flash SERIAL --uf2 firmware/hcirelay/build/zephyr/zephyr.uf2
-# 之后重刷：stty -f PORT 1200 让它进 UF2 盘，再拷 UF2
 ```
 
-板子以 `LR HCI relay` 枚举，串口就是 HCI。Bumble 的传输名写 `serial:/dev/cu.usbmodemXXXX`（波特率无所谓，USB CDC）：
+- **中继插着时，别用 `lr.sh flash` 刷录音设备**：它取排在第一个的 `/dev/cu.usbmodem*` 发 1200 bps，不分是哪块板。要是中继排在前面，中继会进 bootloader，录音固件就被拷进了中继（重刷中继能恢复）。改用 `uv run firmware/selftest/selftest.py flash SERIAL --uf2 …` 按序列号刷，或者先拔掉中继。
+- 以后重刷中继：`stty -f /dev/cu.usbmodemXXXX 1200` 让它进 UF2 盘，再按上面的命令拷 UF2。
+
+板子以 `LR HCI relay` 枚举，串口就是 HCI。Bumble 的传输名写 `serial:/dev/cu.usbmodemXXXX`。USB CDC 不管波特率，但 **1200 除外**：用 1200 打开这个口，板子就会重启进 UF2 bootloader。Bumble 默认用 1000000，不会碰到：
 
 ```bash
 uv venv .venv && uv pip install --python .venv bumble
