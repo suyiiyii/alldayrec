@@ -1,8 +1,8 @@
 """The audio store: what clients upload goes in, one endless time-stamped stream of 16 kHz mono samples comes out.
 
-Only this module knows how audio is kept (today: each uploaded piece appended unchanged to its device's file for the
-hour it starts in, chunks/<device>/<date>/<HH>.<ext>, and indexed in the pieces table by path, pos and size; one file a
-piece made 3600 tiny files an hour while the app was in front). Each device is its own stream: the pipeline of a device reads `stream(device, after)`, the playback reads `cut()`;
+Only this module knows how audio is kept (each uploaded piece appended unchanged to its device's file for the hour it
+starts in, chunks/<device>/<date>/<HH>.<ext>, and indexed in the pieces table by path, pos and size; one file a piece
+made 3600 tiny files an hour while the app was in front); its bytes are read and written through store.py. Each device is its own stream: the pipeline of a device reads `stream(device, after)`, the playback reads `cut()`;
 neither cares about formats, files or piece lengths. A stream pauses when nothing new has arrived and when its reader
 stops asking (it pulls at its own pace), and a gap between two pieces is only a jump in their start times. A device
 that sends a backlog of older audio while another one is recording is streamed on its own, not dropped. A device's
@@ -15,7 +15,6 @@ import io
 import logging
 import os
 import re
-import shutil
 import signal
 import struct
 import subprocess
@@ -34,6 +33,7 @@ from alldayrec import db
 from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import squeeze
+from alldayrec import store
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.tenant import T
@@ -231,38 +231,17 @@ def envelope(x: np.ndarray) -> bytes:
 def hour_file(device: str, start_ms: int, ext: str) -> Path:
     """Where a piece starting at start_ms goes, relative to the recordings dir: its device's file for that (local) hour."""
     t = dt.datetime.fromtimestamp(start_ms / 1000)
-    return Path("chunks") / re.sub(r"[^\w.-]", "_", device) / f"{t:%Y-%m-%d}" / f"{t:%H}.{ext}"
+    return Path("chunks") / _name(device) / f"{t:%Y-%m-%d}" / f"{t:%H}.{ext}"
 
 
-def make_parents(f: Path) -> set[Path]:
-    """Makes the directories f (in the recordings dir) goes in; the directories that f, new, and those made add a name
-    to: fsync them once f is written, for its name to be on disk too (a new device's or day's first piece). f's own
-    directory always: a retry after a failed first write finds f there already, its name maybe not on disk yet."""
-    new = [d for d in (f, *f.parents) if T().recordings in d.parents and not d.exists()]
-    f.parent.mkdir(parents=True, exist_ok=True)
-    return {d.parent for d in new} | {f.parent}
+def _name(device: str) -> str:
+    """A device as a file name."""
+    return re.sub(r"[^\w.-]", "_", device)
 
 
-def sync_dirs(dirs: set[Path]):
-    for parent in dirs:
-        d = os.open(parent, os.O_RDONLY)
-        try:
-            os.fsync(d)
-        finally:
-            os.close(d)
-
-
-def append(path: Path, body: bytes) -> int:
-    """Appends body to the recordings dir / path and returns where it starts; on disk (fsync) when this returns. Hold _append."""
-    f = T().recordings / path
-    dirs = make_parents(f)
-    with open(f, "ab") as h:
-        pos = h.seek(0, os.SEEK_END)  # a failed write before leaves bytes no row points at: harmless
-        h.write(body)
-        h.flush()
-        os.fsync(h.fileno())
-    sync_dirs(dirs)
-    return pos
+def rejected(device: str, start_ms: int, ext: str) -> str:
+    """Where an upload that is not audio is kept (always on local disk), for a look later."""
+    return f"rejected/{_name(device)}/{start_ms}.{ext}"
 
 
 def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | None = None, report: dict | None = None) -> float | None:
@@ -280,16 +259,14 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
     ext = {"audio/ogg": "ogg", "audio/webm": "webm", "audio/aac": "aac"}.get(content_type.split(";")[0], "bin")
     x = decode(body, aac=ext == "aac", n=n, prev=before(device, start_ms) if ext == "ogg" else None)
     if x is None:  # the client drops it on the 400 that follows: its bytes stay here, for a look later
-        f = T().recordings / "rejected" / re.sub(r"[^\w.-]", "_", device) / f"{start_ms}.{ext}"
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_bytes(body)
+        store.local().write(rejected(device, start_ms, ext), body)
         return None
-    path = hour_file(device, start_ms, ext)
+    path = str(hour_file(device, start_ms, ext))
     h = health(x)
     with _append:
         if r := kept():  # the same piece in two requests at once
             return r[0]
-        pos = append(path, body)
+        pos = store.of(path).append(path, body)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
@@ -297,7 +274,7 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
                 report["late"] = queued_late
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
                           "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), str(path), pos, len(body), n, received, *h, envelope(x)))
+                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x)))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -438,35 +415,23 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
     prev = before(device, start_ms, COPY_BYTES) if ext == "ogg" and size <= COPY_BYTES else None
     with decoded_file(source, ext == "aac", n, prev) as decoded:
         if decoded is None:
-            path = T().recordings / "rejected" / re.sub(r"[^\w.-]", "_", device) / f"{start_ms}.{ext}"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            source.seek(0)
-            with path.open("wb") as out:
-                shutil.copyfileobj(source, out, COPY_BYTES)
+            store.local().write(rejected(device, start_ms, ext), source)
             return None
         pcm, count = decoded
         env = []
         h = file_health(pcm, count, env)
         env = b"".join(env)
-    path = hour_file(device, start_ms, ext)
+    path = str(hour_file(device, start_ms, ext))
     with _append:
         if r := kept():
             return r[0]
-        dest = T().recordings / path
-        dirs = make_parents(dest)
-        source.seek(0)
-        with dest.open("ab") as out:
-            pos = out.tell()
-            shutil.copyfileobj(source, out, COPY_BYTES)
-            out.flush()
-            os.fsync(out.fileno())
-        sync_dirs(dirs)
+        pos = store.of(path).append(path, source)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                      (device, start_ms, round(count / SR, 3), str(path), pos, size, n, received, *h, env))
+                      (device, start_ms, round(count / SR, 3), path, pos, size, n, received, *h, env))
         if report is not None:
             report["late"] = is_late
         with _holds:
@@ -481,15 +446,13 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
 def piece_file(p):
     """Isolate one indexed piece from its append-only hour file, in bounded copies."""
     with tempfile.NamedTemporaryFile() as source:
-        with open(T().recordings / p["path"], "rb") as stored:
-            stored.seek(p["pos"])
-            left = p["size"]
-            while left:
-                data = stored.read(min(left, COPY_BYTES))
-                if not data:
-                    raise OSError("stored audio ended early")
-                source.write(data)
-                left -= len(data)
+        done = 0
+        while done < p["size"]:
+            data = store.of(p["path"]).read(p["path"], p["pos"] + done, min(p["size"] - done, COPY_BYTES))
+            if not data:
+                raise OSError("stored audio ended early")
+            source.write(data)
+            done += len(data)
         source.flush()
         yield source
 
@@ -552,9 +515,9 @@ def gone(p) -> bool:
     audio reads as none, as where nothing was recorded, and the file is warned of once instead of failing every reader
     (the speaker loops retry every 5 minutes). Only for readers that can do without it (playback, voiceprints, listening):
     stream() holds on a missing file instead, since what it hands the pipeline is finalized for good."""
-    f = T().recordings / p["path"]
-    if f.exists():
+    if store.of(p["path"]).exists(p["path"]):
         return False
+    f = T().recordings / p["path"]
     if f not in T().gone:
         T().gone.add(f)
         log.warning("stored audio missing: %s", f)
@@ -563,9 +526,7 @@ def gone(p) -> bool:
 
 def read(p) -> bytes:
     """A pieces row's bytes, as uploaded."""
-    with open(T().recordings / p["path"], "rb") as f:
-        f.seek(p["pos"])
-        return f.read(p["size"])
+    return store.of(p["path"]).read(p["path"], p["pos"], p["size"])
 
 
 def samples(p) -> np.ndarray | None:
