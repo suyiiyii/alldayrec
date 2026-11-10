@@ -1439,7 +1439,7 @@ abstract class AppLocalizations {
   /// No description provided for @cardBlankSub.
   ///
   /// In zh, this message translates to:
-  /// **'卡上没有分区，也没有文件系统（全新的空白卡，或者 ext4、NTFS 的卡），下面可以格式化；在那之前只能实时上传'**
+  /// **'卡上没有录音设备能用的 FAT32 或 exFAT 文件系统（全新的空白卡，或者 ext4、NTFS 的卡），下面可以格式化；在那之前只能实时上传'**
   String get cardBlankSub;
 
   /// No description provided for @cardForeignTile.
@@ -1475,7 +1475,7 @@ abstract class AppLocalizations {
   /// No description provided for @formatCardBody.
   ///
   /// In zh, this message translates to:
-  /// **'卡上原有的内容会全部清空，没法恢复。\n\n容量 {size}，格式化成 {fs}（电脑和手机都能读），约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。'**
+  /// **'卡上原有的内容会全部清空，没法恢复。\n\n容量 {size}，格式化成 {fs}，约需几十秒；期间录音只走实时上传，请让手机待在录音设备旁边。{fs, select, FAT32{\n\n电脑认 FAT32；不过用录音设备的 U 盘模式接 Mac 时，32 GB 的 FAT32 卡可能挂不上。} other{}}'**
   String formatCardBody(String size, String fs);
 
   /// No description provided for @formatCardGo.

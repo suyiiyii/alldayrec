@@ -42,6 +42,7 @@ void main() {
     expect(find.textContaining('Everything on the card will be erased'), findsOneWidget);
     expect(find.textContaining('29.72 GB'), findsOneWidget);
     expect(find.textContaining('formatted as FAT32'), findsOneWidget);  // the board's choice up to 32 GB
+    expect(find.textContaining('may not mount on a Mac'), findsOneWidget);  // FAT32's cost, said before the user agrees
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     expect(asked, isEmpty);
@@ -101,6 +102,7 @@ void main() {
     await tester.tap(find.text('Format card'));
     await tester.pump();
     expect(find.textContaining('formatted as exFAT'), findsOneWidget);
+    expect(find.textContaining('may not mount on a Mac'), findsNothing);
     await tester.tap(find.text('Cancel'));
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));

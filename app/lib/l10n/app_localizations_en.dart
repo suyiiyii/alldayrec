@@ -801,7 +801,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardBlankSub =>
-      'The card has no partition and no file system (a new blank card, or one with ext4 or NTFS); format it below. Until then, live upload only';
+      'The card has no FAT32 or exFAT file system the recorder can use (a new blank card, or one with ext4 or NTFS); format it below. Until then, live upload only';
 
   @override
   String get cardForeignTile => 'Not readable';
@@ -821,7 +821,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String formatCardBody(String size, String fs) {
-    return 'Everything on the card will be erased and can\'t be recovered.\n\nCapacity $size, formatted as $fs (computers and phones can read it); takes tens of seconds. Meanwhile recording goes to live upload only, so keep the phone near the recorder.';
+    String _temp0 = intl.Intl.selectLogic(fs, {
+      'FAT32': '\n\nComputers read FAT32, but through the recorder\'s USB disk mode a 32 GB FAT32 card may not mount on a Mac.',
+      'other': '',
+    });
+    return 'Everything on the card will be erased and can\'t be recovered.\n\nCapacity $size, formatted as $fs; takes tens of seconds. Meanwhile recording goes to live upload only, so keep the phone near the recorder.$_temp0';
   }
 
   @override
