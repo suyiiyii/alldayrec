@@ -1,4 +1,5 @@
 """Late reads share import decoding bounds and retain failed audio for retry."""
+import json
 import subprocess
 
 import anyio
@@ -92,15 +93,16 @@ def test_late_decode_failure_keeps_audio_until_retry_limit(store, monkeypatch, s
     async def stop_when_idle(seconds):
         raise RuntimeError("test idle")
     monkeypatch.setattr(late.anyio, "sleep", stop_when_idle)
-    # Exercise the real processor's exception handler and durable backoff first.
+    # Exercise the real processor and its durable backoff first.
     with pytest.raises(RuntimeError, match="test idle"):
         anyio.run(late.processor)
-    error = ValueError if failure == "none" else subprocess.TimeoutExpired
+    # The span's one piece would not decode: that piece (all of the span) stays in it, retried with backoff (#180).
     for attempt in range(1, 4):
         saved = dict(db.conn().execute("SELECT * FROM late_spans").fetchone())
         assert saved["tries"] == attempt
         assert saved["status"] == ("failed" if attempt == 3 else "waiting")
-        assert saved["note"] == error.__name__ and saved["done_ms"] is None
+        assert saved["note"] == "undecodable audio" and saved["done_ms"] is None
+        assert json.loads(saved["ranges"]) == [[ms(0), ms(seconds)]]
         assert not db.processed(D, ms(0), ms(seconds))
         assert not db.sentences("", "z")
         assert not T().dias
@@ -109,6 +111,4 @@ def test_late_decode_failure_keeps_audio_until_retry_limit(store, monkeypatch, s
         if attempt == 3:
             assert claimed is None
         else:
-            with pytest.raises(error) as exc:
-                anyio.run(late.process, claimed)
-            late_store.failed(claimed, exc.value, saved["next_ms"])
+            anyio.run(late.process, claimed)

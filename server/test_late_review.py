@@ -52,7 +52,7 @@ def test_restart_mid_late_processing_hands_unfinalized_audio_back_to_live(store,
         async def transcribe(span):
             entered.set()
             await finish.wait()
-            return [row(10.1, 19.9, text="same audio, new ASR timing")], {"S1": E1}
+            return [row(10.1, 19.9, text="same audio, new ASR timing")], {"S1": E1}, []
         monkeypatch.setattr(late, "transcribe", transcribe)
         async def processing():
             await late.process(s)

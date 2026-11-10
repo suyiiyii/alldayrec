@@ -152,7 +152,7 @@ def test_tail_of_first_come(store, monkeypatch):
     span = late_store.claim()
     assert span and json.loads(span["ranges"]) == [[at(400), at(420)]]
     monkeypatch.setattr(infer, "StreamVad", EnergyVad)
-    monkeypatch.setattr(late, "read_exact", lambda d, a, b: np.zeros(round((b - a) * audio.SR / 1000), np.int16))
+    monkeypatch.setattr(late, "read_exact", lambda d, a, b, bad=None: np.zeros(round((b - a) * audio.SR / 1000), np.int16))
     anyio.run(late.process, span)
     assert colocate.transcribed(Y, at(400), at(420)) == 1, "the 20 s are transcribed by Y"
 
@@ -285,7 +285,7 @@ def test_late_audio_left_to_who_has_it(store, monkeypatch):
     left = colocate.left
     monkeypatch.setattr(colocate, "left", lambda *a: threads_.append(threading.current_thread()) or left(*a))
     read = []
-    monkeypatch.setattr(late, "read_exact", lambda d, a, b: read.append((a, b)) or np.zeros(round((b - a) * audio.SR / 1000), np.int16))
+    monkeypatch.setattr(late, "read_exact", lambda d, a, b, bad=None: read.append((a, b)) or np.zeros(round((b - a) * audio.SR / 1000), np.int16))
     anyio.run(late.process, span)
     assert threads_ and threads_[0] is not threading.main_thread(), "left() reads the store off the event loop"
     assert read and min(a for a, _ in read) == skip[-1][1], "only the audio apart (and a part at the seam) was read for the engine"

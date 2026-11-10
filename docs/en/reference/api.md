@@ -76,7 +76,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean) |
+| `POST` | Inspect historical missed speech, or enqueue it. | `days?` (query, integer)<br>`dry_run?` (query, boolean)<br>`include_failed?` (query, boolean) |
+
+### `/api/late-requeue`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | Failed late spans (of one device when given; 进度's 重试) waiting again with three new tries. | `device?` (query, string) |
 
 ### `/api/chunks`
 

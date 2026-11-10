@@ -33,7 +33,7 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 | 上传块 | 一次上传的音频 | `(device, start_ms)` | `pieces` 表 + `recordings/chunks/<设备>/<日期>/<HH>.<扩展名>` | `POST /api/chunks`（`audio.save`、`audio.save_file`） | 同一设备、同一开始时刻再传一次更长的，替换这一行；一样长或更短的不替换 | 服务端代码不删除 |
 | 定稿段 | 定稿层一次送给引擎的音频 | 无 | 内存 | `device_pipeline.py` 的 `final_piece` | — | 提交后从内存里丢掉 |
 | 处理覆盖 | 某层已经处理过的一段时间，含停顿 | `(device, start_ms, end_ms, layer)` | `processed_audio` | 定稿段提交（`final` 或 `standby`），迟到区间提交（`late`，留给同处另一台的部分记 `standby`） | 一台设备从备用转回转写时，删掉之前 300 秒的 `standby` 记录，把那段交给迟到层（`colocate.resume`） | 一直保留 |
-| 迟到区间 | 到得太晚、定稿层已经读过去的一段音频 | `id` | `late_spans` | 上传时判定为迟到（`late_store.record`）；备用转回（`colocate.resume`）；历史补扫（`late_backfill.py`） | 迟到处理器：拆分、改状态、记重试 | `waiting` → `processing` → `done`，或 `deferred`、`failed` |
+| 迟到区间 | 到得太晚、定稿层已经读过去的一段音频 | `id` | `late_spans` | 上传时判定为迟到（`late_store.record`）；备用转回（`colocate.resume`）；历史补扫（`late_backfill.py`） | 迟到处理器：拆分、改状态、记重试 | `waiting` → `processing` → `done`，或 `deferred`、`failed`（重试：`late_store.requeue`，回到 `waiting`） |
 | 设备进度 | 每台设备的游标和标志 | 键名 | `kv` 表 | 处理流程、上传接口 | 同左 | 见下文[处理循环](#处理循环) |
 
 `kv` 里和一台设备 `<d>` 有关的键：
