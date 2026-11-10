@@ -12,13 +12,15 @@ export PATH="$CACHE/bin:$HOME/.local/bin:$PATH"
 for command in git curl tar xz sha256sum uv cc; do
   command -v "$command" >/dev/null || { echo "Required host tool missing: $command" >&2; exit 1; }
 done
-# Pin the official Linux bootstrap bytes as resolved during implementation.
-# The publisher's endpoint is mutable; a changed download fails, never silently upgrades.
+# Pin the official Linux launcher 1.4.1 by its versioned file name: the unversioned
+# .../nrfutil alias moves with each release (1.4.2 on 2026-11-05). The sha256 equals
+# the one Nordic's Artifactory storage API lists for this file:
+# https://files.nordicsemi.com/artifactory/api/storage/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil-x86_64-unknown-linux-gnu-1.4.1-f15ff58
 NRFUTIL="$CACHE/bin/nrfutil"
 BOOTSTRAP_SHA=1cf4bd1d3d64f43a6b9602d8d8e8d647bec0d26d517ba72fd154f95546b50260
 if [ ! -f "$NRFUTIL" ]; then
   curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output "$NRFUTIL" \
-    https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil
+    https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/executables/x86_64-unknown-linux-gnu/nrfutil-x86_64-unknown-linux-gnu-1.4.1-f15ff58
 fi
 printf '%s  %s\n' "$BOOTSTRAP_SHA" "$NRFUTIL" | sha256sum --check
 chmod u+x "$NRFUTIL"
