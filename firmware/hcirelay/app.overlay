@@ -1,0 +1,17 @@
+/* Pro Micro nRF52840 (nice!nano and its clones) on the XIAO board definition, as firmware/selftest: the app after
+ * S140 6.1.1 at 0x26000, for the Adafruit UF2 bootloader. */
+&qspi { status = "disabled"; };
+&i2c1 { status = "disabled"; };
+&spi2 { status = "disabled"; };
+&uart0 { status = "disabled"; };
+&pwm0 { status = "disabled"; };
+
+&flash0 {
+	partitions {
+		/delete-node/ partition@27000;
+		code_partition: partition@26000 {
+			label = "code_partition";
+			reg = <0x26000 0xc6000>;
+		};
+	};
+};
