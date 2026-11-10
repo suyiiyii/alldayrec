@@ -310,9 +310,10 @@ int mount_sd_card_reset(void)
  * 32 GB card lent to a Mac may not mount there. Clusters 32 KB up to 32 GB (FatFs picks smaller ones for a card under
  * ~2 GB, too small for FAT32 at 32 KB), 128 KB above, the SD spec's and FatFs's own choice; one FAT; the data area on
  * the card's allocation unit (4 MB, 16 MB above 32 GB: FatFs aligns it on the card's own sector numbers).
- * A format cut short (power, a reset) leaves a blank card, formatted again from the app: the volume shows only once
- * f_mkfs's last write is in. exFAT writes its boot sectors last, so it goes without a partition table (FM_SFD; mounted
- * on macOS, X1 10-18). FAT32 writes its boot sector first and its 3.9 MB FAT after: without a partition table a cut left
+ * A format cut short (power, a reset) leaves a blank card, formatted again from the app: no volume shows before the
+ * rest is written. exFAT writes its boot region (sectors 0-23) after its bitmap, up-case table and root, so it goes
+ * without a partition table (FM_SFD; mounted on macOS, X1 10-18); a cut inside those 24 writes may leave sector 0 in
+ * and its checksum or backup not, a whole volume a Mac may call damaged. FAT32 writes its boot sector first and its 3.9 MB FAT after: without a partition table a cut left
  * a FAT32 volume that mounted with half of its FAT the card's old data. So FAT32 goes in an MBR partition (from sector
  * 63; its FAT off the allocation units, the data area on them), whose table FatFs writes last, on a sector 0 zeroed
  * before. work: f_mkfs's buffer, a multiple of 512 B: the FAT is written that much at a time (4 KB: ~1000 writes). */

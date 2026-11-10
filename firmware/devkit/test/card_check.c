@@ -68,6 +68,10 @@ int main(void)
         memset(s, 0, sizeof(s)), mbr(s, 2, *t, 8192);
         assert(lr_card_marked(s, lba, &n));  // a FAT partition, its boot sector there or not: its volume may be
     }
+    for (const uint8_t *t = (const uint8_t[]){0x05, 0x0F, 0x85, 0x1C, 0xAF, 0xA5, 0}; *t; t++) {
+        memset(s, 0, sizeof(s)), mbr(s, 1, *t, 2048);
+        assert(lr_card_marked(s, lba, &n));  // extended (logical volumes FatFs does not read), hidden FAT, HFS+, BSD
+    }
     memset(s, 0, sizeof(s)), mbr(s, 0, 0x07, 8192), mbr(s, 2, 0x83, 900000);
     assert(!lr_card_marked(s, lba, &n) && n == 2 && lba[0] == 8192 && lba[1] == 900000);  // NTFS/exFAT, Linux: to look at
     memset(s, 0, sizeof(s)), s[510] = 0x55, s[511] = 0xAA;
@@ -95,6 +99,13 @@ int main(void)
     assert(!blank());  // FAT32's backup in a partition typed otherwise
     mbr(put(0), 0, 0x07, DISK);
     assert(!blank());  // a partition past the card's end
+    mbr(put(0), 0, 0x0F, 2048), mbr(put(2048), 0, 0x0C, 2048), vbr(4096, "FAT32   ", 82), vbr(4102, "FAT32   ", 82);
+    assert(!blank());  // a whole FAT32 volume in a logical partition (EBR at 2048): files and all
+    uint8_t *m = put(0);
+    for (int i = 0; i < 4; i++) {
+        mbr(m, i, i & 1 ? 0x83 : 0x07, 2048 + i * 100000), vbr(2048 + i * 100000, "NTFS    ", 3);
+    }
+    assert(blank());  // four NTFS and Linux partitions: FORMAT may take them
     bad = 0;
     assert(!blank());  // sector 0 cannot be read
     bad = 12;
