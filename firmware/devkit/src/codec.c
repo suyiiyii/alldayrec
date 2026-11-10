@@ -48,6 +48,9 @@ int codec_receive_pcm(int16_t *data, size_t len) // this gets called after mic d
 //
 
 int16_t codec_input_samples[CODEC_PACKAGE_SAMPLES];
+#ifdef CONFIG_LR_POWER_DEBUG
+bool lr_debug_codec_off;
+#endif
 static struct hpf hpf[2];
 struct mic_health mic_health;  // lr_log.c logs it every 10 minutes (HEALTH)
 uint8_t codec_output_bytes[CODEC_OUTPUT_MAX_BYTES];
@@ -82,6 +85,12 @@ void codec_entry()
             continue;
         }
         transport_frame_no += left_out;  // the buffers the ring had no room for: a gap in the frame numbers (mic_ring.h)
+#ifdef CONFIG_LR_POWER_DEBUG
+        extern bool lr_debug_codec_off;
+        if (lr_debug_codec_off) {  // power tests: the mic's frames dropped before the codec, nothing goes on
+            continue;
+        }
+#endif
 
         // High-pass here, not in the PDM interrupt: the BLE stream and the SD store both take what this encodes
         mic_health_raw(&mic_health, codec_input_samples, CODEC_PACKAGE_SAMPLES);

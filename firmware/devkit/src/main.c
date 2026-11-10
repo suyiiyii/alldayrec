@@ -68,6 +68,9 @@ static void print_reset_reason(void)
 }
 
 bool is_connected = false;
+#ifdef CONFIG_LR_POWER_DEBUG
+bool lr_debug_led_off;
+#endif
 extern bool is_off;
 extern bool usb_charge;
 static void boot_led_sequence(void)
@@ -105,6 +108,14 @@ void set_led_state()
     // short flashes instead (led_code.h).
     static bool tick;
     tick = !tick;
+#ifdef CONFIG_LR_POWER_DEBUG
+    if (lr_debug_led_off) {  // power tests (lr_store.c): dark, not left as they were (blue while connected)
+        set_led_red(false);
+        set_led_green(false);
+        set_led_blue(false);
+        return;
+    }
+#endif
 #ifdef CONFIG_LR_ONE_LED
     static unsigned n;
     int k = led_flashes(n++, lr_bond_count(), is_off || lr_paused(), !lr_store_err(), is_connected);
