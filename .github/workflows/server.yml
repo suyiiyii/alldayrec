@@ -27,7 +27,7 @@ jobs:
 
   server:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15  # ~4 min on a hosted runner; one slow run went past 10
+    timeout-minutes: 25  # 13-15 min on a hosted runner (11-09); 15 cancelled a run that was only slow
     defaults:
       run:
         working-directory: server
