@@ -231,6 +231,17 @@ def stopped(span):
                       "WHERE id=? AND status='processing' AND stops < 3", (span["id"],))
 
 
+UNREACHABLE_RETRY_S = 60
+
+
+def unreachable(span, now_ms: int | None = None):
+    """span's audio could not be read (store.Unreachable: the object store down): its claim and try given back, tried
+    again UNREACHABLE_RETRY_S later, for as long as the outage lasts (the final stream waits on such a piece too)."""
+    now_ms = round(time.time() * 1000) if now_ms is None else now_ms
+    db.conn().execute("UPDATE late_spans SET status='waiting', tries=MAX(0, tries-1), note='Unreachable', next_ms=? "
+                      "WHERE id=? AND status='processing'", (now_ms + UNREACHABLE_RETRY_S * 1000, span["id"]))
+
+
 def move_seam(span, cut):
     """Return the untranscribed suffix to the next job, atomically and without resetting retries."""
     with db.tx() as t:

@@ -37,6 +37,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | Path | Content |
 |---|---|
 | `chunks/<device>/<date>/<HH>.<ext>` | One file per device per hour; each piece that arrives is appended to it as is, and its position and length in the file are recorded in the `pieces` table of `live.db`. The extension follows the upload's `Content-Type`: `ogg`, `webm`, `aac`, otherwise `bin` |
+| `staging/chunks/<device>/<date>/<HH>.<ext>.<gen>` | Only with `STORAGE=s3`: late pieces of an hour already sealed, kept here until merged into its object. A row whose `pieces.path` starts with `s3:` is then in the object store (`<S3_PREFIX><tenant id>/<path>`): [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept) |
 | `rejected/<device>/<start>.<ext>` | Uploads that failed to decode (the endpoint returned 400), kept as they are for inspection |
 
 ## The tables of live.db

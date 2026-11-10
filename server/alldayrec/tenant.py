@@ -60,6 +60,10 @@ class Tenant:
     owner: dict | None = None                       # 我's voiceprint picked on its card (selfvoice), for the next conversations
     read_to: dict = field(default_factory=dict)     # audio.stream: per device, the last piece its reader has finished with
     gone: set = field(default_factory=set)          # audio.gone: its recordings found missing, each warned of once
+    store_calls: dict = field(default_factory=dict)  # store.timed: op -> [calls, {failure kind: n}, seconds] (lr_store_* metrics)
+    store_locks: dict = field(default_factory=dict)  # seal.lock: path -> the lock of its one seal or merge at a time
+    store_retry: dict = field(default_factory=dict)  # seal.step: path -> (failures, when to try again) of a failed one
+    store_prefix: str | None = None                  # store.S3.key: its objects' key prefix (kv s3_prefix), once read
     tags: dict = field(default_factory=lambda: {"at": 0.0, "counts": {}})
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
     hotwords: dict = field(default_factory=lambda: {"at": 0.0, "words": []})  # db.hotwords, a few seconds old at most

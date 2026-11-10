@@ -1,15 +1,18 @@
 """The recordings: a stretch of a device's audio as WAV, and listening in on a device."""
 import datetime as dt
+import logging
 
 import anyio.to_thread
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from alldayrec import audio
+from alldayrec import store
 from alldayrec import threads
 from alldayrec.core import NO_CACHE
 
 router = APIRouter()
+log = logging.getLogger("live")
 
 
 @router.get("/api/audio")
@@ -38,6 +41,9 @@ async def cut(start: str, end: str, fmt: str, device: str | None = None) -> byte
         out = await anyio.to_thread.run_sync(audio.cut, a, b, fmt, device, limiter=threads.MEDIA) if 0 < (b - a).total_seconds() <= 120 else None
     except audio.DecoderTerminated:  # a service stop: the page asks again; the speaker loops skip it as they skip a 404
         raise HTTPException(503, "Audio decoding was stopped; try again")
+    except store.Unreachable as e:  # STORAGE=s3, the object store down: sealed audio cannot be read now
+        log.warning("audio %s..%s: %s", start, end, e)  # the key and the store's answer: in the log, not to the client
+        raise HTTPException(503, "Object storage unreachable, try again later")
     if out is None:
         raise HTTPException(404, "no recording covers this time")
     return out

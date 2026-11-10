@@ -66,6 +66,15 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
                                                                                                 -- env: audio.envelope() (colocate.py)
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE INDEX IF NOT EXISTS pieces_end ON pieces(device, start_ms + seconds * 1000);  -- where its audio ends: backlog, a stream's start, pending
+CREATE TABLE IF NOT EXISTS store_objects (    -- STORAGE=s3 (seal.py): each hour file (and import) on its way to an object;
+    path TEXT PRIMARY KEY,                          -- path: the local file, s3:path the object; its rows' start_ms
+    lo_ms INTEGER NOT NULL, hi_ms INTEGER NOT NULL,  -- in [lo, hi]. state: open (local), sealing, sealed (the object),
+    state TEXT NOT NULL, seal_at INTEGER,           -- local (over one PUT: stays on disk); seal_at: when it may be sealed;
+    size INTEGER, sha256 TEXT, etag TEXT,           -- sealed: the object's (etag: a merge replaces only that version);
+                                                    -- late pieces go to staging/<path w/o ext>.<gen>.<ext>,
+    gen INTEGER NOT NULL DEFAULT 0,                 -- late_*: those staged since the last merge (received_ms, bytes);
+    late_first INTEGER, late_last INTEGER, late_bytes INTEGER NOT NULL DEFAULT 0,  -- intent: what the upload under way
+    intent TEXT);                                   -- makes the object (size, sha256, the rows to move), till it is done
 CREATE TABLE IF NOT EXISTS late_spans (
     id INTEGER PRIMARY KEY, device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
     first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting',

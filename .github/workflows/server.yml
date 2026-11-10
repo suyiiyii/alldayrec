@@ -32,14 +32,44 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1, the job's only action: a runner downloads every action its job names, skipped or not
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1; with actions/cache (MinIO) its only actions: a runner downloads every action its job names, skipped or not
       - run: |  # the tests encode Opus and AAC pieces; the hosted mirror stalled twice for >10 min, so fail fast and retry
           if command -v ffmpeg >/dev/null; then ffmpeg -version | head -1; exit 0; fi
           APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
           $APT update && $APT install -yq --no-install-recommends ffmpeg
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
+      # MinIO for test_store_s3.py (STORAGE=s3 on a real S3 protocol). The community edition is archived: no image on
+      # Docker Hub any more (so no service container), no downloads at dl.min.io. Homebrew's bottle of its last release,
+      # by digest; once that is gone too, switch to versitygw or Garage.
+      - name: Cache MinIO
+        id: minio
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/minio
+          key: minio-RELEASE.2025-10-15T17-29-55Z-372125db73bf
+      - name: Get MinIO (pinned, sha256-checked)
+        if: steps.minio.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/minio && cd ~/minio
+          curl -fsSL --retry 3 -H "Authorization: Bearer QQ==" -o bottle.tgz \
+            https://ghcr.io/v2/homebrew/core/minio/blobs/sha256:a36e522f309bb9a9c4487133ccab4c1b8c62b1f31f5afb177f090ea3e3eb78e5 \
+            || { echo "::error::MinIO bottle download from ghcr.io failed"; exit 1; }
+          tar xzf bottle.tgz --strip-components=3 minio/2025-10-15T17-29-55Z/bin/minio && rm bottle.tgz
+      - name: Start MinIO
+        run: |
+          echo "372125db73bf2570efdda747b9a89a16b4a2636e06d445381531766718534d8b  $HOME/minio/minio" | sha256sum -c
+          # the bottle's interpreter is Homebrew's (@@HOMEBREW_PREFIX@@/lib/ld.so): run it with the system's
+          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin nohup /lib64/ld-linux-x86-64.so.2 ~/minio/minio \
+            server --address 127.0.0.1:9000 "$RUNNER_TEMP/minio-data" > "$RUNNER_TEMP/minio.log" 2>&1 &
+          for i in $(seq 60); do curl -sf http://127.0.0.1:9000/minio/health/live && exit 0; sleep 1; done
+          cat "$RUNNER_TEMP/minio.log"; echo "::error::MinIO did not start"; exit 1
       - run: uv sync --locked  # uv.lock as it is (deploy.sh: uv sync --frozen); without the [local] extra, as pip installs it
       - run: uv run --with pytest pytest -q
+        env:
+          LR_S3_TEST: 1  # test_store_s3.py fails, never skips, without its MinIO
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          TEST_S3_ACCESS_KEY: minioadmin
+          TEST_S3_SECRET_KEY: minioadmin
 
   wheel:  # the wheel pip and uvx install (no web app built here: its pages say so), its command up to --help
     runs-on: ubuntu-24.04

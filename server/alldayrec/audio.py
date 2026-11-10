@@ -32,6 +32,7 @@ import numpy as np
 from alldayrec import db
 from alldayrec import late_store
 from alldayrec import perf
+from alldayrec import seal
 from alldayrec import squeeze
 from alldayrec import store
 from alldayrec import threads
@@ -266,9 +267,12 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
     with _append:
         if r := kept():  # the same piece in two requests at once
             return r[0]
+        whole = len(x) / SR > WHOLE_S
+        path = seal.place(path, start_ms, len(body), whole)
         pos = store.of(path).append(path, body)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
+            seal.placed(t, path, start_ms, len(body), received, whole)
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
@@ -425,9 +429,12 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
     with _append:
         if r := kept():
             return r[0]
+        whole = count / SR > WHOLE_S
+        path = seal.place(path, start_ms, size, whole)
         pos = store.of(path).append(path, source)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
+            seal.placed(t, path, start_ms, size, received, whole)
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -445,14 +452,24 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
 @contextlib.contextmanager
 def piece_file(p):
     """Isolate one indexed piece from its append-only hour file, in bounded copies."""
-    with tempfile.NamedTemporaryFile() as source:
+    def copy(p, out):
         done = 0
         while done < p["size"]:
             data = store.of(p["path"]).read(p["path"], p["pos"] + done, min(p["size"] - done, COPY_BYTES))
             if not data:
                 raise OSError("stored audio ended early")
-            source.write(data)
+            out.write(data)
             done += len(data)
+
+    with tempfile.NamedTemporaryFile() as source:
+        try:
+            copy(p, source)
+        except FileNotFoundError:
+            if not (q := moved(p)):
+                raise
+            source.seek(0)  # sealed or merged before or while it was copied: again from where its bytes are now
+            source.truncate()
+            copy(q, source)
         source.flush()
         yield source
 
@@ -515,8 +532,8 @@ def gone(p) -> bool:
     audio reads as none, as where nothing was recorded, and the file is warned of once instead of failing every reader
     (the speaker loops retry every 5 minutes). Only for readers that can do without it (playback, voiceprints, listening):
     stream() holds on a missing file instead, since what it hands the pipeline is finalized for good."""
-    if store.of(p["path"]).exists(p["path"]):
-        return False
+    if p["path"].startswith("s3:") or store.of(p["path"]).exists(p["path"]) or moved(p):
+        return False  # an object is not looked for each read: one missing fails its read (store.Unreachable)
     f = T().recordings / p["path"]
     if f not in T().gone:
         T().gone.add(f)
@@ -524,9 +541,23 @@ def gone(p) -> bool:
     return True
 
 
+def moved(p):
+    """p's row as it is now when a seal or merge (STORAGE=s3) has moved its bytes since p was read and deleted the
+    local file p points at; None when it has not."""
+    if not seal.on():
+        return None
+    q = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms = ?", (p["device"], p["start_ms"])).fetchone()
+    return q if q is not None and (q["path"], q["pos"]) != (p["path"], p["pos"]) else None
+
+
 def read(p) -> bytes:
     """A pieces row's bytes, as uploaded."""
-    return store.of(p["path"]).read(p["path"], p["pos"], p["size"])
+    try:
+        return store.of(p["path"]).read(p["path"], p["pos"], p["size"])
+    except FileNotFoundError:
+        if q := moved(p):
+            return read(q)
+        raise
 
 
 def samples(p) -> np.ndarray | None:
@@ -766,15 +797,17 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
     at, lo, end = min(p["start_ms"] - 1, ms) if p else ms, 0, float(ms)
     decode_failures, waiting = 0, None
 
-    async def wait_file(p):
+    async def wait_file(p, unreachable: bool = False):
         """The queue reader's piece not yet read whose file is gone: not read as silence (the cursor would move on, the
         final layer never transcribe it), waited on until the file is back (a directory briefly unavailable, a
         restore), the final layer cutting what it was fed meanwhile (idle). Said once per piece; a file deleted for
-        good holds until its row goes. A draft reader passes over such a piece (the final layer has it)."""
+        good holds until its row goes. A draft reader passes over such a piece (the final layer has it). unreachable:
+        its object could not be read (STORAGE=s3, the store down), waited on the same way."""
         nonlocal waiting
         if waiting != p["start_ms"]:
             waiting = p["start_ms"]
-            ws.note(f"{device}：音频文件 {p['path']} 缺失，已暂停在这里；文件补上后自动继续", "warn")
+            ws.note(f"{device}：对象存储读不到 {p['path']}，已暂停在这里；恢复后自动继续" if unreachable else
+                    f"{device}：音频文件 {p['path']} 缺失，已暂停在这里；文件补上后自动继续", "warn")
         with idle(device, True):
             await anyio.sleep(GONE_RETRY_S)
 
@@ -822,6 +855,12 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                     try:
                         blocks, skip = await anyio.to_thread.run_sync(
                             lambda: stack.enter_context(piece_blocks(p, max(end, ms, lo))), limiter=threads.MEDIA)
+                    except store.Unreachable:
+                        if edge_s is None:
+                            await wait_file(p, True)
+                        else:
+                            at = p["start_ms"]
+                        continue
                     except (subprocess.TimeoutExpired, StoredDecodeError, DecoderTerminated) as exc:
                         # Entry decodes to disk before handing out any PCM. Later
                         # block/consumer failures must propagate outside this budget.
@@ -852,8 +891,15 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                             yield dt.datetime.fromtimestamp(a / 1000), y
             at = p["start_ms"]
             continue
-        with perf.timed(spent, "decode_ms"):
-            got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
+        try:
+            with perf.timed(spent, "decode_ms"):
+                got = await anyio.to_thread.run_sync(fresh, p, end, limiter=threads.MEDIA)
+        except store.Unreachable:
+            if edge_s is None:
+                await wait_file(p, True)
+            else:
+                at = p["start_ms"]
+            continue
         if got is None and edge_s is None and p["start_ms"] + p["seconds"] * 1000 > end and gone(p):  # after the read: gone while read, held too
             await wait_file(p)
             continue

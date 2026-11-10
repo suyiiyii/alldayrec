@@ -51,6 +51,7 @@ from alldayrec import routes_sentences
 from alldayrec import routes_speakers
 from alldayrec import routes_upload
 from alldayrec import routes_voices
+from alldayrec import seal
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec import transcript
@@ -103,7 +104,7 @@ async def run_tenant(t: tenant.Tenant):
     with anyio.CancelScope() as t.scope:
         async with anyio.create_task_group() as t.tg:
             for name, fn in (("pipeline", pipelines), ("status", status_loop), ("summary", summary_worker), ("voices", voices_loop), ("late", late_processor),
-                             *((("recap", recap_loop),) if RECAP_AT else ())):
+                             *((("recap", recap_loop),) if RECAP_AT else ()), *((("store", seal.loop),) if seal.on() else ())):
                 t.tg.start_soon(supervised, name, fn, name=f"{name}:{t.id}")
 
 
