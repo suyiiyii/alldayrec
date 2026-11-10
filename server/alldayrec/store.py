@@ -8,6 +8,7 @@ read by range. Each tenant's objects are under S3_PREFIX<tenant id>/.
 import contextlib
 import datetime as dt
 import errno
+import fcntl
 import hashlib
 import logging
 import os
@@ -44,6 +45,21 @@ class Storage(Protocol):
     def delete(self, path: str): ...
 
 
+def appending(f: Path) -> BinaryIO:
+    """f opened to append, under its lock (flock, held till it is closed). trim.py's purge deletes an old hour file
+    under it: an append that waited for it finds the name gone or a new file there, and opens again (a new hour file,
+    not the deleted one's bytes)."""
+    while True:
+        h = open(f, "ab")
+        fcntl.flock(h, fcntl.LOCK_EX)
+        try:
+            if os.stat(f).st_ino == os.fstat(h.fileno()).st_ino:
+                return h
+        except FileNotFoundError:
+            pass
+        h.close()
+
+
 def sync_dirs(dirs: set[Path]):
     for parent in dirs:
         d = os.open(parent, os.O_RDONLY)
@@ -70,7 +86,7 @@ class Local:
     def append(self, path, data):
         f = self.root / path
         dirs = self.make_parents(f)
-        with open(f, "ab") as h:
+        with appending(f) as h:
             pos = h.seek(0, os.SEEK_END)  # a failed write before leaves bytes no row points at: harmless
             if isinstance(data, bytes):
                 h.write(data)

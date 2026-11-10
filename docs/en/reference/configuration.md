@@ -122,6 +122,7 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 | `LIVE_DATA` | `replay_case.py` | A tenant's data directory |
 | `CASES_DIR` | `eval_all.sh` | The directory of labeled evaluation cases |
 | `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` | See those scripts |
+| `TRIM_AFTER_DAYS` (default `2`), `TRIM_PAD_S` (`10`), `TRIM_VAD` (`0.1`), `TRIM_PURGE_AFTER_H` (`24`) | `trim.py` | Trimming: how many days after its newest piece an hour file may be trimmed; the seconds kept on each side of speech and of sentences; the VAD threshold for speech (a VAD file made at another threshold is not used); how many hours after a trim `purge` may delete the original (at least 24: less and `purge` refuses to run). See [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept) |
 
 ## Other environment variables
 

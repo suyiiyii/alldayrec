@@ -6,7 +6,11 @@ import { windowAsk, windowLen, windowStart } from "./track";
 
 // one sound at a time, on every page: a clip (play) stops the conversation player (track), and it a clip;
 // heard: the clips played to their end (「这是你吗？」 is answered only after)
-export const player = reactive({ playing: "", failed: new Set<string>(), heard: new Set<string>() });
+export const player = reactive({
+  playing: "",
+  failed: new Set<string>(),
+  heard: new Set<string>(),
+});
 let audio: HTMLAudioElement | null = null;
 
 // the online demo has no recordings: a play says so
@@ -61,7 +65,7 @@ let el: HTMLAudioElement | null = null,
   k = -1, // the window in el
   gen = 0, // the latest seek: a window fetched for an older one is dropped
   miss = 0; // windows in a row without a recording
-const got = new Map<number, Promise<string | null>>(); // window → object URL of its WAV; null: none there
+const got = new Map<number, Promise<string | false | null>>(); // window → object URL of its WAV; false: no recording there (404); null: it did not come
 
 function element() {
   if (el) return el;
@@ -87,8 +91,9 @@ function fetchWindow(w: number) {
     p = !q
       ? Promise.resolve(null)
       : fetch(`/api/audio?${new URLSearchParams(q)}`)
-          .then((r) => (r.ok ? r.blob() : null))
-          .then((b) => b && URL.createObjectURL(b))
+          .then(async (r) =>
+            r.ok ? URL.createObjectURL(await r.blob()) : r.status !== 404 && null,
+          )
           .catch(() => null);
     got.set(w, p);
   }
@@ -114,8 +119,13 @@ async function load(w: number, my: number) {
   }
   const u = await fetchWindow(w);
   if (my !== gen) return;
+  if (u === false) {
+    // no recording covers this window (a gap, or silence trimmed away on the server): on to the next, up to the end
+    track.at = Math.min(track.to, base + windowStart(w + 1));
+    return load(w + 1, my);
+  }
   if (!u) {
-    // no recording covers this window (404) or it did not come: on to the next, three such in a row is the end
+    // it did not come: on to the next, three such in a row is the end
     if (++miss < 3) return load(w + 1, my);
     miss = 0;
     track.playing = false;
@@ -207,6 +217,9 @@ export function trackRate() {
 
 // Sound stops when the page goes out of sight: the browser's visibilitychange (another tab, the lock screen) and the
 // app's own 'app-hidden' (its bottom tabs keep every page alive and visible to the browser, so it says so itself).
-const hidden = () => { audio?.pause(); trackPause(); };
+const hidden = () => {
+  audio?.pause();
+  trackPause();
+};
 document.addEventListener("visibilitychange", () => document.hidden && hidden());
 window.addEventListener("app-hidden", hidden);

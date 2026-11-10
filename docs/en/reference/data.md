@@ -37,6 +37,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | Path | Content |
 |---|---|
 | `chunks/<device>/<date>/<HH>.<ext>` | One file per device per hour; each piece that arrives is appended to it as is, and its position and length in the file are recorded in the `pieces` table of `live.db`. The extension follows the upload's `Content-Type`: `ogg`, `webm`, `aac`, otherwise `bin` |
+| `chunks/<device>/<date>/<HH>.trim.<ext>` | A trimmed hour (`trim.py`): the pieces of the hour file near speech, copied as they are, in order; an object of the same name (`s3:`) when the hour was sealed |
 | `staging/chunks/<device>/<date>/<HH>.<ext>.<gen>` | Only with `STORAGE=s3`: late pieces of an hour already sealed, kept here until merged into its object. A row whose `pieces.path` starts with `s3:` is then in the object store (`<S3_PREFIX><tenant id>/<path>`): [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept) |
 | `rejected/<device>/<start>.<ext>` | Uploads that failed to decode (the endpoint returned 400), kept as they are for inspection |
 
@@ -58,6 +59,8 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `name_hints` | What each label was called in a conversation (used only to suggest names) |
 | `profiles` | People cards of people with recognized names, each row with its source |
 | `pieces` | The index of uploaded pieces, which is also the processing queue |
+| `trims` | Hour files trimmed (`trim.py`): the original, the copy kept, its state, and every index row as it was before (for a restore from a backup) |
+| `cold_starts` | Recorder pieces whose piece right before was dropped by a trim: their start is faded in on reading |
 | `late_spans` | Exact late-audio intervals, processing state and retry counts (since v0.4.0) |
 | `processed_audio` | Actual processed coverage, including pauses, committed with final rows; prevents replay after restart (since v0.4.0) |
 | `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
