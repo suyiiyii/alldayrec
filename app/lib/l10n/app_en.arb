@@ -225,7 +225,7 @@
   "cardBlankTile": "Not formatted",
   "cardBlankSub": "The card has no FAT32 or exFAT file system the recorder can use (a new blank card, or one with ext4 or NTFS); format it below. Until then, live upload only",
   "cardForeignTile": "Not readable",
-  "cardForeignSub": "The card has a partition or file system the recorder can't use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT without partitions. Until then, live upload only",
+  "cardForeignSub": "The card has a partition or file system the recorder can't use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT (with an MBR partition map, or none). Until then, live upload only",
   "cardFormattingTile": "Formatting",
   "formatCard": "Format card",
   "formatCardTitle": "Format the card?",

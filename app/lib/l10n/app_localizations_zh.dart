@@ -785,7 +785,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cardForeignSub =>
-      '卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再不分区格式化成 FAT32 或 exFAT；在那之前只能实时上传';
+      '卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再格式化成 FAT32 或 exFAT（用 MBR 分区方案，或者不分区）；在那之前只能实时上传';
 
   @override
   String get cardFormattingTile => '格式化中';

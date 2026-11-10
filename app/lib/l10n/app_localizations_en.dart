@@ -808,7 +808,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cardForeignSub =>
-      'The card has a partition or file system the recorder can\'t use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT without partitions. Until then, live upload only';
+      'The card has a partition or file system the recorder can\'t use (say, erased on a Mac with a GUID partition map, or a damaged file system), and may still hold files. Put it in a computer, back it up, then format it as FAT32 or exFAT (with an MBR partition map, or none). Until then, live upload only';
 
   @override
   String get cardFormattingTile => 'Formatting';

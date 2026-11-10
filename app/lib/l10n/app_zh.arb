@@ -455,7 +455,7 @@
   "cardBlankTile": "未格式化",
   "cardBlankSub": "卡上没有录音设备能用的 FAT32 或 exFAT 文件系统（全新的空白卡，或者 ext4、NTFS 的卡），下面可以格式化；在那之前只能实时上传",
   "cardForeignTile": "无法识别",
-  "cardForeignSub": "卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再不分区格式化成 FAT32 或 exFAT；在那之前只能实时上传",
+  "cardForeignSub": "卡上有分区或文件系统，录音设备却用不了（比如在 Mac 上抹成了 GUID 分区表，或者文件系统坏了），卡上可能还有内容。请把卡接到电脑上，先备份，再格式化成 FAT32 或 exFAT（用 MBR 分区方案，或者不分区）；在那之前只能实时上传",
   "cardFormattingTile": "格式化中",
   "formatCard": "格式化存储卡",
   "formatCardTitle": "格式化存储卡？",
