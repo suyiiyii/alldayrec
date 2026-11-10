@@ -26,7 +26,7 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarr
     """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want). A piece
     that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone)."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
-    end = a
+    end, missed, filled = a, [], []
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",
                                (device, b, a)).fetchall():
         if p["start_ms"] + p["seconds"] * 1000 <= end:
@@ -47,15 +47,16 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarr
             if bad is None:
                 raise ValueError("stored late audio could not be decoded")
             lo, hi = round(max(a, end, p["start_ms"])), min(b, round(p["start_ms"] + p["seconds"] * 1000))
-            log.warning("late audio of %s: piece %s (%s) would not decode, %.1f s left out", device, p["start_ms"], p["path"],
-                        (hi - lo) / 1000)
-            bad.append([lo, hi])
-            end = hi
-            continue
+            log.warning("late audio of %s: piece %s (%s) would not decode, %.1f s", device, p["start_ms"], p["path"], (hi - lo) / 1000)
+            missed.append([lo, hi])
+            continue  # end stays: a later piece overlapping this one may have its audio
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
+            filled.append([round(start), round(end)])
+    if missed:
+        bad += late_store.subtract(missed, filled)
     return x
 
 

@@ -110,3 +110,15 @@ def test_long_aac_window_stops_at_registered_length(store):
     audio.save(D, end, flac(np.full(audio.SR, 222, np.int16)), "audio/flac")
     x = late.read_exact(D, end - 1000, end + 1000)
     assert (x[audio.SR:] == 222).all(), "the next piece's first 32 ms are its own"
+
+
+def test_overlapping_copy_fills_what_a_bad_piece_misses(store, monkeypatch):
+    """A [0,10) will not decode, B [5,15) overlaps it and does: only 0-5 s is bad, B's audio fills 5-15 s."""
+    audio.save(D, ms(0), flac(np.full(10 * audio.SR, 111, np.int16)), "audio/flac")
+    audio.save(D, ms(5), flac(np.full(10 * audio.SR, 222, np.int16)), "audio/flac")
+    samples = audio.samples
+    monkeypatch.setattr(audio, "samples", lambda p: None if p["start_ms"] == ms(0) else samples(p))
+    bad = []
+    x = late.read_exact(D, ms(0), ms(15), bad)
+    assert bad == [[ms(0), ms(5)]]
+    assert not x[:5 * audio.SR].any() and (x[5 * audio.SR:] == 222).all()

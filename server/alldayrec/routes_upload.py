@@ -39,7 +39,7 @@ async def late_backfill(days: int = 30, dry_run: bool = True, include_failed: bo
 
 @router.post("/api/late-requeue")
 async def late_requeue(device: str | None = None):
-    """Failed late spans (of one device when given; 进度's 重试) waiting again with three new tries."""
+    """Failed late spans (of one device when given; the progress page's Retry) waiting again with three new tries."""
     return {"requeued": await anyio.to_thread.run_sync(late_store.requeue, device, limiter=threads.DB)}
 
 

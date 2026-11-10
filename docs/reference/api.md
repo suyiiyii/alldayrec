@@ -82,7 +82,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | Failed late spans (of one device when given; 进度's 重试) waiting again with three new tries. | `device?` (query, string) |
+| `POST` | Failed late spans (of one device when given; the progress page's Retry) waiting again with three new tries. | `device?` (query, string) |
 
 ### `/api/chunks`
 

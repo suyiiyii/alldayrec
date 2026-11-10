@@ -212,10 +212,12 @@ const lateLine = (d: DeviceStatus) =>
     .filter(([, v]) => v.spans > 0)
     .map(([s, v]) => t(`progress.late.${s}`, { n: v.spans, m: v.minutes.toFixed(1) }, v.spans) + (v.note ? ` (${v.note})` : ""))
     .join(" · ");
-// 重试: the device's failed late spans queued again (three new tries); the status the socket sends shows them waiting
-const { busy: retrying, error: retryError, detail: retryDetail, run: runRetry } = useMutation();
+// 重试: the device's failed late spans queued again (three new tries); the status the socket sends shows them waiting.
+// One per device: an error or a retry under way shows on its own row only
+const retries = new Map<string, ReturnType<typeof useMutation>>();
+const retry = (device: string) => retries.get(device) ?? retries.set(device, useMutation()).get(device)!;
 const retryLate = (device: string) =>
-  runRetry(async () => {
+  retry(device).run(async () => {
     const r = await post<{ requeued: number }>(`/api/late-requeue?device=${encodeURIComponent(device)}`);
     toast(t("progress.late.requeued", { n: r.requeued }, r.requeued));
   });
@@ -326,12 +328,17 @@ const retryLate = (device: string) =>
         >
         <template v-if="lateLine(d)">
           <span>{{ t("progress.late.title") }}</span>
-          <span :class="{ bad: d.late?.failed?.spans }" :title="retryDetail"
+          <span :class="{ bad: d.late?.failed?.spans }" :title="retry(d.device).detail.value"
             >{{ lateLine(d) }}
-            <button v-if="d.late?.failed?.spans" class="chip retry" :disabled="retrying" @click="retryLate(d.device)">
+            <button
+              v-if="d.late?.failed?.spans"
+              class="chip retry"
+              :disabled="retry(d.device).busy.value"
+              @click="retryLate(d.device)"
+            >
               {{ t("progress.late.retry") }}
             </button>
-            <template v-if="retryError">{{ retryError }}</template></span
+            <template v-if="retry(d.device).error.value">{{ retry(d.device).error.value }}</template></span
           >
         </template>
         <span>{{ t("progress.speed") }}</span

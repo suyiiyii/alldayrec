@@ -82,7 +82,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | Failed late spans (of one device when given; 进度's 重试) waiting again with three new tries. | `device?` (query, string) |
+| `POST` | Failed late spans (of one device when given; the progress page's Retry) waiting again with three new tries. | `device?` (query, string) |
 
 ### `/api/chunks`
 
