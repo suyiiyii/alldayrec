@@ -75,6 +75,15 @@ CREATE TABLE IF NOT EXISTS store_objects (    -- STORAGE=s3 (seal.py): each hour
     gen INTEGER NOT NULL DEFAULT 0,                 -- late_*: those staged since the last merge (received_ms, bytes);
     late_first INTEGER, late_last INTEGER, late_bytes INTEGER NOT NULL DEFAULT 0,  -- intent: what the upload under way
     intent TEXT);                                   -- makes the object (size, sha256, the rows to move), till it is done
+CREATE TABLE IF NOT EXISTS trims (            -- trim.py: an hour file cut down to its pieces near speech. path: the
+    path TEXT PRIMARY KEY, copy TEXT NOT NULL,      -- original (s3: an object), its kept rows now in copy; state: writing
+    state TEXT NOT NULL, at INTEGER NOT NULL,       -- (copy being made), abandoned (a copy being deleted), trimmed (at:
+    device TEXT, size INTEGER, sha256 TEXT,         -- when), purging / purged (original deleted), whole (all kept,
+    kept_size INTEGER, kept_sha256 TEXT,            -- nothing written); size, sha256: the original's; kept_*: the copy's;
+    pieces INTEGER, kept INTEGER, seconds REAL, kept_seconds REAL,  -- rows: every row of it as it was (zlib'd JSON),
+    rows BLOB, purged INTEGER, backup INTEGER);     -- for a restore from the backup; backup: the one purge was told has it
+CREATE TABLE IF NOT EXISTS cold_starts (       -- trim.py: pieces whose piece right before was dropped by a trim (a
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, PRIMARY KEY (device, start_ms));  -- recorder's: audio.warmed)
 CREATE TABLE IF NOT EXISTS late_spans (
     id INTEGER PRIMARY KEY, device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
     first_ms INTEGER NOT NULL, last_ms INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'waiting',

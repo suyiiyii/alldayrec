@@ -123,6 +123,7 @@ def ogg(audio_packets: list[bytes], frame_ms: int = 10, pre_skip: int = 0, chann
     return b"".join(pages)
 
 
+COLD_MS = 40  # warmed(): how long the start of a recorder's piece decoded cold is muted
 PREROLL = 8  # packets (80 ms, libopus's advice) of the piece before that a recorder piece's decoder hears first
 DEHUM = os.environ.get("DEHUM", "1") != "0"  # a recorder's 10 ms hum taken out of its pieces as they are read (dehum); 0: as decoded
 QUIET = 32768 * 10 ** (-60 / 20)  # a 10 ms frame under this RMS (-60 dBFS) has no one speaking in it
@@ -158,11 +159,29 @@ def primed(prev: bytes, body: bytes) -> bytes:
     a click at every join, each second while the app is in front (10-08). Anything else (an iPhone's own microphone:
     SILK, 20 ms; a phone that starts each piece anew) is body unchanged."""
     ps, prev = packets(body), packets(prev)[2:][-PREROLL:]
-    ms = celt(ps[2]) if len(ps) > 2 else 0
-    if (not ms or not ps[0].startswith(b"OpusHead") or struct.unpack_from("<H", ps[0], 10)[0] != 0
-            or len(prev) < PREROLL or any(celt(p) != ms for p in prev)):
+    ms = sliced(ps)
+    if not ms or len(prev) < PREROLL or any(celt(p) != ms for p in prev):
         return body
     return ogg(prev + ps[2:], ms, PREROLL * ms * 48, ps[0][9])
+
+
+def sliced(ps: list[bytes]) -> int:
+    """The frame length (ms) of an Ogg Opus piece's packets when it is a slice of a recorder's running encoder (CELT,
+    pre-skip 0: primed); 0 when not."""
+    ms = celt(ps[2]) if len(ps) > 2 else 0
+    return ms if ms and ps[0].startswith(b"OpusHead") and struct.unpack_from("<H", ps[0], 10)[0] == 0 else 0
+
+
+def warmed(x: np.ndarray) -> np.ndarray:
+    """A recorder's piece whose piece before, its decoder's priming, a trim dropped (cold_starts): its first COLD_MS
+    muted and the next 60 ms faded in. Cold, the decoder puts out the first 5 ms up to 28 dB too loud, still 3 dB at
+    60 ms (11-10 probe: 1 s pieces of a 10 ms CELT stream): a click where kept audio begins. A piece after a real gap
+    (a reconnect) is not one: it plays as it always did, speech in it too."""
+    k, r = COLD_MS * SR // 1000, 60 * SR // 1000
+    y = x.astype(np.float32)
+    y[:k] = 0
+    y[k:k + r] *= np.linspace(0, 1, r, endpoint=False)[:len(y[k:k + r])]
+    return np.round(y).astype(np.int16)
 
 
 def before(device: str, start_ms: int, max_bytes: int | None = None) -> bytes | None:
@@ -542,10 +561,8 @@ def gone(p) -> bool:
 
 
 def moved(p):
-    """p's row as it is now when a seal or merge (STORAGE=s3) has moved its bytes since p was read and deleted the
-    local file p points at; None when it has not."""
-    if not seal.on():
-        return None
+    """p's row as it is now when a seal or merge (STORAGE=s3), or a trim's purge (trim.py), has moved its bytes since
+    p was read and deleted the local file p points at; None when it has not (or its row is gone: a piece trimmed away)."""
     q = db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms = ?", (p["device"], p["start_ms"])).fetchone()
     return q if q is not None and (q["path"], q["pos"]) != (p["path"], p["pos"]) else None
 
@@ -567,9 +584,13 @@ def samples(p) -> np.ndarray | None:
     if gone(p):
         return None
     body, ogg = read(p), p["path"].endswith(".ogg")
-    x = decode(body, aac=p["path"].endswith(".aac"), n=p["n"], prev=before(p["device"], p["start_ms"]) if ogg else None)
+    prev = before(p["device"], p["start_ms"]) if ogg else None
+    x = decode(body, aac=p["path"].endswith(".aac"), n=p["n"], prev=prev)
     if x is not None and DEHUM and ogg and celt((packets(body)[2:] or [b""])[0]) == 10:
-        return dehum(x)
+        x = dehum(x)
+    if (x is not None and ogg and prev is None and sliced(packets(body))
+            and db.conn().execute("SELECT 1 FROM cold_starts WHERE device = ? AND start_ms = ?", (p["device"], p["start_ms"])).fetchone()):
+        x = warmed(x)  # the first of a kept stretch (trim.py): the piece before it, its decoder's priming, is gone
     return x
 
 
