@@ -39,12 +39,16 @@ jobs:
           $APT update && $APT install -yq --no-install-recommends ffmpeg
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - name: MinIO for test_store_s3.py (STORAGE=s3 on a real S3 protocol)
-        # a docker run, not a job service: a service container takes no arguments, and MinIO needs `server /data`
+        # minio/minio is gone from Docker Hub (the project is archived), so no service container: Homebrew's bottle of
+        # its last release, run as a process for the job
         run: |
-          docker run -d --name minio -p 127.0.0.1:9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 BREW=/home/linuxbrew/.linuxbrew/bin/brew
+          $BREW fetch minio
+          mkdir -p "$RUNNER_TEMP/minio" && tar xzf "$($BREW --cache minio)" -C "$RUNNER_TEMP/minio"
+          bin=$(find "$RUNNER_TEMP/minio" -path '*/bin/minio' -type f) && "$bin" --version
+          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin nohup "$bin" server --address 127.0.0.1:9000 "$RUNNER_TEMP/minio-data" > "$RUNNER_TEMP/minio.log" 2>&1 &
           for i in $(seq 60); do curl -sf http://127.0.0.1:9000/minio/health/live && exit 0; sleep 1; done
-          docker logs minio; exit 1
+          cat "$RUNNER_TEMP/minio.log"; exit 1
       - run: uv sync --locked  # uv.lock as it is (deploy.sh: uv sync --frozen); without the [local] extra, as pip installs it
       - run: uv run --with pytest pytest -q
         env:
