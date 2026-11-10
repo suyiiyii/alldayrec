@@ -15,6 +15,7 @@ Local and staging bytes are deleted only after that transaction and only once no
 merge per object at a time (lock()). The object store down: uploads go on as ever (local only), sealing and merging
 back off and retry, local disk grows (lr_store_local_bytes, lr_store_pending_seal).
 """
+import contextlib
 import datetime as dt
 import json
 import logging
@@ -87,7 +88,7 @@ def place(path: str, start_ms: int, size: int, whole: bool) -> str:
     return path if r is None or r["state"] in ("open", "local") else staging(path, r["gen"])
 
 
-def placed(t, path: str, device: str, start_ms: int, size: int, received: int, whole: bool):
+def placed(t, path: str, start_ms: int, size: int, received: int, whole: bool):
     """The bookkeeping of a piece put at path (place), in the save's transaction t."""
     if not on():
         return
@@ -98,18 +99,19 @@ def placed(t, path: str, device: str, start_ms: int, size: int, received: int, w
     h = hour_start(start_ms)
     seal_at = received if whole else max(h + 3600_000, received + SEAL_IDLE_S * 1000)
     # lo..hi: where the start of every row in it is (an hour either side: a clock set back, a DST hour twice)
-    t.execute("INSERT INTO store_objects (path, device, lo_ms, hi_ms, state, seal_at) VALUES (?, ?, ?, ?, 'open', ?) "
+    t.execute("INSERT INTO store_objects (path, lo_ms, hi_ms, state, seal_at) VALUES (?, ?, ?, 'open', ?) "
               "ON CONFLICT (path) DO UPDATE SET seal_at = max(seal_at, excluded.seal_at) WHERE state = 'open'",
-              (path, device, h - 3600_000, h + 7200_000, seal_at))
+              (path, h - 3600_000, h + 7200_000, seal_at))
 
 
 def intent(r) -> dict | None:
     return json.loads(r["intent"]) if r["intent"] else None
 
 
-def matches(path: str, it: dict) -> bool:
-    """Whether the object is what the intent says (its size, and the SHA-256 its PUT was signed with)."""
-    return store.s3().head(path) == (it["size"], it["sha256"])
+def matches(path: str, it: dict) -> str | None:
+    """The object's ETag when it is what the intent says (its size, and the SHA-256 its PUT was signed with)."""
+    h = store.s3().head(path)
+    return h[2] if h is not None and h[:2] == (it["size"], it["sha256"]) else None
 
 
 def set_intent(path: str, it: dict | None):
@@ -117,15 +119,23 @@ def set_intent(path: str, it: dict | None):
         t.execute("UPDATE store_objects SET intent = ? WHERE path = ?", (it and json.dumps(it), path))
 
 
-def release(path: str, s3_path: str | None = None):
-    """Deletes the local file path once no row points at it; rows still there (a device whose name came out as
-    another's, a row outside lo..hi) are pointed at s3_path first, when its bytes are in that object."""
+def release(path: str, sealed: tuple | None = None):
+    """Deletes the local file path once no row points at it. sealed: (size, sha256) of the object it was sealed into:
+    only a file that is exactly those bytes goes, its rows left on it (one outside lo..hi) pointed at the object
+    first; a file made again since (STORAGE=local for a while: late pieces appended to a new hour file from 0) is
+    kept, rows and all."""
+    if sealed is not None:
+        with open(T().recordings / path, "rb") as h:
+            size = h.seek(0, os.SEEK_END)
+            if (size, store.file_sha(h, size)) != tuple(sealed):
+                log.error("store: %s is not the object it was sealed into (written again since): kept on local disk", path)
+                return
     if db.conn().execute("SELECT 1 FROM pieces WHERE path = ? LIMIT 1", (path,)).fetchone():  # a scan: once per file
-        if s3_path is None:
+        if sealed is None:
             log.warning("store: %s kept: rows still point at it", path)
             return
         with db.tx(durable=True) as t:
-            t.execute("UPDATE pieces SET path = ? WHERE path = ?", (s3_path, path))
+            t.execute("UPDATE pieces SET path = ? WHERE path = ?", ("s3:" + path, path))
     store.local().delete(path)
 
 
@@ -140,7 +150,8 @@ def seal(path: str):
                 with db.tx(durable=True) as t:
                     t.execute("UPDATE store_objects SET state = 'sealing' WHERE path = ?", (path,))
         it = intent(r)
-        if it is None or not matches(path, it):
+        etag = it and matches(path, it)
+        if not etag:
             f = T().recordings / path
             size = f.stat().st_size
             if size > store.PUT_MAX:
@@ -151,15 +162,15 @@ def seal(path: str):
             with open(f, "rb") as h:
                 it = {"size": size, "sha256": store.file_sha(h, size)}
                 set_intent(path, it)
-                store.s3().write(path, h, it["sha256"])
-            if not matches(path, it):
+                store.s3().write(path, h, it["sha256"])  # only a new key: never over another instance's object
+            if not (etag := matches(path, it)):
                 raise store.Unreachable(f"{path}: the object does not match what was uploaded")
         with db.tx(durable=True) as t:
-            t.execute("UPDATE pieces SET path = ? WHERE device = ? AND start_ms BETWEEN ? AND ? AND path = ?",
-                      ("s3:" + path, r["device"], r["lo_ms"], r["hi_ms"], path))
-            t.execute("UPDATE store_objects SET state = 'sealed', size = ?, sha256 = ?, intent = NULL, seal_at = NULL WHERE path = ?",
-                      (it["size"], it["sha256"], path))
-        release(path, "s3:" + path)
+            t.execute("UPDATE pieces SET path = ? WHERE start_ms BETWEEN ? AND ? AND path = ?",
+                      ("s3:" + path, r["lo_ms"], r["hi_ms"], path))
+            t.execute("UPDATE store_objects SET state = 'sealed', size = ?, sha256 = ?, etag = ?, intent = NULL, seal_at = NULL WHERE path = ?",
+                      (it["size"], it["sha256"], etag, path))
+        release(path, (it["size"], it["sha256"]))
 
 
 def sweep():
@@ -173,7 +184,7 @@ def sweep():
             if top == "chunks":
                 r = row(path)
                 if r is not None and r["state"] == "sealed":
-                    release(path, "s3:" + path)
+                    release(path, (r["size"], r["sha256"]))
             else:
                 hour, gen = unstaged(path)
                 r = row(hour)
@@ -212,9 +223,9 @@ def step():
 def staged(r, below: int | None = None) -> list:
     """The rows of r's hour in its staging files (of a gen below `below`), in the order they were staged."""
     prefix = f"staging/{PurePosixPath(r['path']).with_suffix('')}."
-    rows = db.conn().execute("SELECT device, start_ms, path, pos, size, received_ms FROM pieces WHERE device = ? AND "
-                             "start_ms BETWEEN ? AND ? AND substr(path, 1, ?) = ?",
-                             (r["device"], r["lo_ms"], r["hi_ms"], len(prefix), prefix)).fetchall()
+    rows = db.conn().execute("SELECT device, start_ms, path, pos, size, received_ms FROM pieces WHERE "
+                             "start_ms BETWEEN ? AND ? AND substr(path, 1, ?) = ?",  # any device's (two names, one file)
+                             (r["lo_ms"], r["hi_ms"], len(prefix), prefix)).fetchall()
     rows = [(unstaged(x["path"]), x) for x in rows]  # 10.ogg's, not 10.aac's (a device that changed codec)
     return [x for (hour, gen), x in sorted(rows, key=lambda y: (y[0][1], y[1]["pos"])) if hour == r["path"] and (below is None or gen < below)]
 
@@ -227,7 +238,8 @@ def merge(path: str):
         if r is None or r["state"] != "sealed":
             return
         it = intent(r)
-        if it is not None and not matches(path, it):
+        etag = it and matches(path, it)
+        if not etag:
             it = None  # the upload never happened (the object is as before): from the start
         if it is None:
             with audio._append:  # the pieces still to come go to the next staging file
@@ -252,10 +264,10 @@ def merge(path: str):
                 size = f.tell()
                 it = {"size": size, "sha256": store.file_sha(f, size), "moves": moves}
                 set_intent(path, it)
-                store.s3().write(path, f, it["sha256"])
-            if not matches(path, it):
+                store.s3().write(path, f, it["sha256"], replaces=r["etag"])  # only over the version it was made from
+            if not (etag := matches(path, it)):
                 raise store.Unreachable(f"{path}: the object does not match what was uploaded")
-        finish(row(path), it["moves"], it)
+        finish(row(path), it["moves"], it | {"etag": etag})
 
 
 def finish(r, moves: list, it: dict | None = None):
@@ -267,8 +279,8 @@ def finish(r, moves: list, it: dict | None = None):
             t.execute("UPDATE pieces SET path = ?, pos = ? WHERE device = ? AND start_ms = ? AND path = ? AND pos = ?",
                       ("s3:" + path, new, device, start_ms, old, pos))
         later = staged(r)
-        t.execute("UPDATE store_objects SET size = ?, sha256 = ?, intent = NULL, late_first = ?, late_last = ?, late_bytes = ? WHERE path = ?",
-                  (it["size"] if it else r["size"], it["sha256"] if it else r["sha256"], min((x["received_ms"] for x in later), default=None),
+        t.execute("UPDATE store_objects SET size = ?, sha256 = ?, etag = ?, intent = NULL, late_first = ?, late_last = ?, late_bytes = ? WHERE path = ?",
+                  (*((it["size"], it["sha256"], it["etag"]) if it else (r["size"], r["sha256"], r["etag"])), min((x["received_ms"] for x in later), default=None),
                    max((x["received_ms"] for x in later), default=None), sum(x["size"] for x in later), path))
     root = T().recordings
     for f in sorted((root / "staging" / path).parent.glob(f"{PurePosixPath(path).stem}.*")):
@@ -278,13 +290,16 @@ def finish(r, moves: list, it: dict | None = None):
 
 
 def pending() -> dict:
-    """The store's state for the metrics: bytes on local disk (open and staging), seals due, merges waiting."""
-    now = int(time.time() * 1000)
+    """The store's state for the metrics: bytes on local disk waiting for the object store (hour files open, being
+    sealed or too large for one PUT, and staging files; recordings from before STORAGE=s3 not counted), seals due,
+    merges waiting."""
+    now, c = int(time.time() * 1000), db.conn()
     root, local = T().recordings, 0
-    for top in ("chunks", "staging"):
-        for f in (root / top).rglob("*") if (root / top).is_dir() else ():
-            local += f.stat().st_size if f.is_file() else 0
-    c = db.conn()
+    for (path,) in c.execute("SELECT path FROM store_objects WHERE state IN ('open', 'sealing', 'local')"):
+        with contextlib.suppress(FileNotFoundError):
+            local += (root / path).stat().st_size
+    for f in (root / "staging").rglob("*") if (root / "staging").is_dir() else ():
+        local += f.stat().st_size if f.is_file() else 0
     return {"local_bytes": local,
             "pending_seal": c.execute("SELECT count(*) FROM store_objects WHERE state = 'sealing' OR state = 'open' AND seal_at <= ?", (now,)).fetchone()[0],
             "pending_merge": c.execute("SELECT count(*) FROM store_objects WHERE state = 'sealed' AND late_bytes > 0").fetchone()[0]}

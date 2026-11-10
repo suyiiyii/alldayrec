@@ -63,6 +63,7 @@ class Tenant:
     store_calls: dict = field(default_factory=dict)  # store.timed: op -> [calls, failures, seconds] (lr_store_* metrics)
     store_locks: dict = field(default_factory=dict)  # seal.lock: path -> the lock of its one seal or merge at a time
     store_retry: dict = field(default_factory=dict)  # seal.step: path -> (failures, when to try again) of a failed one
+    store_prefix: str | None = None                  # store.S3.key: its objects' key prefix (kv s3_prefix), once read
     tags: dict = field(default_factory=lambda: {"at": 0.0, "counts": {}})
     speakers: dict = field(default_factory=lambda: {"at": 0.0, "groups": None, "vec": {}})
     hotwords: dict = field(default_factory=lambda: {"at": 0.0, "words": []})  # db.hotwords, a few seconds old at most

@@ -87,11 +87,11 @@ Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as
 | Variable | Example value | When unset | Description |
 |---|---|---|---|
 | `STORAGE` | `s3` | `local` | `local`: recordings on local disk; `s3`: sealed into an S3-compatible object store (MinIO, Cloudflare R2, Alibaba Cloud OSS, Volcengine TOS and the like) |
-| `S3_ENDPOINT` | `https://s3.example.com` | required with `STORAGE=s3` | The endpoint. Path-style requests (`<endpoint>/<bucket>/<key>`), not bucket-named hosts |
+| `S3_ENDPOINT` | `https://s3.example.com` | required with `STORAGE=s3` | The endpoint, a port and a path allowed. Path-style requests (`<endpoint>/<bucket>/<key>`), not bucket-named hosts. The store must take conditional writes (`If-None-Match`, `If-Match`): MinIO, AWS S3 and Cloudflare R2 do |
 | `S3_BUCKET` | `alldayrec` | required with `STORAGE=s3` | The bucket; create it first |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | empty | required with `STORAGE=s3` | The access key, allowed to read, write, delete and HEAD in that bucket |
 | `S3_REGION` | `us-east-1` | `us-east-1` | The region requests are signed for; for MinIO usually `us-east-1` |
-| `S3_PREFIX` | `alldayrec/` | empty | The keys' prefix. Each tenant's objects are under `<S3_PREFIX><tenant id>/`; server instances sharing a bucket each use their own prefix |
+| `S3_PREFIX` | `alldayrec/` | empty | The keys' prefix. Each tenant's objects are under `<S3_PREFIX><tenant id>/`. One prefix per server instance; instances sharing a bucket each use their own. A tenant records the prefix in its own store the first time it uses the object store and keeps it, so a tenant moved into another instance (`tenants.sh merge`) still reads its own objects |
 | `SEAL_IDLE_S` | `600` | `600` | Once an hour is over, it is sealed this many seconds after its last piece came |
 | `MERGE_IDLE_S` | `90` | `90` | A sealed hour's staged late pieces are merged into its object once none has come for this many seconds |
 | `MERGE_MAX_BYTES` | `33554432` | 32 MiB | ... or as soon as they add up to this many bytes |
@@ -100,6 +100,8 @@ Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as
 - One object is at most 5 GB: that is one PUT's limit, and the server does no multipart upload. A larger file (only a very large import can be one) stays on local disk with an error in the log, and reads as usual.
 - With the object store unreachable, uploads are written to local disk as ever; sealing and merging retry after 30 s, 60 s, ... up to 10 minutes, and local disk grows. Sealed audio cannot be read meanwhile: playback answers 503 and transcription waits at that piece until the store is back.
 - Recordings already on local disk before the switch to `s3` stay there and read as usual; they are not moved.
+- The server never overwrites another's object: a new object is written only if its key does not exist yet (`If-None-Match: *`), and a merge replaces only the version that was sealed (`If-Match`). Two instances given the same prefix by mistake: the later seal is refused with an error in the log, and that hour stays on local disk.
+- `s3` switched back to `local` for a while, then to `s3` again: pieces that came meanwhile for hours already sealed are in new local hour files; after the switch back these files and their pieces stay on local disk and read as usual, with an error in the log, and are not deleted.
 
 ### Advanced: only for `stepfun` and `stepfun-file`
 

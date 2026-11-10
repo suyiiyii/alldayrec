@@ -9,7 +9,7 @@ from contextlib import nullcontext
 import anyio
 import numpy as np
 
-from alldayrec import asr, audio, colocate, compute, db, late_merge, late_store, threads, ws
+from alldayrec import asr, audio, colocate, compute, db, late_merge, late_store, store, threads, ws
 from alldayrec.conversations import GAP_S
 from alldayrec.core import conversation_rows, iso, owner_npz, state
 from alldayrec.diarist import Diarist, relabel
@@ -238,7 +238,10 @@ async def processor():
                     tg.cancel_scope.cancel()
         except Exception as e:
             e = threads.first(e)
-            late_store.failed(span, e)
+            if isinstance(e, store.Unreachable):  # STORAGE=s3, the store down: not a try; again once it may be back
+                late_store.unreachable(span)
+            else:
+                late_store.failed(span, e)
             log.warning("late span %s: %s", span["id"], type(e).__name__)
         except BaseException as e:
             if isinstance(threads.first(e), compute.Stopping):

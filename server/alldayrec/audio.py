@@ -272,7 +272,7 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
         pos = store.of(path).append(path, body)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
-            seal.placed(t, path, device, start_ms, len(body), received, whole)
+            seal.placed(t, path, start_ms, len(body), received, whole)
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
@@ -434,7 +434,7 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         pos = store.of(path).append(path, source)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
-            seal.placed(t, path, device, start_ms, size, received, whole)
+            seal.placed(t, path, start_ms, size, received, whole)
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
             t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -452,16 +452,24 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
 @contextlib.contextmanager
 def piece_file(p):
     """Isolate one indexed piece from its append-only hour file, in bounded copies."""
-    if seal.on() and not p["path"].startswith("s3:") and not store.local().exists(p["path"]) and (q := moved(p)):
-        p = q  # sealed or merged since p was read
-    with tempfile.NamedTemporaryFile() as source:
+    def copy(p, out):
         done = 0
         while done < p["size"]:
             data = store.of(p["path"]).read(p["path"], p["pos"] + done, min(p["size"] - done, COPY_BYTES))
             if not data:
                 raise OSError("stored audio ended early")
-            source.write(data)
+            out.write(data)
             done += len(data)
+
+    with tempfile.NamedTemporaryFile() as source:
+        try:
+            copy(p, source)
+        except FileNotFoundError:
+            if not (q := moved(p)):
+                raise
+            source.seek(0)  # sealed or merged before or while it was copied: again from where its bytes are now
+            source.truncate()
+            copy(q, source)
         source.flush()
         yield source
 

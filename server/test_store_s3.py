@@ -4,6 +4,7 @@ hour, the store down, imports, and tenants kept apart. Skipped (saying why) with
 import datetime as dt
 import hashlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -103,8 +104,12 @@ def test_interface(s3):
     path = "s3:chunks/电话 1/x.ogg"
     s.write(path, b"0123456789")
     assert s.read(path, 2, 3) == b"234" and s.read(path, 8, 10) == b"89" and s.read(path, 10, 5) == b""
-    s.write(path, io.BytesIO(b"abc"))
-    assert s.head(path) == (3, hashlib.sha256(b"abc").hexdigest()) and s.exists(path)
+    with pytest.raises(store.Conflict):
+        s.write(path, io.BytesIO(b"abc"))  # a key there already: never overwritten without its ETag
+    etag = s.write(path, io.BytesIO(b"abc"), replaces=s.head(path)[2])
+    assert s.head(path) == (3, hashlib.sha256(b"abc").hexdigest(), etag) and s.exists(path)
+    with pytest.raises(store.Conflict):
+        s.write(path, b"x", replaces=f'"{"0" * 32}"')  # over another version than the one there
     assert keys(s3) == [f"{s3}local/chunks/电话 1/x.ogg"], "S3_PREFIX, the tenant's id, the path"
     s.delete(path)
     assert s.head(path) is None and not s.exists(path)
@@ -117,7 +122,7 @@ def test_seal(s3):
     assert {p["path"] for p in rows()} == {"s3:" + HOUR} and [p["pos"] for p in rows()] == [0, len(kept[H10])], "pos unchanged"
     assert not (T().recordings / HOUR).exists(), "the local file gone once its rows point at the object"
     o = obj(HOUR)
-    assert o["state"] == "sealed" and o["intent"] is None and store.s3().head(HOUR) == (o["size"], o["sha256"])
+    assert o["state"] == "sealed" and o["intent"] is None and store.s3().head(HOUR) == (o["size"], o["sha256"], o["etag"])
     assert o["size"] == sum(map(len, kept.values()))
     same(kept)
     x = audio.cut(dt.datetime.fromtimestamp(H10 / 1000 + 0.5), dt.datetime.fromtimestamp(H10 / 1000 + 3), "s16le", "phone")
@@ -166,9 +171,9 @@ def test_read_during_merge(s3, monkeypatch):
     before = {p["start_ms"]: p for p in rows()}
     write, seen = store.S3.write, []
 
-    def during(self, path, data, sha=None):
+    def during(self, path, data, sha=None, replaces=None):
         seen.append({ms: audio.read(p) for ms, p in before.items()})  # old object, staging file
-        write(self, path, data, sha)
+        write(self, path, data, sha, replaces)
         seen.append({ms: audio.read(p) for ms, p in before.items()})  # new object, staging file
     monkeypatch.setattr(store.S3, "write", during)
     seal.step()
@@ -203,7 +208,7 @@ def test_seal_crash(s3, monkeypatch, where):
     audio.save("phone", H10, kept[H10], "audio/ogg")
     puts = []
     write = store.S3.write
-    monkeypatch.setattr(store.S3, "write", lambda self, *a: puts.append(1) or write(self, *a))
+    monkeypatch.setattr(store.S3, "write", lambda self, *a, **k: puts.append(1) or write(self, *a, **k))
     if where == "file_sha":
         crash_once(monkeypatch, store, "file_sha")
     elif where == "write":
@@ -251,7 +256,7 @@ def test_merge_crash(s3, monkeypatch, where):
     audio.save("phone", late, kept[late], "audio/ogg")
     puts = []
     write = store.S3.write
-    monkeypatch.setattr(store.S3, "write", lambda self, *a: puts.append(1) or write(self, *a))
+    monkeypatch.setattr(store.S3, "write", lambda self, *a, **k: puts.append(1) or write(self, *a, **k))
     if where in ("download", "write"):
         crash_once(monkeypatch, store.S3, where)
     elif where == "matches":
@@ -275,7 +280,7 @@ def test_merge_crash(s3, monkeypatch, where):
     assert {p["path"] for p in rows()} == {"s3:" + HOUR}
     assert not list((T().recordings / "staging").rglob("*.ogg*")), "no staging file left"
     o = obj(HOUR)
-    assert store.s3().head(HOUR) == (o["size"], o["sha256"]) and o["late_bytes"] == 0 and o["intent"] is None
+    assert store.s3().head(HOUR) == (o["size"], o["sha256"], o["etag"]) and o["late_bytes"] == 0 and o["intent"] is None
     same(kept)
     if where in ("matches", "commit"):
         assert len(puts) == n + 1, "the crashed merge only committed; the later piece one upload more"
@@ -313,7 +318,8 @@ def test_store_down(s3, monkeypatch):
     with pytest.raises(Exception) as e:
         anyio.run(routes_audio.cut, dt.datetime.fromtimestamp(H10 / 1000).isoformat(),
                   dt.datetime.fromtimestamp(H10 / 1000 + 2).isoformat(), "wav", "phone")
-    assert getattr(e.value, "status_code", None) == 503
+    assert getattr(e.value, "status_code", None) == 503 and "chunks" not in e.value.detail and s3 not in e.value.detail, \
+        "the key and the store's answer go to the log, not to the client"
 
     async def first_piece():
         s = audio.stream("phone", None)
@@ -392,15 +398,21 @@ def test_name_collision(s3):
 
 def test_seal_verified(s3, monkeypatch):
     """An object that is not what was uploaded (a store that kept other bytes) is never committed: the rows stay on
-    the local file, the next run uploads again."""
+    the local file; nor is it overwritten (it may be another's): the hour stays local, refused (store.Conflict) each
+    try, until the key is cleared."""
     kept = {H10: tone(2)}
     audio.save("phone", H10, kept[H10], "audio/ogg")
     write = store.S3.write
-    monkeypatch.setattr(store.S3, "write", lambda self, path, data, sha=None: write(self, path, b"other bytes"))
+    monkeypatch.setattr(store.S3, "write", lambda self, path, data, sha=None, replaces=None: write(self, path, b"other bytes"))
     seal.step()
     assert rows()[0]["path"] == HOUR and (T().recordings / HOUR).exists() and obj(HOUR)["state"] == "sealing"
     same(kept)
     monkeypatch.setattr(store.S3, "write", write)
+    T().store_retry.clear()
+    seal.step()
+    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == 2, "not overwritten: refused again"
+    same(kept)
+    store.s3().delete(HOUR)
     T().store_retry.clear()
     seal.step()
     assert rows()[0]["path"] == "s3:" + HOUR
@@ -413,8 +425,10 @@ def test_merge_refuses_changed_object(s3):
     late = H10 + 60_000
     kept[late] = tone(2, 700)
     audio.save("phone", late, kept[late], "audio/ogg")
-    store.s3().write(HOUR, b"not the sealed bytes")
+    store.s3().write(HOUR, b"not the sealed bytes", replaces=obj(HOUR)["etag"])
+    writes = T().store_calls["write"][0]
     seal.step()
+    assert T().store_calls["write"][0] == writes, "found before any upload (the download is checked)"
     assert rows()[-1]["path"].startswith("staging/chunks/phone/2026-10-02/10.") and audio.read(rows()[-1]) == kept[late]
     assert store.s3().read(HOUR, 0, 100) == b"not the sealed bytes", "not overwritten"
 
@@ -428,9 +442,9 @@ def test_resend_during_merge(s3, monkeypatch):
     kept[late] = tone(3, 700)
     write = store.S3.write
 
-    def during(self, path, data, sha=None):
+    def during(self, path, data, sha=None, replaces=None):
         audio.save("phone", late, kept[late], "audio/ogg")
-        write(self, path, data, sha)
+        write(self, path, data, sha, replaces)
     monkeypatch.setattr(store.S3, "write", during)
     seal.step()
     assert rows()[-1]["path"] == STAGED1 and audio.read(rows()[-1]) == kept[late]
@@ -471,3 +485,163 @@ def test_two_codecs_one_hour(s3):
     seal.step()
     assert [p["path"] for p in rows()] == ["s3:" + HOUR, "s3:chunks/phone/2026-10-02/10.aac"] * 2
     same(kept)
+
+
+def test_rollback_to_local_then_s3(s3, monkeypatch):
+    """STORAGE=s3, then local for a while (a rollback: a late piece goes to a new hour file, from 0), then s3 again:
+    the restart's sweep keeps that file and its row (it is not the sealed object's bytes); nothing reads another's."""
+    kept = sealed_hour()
+    monkeypatch.setattr(store, "STORAGE", "local")
+    late = H10 + 60_000
+    kept[late] = tone(2, 700)
+    audio.save("phone", late, kept[late], "audio/ogg")
+    assert rows()[-1]["path"] == HOUR and rows()[-1]["pos"] == 0
+    monkeypatch.setattr(store, "STORAGE", "s3")
+    seal.sweep()
+    seal.step()
+    assert rows()[-1]["path"] == HOUR and (T().recordings / HOUR).exists()
+    same(kept)
+
+
+def test_two_instances_same_prefix(s3, tmp_path):
+    """Two server instances on one bucket, the same S3_PREFIX, tenant and device: the second's seal is refused (the
+    key is taken), never over the first's object; its rows stay on its local file."""
+    a = T()
+    kept = sealed_hour()
+    (tmp_path / "b").mkdir()
+    b = db.open_db(tmp_path / "b/t.db", tmp_path / "b/rec")  # another instance: tenant "local" again
+    other = {H10: tone(2, 900)}
+    audio.save("phone", H10, other[H10], "audio/ogg")
+    seal.step()
+    assert rows()[0]["path"] == HOUR and T().store_calls["seal"][1] == 1, "refused (store.Conflict)"
+    same(other)
+    tenant.enter(a)
+    same(kept)
+    assert b is not a
+
+
+def test_prefix_kept(s3, monkeypatch):
+    """A tenant's objects stay under the prefix its store took first (kv s3_prefix), whatever S3_PREFIX the process
+    it runs in has later (tenants.sh merge into another instance)."""
+    kept = sealed_hour()
+    assert db.kv("s3_prefix") == f"{s3}local/"
+    monkeypatch.setenv("S3_PREFIX", "another/")
+    monkeypatch.setattr(store, "_s3", None)
+    T().store_prefix = None  # a new process
+    same(kept)
+
+
+def test_name_collision_late(s3):
+    """Two devices whose names make one file name, both with a late piece in the sealed hour: both merged, the
+    staging file gone."""
+    kept = {H10: tone(1, 300), H10 + 2000: tone(1, 500)}
+    audio.save("a b", H10, kept[H10], "audio/ogg")
+    audio.save("a_b", H10 + 2000, kept[H10 + 2000], "audio/ogg")
+    seal.step()
+    kept |= {H10 + 60_000: tone(1, 600), H10 + 62_000: tone(1, 800)}
+    audio.save("a b", H10 + 60_000, kept[H10 + 60_000], "audio/ogg")
+    audio.save("a_b", H10 + 62_000, kept[H10 + 62_000], "audio/ogg")
+    seal.step()
+    got = db.conn().execute("SELECT * FROM pieces ORDER BY start_ms").fetchall()
+    assert {p["path"] for p in got} == {"s3:chunks/a_b/2026-10-02/10.ogg"}
+    assert {p["start_ms"]: audio.read(p) for p in got} == kept
+    assert seal.pending()["local_bytes"] == 0
+
+
+def test_piece_file_deleted_mid_copy(s3, monkeypatch):
+    """A long import copied out in bounded reads while its seal deletes the local file between two of them: the copy
+    starts again from the object."""
+    monkeypatch.setattr(seal, "SEAL_IDLE_S", 600)
+    monkeypatch.setattr(audio, "WHOLE_S", 3)
+    monkeypatch.setattr(audio, "COPY_BYTES", 1000)
+    body = tone(5)
+    with open(T().data / "up.ogg", "w+b") as f:
+        f.write(body)
+        f.flush()
+        audio.save_file("phone", H10, f, "audio/ogg")
+    p = rows()[0]
+    read, calls = store.Local.read, []
+
+    def sealing(self, path, pos, size):
+        calls.append(1)
+        if len(calls) == 2:
+            seal.step()
+        return read(self, path, pos, size)
+    monkeypatch.setattr(store.Local, "read", sealing)
+    with audio.piece_file(p) as src:
+        src.seek(0)
+        assert src.read() == body
+    assert rows()[0]["path"].startswith("s3:")
+
+
+def test_piece_during_seal_upload(s3, monkeypatch):
+    """A piece for the hour arriving after its seal's upload, before its check and transaction: staged, not
+    appended to the file being sealed (whose bytes past the upload the object never gets)."""
+    kept = {H10: tone(2, 300)}
+    audio.save("phone", H10, kept[H10], "audio/ogg")
+    write, late = store.S3.write, H10 + 4000
+    kept[late] = tone(2, 500)
+
+    def during(self, *a, **k):
+        r = write(self, *a, **k)
+        if late not in {p["start_ms"] for p in rows()}:
+            audio.save("phone", late, kept[late], "audio/ogg")
+        return r
+    monkeypatch.setattr(store.S3, "write", during)
+    seal.step()
+    assert rows()[-1]["path"] == STAGED0
+    seal.step()
+    same(kept)
+    assert {p["path"] for p in rows()} == {"s3:" + HOUR}
+
+
+def test_local_bytes_counts_what_waits(s3):
+    """lr_store_local_bytes: the hour files not yet sealed and the staging files, not the recordings from before
+    STORAGE=s3 (a file no store_objects row has)."""
+    old = T().recordings / "chunks/phone/2026-10-01/09.ogg"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"x" * 1000)
+    body = tone(1)
+    audio.save("phone", H10, body, "audio/ogg")
+    assert seal.pending()["local_bytes"] == len(body)
+    seal.step()
+    assert seal.pending()["local_bytes"] == 0
+
+
+def test_late_span_waits_out_the_store(s3, monkeypatch):
+    """A late span whose audio cannot be read (store.Unreachable) gives its try back and waits; it never ends
+    failed for an outage."""
+    from alldayrec import late, late_store
+    span = {"id": 1, "tries": 1}
+    db.conn().execute("INSERT INTO late_spans (id, device, start_ms, end_ms, first_ms, last_ms, status, tries, ranges) "
+                      "VALUES (1, 'phone', 0, 1000, 0, 0, 'processing', 3, '[[0, 1000]]')")
+    claims = [dict(span, tries=3)]
+    monkeypatch.setattr(late_store, "recover", lambda: None)
+    monkeypatch.setattr(late_store, "claim", lambda: claims.pop() if claims else None)
+    monkeypatch.setattr(late_store, "queue_summaries", lambda: None)
+
+    async def down(span):
+        raise store.Unreachable("object store unreachable")
+    monkeypatch.setattr(late, "process", down)
+
+    async def run():
+        with anyio.move_on_after(0.5):
+            await late.processor()
+    anyio.run(run)
+    r = db.conn().execute("SELECT status, tries, note FROM late_spans WHERE id = 1").fetchone()
+    assert tuple(r) == ("waiting", 2, "Unreachable"), tuple(r)
+
+
+def test_snapshot_reads_objects(s3, monkeypatch):
+    """final_parity.py snapshot: a sealed hour's rows come with their object, as the hour file they were."""
+    import final_parity
+    import tarfile
+    kept = sealed_hour()
+    out = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(out))
+    final_parity.snapshot(str(T().db), str(T().recordings), "phone", "2026-10-02T09:00", "2026-10-02T11:00")
+    sys.stdout.flush()
+    with tarfile.open(fileobj=io.BytesIO(out.getvalue())) as t:
+        hour = t.extractfile(f"recordings/{HOUR}").read()
+        pieces = json.loads(t.extractfile("pieces.json").read())["pieces"]
+    assert {p["start_ms"]: hour[p["pos"]:p["pos"] + p["size"]] for p in pieces} == kept and {p["path"] for p in pieces} == {HOUR}

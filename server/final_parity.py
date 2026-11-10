@@ -38,8 +38,10 @@ def snapshot(store: str, recordings: str, device: str, a: str, b: str):
     c.row_factory = sqlite3.Row
     pieces = [dict(r) for r in c.execute("SELECT * FROM pieces WHERE device = ? AND start_ms >= ? AND start_ms < ? ORDER BY start_ms",
                                          (device, ms(a), ms(b)))]
+    paths = list(dict.fromkeys(p["path"] for p in pieces))
     for p in pieces:
         p["env"] = None  # the envelope is for the timeline page
+        p["path"] = p["path"].removeprefix("s3:")  # STORAGE=s3: a sealed hour, in the snapshot as the file it was
     people = [{"name": r["name"], "n": r["n"], "e": r["e"].hex()} for r in c.execute("SELECT * FROM people")]
     with tarfile.open(fileobj=sys.stdout.buffer, mode="w|") as t:
         def add(name: str, data: bytes):
@@ -50,8 +52,23 @@ def snapshot(store: str, recordings: str, device: str, a: str, b: str):
         add("people.json", json.dumps(people).encode())
         if (vp := Path(store).parent / "owner-redimnet2.npz").exists():
             t.add(vp, "owner-redimnet2.npz")
-        for path in dict.fromkeys(p["path"] for p in pieces):
-            t.add(Path(recordings) / path, f"recordings/{path}")
+        for path in paths:
+            if path.startswith("s3:"):
+                add(f"recordings/{path[3:]}", sealed(c, store, recordings, path))
+            else:
+                t.add(Path(recordings) / path, f"recordings/{path}")
+
+
+def sealed(c, store: str, recordings: str, path: str) -> bytes:
+    """An s3: row's object, whole (STORAGE=s3), from the store's own key prefix (kv s3_prefix) with S3_* as the
+    server has them."""
+    from alldayrec import store as objects, tenant
+
+    tenant.enter(tenant.Tenant("snapshot", "", Path(store).parent, recordings, db=Path(store)))
+    prefix = json.loads(c.execute("SELECT value FROM kv WHERE key = 's3_prefix'").fetchone()[0])
+    e = os.environ
+    s3 = objects.S3(e["S3_ENDPOINT"], e["S3_BUCKET"], e["S3_ACCESS_KEY"], e["S3_SECRET_KEY"], e.get("S3_REGION", ""))
+    return s3.request("GET", prefix + path.removeprefix("s3:"), (200,)).content
 
 
 def run(snap: Path, out: Path, cache_path: Path | None, latency: bool):
