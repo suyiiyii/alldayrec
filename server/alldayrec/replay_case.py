@@ -345,6 +345,17 @@ def hybrid_segs(utts: list[tuple[float, float]], segs: list[dict], min_piece=0.5
     return out
 
 
+def _volc_retry(what: str, a: float, b: float, call):
+    """anyio.run(call) up to 3 times, 5 s apart; RuntimeError once all fail."""
+    for attempt in range(3):
+        try:
+            return anyio.run(call)
+        except Exception as e:
+            print(f"  {what} {a:.0f}-{b:.0f} attempt {attempt + 1} failed: {e!r}"[:160], flush=True)
+            time.sleep(5)
+    raise RuntimeError(f"{what} gave up on {a:.0f}-{b:.0f}")
+
+
 def _volc_window(self, a: float, b: float) -> list[dict]:
     mode = os.environ.get("VOLC_MODE", "nostream")
     p = self.work / ("volc" if mode == "nostream" else f"volc-{mode}") / f"{a:.1f}-{b:.1f}.json"
@@ -352,15 +363,7 @@ def _volc_window(self, a: float, b: float) -> list[dict]:
         return json.load(open(p))
     p.parent.mkdir(exist_ok=True)
     from alldayrec import volc_asr
-    for attempt in range(3):
-        try:
-            utts, info = anyio.run(functools.partial(volc_asr.transcribe, self.x[int(a * SR):int(b * SR)], mode=mode))
-            break
-        except Exception as e:
-            print(f"  volc {a:.0f}-{b:.0f} attempt {attempt + 1} failed: {e!r}"[:160], flush=True)
-            time.sleep(5)
-    else:
-        raise RuntimeError(f"volc gave up on {a:.0f}-{b:.0f}")
+    utts, info = _volc_retry("volc", a, b, functools.partial(volc_asr.transcribe, self.x[int(a * SR):int(b * SR)], mode=mode))
     segs = [{"speaker": "SPEAKER_0", **u, "engine": "volc"} for u in utts]
     print(f"  volc {a:.0f}-{b:.0f}: {info['seconds']} s, {len(segs)} utterances", flush=True)
     json.dump(segs, open(p, "w"), ensure_ascii=False)
@@ -381,15 +384,7 @@ def _volc_session(self, a: float, b: float) -> list[dict]:
         return json.load(open(p))
     p.parent.mkdir(exist_ok=True)
     from alldayrec import volc_asr
-    for attempt in range(3):
-        try:
-            utts, info = anyio.run(volc_asr.stream, self.x[int(a * SR):int(b * SR)], STREAM_PACE, STREAM_END_MS)
-            break
-        except Exception as e:
-            print(f"  stream {a:.0f}-{b:.0f} attempt {attempt + 1} failed: {e!r}"[:160], flush=True)
-            time.sleep(5)
-    else:
-        raise RuntimeError(f"stream gave up on {a:.0f}-{b:.0f}")
+    utts, info = _volc_retry("stream", a, b, functools.partial(volc_asr.stream, self.x[int(a * SR):int(b * SR)], STREAM_PACE, STREAM_END_MS))
     segs = [{"speaker": "SPEAKER_0", **u, "start_ms": u["start_ms"] + int(a * 1000), "end_ms": u["end_ms"] + int(a * 1000), "engine": "volc"} for u in utts]
     print(f"  stream {a:.0f}-{b:.0f}: {info['seconds']} s, {len(segs)} sentences" + (f", {len(info['untimed'])} without times: {info['untimed'][:2]}" if info["untimed"] else ""), flush=True)
     json.dump(segs, open(p, "w"), ensure_ascii=False)
