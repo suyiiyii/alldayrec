@@ -26,11 +26,15 @@ def legacy_cut(a, b, fmt, device=None):
         if got := audio.fresh(p, end.get(p['device'], 0.0)):
             end[p['device']] = got[0] + len(got[1]) * 1000 / audio.SR
             xs.append(got)
-    if not xs:
-        return None
-    i = int(max(0.0, (a_ms - xs[0][0]) / 1000 - 0.2) * audio.SR)
-    x = np.concatenate([x for _, x in xs])[i:i + int(((b - a).total_seconds() + 0.4) * audio.SR)]
-    return None if not len(x) else x.tobytes() if fmt == 's16le' else audio.wav(x)
+    # each piece at its own time, silence where none has audio (cut() since 11-10, was back to back)
+    need = int(((b - a).total_seconds() + 0.4) * audio.SR)
+    x, hit = np.zeros(need, np.int16), False
+    for start, y in xs:
+        i = round((start - (a_ms - 200)) * audio.SR / 1000)
+        y = y[max(0, -i):max(0, need - i)]
+        if len(y):
+            x[max(0, i):max(0, i) + len(y)], hit = y, True
+    return None if not hit else x.tobytes() if fmt == 's16le' else audio.wav(x)
 
 
 @pytest.mark.parametrize('kind', ['mp4', 'png'])

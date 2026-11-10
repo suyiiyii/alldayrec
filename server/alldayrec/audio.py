@@ -917,14 +917,18 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> bytes | None:
     """[a, b] (+0.2 s each side) of one device (any when None) as `fmt`, or None when no stored audio covers it: wav
-    to be played (played(): a recorder's louder), s16le as stored (voiceprints)."""
+    to be played (played(): a recorder's louder), s16le as stored (voiceprints). Each piece is put at its own time and
+    where none has audio (before the first, between two, after the last) it is silence: a second of the cut is a
+    second of the recording, so the conversation player's windows and the sentence it highlights stay on time."""
     a_ms, b_ms = int(a.timestamp() * 1000), int(b.timestamp() * 1000)
     pieces = db.conn().execute(
         "SELECT * FROM pieces WHERE start_ms <= ? AND start_ms + seconds * 1000 >= ? AND (? IS NULL OR device = ?) ORDER BY start_ms",
         (b_ms, a_ms, device, device)).fetchall()
-    xs, ds, end, drop = [], [], {}, None
-    need = int(((b - a).total_seconds() + 0.4) * SR)
+    at, need = a_ms - 200, int(((b - a).total_seconds() + 0.4) * SR)  # the cut's first sample (unix ms), its length
+    parts, end = [], {}  # (where in the cut, samples, device)
     for p in pieces:
+        if round((p["start_ms"] - at) * SR / 1000) >= need:
+            break
         previous = end.get(p["device"], 0.0)
         if p["start_ms"] + p["seconds"] * 1000 <= previous:
             continue
@@ -940,36 +944,32 @@ def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> 
             count = max(0, round(p["seconds"] * SR) - skip)
             x = None
         end[p["device"]] = start + count * 1000 / SR
-        if drop is None:
-            drop = int(max(0.0, (a_ms - start) / 1000 - 0.2) * SR)
-        if x is not None and drop >= count:
-            drop -= count
+        off = round((start - at) * SR / 1000)
+        # the piece's samples inside the cut; pieces.seconds is rounded to milliseconds: EOF, rather than that
+        # metadata, decides a long file's end
+        lo, hi = max(0, -off), need - off if x is None else min(count, need - off)
+        if lo >= hi:
             continue
-        # pieces.seconds is rounded to milliseconds; let EOF, rather than that
-        # metadata, decide the final sample of a long file.
-        take = min(need, count - drop) if x is not None else need
-        windowed = x is None
-        x = x[drop:drop + take] if x is not None else piece_window(p, skip + drop, take)
+        if x is None:
+            x = piece_window(p, skip + lo, hi - lo)
+            if x is not None:
+                end[p["device"]] = start + (lo + len(x)) * 1000 / SR
+        else:
+            x = x[lo:hi]
         if x is not None and len(x):
-            if windowed:
-                end[p["device"]] = start + (drop + len(x)) * 1000 / SR
-            xs.append(x)
-            ds.append(p["device"])
-            need -= len(x)
-        drop = 0
-        if need <= 0:
-            break
-    if not xs:
+            parts.append((off + lo, x, p["device"]))
+    if not parts:
         return None
-    # concatenated back to back (the small gaps between pieces are ignored)
-    x = np.concatenate(xs)
-    if not len(x):
-        return None
+    many = len({d for _, _, d in parts}) > 1  # no device asked for and two answered: each piece at its own device's gain
+    x, free = np.zeros(need, np.int16), np.ones(need, bool)
+    for i, y, d in parts:  # where two devices overlap, the first one's
+        y = played(y, d) if many and fmt != "s16le" else y
+        f = free[i:i + len(y)]
+        x[i:i + len(y)][f] = y[f]
+        free[i:i + len(y)] = False
     if fmt == "s16le":
         return x.tobytes()
-    if len(set(ds)) > 1:  # no device asked for and two answered: each piece at its own device's gain
-        return wav(np.concatenate([played(y, d) for y, d in zip(xs, ds)]))
-    return wav(played(x, ds[0]))
+    return wav(x if many else played(x, parts[0][2]))
 
 
 def wav(x: np.ndarray) -> bytes:
