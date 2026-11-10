@@ -38,8 +38,19 @@ jobs:
           APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
           $APT update && $APT install -yq --no-install-recommends ffmpeg
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
+      - name: MinIO for test_store_s3.py (STORAGE=s3 on a real S3 protocol)
+        # a docker run, not a job service: a service container takes no arguments, and MinIO needs `server /data`
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for i in $(seq 60); do curl -sf http://127.0.0.1:9000/minio/health/live && exit 0; sleep 1; done
+          docker logs minio; exit 1
       - run: uv sync --locked  # uv.lock as it is (deploy.sh: uv sync --frozen); without the [local] extra, as pip installs it
       - run: uv run --with pytest pytest -q
+        env:
+          TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          TEST_S3_ACCESS_KEY: minioadmin
+          TEST_S3_SECRET_KEY: minioadmin
 
   wheel:  # the wheel pip and uvx install (no web app built here: its pages say so), its command up to --help
     runs-on: ubuntu-24.04

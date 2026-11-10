@@ -80,6 +80,27 @@ Used for conversation summaries, to-dos, "ask AI" and the daily recap. Any OpenA
 | `VM_INGEST_URL` | empty | none | A VictoriaMetrics import URL (e.g. `https://example.com/api/v1/import/prometheus`); the server pushes `lr_*` metrics to it every minute; empty means no push |
 | `VM_INGEST_USER`, `VM_INGEST_PASSWORD` | empty | empty | Basic auth for pushing metrics |
 
+### Optional: recordings in object storage
+
+Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as before. With `STORAGE=s3`, the hour being recorded is still written to local disk; once that hour is over and no piece has come for `SEAL_IDLE_S` seconds, the whole file is uploaded as one object of an S3-compatible store, checked, and only then deleted locally, so local disk holds about the current hour or two. Pieces that arrive later go to a local staging file first and are merged into that object in batches. The whole process: [Architecture and data flow](../explanation/architecture.md#where-recordings-are-kept).
+
+| Variable | Example value | When unset | Description |
+|---|---|---|---|
+| `STORAGE` | `s3` | `local` | `local`: recordings on local disk; `s3`: sealed into an S3-compatible object store (MinIO, Cloudflare R2, Alibaba Cloud OSS, Volcengine TOS and the like) |
+| `S3_ENDPOINT` | `https://s3.example.com` | required with `STORAGE=s3` | The endpoint. Path-style requests (`<endpoint>/<bucket>/<key>`), not bucket-named hosts |
+| `S3_BUCKET` | `alldayrec` | required with `STORAGE=s3` | The bucket; create it first |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | empty | required with `STORAGE=s3` | The access key, allowed to read, write, delete and HEAD in that bucket |
+| `S3_REGION` | `us-east-1` | `us-east-1` | The region requests are signed for; for MinIO usually `us-east-1` |
+| `S3_PREFIX` | `alldayrec/` | empty | The keys' prefix. Each tenant's objects are under `<S3_PREFIX><tenant id>/`; server instances sharing a bucket each use their own prefix |
+| `SEAL_IDLE_S` | `600` | `600` | Once an hour is over, it is sealed this many seconds after its last piece came |
+| `MERGE_IDLE_S` | `90` | `90` | A sealed hour's staged late pieces are merged into its object once none has come for this many seconds |
+| `MERGE_MAX_BYTES` | `33554432` | 32 MiB | ... or as soon as they add up to this many bytes |
+| `MERGE_MAX_S` | `1800` | `1800` | ... or as soon as the first of them has waited this many seconds |
+
+- One object is at most 5 GB: that is one PUT's limit, and the server does no multipart upload. A larger file (only a very large import can be one) stays on local disk with an error in the log, and reads as usual.
+- With the object store unreachable, uploads are written to local disk as ever; sealing and merging retry after 30 s, 60 s, ... up to 10 minutes, and local disk grows. Sealed audio cannot be read meanwhile: playback answers 503 and transcription waits at that piece until the store is back.
+- Recordings already on local disk before the switch to `s3` stay there and read as usual; they are not moved.
+
 ### Advanced: only for `stepfun` and `stepfun-file`
 
 When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_FALLBACK`, all four `ASR_*` variables below are required.

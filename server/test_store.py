@@ -1,7 +1,9 @@
 """The storage interface (store.py): what audio.py relies on of every implementation."""
 import io
 
-from alldayrec import db, store
+import numpy as np
+
+from alldayrec import audio, db, seal, store
 
 
 def test_local(tmp_path):
@@ -15,3 +17,12 @@ def test_local(tmp_path):
     s.delete("rejected/d/1.bin")
     s.delete("rejected/d/1.bin")
     assert not s.exists("rejected/d/1.bin"), "deleting what is not there is no error"
+
+
+def test_local_seals_nothing(tmp_path):
+    """STORAGE=local: no store_objects rows, nothing sealed, the hour file stays."""
+    db.open_db(tmp_path / "t.db")
+    audio.save("phone", 1759370400000, audio.wav(np.zeros(audio.SR, np.int16)), "audio/wav")
+    seal.step()
+    assert db.conn().execute("SELECT path FROM pieces").fetchone()[0].startswith("chunks/phone/")
+    assert db.conn().execute("SELECT count(*) FROM store_objects").fetchone()[0] == 0

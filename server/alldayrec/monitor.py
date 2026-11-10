@@ -24,6 +24,7 @@ from alldayrec import db
 from alldayrec import late_store
 from alldayrec import device_pipeline
 from alldayrec import perf
+from alldayrec import seal
 from alldayrec import stepfun_asr
 from alldayrec import tenant
 from alldayrec import threads
@@ -192,6 +193,13 @@ def metrics() -> str:
     for c in db.calls((now - dt.timedelta(hours=1)).isoformat()):
         for q in ("50", "90"):
             m("lr_call_latency_seconds", c[f"ms{q}"] and c[f"ms{q}"] / 1000, kind=c["kind"], engine=c["engine"], quantile=f"0.{q[0]}")
+    if seal.on():  # STORAGE=s3: what waits on local disk, and the object store's calls (store.timed)
+        for name, v in seal.pending().items():
+            m(f"lr_store_{name}", v)
+        for op, (n, failed, sec) in list(T().store_calls.items()):
+            m("lr_store_errors_total", failed, op=op)
+            m("lr_store_seconds_count", n, op=op)
+            m("lr_store_seconds_sum", round(sec, 3), op=op)
     b = s["balance"] or {}
     m("lr_stepfun_balance_cny", b.get("cny"))
     m("lr_stepfun_days_left", b.get("days_left"))

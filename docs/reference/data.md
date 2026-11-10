@@ -37,6 +37,7 @@ type: reference
 | 路径 | 内容 |
 |---|---|
 | `chunks/<设备名>/<日期>/<HH>.<扩展名>` | 每台设备每小时一个文件，收到的音频块原样追加在后面；每块在文件里的位置和长度记在 `live.db` 的 `pieces` 表里。扩展名按上传时的 `Content-Type`：`ogg`、`webm`、`aac`，其他是 `bin` |
+| `staging/chunks/<设备名>/<日期>/<HH>.<扩展名>.<代>` | 只在 `STORAGE=s3` 时有：已封存的小时又来的迟到块，合并进对象前先存在这里。这时 `pieces.path` 以 `s3:` 开头的块在对象存储里（`<S3_PREFIX><租户 id>/<路径>`），见[录音存在哪里](../explanation/architecture.md#录音存在哪里) |
 | `rejected/<设备名>/<开始时刻>.<扩展名>` | 解码失败（接口返回 400）的上传，原样留着供检查 |
 
 ## live.db 的表
