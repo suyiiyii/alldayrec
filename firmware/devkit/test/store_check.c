@@ -1196,6 +1196,17 @@ int main(void)
     assert(fe >= 0 && logged[fe].x == 0);
     time_read(&the_conn, 0, 0, 0, 0);
     assert(status[48] >> 1 == 1);
+    // a blank or foreign card is lent all the same (a computer's to back up and format it); back, it is looked at
+    // afresh, never formatted, and one the computer formatted mounts. A card that does not answer is not lent
+    usb_charge = true, store_err = -ENODEV, lr_sd_foreign = true, formats = mounts = resets = reattached = 0;
+    mount_fails = 1;  // still foreign
+    assert(lend(true, BACK_PHONE) == 0 && usb_disk_lent && store_err == -EBUSY && reattached == 1);
+    assert(lend(false, BACK_PHONE) == 0 && !usb_disk_lent && store_err == -EIO && mounts + resets == 1 && !formats);
+    lr_sd_foreign = false, lr_sd_blank = true;  // blank: formatted on the computer meanwhile
+    assert(lend(true, BACK_PHONE) == 0 && lend(false, BACK_IDLE) == 0 && !store_err && mounts + resets == 2 && !formats);
+    assert(reattached == 4);
+    lr_sd_blank = false, store_err = -ENODEV, lr_sd_sectors = 0;
+    assert(lend(true, BACK_PHONE) == -ENODEV && !usb_disk_lent && reattached == 4);
     printf("store_check ok: %u + %u + %u B on the card\n", card_len[0], card_len[1], card_len[2]);
     return 0;
 }

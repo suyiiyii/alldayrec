@@ -577,7 +577,8 @@ static bool formatting;  // FORMAT going on (the store thread): TIME's card stat
 /* The card as TIME's features bits 1-3 say it (0: firmware older than this field): 1 it takes the stream, or is full
  * or lent; 2 none answers (no card, not seated, or dead); 3 it answers and fails (its mount, a write); 4 it answers and
  * holds no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it); 5 being formatted; 6 it answers, does not mount
- * and shows a volume all the same (GPT, a FAT/exFAT volume FatFs cannot take: sdcard.c lr_sd_foreign), never formatted */
+ * and shows a volume all the same (a GPT with partitions, a FAT/exFAT volume FatFs cannot take: sdcard.c lr_sd_foreign),
+ * never formatted but lent (a computer's to back up and format) */
 static uint8_t card_state(void)
 {
     return formatting ? 5 : !store_err || store_err == -ENOSPC || store_err == -EBUSY ? 1 : lr_sd_blank ? 4 : lr_sd_foreign ? 6 : lr_sd_sectors ? 3 : 2;
@@ -989,16 +990,20 @@ enum { BACK_PHONE = 1, BACK_UNPLUGGED, BACK_IDLE };  // why a lent card came bac
  * computer that has the card mounted lets go of it as of a disk pulled out. A medium that only goes away is not seen:
  * macOS 26 kept the exFAT volume mounted, and whatever read it (cat, diskutil list) hung; unmount force took minutes
  * or failed; the board leaving the bus ended it at once (X1 10-17, back by the phone and back after 3 min alike). */
+static bool lent_unmounted;  // the card lent was blank or foreign (sdcard.h): a computer's to back up and format
+static void retry_card(void);
+
 static int lend(bool on, uint8_t why)
 {
     if (on == usb_disk_lent) {
         return 0;
     }
-    if (on && (!usb_charge || store_err)) {
-        return usb_charge ? store_err : -ENOTCONN;  // not on a computer, or no card to lend
+    if (on && (!usb_charge || (store_err && !lr_sd_blank && !lr_sd_foreign))) {
+        return usb_charge ? store_err : -ENOTCONN;  // not on a computer, or no card that answers
     }
     k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
     if (on) {
+        lent_unmounted = store_err;
         if (phone_mode) {
             to_card(4);
         }
@@ -1013,6 +1018,11 @@ static int lend(bool on, uint8_t why)
         usb_disk_lent = true;
         LOG_INF("card lent to USB");
         lr_log(LR_USB_DISK, 1, 0, 0);
+    } else if (lent_unmounted) {
+        usb_disk_lent = false;
+        store_err = -ENODEV;  // looked at afresh below, as after a FORMAT: mounted if the computer formatted it
+        LOG_INF("card back from USB, not mounted before (%d)", why);
+        lr_log(LR_USB_DISK, 0, -ENODEV, why);
     } else {
         usb_disk_lent = false;
         int err = mount_card(mount_sd_card);
@@ -1031,6 +1041,10 @@ static int lend(bool on, uint8_t why)
     k_mutex_unlock(&write_sdcard_mutex);
     if (on || why != BACK_UNPLUGGED) {  // unplugged: off the bus already
         usb_reattach();
+    }
+    if (!on && lent_unmounted) {
+        retries = 0;
+        retry_card();  // still blank or foreign: only read, never formatted; one the computer formatted: set up as a new card
     }
     return 0;
 }

@@ -213,8 +213,8 @@ static bool marked(void)
 /* disk init, then the mount; what they say of the card kept for TIME's read (sdcard.h). FatFs's FR_NO_FILESYSTEM is
  * fs_mount's -ENODEV (zephyr/subsys/fs/fat_fs.c translate_error; its other -ENODEVs, a bad drive name and no work area,
  * cannot be ours): sector 0 read back fine and FatFs took no FAT or exFAT volume from it. Blank only if the card shows
- * none either (marked: its boot sectors and their backups, the MBR's partitions); a GPT card or a FAT/exFAT volume
- * FatFs cannot mount is foreign. A read that fails is FR_DISK_ERR, -EIO. */
+ * none either (marked: its boot sectors and their backups, the MBR's partitions, a GPT's entries); a GPT card with a
+ * partition or a FAT/exFAT volume FatFs cannot mount is foreign. A read that fails is FR_DISK_ERR, -EIO. */
 static int mount_try(void)
 {
     int err = disk_access_init("SD");

@@ -20,7 +20,7 @@ void lr_sdhc_spi_unlock(const struct device *sdhc);
 void unmount_sd_card(void);
 /* The last mount try's card: its 512 B sectors if it answered (0: none did: no card, or not seated), whether it held
  * no FAT or exFAT volume (blank, ext4, NTFS: FORMAT takes it), and whether it did not mount but shows one all the same
- * (foreign: GPT, a FAT/exFAT volume FatFs cannot take; never formatted, a computer's job) */
+ * (foreign: a GPT with partitions, a FAT/exFAT volume FatFs cannot take; never formatted, a computer's job) */
 extern bool lr_sd_blank, lr_sd_foreign;
 extern uint32_t lr_sd_sectors;
 /* A card with no file system formatted, FAT32 up to 32 GB, exFAT above (FORMAT, lr_store.c), if it is still kb KB;

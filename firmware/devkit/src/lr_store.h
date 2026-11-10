@@ -40,7 +40,7 @@
  *               charge:u8 (lr_power.h) features:u8 (bit 0: ACK taken, phone mode; older firmware: no such byte;
  *               bits 1-3: the card, 0 older firmware, 1 takes the stream (or full, lent), 2 none answers, 3 it answers and
  *               fails, 4 no file system: FORMAT takes it, 5 being formatted, 6 does not mount but shows a volume:
- *               GPT, or a FAT/exFAT volume FatFs cannot take; never formatted) card_kb:u32 (the card's size as it
+ *               a GPT with partitions, or a FAT/exFAT volume FatFs cannot take; never formatted, lent all the same) card_kb:u32 (the card's size as it
  *               answered, file system or not; 0: none answered)
  *   ...02 CTRL  write commands, notify replies:
  *               0x01 LIST                -> 0x81 file:u32 size:u32 per file (the open one too, with what the stream
@@ -54,7 +54,8 @@
  *               0x06 USB_DISK on:u8      -> 0x86 on:u32 status:i8: on a computer's USB, the card shows as a USB disk
  *                                           (writing to it pauses, TIME's store reads -16; the stream goes on) or comes
  *                                           back (eject it on the computer first); unplugging also brings it back.
- *                                           -107: not on USB
+ *                                           A blank or foreign card is lent too, and looked at afresh when back.
+ *                                           -107: not on USB; the card's error (TIME's store): no card that answers
  *               0x07 LOG from:u32        -> DATA notifications seq:u32 + records (seq, seq+1, ...; 16 B each, lr_log.h)
  *                                           for every logged event from seq `from` on, then 0x87 next:u32, the seq
  *                                           the next event will get: ask from there next time
