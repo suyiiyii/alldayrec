@@ -53,8 +53,6 @@ export const track = reactive({
   failed: false,
   follow: true,
 });
-// ponytail: a window whose recording starts late (or has gaps between pieces, which the server joins back to back)
-// plays early by that much; ask the server for the WAV's own start if that ever shows
 const SILENT =
   "data:audio/wav;base64,UklGRkQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
 let el: HTMLAudioElement | null = null,

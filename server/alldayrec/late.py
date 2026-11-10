@@ -22,7 +22,7 @@ LATE_PROCESS_TIMEOUT_S = float(os.environ.get("LATE_PROCESS_TIMEOUT_S", "1800"))
 
 
 def read_exact(device: str, a: int, b: int) -> np.ndarray:
-    """Exact [a,b) on its wall clock. Playback cut() pads and concatenates holes; neither fits ASR timestamps."""
+    """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want)."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
     end = a
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",

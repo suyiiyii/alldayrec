@@ -74,3 +74,22 @@ def test_backlog_counts_once(tmp_path):
     assert audio.queued(DEVICE) == 20, "a live piece the card's cover whole is not handed out"
     T().read_to[DEVICE] = int(t0.timestamp() * 1000) + 60_000  # its reader has had the pieces to the live one at 60 s
     assert audio.queued(DEVICE) == 9 + 8, "the card's from 67 s on, the live ones from 120 s on"
+
+
+def test_playback_keeps_time_across_gaps(tmp_path):
+    """Pieces with holes between them (a trimmed hour, a reconnect): the cut has silence where nothing was kept, so
+    every sample is at its own time (10-24: joined back to back, the conversation player played early by each gap)."""
+    db.open_db(tmp_path / "live.db")
+    x = np.zeros(60 * SR, np.int16)
+    for i in range(6):
+        x[(10 * i + 2) * SR:(10 * i + 5) * SR] = tone(i, 3)
+    t0 = dt.datetime.fromtimestamp(round(time.time()) - 7200)
+    kept = [0, 10, 40]  # 10 s pieces at 0, 10 and 40 s: 20-40 s and 50-60 s were dropped
+    for a in kept:
+        save(t0 + dt.timedelta(seconds=a), flac(x[a * SR:(a + 10) * SR]))
+    want = np.concatenate([x[a * SR:(a + 10) * SR] if a in kept else np.zeros(10 * SR, np.int16) for a in range(0, 60, 10)])
+    at = lambda s: t0 + dt.timedelta(seconds=s)
+    for s, n in ((15, 30), (5, 50), (35, 10), (45, 14)):  # across a gap, two gaps, from inside one, past the end
+        got = np.frombuffer(audio.cut(at(s), at(s + n), "s16le", DEVICE), np.int16)
+        assert len(got) == round((n + 0.4) * SR) and np.array_equal(got, want[round((s - 0.2) * SR):][:len(got)]), (s, n)
+    assert audio.cut(at(22), at(38), "s16le", DEVICE) is None, "all of it in a gap: no recording there"
