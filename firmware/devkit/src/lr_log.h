@@ -85,9 +85,9 @@
  *                   time << 16; why: 1 the link gone or LIVE unsubscribed, 2 no ACK for 8 s, 3 3/4 of the RAM ring not
  *                   acked, 4 a restart or the card lent to USB, 6 the card did not come back on. x 5: at boot, a bytes
  *                   a crash or watchdog reset left in RAM, written to the card as file b
- *    36 FORMAT      FORMAT (lr_store.c): a card with no file system made exFAT; x 0 done, else the error (positive
- *                   errno: 17 it mounted after all, never formatted; 19 it did not answer; 5 the format failed), a its
- *                   512 B sectors, b ms it took
+ *    36 FORMAT      FORMAT (lr_store.c): a card with no file system made FAT32 (up to 32 GB) or exFAT; x 0 done,
+ *                   else the error (positive errno: 17 it mounted after all, never formatted; 19 it did not answer; 5
+ *                   the format failed), a its 512 B sectors, b ms it took
  *
  * Each record has a sequence number, one more than the last, across boots: a reader asks for those from the last
  * it has. Records gather in RAM (__noinit: a crash or watchdog reset keeps them for the next boot) and go to flash
