@@ -1,11 +1,12 @@
-"""STORAGE=s3 on a real S3 protocol (MinIO: CI's service, or TEST_S3_ENDPOINT): the storage interface on objects, an
+"""STORAGE=s3 on a real S3 protocol (MinIO at TEST_S3_ENDPOINT): the storage interface on objects, an
 hour sealed, late pieces staged and merged, reads during a merge, a crash at every step, a longer resend into a sealed
-hour, the store down, imports, and tenants kept apart. Skipped without TEST_S3_ENDPOINT, except on CI (fails)."""
+hour, the store down, imports, and tenants kept apart. Skipped (saying why) without a MinIO; failed with LR_S3_TEST=1 (CI)."""
 import datetime as dt
 import hashlib
 import io
 import os
 import subprocess
+import sys
 import uuid
 
 import anyio
@@ -17,9 +18,11 @@ from alldayrec import audio, db, monitor, routes_audio, seal, sigv4, store, tena
 from alldayrec.tenant import T
 
 ENDPOINT = os.environ.get("TEST_S3_ENDPOINT")
+REQUIRED = os.environ.get("LR_S3_TEST") == "1"  # CI: a MinIO missing or down fails these, never skips them
 if not ENDPOINT:
-    if os.environ.get("CI"):
-        raise RuntimeError("CI runs these on MinIO: TEST_S3_ENDPOINT is not set")
+    if REQUIRED:
+        raise RuntimeError("LR_S3_TEST=1 but no TEST_S3_ENDPOINT (the MinIO these run on)")
+    print("test_store_s3.py skipped: no TEST_S3_ENDPOINT (a MinIO to test on)", file=sys.stderr)
     pytest.skip("no TEST_S3_ENDPOINT (a MinIO to test on)", allow_module_level=True)
 KEY, SECRET = os.environ.get("TEST_S3_ACCESS_KEY", "minioadmin"), os.environ.get("TEST_S3_SECRET_KEY", "minioadmin")
 BUCKET = os.environ.get("TEST_S3_BUCKET", "alldayrec-test")
@@ -42,7 +45,13 @@ def keys(prefix: str) -> list[str]:
 @pytest.fixture
 def s3(tmp_path, monkeypatch):
     """STORAGE=s3 on MinIO under a prefix of this test's own; seal and merge as soon as they may."""
-    assert call("PUT", f"/{BUCKET}").status_code in (200, 409)  # made, or there already
+    try:
+        made = call("PUT", f"/{BUCKET}").status_code
+    except httpx2.HTTPError as e:
+        if REQUIRED:
+            raise
+        pytest.skip(f"MinIO at TEST_S3_ENDPOINT unreachable: {type(e).__name__}")
+    assert made in (200, 409), made  # made, or there already
     prefix = f"t-{uuid.uuid4().hex[:8]}/"
     for k, v in {"S3_ENDPOINT": ENDPOINT, "S3_BUCKET": BUCKET, "S3_ACCESS_KEY": KEY, "S3_SECRET_KEY": SECRET, "S3_PREFIX": prefix}.items():
         monkeypatch.setenv(k, v)
