@@ -14,12 +14,24 @@ to move); after a crash an object that matches it only needs the transaction, on
 Local and staging bytes are deleted only after that transaction and only once no row points at them. One seal or
 merge per object at a time (lock()). The object store down: uploads go on as ever (local only), sealing and merging
 back off and retry, local disk grows (lr_store_local_bytes, lr_store_pending_seal).
+
+Recordings from before STORAGE=s3 (local hour files no store_objects row knows) stay local till adopted:
+
+    cd server && uv run python -m alldayrec.seal adopt --tenant ID --dry-run    # what it would hand over, and the bytes
+    cd server && uv run python -m alldayrec.seal adopt --tenant ID [--limit N]
+
+Run it with the instance's environment (STORAGE=s3, S3_*) and time zone (hour file names are its wall clock). It only
+gives each file a row due now, as placed() would have made it; the running instance's seal() then uploads, checks,
+points the rows at the object and deletes the file (within EVERY_S; a stopped one once started). It holds trim.lock():
+never beside a trim apply or purge of the tenant.
 """
+import argparse
 import contextlib
 import datetime as dt
 import json
 import logging
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -31,6 +43,7 @@ import anyio.to_thread
 from alldayrec import audio
 from alldayrec import db
 from alldayrec import store
+from alldayrec import tenant
 from alldayrec.tenant import T
 
 log = logging.getLogger("live")
@@ -332,3 +345,66 @@ async def loop():
     while True:
         await anyio.to_thread.run_sync(step)
         await anyio.sleep(EVERY_S)
+
+
+def adopt(limit: int | None = None, dry: bool = False) -> dict:
+    """Local files of rows that no store_objects row knows (from before STORAGE=s3), up to limit of them, given an
+    open row due now, lo..hi their hour an hour either side (dry: only counted). Left alone: one of the hour now or
+    that a piece came to within SEAL_IDLE_S (still being written), one missing on disk (nothing to upload), a trim's
+    copy its purge has still to check on local disk, one whose first piece's hour file in this process's time zone
+    is not its name (run in another zone than the instance's: its lo..hi hours off, late pieces never merged)."""
+    now, c = int(time.time() * 1000), db.conn()
+    copies = {r[0] for r in c.execute("SELECT copy FROM trims WHERE state IN ('trimmed', 'purging')")}
+    n, todo = {"to adopt" if dry else "adopted": 0, "bytes": 0, "recent": 0, "missing": 0, "trim copy": 0, "not its hour": 0}, []
+    local = "FROM pieces WHERE path NOT LIKE 's3:%' AND path NOT LIKE 'staging/%' AND path NOT IN (SELECT path FROM store_objects) GROUP BY path"
+    last = dict(c.execute(f"SELECT path, max(coalesce(received_ms, start_ms + seconds * 1000)) {local}").fetchall())
+    # the lone min(): SQLite gives device and start_ms of that row, the file's first piece
+    for path, device, start, _ in c.execute(f"SELECT path, device, start_ms, min(pos) {local} ORDER BY path").fetchall():
+        if limit is not None and len(todo) >= limit:
+            break
+        try:
+            size = (T().recordings / path).stat().st_size
+        except FileNotFoundError:
+            n["missing"] += 1
+            continue
+        p, h = PurePosixPath(path), hour_start(start)
+        if path in copies:
+            n["trim copy"] += 1
+        elif str(audio.hour_file(device, start, p.suffix[1:])) != str(p.with_name(p.name.split(".")[0] + p.suffix)):  # <HH>[.<...>].<ext>
+            n["not its hour"] += 1
+        elif h + 3600_000 > now or last[path] > now - SEAL_IDLE_S * 1000:
+            n["recent"] += 1
+        else:
+            todo.append((path, h - 3600_000, h + 7200_000, now))
+            n["bytes"] += size
+            log.info("store: %s: %d bytes, %s", path, size, "would be adopted" if dry else "adopted")
+    n["to adopt" if dry else "adopted"] = len(todo)
+    if not dry:
+        with db.tx(durable=True) as t:  # a piece placed meanwhile made its row first: that one stays
+            t.executemany("INSERT INTO store_objects (path, lo_ms, hi_ms, state, seal_at) VALUES (?, ?, ?, 'open', ?) "
+                          "ON CONFLICT (path) DO NOTHING", todo)
+    return n
+
+
+def main():
+    a = argparse.ArgumentParser(description="Recordings from before STORAGE=s3 handed to the running instance's sealing")
+    a.add_argument("cmd", choices=("adopt",))
+    a.add_argument("--tenant", required=True, help="a tenant of DATA_DIR/tenants.json")
+    a.add_argument("--limit", type=int, help="at most this many files")
+    a.add_argument("--dry-run", action="store_true", help="only say what would be adopted")
+    o = a.parse_args()
+    if not on():
+        a.error("STORAGE is not s3: nothing would seal them")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
+    t = next((t for t in tenant.load() if t.id == o.tenant), None)
+    if t is None:
+        a.error(f"no tenant {o.tenant!r} in {tenant.FILE}")
+    tenant.enter(t)
+    db.init()
+    from alldayrec import trim  # trim imports this module
+    with trim.lock():
+        print(json.dumps(adopt(o.limit, o.dry_run)))
+
+
+if __name__ == "__main__":
+    main()

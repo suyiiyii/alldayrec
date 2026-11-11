@@ -78,13 +78,13 @@ def ms(iso: str) -> int:
 
 @contextlib.contextmanager
 def lock():
-    """The tenant's one apply or purge at a time (another process's: leftovers() would take the copy of a trim under
-    way), or SystemExit."""
+    """The tenant's one apply or purge (or seal adopt) at a time (another process's: leftovers() would take the copy
+    of a trim under way), or SystemExit."""
     with open(T().db.with_name("trim.lock"), "a") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise SystemExit("trim: another apply or purge of this tenant is running") from None
+            raise SystemExit("another trim apply or purge, or seal adopt, of this tenant is running") from None
         yield
 
 

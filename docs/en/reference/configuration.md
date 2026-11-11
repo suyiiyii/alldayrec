@@ -99,7 +99,13 @@ Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as
 
 - One object is at most 5 GB: that is one PUT's limit, and the server does no multipart upload. A larger file (only a very large import can be one) stays on local disk with an error in the log, and reads as usual.
 - With the object store unreachable, uploads are written to local disk as ever; sealing and merging retry after 30 s, 60 s, ... up to 10 minutes, and local disk grows. Sealed audio cannot be read meanwhile: playback answers 503 and transcription waits at that piece until the store is back.
-- Recordings already on local disk before the switch to `s3` stay there and read as usual; they are not moved.
+- Recordings already on local disk before the switch to `s3` stay there and read as usual; they are not moved by themselves. To move them into the object store, run `seal adopt` with the instance's environment and time zone: it only marks those hour files as due for sealing, and the running instance seals them as any other (a stopped one once started): upload, check, rows pointed at the object, local file deleted. The hour now, a file a piece came to within `SEAL_IDLE_S`, and a file over 5 GB stay local. It takes the same lock as `trim.py`'s `apply` and `purge`, so they never run together. First `--dry-run` to see which files it would take and their total bytes, then `--limit` in batches, each once `lr_store_pending_seal` is back to 0:
+
+  ```sh
+  cd server
+  uv run python -m alldayrec.seal adopt --tenant main --dry-run    # only lists the files and their total bytes
+  uv run python -m alldayrec.seal adopt --tenant main --limit 200
+  ```
 - The server never overwrites another's object: a new object is written only if its key does not exist yet (`If-None-Match: *`), and a merge replaces only the version that was sealed (`If-Match`). Two instances given the same prefix by mistake: the later seal is refused with an error in the log, and that hour stays on local disk.
 - `s3` switched back to `local` for a while, then to `s3` again: pieces that came meanwhile for hours already sealed are in new local hour files; after the switch back these files and their pieces stay on local disk and read as usual, with an error in the log, and are not deleted.
 
