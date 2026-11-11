@@ -216,6 +216,11 @@ final class FakeBean: BeanIo {
     if !joinFails.isEmpty { throw joinFails.removeFirst() }
     onWifi = true
   }
+  var redials = 0
+  var staleOnRedial = false  // the bean goes on with what it was sending, on the new socket (replayStale())
+  private var stale: [([UInt8], Int64)] = []
+  func wifiRedial() throws { redials += 1; if staleOnRedial { stale = out }; out = [] }  // else nothing of the socket before
+  func replayStale() { out += stale; stale = [] }
   func wifiLeave() { onWifi = false }
 
   func info() -> [UInt8] {
@@ -802,6 +807,76 @@ do {
   check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "then BLE from where Wi-Fi stopped")
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
   check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+}
+
+/// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496
+/// units it sent the phone had): the read stops where that stretch begins, by a new socket (as BLE's by the link going),
+/// the next hole from its own offset; a short stretch is read through. What the phone had is counted apart.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 1_000_000) / 1000, n: Int64 = 40_000
+  bean.list(a, n * 20); bean.wifiAsk = true
+  let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[1000, 35_000], [36_000, 37_000]], "p": [[Int64]]()] as [String: Any]]
+  try! JSONSerialization.data(withJSONObject: state).write(to: dir.appendingPathComponent("state.json"))
+  bean.onTransfer = { file, from, _ in
+    check(bean.onWifi, true, "over Wi-Fi only")
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 0); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[a, 0, 0], [a, 35_000, 0]], "cut at 1000 (34,000 had), read through 36,000..37,000 (1,000 had)")
+  check(bean.redials, 1)
+  check(Set(queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)), Set(Array(0..<1000) + Array(35_000..<36_000) + Array(37_000..<n)), "the holes, each once")
+  let done = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_done" }!]
+  check(done["new_s"] as? Int64, 100, "5,000 units the phone lacked")
+  check((done["dupes"] as? Int).map { $0 >= 1000 && $0 < 1010 }, true, "the short stretch, and the cut frame's rest: \(done["dupes"] ?? "")")
+}
+
+/// After a new socket the bean goes on with the file before, its next header first (#318 review): those units carry no
+/// file and would decrypt to noise as the next file's, then count as had. A first unit not at the offset asked for ends
+/// Wi-Fi with nothing of it written, and BLE reads that file whole.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 1_000_000) / 1000, b = (t0 - 100_000) / 1000, n: Int64 = 40_000
+  bean.list(a, n * 20); bean.list(b, 60_000); bean.wifiAsk = true; bean.staleOnRedial = true
+  let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[1000, n]], "p": [[Int64]]()] as [String: Any]]
+  try! JSONSerialization.data(withJSONObject: state).write(to: dir.appendingPathComponent("state.json"))
+  bean.onTransfer = { file, from, _ in
+    let units: Int64 = file == a ? n : 3000
+    bean.header(file, units * Int64(Bean.unit))
+    if bean.onWifi && file == b { bean.replayStale() }
+    bean.units(file, Array(from..<units), last: units - 1, ms: 0); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("不是要的 0"), true, again.description)
+  check(bean.redials, 1)
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 0, 0]], "a's hole over Wi-Fi, b over Wi-Fi refused, then b over BLE")
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }
+  check(got.count, 1000 + 3000, "a's hole and b, nothing else")
+  check(got.filter { $0[5] == UInt8(b % 251) }.map(seqOf), Array(0..<3000), "b's own audio, each unit once")
+  check(got.allSatisfy { $0[5] == UInt8(a % 251) || $0[5] == UInt8(b % 251) }, true, "no noise")
+}
+
+/// A file Wi-Fi gives up on (each read ends short, tries over): the fast transfer ends saying so, not 「都取到了」.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, from, _ in bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<(from + 10)), ms: 0); bean.complete(file) }
+  bean.script = Array(repeating: {}, count: 40)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("取不全"), true, again.description)
+  check(bean.transfers.count, BeanSync.tries + 1)
 }
 
 /// Asked for while the bean records (11-08 22:36, 23:41, 11-09 10:12: over Wi-Fi it answered no 1A/07, for the file it

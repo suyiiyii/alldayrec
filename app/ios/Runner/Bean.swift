@@ -273,12 +273,15 @@ protocol BeanIo: AnyObject {
   /// Joins the bean's hotspot and opens its WebSocket (`endpoint`: the 1A/05 answer); send and receive go over it then,
   /// until wifiLeave() (FINISH, the hotspot forgotten).
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws
+  /// A new socket on the hotspot, the one before closed: what the bean was sending stops (as when BLE goes).
+  func wifiRedial() throws
   func wifiLeave()
 }
 
 extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say otherwise)
   func wifiAsked() -> Bool { false }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { throw Bean.Fail("no Wi-Fi") }
+  func wifiRedial() throws { throw Bean.Fail("no Wi-Fi") }
   func wifiLeave() {}
 }
 extension BeanIo { func phoneState() -> [String: Any] { [:] } }
@@ -300,6 +303,8 @@ final class BeanSync {
   static let tries = 3
   static let paceMs: Int64 = 200  // between transfers (ws/soundcore: the SDK's 200 ms)
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
+  /// over Wi-Fi (5,000–10,000 units/s) a new socket and the next ask cost about 3 s (11-11): 10 min of audio, 3–6 s to send
+  static let wifiRestUnits: Int64 = 30_000
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
   static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
   static let clockUnits: Int64 = 1500  // half a minute of live units: the fastest of each dates the file (reanchor())
@@ -396,7 +401,7 @@ final class BeanSync {
   private var wifiNext = false  // asked for: before the next transfer
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at BeanSync.tries (wifiOff())
-  private var wifiUnits = 0
+  private var wifiUnits = 0, wifiDupes = 0  // over Wi-Fi: units come, and those the phone had already
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
@@ -623,7 +628,7 @@ final class BeanSync {
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
-    overWifi = true; wifiUnits = 0
+    overWifi = true; wifiUnits = 0; wifiDupes = 0
     files.values.forEach { $0.wifiTries = 0 }
     state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false, note: String?
@@ -640,10 +645,11 @@ final class BeanSync {
     wifiEnded = io.monotonicNow()
     let ms = max(1, wifiEnded - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
     let audio = Int64(wifiUnits) * Bean.frameMs, x = Double(audio) / Double(ms)
+    let fresh = Int64(wifiUnits - wifiDupes) * Bean.frameMs / 1000  // what the backlog went down by (11-11 14:01: 87% had)
     let q = queued().count  // what is still to go up: the bean gives faster than the phone uploads (11-08: 200× vs 40×)
-    log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频），\(kb) KB，用时 \(ms / 1000) s，" +
+    log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频，手机没有的 \(fresh) s，已有的 \(wifiDupes) 个），\(kb) KB，用时 \(ms / 1000) s，" +
         String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x) + "；上传队列还有 \(q) 块", wifiUnits == 0 ? "warn" : nil,
-        ["why": why, "units": wifiUnits, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x, "queued": q])
+        ["why": why, "units": wifiUnits, "dupes": wifiDupes, "new_s": fresh, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x, "queued": q])
     throw Again(description: "Wi-Fi transfer over: \(why)", naturalRollover: rollover)
   }
 
@@ -655,9 +661,9 @@ final class BeanSync {
       if io.wifiAsked() { log("bean_wifi_ask", "已在 Wi-Fi 快传，这次请求忽略") }  // not kept for after it (11-08)
       if t - at >= 10_000 {  // progress: what came in the last 10 s, and the upload queue (does it drain meanwhile?)
         let n = wifiUnits - was, kbps = Double(n * Bean.unit) / 1.024 / Double(t - at), x = Double(Int64(n) * Bean.frameMs) / Double(t - at)
-        log("bean_wifi_progress", String(format: "Wi-Fi 快传：共 %d 个单元，近 10 s %.0f KB/s，%.1f 倍实时，", wifiUnits, kbps, x) +
+        log("bean_wifi_progress", String(format: "Wi-Fi 快传：共 %d 个单元（已有的 %d 个），近 10 s %.0f KB/s，%.1f 倍实时，", wifiUnits, wifiDupes, kbps, x) +
             "文件 \(xfer?.file ?? 0) 到单元 \(xfer?.last ?? -1)，上传队列 \(queued().count) 块",
-            fields: ["units": wifiUnits, "kb": Int64(wifiUnits) * Int64(Bean.unit) / 1024, "kbps": kbps, "x": x, "file": xfer?.file ?? 0,
+            fields: ["units": wifiUnits, "dupes": wifiDupes, "kb": Int64(wifiUnits) * Int64(Bean.unit) / 1024, "kbps": kbps, "x": x, "file": xfer?.file ?? 0,
                      "seq": xfer?.last ?? -1, "lag_s": xfer?.lag.map { $0 / 1000 } ?? NSNull(), "queued": queued().count])
         at = t; was = wifiUnits
       }
@@ -666,11 +672,18 @@ final class BeanSync {
         if xfer == nil {
           if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
           if busy > 20 { return "豆子一直忙（code 4）" }
-          guard let x = backlog() else { return "都取到了" }
+          // a file Wi-Fi gave up on (tried()) is not had: BLE reads it after
+          guard let x = backlog() else { return files.values.contains { $0.wifiTries > BeanSync.tries && gap($0) != nil } ? "Wi-Fi 上有文件取不全，留给蓝牙" : "都取到了" }
           try begin(x)
         }
         if let f = try next(1000) { try take(f) }
         guard let x = xfer else { return nil }
+        if x.cut {  // the rest of the file is here (rest()): a new socket stops the bean, as BLE going does, the next hole after
+          complete(x, 0)
+          try io.wifiRedial()
+          reader = Bean.Reader(); inbox = []
+          return nil
+        }
         let now = io.now()
         if x.key == nil && now - x.at > 8000 {  // ws/soundcore: 3 asks 8 s apart
           if x.asked < 3 {
@@ -1001,7 +1014,7 @@ final class BeanSync {
         if h.size % Int64(Bean.unit) != 0 { return failed(x, "file of \(h.size) B") }
         let f = file(x.file, x.file * 1000)
         f.total = h.size / Int64(Bean.unit)
-        if !x.live && !overWifi { x.until = rest(f, x.from) }  // over Wi-Fi a cut would cost more than the rest
+        if !x.live { x.until = rest(f, x.from, overWifi ? BeanSync.wifiRestUnits : BeanSync.restUnits) }
       }
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
@@ -1049,6 +1062,14 @@ final class BeanSync {
   }
 
   private func unit(_ x: Xfer, _ s: Bean.Slice) throws {
+    // over Wi-Fi the bean may still send the file before after a new socket (wifiRedial()) and the next file's header:
+    // its units carry no file and decrypt to noise with this key, and once had they would never be read again; the bean
+    // has always begun at the offset asked for, so anything else ends Wi-Fi here, nothing of it written, BLE reads on
+    if overWifi && x.first < 0 && s.seq != x.from {
+      log("bean_xfer", "补传文件 \(x.file) Wi-Fi 上首单元 \(s.seq) 不是要的 \(x.from)：可能是上一个文件的，不写，回蓝牙", "warn",
+          ["file": x.file, "seq": s.seq, "from": x.from])
+      throw Bean.Fail("首单元 \(s.seq) 不是要的 \(x.from)，回蓝牙")
+    }
     let audio = try Bean.opus(x.key!, x.nonce, s)
     if x.first < 0 { first(x, s, audio) }
     let f = files[x.file]!
@@ -1098,7 +1119,7 @@ final class BeanSync {
     if mark && !marked && !dupe { log("mark", "双击标记", fields: ["file": x.file, "seq": s.seq], at: f.at(s.seq)) }
     marked = mark  // also on units had already: a mark that goes on past them is not a new one
     if x.until >= 1 && x.until <= s.seq + 1 { x.cut = true }
-    if dupe { x.dupes += 1; return }
+    if dupe { x.dupes += 1; if overWifi { wifiDupes += 1 }; return }
     let n = Int64(run.count)  // a piece is dated by one anchor
     if !run.isEmpty && (runFile != x.file || s.seq != runFrom + n || f.at(s.seq) != f.at(runFrom) + n * Bean.frameMs) { flush() }
     if run.isEmpty { runFile = x.file; runFrom = s.seq; if x.live { step(x, f, s.seq) } }
@@ -1226,9 +1247,10 @@ final class BeanSync {
 
   private func done(_ f: F) -> Bool { gap(f) == nil || f.tries > BeanSync.tries || overWifi && f.wifiTries > BeanSync.tries }
 
-  /// Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
-  /// than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file). -1: take it all.
-  private func rest(_ f: F, _ from: Int64) -> Int64 { f.have.first { $0.0 > from && $0.1 - $0.0 >= BeanSync.restUnits }?.0 ?? -1 }
+  /// Where the first range the phone has after `from` that is long enough to skip begins: a new connection (over Wi-Fi
+  /// a new socket, `min` wifiRestUnits) costs less than taking it again (the bean sends from the offset to the end and
+  /// cannot be stopped mid-file). -1: take it all.
+  private func rest(_ f: F, _ from: Int64, _ min: Int64 = BeanSync.restUnits) -> Int64 { f.have.first { $0.0 > from && $0.1 - $0.0 >= min }?.0 ?? -1 }
 
   private func send(_ frame: [UInt8]) throws {
     guard Bean.allowed(frame, deletable) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }  // the last check before the radio
