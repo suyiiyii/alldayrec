@@ -3,6 +3,7 @@ seals them as any hour: played back the same bytes, rows outside their hour too,
 crash at any step loses nothing, and never beside a trim apply or purge."""
 import contextlib
 import datetime as dt
+import os
 import sys
 import time
 
@@ -10,7 +11,7 @@ import pytest
 
 from alldayrec import audio, db, seal, store, tenant, trim
 from alldayrec.tenant import T
-from test_store_s3 import H10, HOUR, Crash, crash_once, keys, obj, rows, s3, same, tone  # noqa: F401  (s3: the fixture)
+from test_store_s3 import H10, HOUR, STAGED0, Crash, crash_once, keys, obj, rows, s3, same, sealed_hour, tone  # noqa: F401  (s3: the fixture)
 
 H11 = "chunks/phone/2026-10-02/11.ogg"
 
@@ -37,7 +38,7 @@ def test_adopt_then_sealed(s3, monkeypatch):
     seal.step()
     assert seal.row(HOUR) is None, "not sealed by itself"
     size = (T().recordings / HOUR).stat().st_size + (T().recordings / H11).stat().st_size
-    assert seal.adopt(dry=True) == {"to adopt": 2, "bytes": size, "recent": 1, "missing": 0, "trim copy": 0, "not an hour file": 0}
+    assert seal.adopt(dry=True) == {"to adopt": 2, "bytes": size, "recent": 1, "missing": 0, "trim copy": 0, "not its hour": 0}
     assert seal.row(HOUR) is None, "dry: nothing changed"
     assert seal.adopt(limit=1)["adopted"] == 1 and seal.row(H11) is None
     assert seal.adopt()["adopted"] == 1
@@ -62,7 +63,7 @@ def test_adopt_leaves(s3, monkeypatch):
     (T().recordings / H11).unlink()
     copy = "chunks/phone/2026-10-02/12.ogg"
     db.conn().execute("INSERT INTO trims (path, copy, state, at) VALUES ('chunks/phone/2026-10-02/12.x.ogg', ?, 'trimmed', 0)", (copy,))
-    assert seal.adopt() == {"adopted": 0, "bytes": 0, "recent": 1, "missing": 1, "trim copy": 1, "not an hour file": 0}
+    assert seal.adopt() == {"adopted": 0, "bytes": 0, "recent": 1, "missing": 1, "trim copy": 1, "not its hour": 0}
     assert db.conn().execute("SELECT count(*) FROM store_objects").fetchone()[0] == 0
 
 
@@ -159,3 +160,63 @@ def test_adopt_and_trim_exclusive(s3, monkeypatch):
     monkeypatch.setattr(seal, "adopt", adopt)
     seal.main()
     assert obj(HOUR)["state"] == "open"
+
+
+def test_adopt_in_the_instance_zone_only(s3, monkeypatch):
+    """Run in another time zone than the files were named in: left (its hours would be off, late pieces never
+    merged); in the instance's zone: adopted, lo..hi its hour."""
+    zone = os.environ.get("TZ")
+
+    def to(tz):
+        if tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = tz
+        time.tzset()
+    try:
+        to("Asia/Taipei")
+        h10 = int(dt.datetime(2026, 10, 2, 10, 0).timestamp() * 1000)
+        before_s3(monkeypatch, {h10: tone(1)})
+        to("America/Los_Angeles")
+        assert seal.adopt()["not its hour"] == 1 and seal.row(HOUR) is None
+        to("Asia/Taipei")
+        assert seal.adopt()["adopted"] == 1 and (obj(HOUR)["lo_ms"], obj(HOUR)["hi_ms"]) == (h10 - 3600_000, h10 + 7200_000)
+    finally:
+        to(zone)
+
+
+def test_adopt_keeps_a_row_made_meanwhile(s3, monkeypatch):
+    """A row the instance made between adopt's look and its transaction (a piece placed, the hour sealed since)
+    stays as it is."""
+    before_s3(monkeypatch, {H10: tone(1)})
+    tx = db.tx
+
+    def meanwhile(durable=False):
+        db.conn().execute("INSERT INTO store_objects (path, lo_ms, hi_ms, state, size) VALUES (?, 1, 2, 'sealed', 7)", (HOUR,))
+        monkeypatch.setattr(db, "tx", tx)
+        return tx(durable)
+    monkeypatch.setattr(db, "tx", meanwhile)
+    assert seal.adopt()["adopted"] == 1
+    o = obj(HOUR)
+    assert (o["state"], o["lo_ms"], o["hi_ms"], o["size"]) == ("sealed", 1, 2, 7)
+
+
+def test_adopt_leaves_staging(s3):
+    """A staging file (late pieces of a sealed hour) is merge()'s, never adopted."""
+    sealed_hour()
+    audio.save("phone", H10 + 60_000, tone(1, 700), "audio/ogg")
+    assert rows()[-1]["path"] == STAGED0 and seal.row(STAGED0) is None
+    assert seal.adopt() == {"adopted": 0, "bytes": 0, "recent": 0, "missing": 0, "trim copy": 0, "not its hour": 0}
+
+
+@pytest.mark.parametrize("argv", [["adopt", "--tenant", "local"], ["adopt", "--tenant", "nobody"]])
+def test_cli_refuses(s3, monkeypatch, capsys, argv):
+    """Not with STORAGE=local (nothing would seal them); a tenant not in tenants.json said so."""
+    t = T()
+    monkeypatch.setattr(tenant, "load", lambda: [t])
+    if argv[-1] == "local":
+        monkeypatch.setattr(store, "STORAGE", "local")
+    monkeypatch.setattr(sys, "argv", ["seal", *argv])
+    with pytest.raises(SystemExit) as e:
+        seal.main()
+    assert e.value.code == 2 and ("STORAGE is not s3" if argv[-1] == "local" else "no tenant 'nobody'") in capsys.readouterr().err

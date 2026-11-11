@@ -351,12 +351,15 @@ def adopt(limit: int | None = None, dry: bool = False) -> dict:
     """Local files of rows that no store_objects row knows (from before STORAGE=s3), up to limit of them, given an
     open row due now, lo..hi their hour an hour either side (dry: only counted). Left alone: one of the hour now or
     that a piece came to within SEAL_IDLE_S (still being written), one missing on disk (nothing to upload), a trim's
-    copy its purge has still to check on local disk, one not named by its hour."""
+    copy its purge has still to check on local disk, one whose first piece's hour file in this process's time zone
+    is not its name (run in another zone than the instance's: its lo..hi hours off, late pieces never merged)."""
     now, c = int(time.time() * 1000), db.conn()
     copies = {r[0] for r in c.execute("SELECT copy FROM trims WHERE state IN ('trimmed', 'purging')")}
-    n, todo = {"to adopt" if dry else "adopted": 0, "bytes": 0, "recent": 0, "missing": 0, "trim copy": 0, "not an hour file": 0}, []
-    for path, got in c.execute("SELECT path, max(coalesce(received_ms, start_ms + seconds * 1000)) FROM pieces WHERE path NOT LIKE 's3:%' "
-                               "AND path NOT LIKE 'staging/%' AND path NOT IN (SELECT path FROM store_objects) GROUP BY path ORDER BY path").fetchall():
+    n, todo = {"to adopt" if dry else "adopted": 0, "bytes": 0, "recent": 0, "missing": 0, "trim copy": 0, "not its hour": 0}, []
+    local = "FROM pieces WHERE path NOT LIKE 's3:%' AND path NOT LIKE 'staging/%' AND path NOT IN (SELECT path FROM store_objects) GROUP BY path"
+    last = dict(c.execute(f"SELECT path, max(coalesce(received_ms, start_ms + seconds * 1000)) {local}").fetchall())
+    # the lone min(): SQLite gives device and start_ms of that row, the file's first piece
+    for path, device, start, _ in c.execute(f"SELECT path, device, start_ms, min(pos) {local} ORDER BY path").fetchall():
         if limit is not None and len(todo) >= limit:
             break
         try:
@@ -364,15 +367,12 @@ def adopt(limit: int | None = None, dry: bool = False) -> dict:
         except FileNotFoundError:
             n["missing"] += 1
             continue
-        p = PurePosixPath(path)  # chunks/<device>/<date>/<HH>...: audio.hour_file's local hour
-        try:
-            h = int(dt.datetime.strptime(f"{p.parent.name} {p.name[:2]}", "%Y-%m-%d %H").timestamp() * 1000)
-        except ValueError:
-            n["not an hour file"] += 1
-            continue
+        p, h = PurePosixPath(path), hour_start(start)
         if path in copies:
             n["trim copy"] += 1
-        elif h + 3600_000 > now or got > now - SEAL_IDLE_S * 1000:
+        elif str(audio.hour_file(device, start, p.suffix[1:])) != str(p.with_name(p.name.split(".")[0] + p.suffix)):  # <HH>[.<...>].<ext>
+            n["not its hour"] += 1
+        elif h + 3600_000 > now or last[path] > now - SEAL_IDLE_S * 1000:
             n["recent"] += 1
         else:
             todo.append((path, h - 3600_000, h + 7200_000, now))
@@ -396,7 +396,10 @@ def main():
     if not on():
         a.error("STORAGE is not s3: nothing would seal them")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stderr)
-    tenant.enter(next(t for t in tenant.load() if t.id == o.tenant))
+    t = next((t for t in tenant.load() if t.id == o.tenant), None)
+    if t is None:
+        a.error(f"no tenant {o.tenant!r} in {tenant.FILE}")
+    tenant.enter(t)
     db.init()
     from alldayrec import trim  # trim imports this module
     with trim.lock():
