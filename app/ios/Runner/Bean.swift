@@ -672,7 +672,8 @@ final class BeanSync {
         if xfer == nil {
           if io.now() < quietUntil { if let f = try next(quietUntil - io.now()) { try take(f) }; return nil }
           if busy > 20 { return "豆子一直忙（code 4）" }
-          guard let x = backlog() else { return "都取到了" }
+          // a file Wi-Fi gave up on (tried()) is not had: BLE reads it after
+          guard let x = backlog() else { return files.values.contains { $0.wifiTries > BeanSync.tries && gap($0) != nil } ? "Wi-Fi 上有文件取不全，留给蓝牙" : "都取到了" }
           try begin(x)
         }
         if let f = try next(1000) { try take(f) }
@@ -1061,6 +1062,14 @@ final class BeanSync {
   }
 
   private func unit(_ x: Xfer, _ s: Bean.Slice) throws {
+    // over Wi-Fi the bean may still send the file before after a new socket (wifiRedial()) and the next file's header:
+    // its units carry no file and decrypt to noise with this key, and once had they would never be read again; the bean
+    // has always begun at the offset asked for, so anything else ends Wi-Fi here, nothing of it written, BLE reads on
+    if overWifi && x.first < 0 && s.seq != x.from {
+      log("bean_xfer", "补传文件 \(x.file) Wi-Fi 上首单元 \(s.seq) 不是要的 \(x.from)：可能是上一个文件的，不写，回蓝牙", "warn",
+          ["file": x.file, "seq": s.seq, "from": x.from])
+      throw Bean.Fail("首单元 \(s.seq) 不是要的 \(x.from)，回蓝牙")
+    }
     let audio = try Bean.opus(x.key!, x.nonce, s)
     if x.first < 0 { first(x, s, audio) }
     let f = files[x.file]!

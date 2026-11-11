@@ -8,6 +8,7 @@ import CryptoKit
 import Foundation
 import Network
 import NetworkExtension
+import UIKit
 
 final class BeanWifi {
   static let host = "192.168.43.1", port: UInt16 = 443  // the bean's, whatever else it answers
@@ -50,11 +51,21 @@ final class BeanWifi {
     // 6 such, none of 4 later), the hotspot not up yet; a second try, asking nothing, joined each time: wait for it
     Thread.sleep(forTimeInterval: 5)
     var joinedOnce = false
+    var away: Int64 = 0  // this fast transfer's waits for the app to come to the front, all of them
     for (n, wait) in [0.0, 2, 4, 8].enumerated() {
       if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-      // iOS joins nothing for an app not in front (14 applicationIsNotInForeground: 11-11 14:00, left 8 s before and
-      // back 32 s later): up to a minute for it to come back, the hotspot waiting meanwhile
-      for _ in 0..<120 where !BeanWifi.front() { Thread.sleep(forTimeInterval: 0.5) }
+      // iOS joins nothing for an app in the background (14 applicationIsNotInForeground: 11-11 14:00, gone 8 s before and
+      // back 32 s later): a minute in all for it to come back, the hotspot open meanwhile. Inactive (iOS's own join
+      // question, Control Center) is in front still: the question of the try before must not hold up this one
+      if !BeanWifi.inFront() && away < 60_000 {
+        let w0 = BeanWifi.mono()
+        while !BeanWifi.inFront() && away + BeanWifi.mono() - w0 < 60_000 { Thread.sleep(forTimeInterval: 0.5) }
+        let waited = BeanWifi.mono() - w0
+        away += waited
+        let back = BeanWifi.inFront()
+        log("bean_wifi_front", back ? "App 在后台，等它回到前台 \(waited) ms 再加入热点（第 \(n + 1) 次）" : "App 一直在后台（共等 \(away / 1000) s），照样试加入（第 \(n + 1) 次）",
+            back ? nil : "warn", ["ms": waited, "total_ms": away, "front": back, "try": n + 1])
+      }
       let t1 = BeanWifi.mono()
       let c = NEHotspotConfiguration(ssid: ssid, passphrase: password, isWEP: false)
       c.joinOnce = true  // iOS leaves it when the app leaves the front
@@ -213,9 +224,15 @@ final class BeanWifi {
     return scoped.keys.contains { k in ["utun", "ipsec", "ppp", "tap", "tun"].contains { k.hasPrefix($0) } }
   }
 
-  static func front() -> Bool { Thread.isMainThread ? Recorder.foregroundApp : DispatchQueue.main.sync { Recorder.foregroundApp } }
+  static func context() -> [String: Any] {
+    ["vpn": vpn(), "front": Thread.isMainThread ? Recorder.foregroundApp : DispatchQueue.main.sync { Recorder.foregroundApp }]
+  }
 
-  static func context() -> [String: Any] { ["vpn": vpn(), "front": front()] }
+  /// Not in the background (active or inactive): what iOS asks of a hotspot join.
+  static func inFront() -> Bool {
+    let state = { UIApplication.shared.applicationState != .background }
+    return Thread.isMainThread ? state() : DispatchQueue.main.sync(execute: state)
+  }
 
   static func name(_ e: NEHotspotConfigurationError) -> String {
     switch e {
@@ -279,11 +296,16 @@ final class BeanWifi {
     old?.cancel()
     inbox.clear()
     let t0 = BeanWifi.mono()
-    do { try connect() } catch {
-      log("bean_wifi_socket", "重连豆子的 WebSocket 没成：\(error)；状态 \(trail)", "warn", ["redial": true, "error": "\(error)", "states": trail])
-      throw error
+    for n in 1...3 {
+      do { try connect() } catch {
+        log("bean_wifi_socket", "重连豆子的 WebSocket 第 \(n) 次没成：\(error)；状态 \(trail)", "warn", ["redial": true, "tries": n, "error": "\(error)", "states": trail])
+        if n == 3 { throw error }
+        Thread.sleep(forTimeInterval: 0.7)
+        continue
+      }
+      log("bean_wifi_socket", "重连了豆子的 WebSocket（第 \(n) 次，\(BeanWifi.mono() - t0) ms）：让豆子停下这个文件", nil, ["redial": true, "tries": n, "ms": BeanWifi.mono() - t0])
+      return
     }
-    log("bean_wifi_socket", "重连了豆子的 WebSocket（\(BeanWifi.mono() - t0) ms）：让豆子停下这个文件", nil, ["redial": true, "ms": BeanWifi.mono() - t0])
   }
 
   /// Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not).
