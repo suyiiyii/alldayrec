@@ -32,6 +32,8 @@ def test_adopt_then_sealed(s3, monkeypatch):
     audio.save("phone", now, tone(1), "audio/ogg")  # the hour now: still being written
     monkeypatch.setattr(store, "STORAGE", "s3")
     current = str(audio.hour_file("phone", now, "ogg"))
+    play = lambda: audio.cut(dt.datetime.fromtimestamp(H10 / 1000), dt.datetime.fromtimestamp(H10 / 1000 + 3605), "s16le", "phone")
+    before = play()
     seal.step()
     assert seal.row(HOUR) is None, "not sealed by itself"
     size = (T().recordings / HOUR).stat().st_size + (T().recordings / H11).stat().st_size
@@ -47,8 +49,7 @@ def test_adopt_then_sealed(s3, monkeypatch):
     assert not (T().recordings / HOUR).exists() and not (T().recordings / H11).exists()
     assert (T().recordings / current).exists()
     same(kept | {now: audio.read(rows()[-1])})
-    x = audio.cut(dt.datetime.fromtimestamp(H10 / 1000), dt.datetime.fromtimestamp(H10 / 1000 + 4), "s16le", "phone")
-    assert len(x) == 4 * audio.SR * 2, "played from the object"
+    assert play() == before and len(before) > 3600 * audio.SR * 2, "played from the objects, as from the files"
     assert seal.adopt()["adopted"] == 0, "each once"
 
 
