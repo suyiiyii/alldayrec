@@ -216,6 +216,8 @@ final class FakeBean: BeanIo {
     if !joinFails.isEmpty { throw joinFails.removeFirst() }
     onWifi = true
   }
+  var redials = 0
+  func wifiRedial() throws { redials += 1; out = [] }  // a new socket: nothing of the one before on its way
   func wifiLeave() { onWifi = false }
 
   func info() -> [UInt8] {
@@ -802,6 +804,32 @@ do {
   check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "then BLE from where Wi-Fi stopped")
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
   check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+}
+
+/// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496
+/// units it sent the phone had): the read stops where that stretch begins, by a new socket (as BLE's by the link going),
+/// the next hole from its own offset; a short stretch is read through. What the phone had is counted apart.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 1_000_000) / 1000, n: Int64 = 40_000
+  bean.list(a, n * 20); bean.wifiAsk = true
+  let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[1000, 35_000], [36_000, 37_000]], "p": [[Int64]]()] as [String: Any]]
+  try! JSONSerialization.data(withJSONObject: state).write(to: dir.appendingPathComponent("state.json"))
+  bean.onTransfer = { file, from, _ in
+    check(bean.onWifi, true, "over Wi-Fi only")
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 0); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[a, 0, 0], [a, 35_000, 0]], "cut at 1000 (34,000 had), read through 36,000..37,000 (1,000 had)")
+  check(bean.redials, 1)
+  check(Set(queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)), Set(Array(0..<1000) + Array(35_000..<36_000) + Array(37_000..<n)), "the holes, each once")
+  let done = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_done" }!]
+  check(done["new_s"] as? Int64, 100, "5,000 units the phone lacked")
+  check((done["dupes"] as? Int).map { $0 >= 1000 && $0 < 1010 }, true, "the short stretch, and the cut frame's rest: \(done["dupes"] ?? "")")
 }
 
 /// Asked for while the bean records (11-08 22:36, 23:41, 11-09 10:12: over Wi-Fi it answered no 1A/07, for the file it

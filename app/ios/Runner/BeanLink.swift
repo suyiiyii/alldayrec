@@ -301,6 +301,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }
+  func wifiRedial() throws { guard let w = wifi else { throw BeanSync.Gone("no Wi-Fi") }; try w.redial() }
   func wifiLeave() { wifi?.close(); wifi = nil }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
