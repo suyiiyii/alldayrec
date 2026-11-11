@@ -59,9 +59,12 @@ tenants() {  # dir: its tenants, an "id data-dir" a line (the tokens stay in the
 
 first() { tenants "$1" | head -1 | cut -d' ' -f1; }  # dir: its first tenant (the pages and the status are asked as it)
 
-get() {  # dir tenant path: GET from the instance on loopback as that tenant (its token through stdin: not in the process list)
+get() {  # dir tenant path: GET from the instance as that tenant (its token through stdin: not in the process list), where
+  local h  # it listens: its HOST, loopback when that is every address or unset (the server's default)
+  h=$(env_of "$1" HOST) || true
+  case $h in "" | 0.0.0.0 | ::) h=127.0.0.1 ;; *:*) h="[$h]" ;; esac
   python3 -c 'import json, sys; print("Authorization: Bearer " + next(t["token"] for t in json.load(open(sys.argv[1])) if t["id"] == sys.argv[2]))' \
-    "$1/tenants.json" "$2" | curl -sf -m 10 -H @- "http://127.0.0.1:$(env_of "$1" PORT)$3"
+    "$1/tenants.json" "$2" | curl -sf -m 10 -H @- "http://$h:$(env_of "$1" PORT)$3"
 }
 
 started() {  # dir unit log-offset (after a restart): answering within 3 min, not restarted since, no errors logged

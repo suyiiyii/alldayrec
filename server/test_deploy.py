@@ -51,3 +51,22 @@ def test_leaves_disabled_alone(tmp_path):
     r = deploy(tmp_path, merged, good, disabled="lr-merged")
     assert "skip" in r.stderr and "cannot read" not in r.stdout and list(tmp_path.glob("good/backup-deploy-*")), r.stdout + r.stderr
     assert not list(tmp_path.glob("merged/backup-*"))
+
+
+def test_check_asks_where_it_listens(tmp_path):
+    """check (and a deploy's) GETs the instance at its HOST, loopback when it listens on every address or HOST is unset."""
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin/systemctl").write_text("#!/bin/sh\necho enabled\n")
+    (tmp_path / "bin/curl").write_text(f'#!/bin/sh\nfor a; do last=$a; done; echo "$last" >> "{tmp_path}/urls"; exit 1\n')
+    for f in ("systemctl", "curl"):
+        (tmp_path / "bin" / f).chmod(0o755)
+    for host, want in ((None, "127.0.0.1"), ("0.0.0.0", "127.0.0.1"), ("::", "127.0.0.1"), ("192.0.2.9", "192.0.2.9"),
+                       ("fd7a::9", "[fd7a::9]")):
+        i = instance(tmp_path, f"h{len(want)}{host}".replace(":", "-"), GOOD)
+        env = Path(i.split(":")[0]) / ".env"
+        env.write_text(env.read_text() + "PORT=8770\n" + (f"HOST={host}\n" if host else ""))
+        (tmp_path / "urls").unlink(missing_ok=True)
+        subprocess.run(["bash", HERE / "deploy.sh", "remote", "check", i], capture_output=True, text=True,
+                       env={**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"})
+        urls = (tmp_path / "urls").read_text().split()
+        assert urls and all(u.startswith(f"http://{want}:8770/") for u in urls), (host, urls)
