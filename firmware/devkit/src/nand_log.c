@@ -230,7 +230,7 @@ static int verify(uint32_t b, uint32_t *s0)
 {
     uint32_t file = INV, s = INV;
     bool run = false;
-    for (uint32_t p = 0; p < 3; p++) {
+    for (uint32_t p = 0; p < NL_PPB; p++) {  // to the first blank: one page that checks is enough (a block gone bad)
         struct hdr h;
         bool crc_ok;
         int ecc, err = read_whole(b * NL_PPB + p, &h, &crc_ok, &ecc);
@@ -324,7 +324,7 @@ static int advance(void)
         }
         drop(b);
         if (ops->save_erase(b) && ops->save_erase(b)) {  // an erase cut short reads as pages ECC cannot correct: the
-            nl_err[NL_FAILS]++;  // next mount erases it again. Not in NVS: erased all the same (one cut: kept, not lost)
+            nl_err[NL_NVS]++;  // next mount erases it again. Not in NVS: erased all the same (one cut: kept, not lost)
         }
         int err = ops->erase(b);
         if (err && err != -EIO) {

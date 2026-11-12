@@ -902,15 +902,15 @@ static void test_erase_cut(void)
         uint32_t u = 0, f;
         uint32_t t = lapped(&u, &f);
         int e0 = erases[t];
-        uint32_t fails = nl_err[NL_FAILS];
+        uint32_t fails = nl_err[NL_NVS];
         if (k == 2) {  // NVS takes no writes: each erase goes on (two here), counted
             save_fails = 1 << 30;
             put(f, size_of(f), 70 * NL_PAGE);
-            assert(!nl_flush() && erases[t] == e0 + 1 && nl_err[NL_FAILS] == fails + 2);
+            assert(!nl_flush() && erases[t] == e0 + 1 && nl_err[NL_NVS] == fails + 2 && !nl_err[NL_FAILS]);
             save_fails = 0;
         } else if (k == 3) {  // one write fails at the mount's erase: tried again, the erase goes on, not counted
             save_fails = 1;
-            assert(!mount(u) && erases[t] == e0 + 1 && nl_err[NL_FAILS] == fails && wblock == t);
+            assert(!mount(u) && erases[t] == e0 + 1 && nl_err[NL_NVS] == fails && wblock == t);
         } else {
             erase_half = k < 4 ? 1 : 2, ops_n = 0, cut_at = 1;
             if (k & 1) {
@@ -947,22 +947,27 @@ static void test_erase_cut(void)
         rfail_n = 0;
     }
 
-    fresh();
-    assert(!mount(0));
-    put(1, 0, (64 * 2 + 40) * NL_PAGE);  // blocks 0, 1 full, block 2: 40 pages
-    assert(!nl_flush() && wblock == 2);
-    for (uint32_t p = 2 * NL_PPB; p < 2 * NL_PPB + 3; p++) {
-        ecc_of[p] = 2;
+    // the newest block (NVS names it), its pages not checking: the first three only, one header hit on the second (no
+    // run there: k 0 its file, k 1 its seq): read on to one that checks, data, listed whole; all it has, a run: kept
+    for (int k = 0; k < 3; k++) {
+        fresh();
+        assert(!mount(0));
+        put(1, 0, (64 * 2 + 40) * NL_PAGE);  // blocks 0, 1 full, block 2: 40 pages
+        assert(!nl_flush() && wblock == 2 && sim_erasing == 2);
+        for (uint32_t p = 2 * NL_PPB; p < 2 * NL_PPB + (k < 2 ? 3 : 40); p++) {
+            ecc_of[p] = 2;
+        }
+        mem[2 * NL_PPB + 1][NL_PAGE + (k ? 7 : 23)] |= k < 2 ? 0x01 : 0;  // bit 24
+        assert(!mount(0) && erases[2] == 1 && bit(bad, 2) == (k == 2) && unknown == (k == 2));
+        assert(k == 2 || size_of(1) == (64 * 2 + 40) * NL_PAGE);
     }
-    sim_erasing = 2;
-    assert(!mount(0) && bit(bad, 2) && unknown == 1 && erases[2] == 1);
 
     // the ring gone round: the newest kept so, the next to erase is then the one after it, checked first (its first
     // page's data not checking, its second page's reads failing: kept too)
     uint32_t u = 0, f;
     uint32_t t = lapped(&u, &f), h = wblock;
     int e0 = erases[t];
-    for (uint32_t p = h * NL_PPB; p < h * NL_PPB + 3; p++) {
+    for (uint32_t p = h * NL_PPB; p < (h + 1) * NL_PPB; p++) {
         ecc_of[p] = 2;
     }
     mem[t * NL_PPB][0] ^= 1;
@@ -974,8 +979,10 @@ static void test_erase_cut(void)
     assert(!mount(0));
     put(1, 0, (64 * 3 + 30) * NL_PAGE);
     assert(!nl_flush());
-    ecc_of[NL_PPB] = 2;  // block 1: three pages that do not check, their headers no run
-    mem[NL_PPB + 1][0] ^= 1, mem[NL_PPB + 2][0] ^= 1, mem[NL_PPB + 1][NL_PAGE + 4] ^= 0x10;
+    for (uint32_t p = NL_PPB; p < 2 * NL_PPB; p++) {
+        mem[p][0] ^= 1;  // block 1: no page that checks (the first ECC 2, the rest their data wrong)
+    }
+    ecc_of[NL_PPB] = 2;
     sim_erasing = 1;
     assert(!mount(0) && bit(bad, 1) && unknown == 1 && erases[1] == 1);
     printf("erase cut short ok\n");

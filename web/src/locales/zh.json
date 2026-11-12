@@ -662,6 +662,7 @@
       "SD_ERRORS": "存储卡驱动出错（10 分钟）",
       "PHONE": "手机接管录音流",
       "FORMAT": "格式化存储卡",
+      "NVS_FAIL": "擦除记录没写进设置区",
       "unknown": "未知事件"
     },
     "reset": {
@@ -745,6 +746,7 @@
     "phoneOut": "回到写卡（{why}）：没确认的 {b} B 写上卡，距上次确认 {ms} ms，最多 {kb} KB 没确认",
     "phoneRecovered": "上次重启时内存里的 {b} B 写上卡：{file}.BIN",
     "formatDone": "{gb} GB 的卡格式化成 {fs}，用时 {s} s",
+    "nvsFail": "设置区两次都没记下要擦的块，照样擦了（{n} 次，本次开机第一条）",
     "formatFail": "{gb} GB 的卡没有格式化：{why}",
     "formatWhy": {
       "5": "格式化失败",
