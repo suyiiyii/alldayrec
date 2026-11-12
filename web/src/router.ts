@@ -85,7 +85,7 @@ router.afterEach(title);
 const STALE =
   /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i;
 router.onError((err, to) => {
-  if (!STALE.test(String(err?.message ?? err))) return;
+  if (!STALE.test(String(err?.message ?? err))) return console.error(err); // as vue-router does without a handler
   const href = router.resolve(to.fullPath).href;
   try {
     if (sessionStorage.getItem("chunkReload") === href) return;
