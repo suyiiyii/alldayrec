@@ -17,11 +17,13 @@ export const importLine = (d: DeviceStatus) => {
 // the same place (colocate.py), and the slowest captions of those transcribing
 export function recordingNow(ds: DeviceStatus[]) {
   const rec = ds.filter(showLiveLag);
-  const main = rec.some((d) => !d.standby) ? rec.filter((d) => !d.standby) : rec; // all standing by: for one not recording
-  const lags = main.flatMap((d) => (d.latency_s == null ? [] : [d.latency_s]));
+  const on = new Set(rec.filter((d) => !d.standby).map((d) => d.device));
+  // one standing by for a recorder that stopped takes over in a minute or two: named, but its lag is from before
+  const spare = rec.filter((d) => d.standby && on.has(d.standby));
+  const lags = rec.flatMap((d) => (on.has(d.device) && d.latency_s != null ? [d.latency_s] : []));
   return {
-    main: main.map((d) => d.device),
-    spare: rec.filter((d) => !main.includes(d)).map((d) => d.device),
+    main: rec.filter((d) => !spare.includes(d)).map((d) => d.device),
+    spare: spare.map((d) => d.device),
     lag: lags.length ? Math.max(...lags) : null,
   };
 }
