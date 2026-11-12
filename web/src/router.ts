@@ -79,6 +79,28 @@ const title = () => {
   document.title = k ? t(k) : "AllDayRec";
 };
 router.afterEach(title);
+// A page's chunk that a deploy since this page loaded removed (each build empties dist): a 404, and the tap did
+// nothing (#327). Load the page anew at its target, once a target: a mark in this tab stops a loop when the chunk is
+// missing for good, and a page that loads clears it for the next deploy. No storage: no mark, no reload.
+const STALE =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i;
+router.onError((err, to) => {
+  if (!STALE.test(String(err?.message ?? err))) return;
+  const href = router.resolve(to.fullPath).href;
+  try {
+    if (sessionStorage.getItem("chunkReload") === href) return;
+    sessionStorage.setItem("chunkReload", href);
+  } catch {
+    return;
+  }
+  location.assign(href);
+});
+router.afterEach((_to, _from, failure) => {
+  if (failure) return;
+  try {
+    sessionStorage.removeItem("chunkReload");
+  } catch {}
+});
 // the online demo has no recorder, microphone, phone or AI service to reach (src/demo.ts): those pages say so; opened
 // directly, the timeline instead
 if (import.meta.env.MODE === "demo")
