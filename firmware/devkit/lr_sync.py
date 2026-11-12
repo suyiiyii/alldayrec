@@ -419,6 +419,7 @@ EVENTS = {
     36: ("FORMAT", lambda x, a, b: f"{a * 512 / 1e9:.2f} GB card made {'exFAT' if a >= 0x4000000 else 'FAT32'} in {b / 1000:.1f} s" if not x else
          f"{a * 512 / 1e9:.2f} GB card not formatted: " + {17: "it mounted after all", 19: "no card answered",
                                                         5: "the format failed"}.get(x, f"error {x}")),
+    37: ("NVS_FAIL", lambda x, a, b: f"NVS did not take the block of {a} NAND erase(s), erased all the same (first this boot)"),
 }
 
 

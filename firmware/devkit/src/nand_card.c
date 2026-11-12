@@ -201,18 +201,20 @@ static int chip_init(uint32_t *blocks)
 
 /* The SD card's error counts (SD_ERRORS, lr_store.c) take the chip's: CRC its reads ECC could not correct, BUSY those
  * it corrected, TIMEOUT busy waits that ran out, OTHER program and erase failures. Files overwritten before they were
- * uploaded: a CARD_FULL x 2 (a their count) */
+ * uploaded: a CARD_FULL x 2 (a their count); an erase NVS did not take the block of: NVS_FAIL, the first of a boot */
 static void count_errors(void)
 {
     static uint32_t seen[NL_ERR_N];
-    static const uint8_t to[NL_ERR_N] = {LR_SD_BUSY, LR_SD_CRC, LR_SD_OTHER, LR_SD_TIMEOUT, LR_SD_ERR_N};
+    static const uint8_t to[NL_ERR_N] = {LR_SD_BUSY, LR_SD_CRC, LR_SD_OTHER, LR_SD_TIMEOUT, LR_SD_ERR_N, LR_SD_ERR_N};
     for (int i = 0; i < NL_ERR_N; i++) {
         uint32_t d = nl_err[i] - seen[i];
         seen[i] = nl_err[i];
         if (d && to[i] < LR_SD_ERR_N) {
             lr_sd_err[to[i]] += d;
-        } else if (d) {
+        } else if (d && i == NL_LOST) {
             lr_log(LR_CARD_FULL, 2, d, 0);
+        } else if (d && seen[i] == d) {  // NVS worn out: one each erase (every 32 s) would fill the log
+            lr_log(LR_NVS_FAIL, 0, d, 0);
         }
     }
 }

@@ -662,6 +662,7 @@
       "SD_ERRORS": "Card driver errors (10 min)",
       "PHONE": "Phone takes the stream",
       "FORMAT": "Format the card",
+      "NVS_FAIL": "Erase record not saved",
       "unknown": "Unknown event"
     },
     "reset": {
@@ -745,6 +746,7 @@
     "phoneOut": "back to the card ({why}): {b} B not acked written to it, last ACK {ms} ms before, at most {kb} KB not acked",
     "phoneRecovered": "{b} B left in RAM by the last reset written to the card: {file}.BIN",
     "formatDone": "{gb} GB card formatted as {fs} in {s} s",
+    "nvsFail": "settings did not take the block about to be erased, twice; erased anyway ({n}, first this boot)",
     "formatFail": "{gb} GB card not formatted: {why}",
     "formatWhy": {
       "5": "the format failed",

@@ -264,6 +264,7 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   34: ["SD_ERRORS", sdErrors],
   35: ["PHONE", phoneMode],
   36: ["FORMAT", format],
+  37: ["NVS_FAIL", (r) => t("rec.nvsFail", { n: r.a })],
 };
 // every few minutes or every connection: hidden unless asked for
 const ROUTINE = new Set([9, 11, 12, 13, 14, 15, 20, 22, 23, 25, 32, 33]);
@@ -291,7 +292,7 @@ export function describe(r: Rec): Said {
     (code === 29 && r.a !== 0) || // the power-fail warning, a low battery's System OFF
     (code === BOOT && (r.a & 0b1010) !== 0); // the last boot ended by the watchdog or a lockup
   const warn =
-    [BOOT, DISCONNECT, DFU, 5, 8, 18, 30, 34].includes(code) ||
+    [BOOT, DISCONNECT, DFU, 5, 8, 18, 30, 34, 37].includes(code) ||
     (code === 31 && (r.a & 0xfffff) + (r.a >>> 20) > 0); // the mic gave all-zero frames, or PDM errors
   return {
     name,
