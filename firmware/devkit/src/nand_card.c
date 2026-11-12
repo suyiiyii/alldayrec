@@ -159,8 +159,9 @@ static int n_mark_bad(uint32_t block)
 }
 
 /* In NVS (nand_log.h): the seq ceiling, written as the log's seqs reach it (about every 8 MB); the block an erase is
- * begun on, written before each erase and cleared after it (every 128 KB recorded, about 5400 a day at 4 KB/s: 12 B
- * each, the 16 KB settings partition's four 4 KB sectors each erased 4-5 times a day: 10 000 cycles last 5-7 years) */
+ * begun on, written before each erase (every 128 KB recorded, about 2700 a day at 4 KB/s all day: 12 B each, the
+ * 16 KB settings partition's four 4 KB sectors each erased 2-3 times a day, the bonds moved at each: 10 000 cycles last
+ * 8-13 years) */
 #define TOP_KEY "lr/nand_top"
 #define ERASE_KEY "lr/nand_erase"
 

@@ -224,8 +224,8 @@ enum { V_OK, V_EMPTY, V_UNKNOWN, V_RUN, V_FAIL };
 
 /* Block b's seq0 from its pages read whole (mount): the first whose header and CRC hold gives it, its seq less its
  * page. V_EMPTY: no page that holds and none can (the first blank, or the only one written cut mid-program); V_UNKNOWN:
- * written pages that do not check; V_RUN: so, but two of their headers (as read) are one file's run of seqs: data, not
- * an erase cut short; V_FAIL: a read that failed: may hold data */
+ * written pages that do not check; V_RUN: so, but two of their headers (as read) are one file's run of seqs (*s0: its
+ * first, less its page): data, or an erase cut early; V_FAIL: a read that failed: may hold data */
 static int verify(uint32_t b, uint32_t *s0)
 {
     uint32_t file = INV, s = INV;
@@ -242,6 +242,7 @@ static int verify(uint32_t b, uint32_t *s0)
             return V_OK;
         }
         if (!err) {
+            *s0 = !run && h.file == file && h.seq - p == s ? s : *s0;
             run = run || (h.file == file && h.seq - p == s);
             file = h.file, s = h.seq - p;
         }
@@ -322,15 +323,12 @@ static int advance(void)
             continue;
         }
         drop(b);
-        if (ops->save_erase(b)) {  // an erase cut short reads as pages ECC cannot correct: the next mount erases it
-            return -EAGAIN;        // again. Not in NVS: not begun (it would be kept for good if cut); the next page tries
+        if (ops->save_erase(b) && ops->save_erase(b)) {  // an erase cut short reads as pages ECC cannot correct: the
+            nl_err[NL_FAILS]++;  // next mount erases it again. Not in NVS: erased all the same (one cut: kept, not lost)
         }
         int err = ops->erase(b);
         if (err && err != -EIO) {
             return err;  // the chip does not answer: no block to blame
-        }
-        if (!err) {
-            ops->save_erase(INV);  // done: NVS never names the block being written (one that fails: verify's run check)
         }
         if (err) {
             nl_err[NL_FAILS]++;
@@ -504,7 +502,8 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
     top = t0;
     erasing = e0;
     next_seq = INV;  // page_of: no bound yet
-    uint32_t half = INV;  // the block NVS has an erase begun on, its pages not checking: erased again if next to erase
+    uint32_t half = INV, half_s0 = INV;  // the block NVS has an erase begun on, its pages not checking (half_s0: the
+                                         // run they read as): erased again if next to erase
 
     // every block's first page: bad marks (0x800, ours and the factory's), seq0, blank
     bool data = false;
@@ -523,8 +522,9 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
         } else if (r == H_BAD) {  // not ours, ECC failed, or cut mid-program: its pages say
             set_bit(checked, b);
             int v = verify(b, &s0);
-            if (v == V_UNKNOWN && b == erasing) {
+            if ((v == V_UNKNOWN || v == V_RUN) && b == erasing) {
                 half = b;
+                half_s0 = v == V_RUN ? s0 : INV;
             } else if (v >= V_UNKNOWN) {
                 keep(b);
             } else if (v == V_OK) {
@@ -546,6 +546,7 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
     }
 
     uint32_t last, head;
+heads:
     for (;;) {
         last = head = INV;
         for (uint32_t b = 0; b < nblocks; b++) {
@@ -621,6 +622,13 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
             break;
         }
     }
+    // the block NVS names, its run newer than the newest (checked whole) and below top (written): the newest's data, its
+    // pages gone bad since; kept, the walk done again for the next to erase. Older: the oldest, its erase cut early
+    if (half_s0 < top && (head == INV || half_s0 > seq0[head])) {
+        keep(half);
+        half = half_s0 = INV;
+        goto heads;
+    }
     // odd blocks left are factory bad, but the next one to be written after the newest: that one is ours, cut
     // mid-program (no newest: none is)
     uint32_t t = head == INV ? INV : next_good(head);
@@ -649,8 +657,7 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
     build();
     held = unknown || hdr_doubts;  // a header in the list's range not read for sure: its file may not be listed
     rd_seq = INV;
-    int err = advance();
-    return err == -EAGAIN ? 0 : err;  // NVS did not take the erase's block: the first page tries again
+    return advance();
 }
 
 int nl_flush(void)
