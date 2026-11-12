@@ -112,7 +112,12 @@ const live = {
   arrival: { at: Date.now(), lag_s: 8 },
 };
 let status = { recording: true, devices: [imported, live] };
+const sockets: Socket[] = [];
 class Socket {
+  onmessage?: (e: { data: string }) => void;
+  constructor() {
+    sockets.push(this);
+  }
   send() {}
   close() {}
 }
@@ -218,6 +223,36 @@ try {
     assert.doesNotMatch(text(history), /还剩|Transcribing, about/);
     historyApp.unmount();
   }
+  // the cards keep their places while the status every 2 s says another device's audio came last: a tap meant for
+  // one card's 日志 lands on it (11-13: the cards swapped under the finger, 日志 went nowhere or to the other device)
+  pageI18n.global.locale.value = "zh";
+  const card = (device: string, received_to: string) => ({ ...live, device, received_to });
+  status = {
+    recording: true,
+    devices: [card("LR-P3-0002", "2026-01-01T10:00:02"), card("LR-N4-0001", "2026-01-01T10:00:00")],
+  };
+  const root = node("root");
+  const app = renderer.createApp(Page);
+  app.component("RouterLink", { template: "", render: () => null });
+  app.mount(root);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await nextTick();
+  const order = () => sections(root).flatMap((c) => text(c).match(/LR-\w+-\d+/) ?? []);
+  const before = order();
+  assert.deepEqual(before, ["LR-N4-0001", "LR-P3-0002"]);
+  sockets.at(-1)!.onmessage!({
+    data: JSON.stringify({
+      type: "status",
+      recording: true,
+      devices: [
+        card("LR-P3-0002", "2026-01-01T10:00:02"),
+        card("LR-N4-0001", "2026-01-01T10:00:04"),
+      ],
+    }),
+  });
+  await nextTick();
+  assert.deepEqual(order(), before);
+  app.unmount();
 } finally {
   await server.close();
 }

@@ -144,10 +144,9 @@ const balance = computed(() => {
   };
 });
 
+// by name: the status every 2 s must not swap the cards under a finger reaching for one's 日志 (11-13)
 const devices = computed(() =>
-  [...(status.value?.devices ?? [])].sort((a, b) =>
-    (a.received_to ?? "") < (b.received_to ?? "") ? 1 : -1,
-  ),
+  [...(status.value?.devices ?? [])].sort((a, b) => (a.device < b.device ? -1 : 1)),
 );
 // each device's last firmware update in 30 days, looked up when the devices change
 const ups = ref<Record<string, Upgrade | undefined>>({});
@@ -498,6 +497,7 @@ const retryLate = (device: string) =>
 }
 .top b + a {
   margin-left: var(--space-2);
+  padding-block: 12px; /* inline: a finger-sized target (18 px of text), the line stays as it was */
 }
 main {
   padding-top: var(--space-3);
