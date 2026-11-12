@@ -97,7 +97,18 @@ onMounted(() => {
   }, 60_000);
 });
 onUnmounted(() => clearInterval(tick));
-const KINDS = ["final", "draft", "late", "summary", "split", "hints", "profile", "recap", "live", "ask"];
+const KINDS = [
+  "final",
+  "draft",
+  "late",
+  "summary",
+  "split",
+  "hints",
+  "profile",
+  "recap",
+  "live",
+  "ask",
+];
 const kind = (k: string) => (KINDS.includes(k) ? t(`progress.kind.${k}`) : k);
 const secs = (ms: number | null) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)} s`);
 const sec = (n?: number | null) => (n == null ? "—" : t("common.sec", { n }));
@@ -210,15 +221,22 @@ const eta = (d: DeviceStatus) => {
 const lateLine = (d: DeviceStatus) =>
   Object.entries(d.late ?? {})
     .filter(([, v]) => v.spans > 0)
-    .map(([s, v]) => t(`progress.late.${s}`, { n: v.spans, m: v.minutes.toFixed(1) }, v.spans) + (v.note ? ` (${v.note})` : ""))
+    .map(
+      ([s, v]) =>
+        t(`progress.late.${s}`, { n: v.spans, m: v.minutes.toFixed(1) }, v.spans) +
+        (v.note ? ` (${v.note})` : ""),
+    )
     .join(" · ");
 // 重试: the device's failed late spans queued again (three new tries); the status the socket sends shows them waiting.
 // One per device: an error or a retry under way shows on its own row only
 const retries = new Map<string, ReturnType<typeof useMutation>>();
-const retry = (device: string) => retries.get(device) ?? retries.set(device, useMutation()).get(device)!;
+const retry = (device: string) =>
+  retries.get(device) ?? retries.set(device, useMutation()).get(device)!;
 const retryLate = (device: string) =>
   retry(device).run(async () => {
-    const r = await post<{ requeued: number }>(`/api/late-requeue?device=${encodeURIComponent(device)}`);
+    const r = await post<{ requeued: number }>(
+      `/api/late-requeue?device=${encodeURIComponent(device)}`,
+    );
     toast(t("progress.late.requeued", { n: r.requeued }, r.requeued));
   });
 </script>
@@ -305,6 +323,8 @@ const retryLate = (device: string) =>
           )
         }}</span>
       </div>
+      <!-- standing by: the live page's 「+1 备用」 opens this page, a phone has no hover for its name -->
+      <p v-if="d.standby" class="sb">{{ t("deviceCard.standbyOf", { d: d.standby }) }}</p>
       <div class="grid">
         <span>{{ t("progress.received") }}</span
         ><span>{{ at(d.received_to) }}</span> <span>{{ t("progress.finalized") }}</span
@@ -338,7 +358,9 @@ const retryLate = (device: string) =>
             >
               {{ t("progress.late.retry") }}
             </button>
-            <template v-if="retry(d.device).error.value">{{ retry(d.device).error.value }}</template></span
+            <template v-if="retry(d.device).error.value">{{
+              retry(d.device).error.value
+            }}</template></span
           >
         </template>
         <span>{{ t("progress.speed") }}</span
@@ -411,7 +433,9 @@ const retryLate = (device: string) =>
         <template v-if="micGaps(d.device).length">
           <span>{{ t("progress.micGaps") }}</span
           ><span :class="{ bad: !micGaps(d.device).at(-1)!.to }">{{
-            micGaps(d.device).map((s) => micGap(s, true)).join(" · ")
+            micGaps(d.device)
+              .map((s) => micGap(s, true))
+              .join(" · ")
           }}</span>
         </template>
         <template v-if="ups[d.device]">
@@ -462,6 +486,11 @@ const retryLate = (device: string) =>
 </template>
 
 <style scoped>
+.sb {
+  margin: 0 0 6px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
 .top {
   display: flex;
   justify-content: space-between;

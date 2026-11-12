@@ -48,11 +48,17 @@ assert.deepEqual(recordingNow([rec("LR-P3-0001"), rec("LR-N4-0002", { latency_s:
   spare: [],
   lag: 5,
 });
-assert.deepEqual(recordingNow([rec("LR-N4-0002", { standby: "LR-P3-0001", latency_s: null })]), {
+// all standing by, for one that stopped: named, but no lag from before they stood by
+assert.deepEqual(recordingNow([rec("LR-N4-0002", { standby: "LR-P3-0001", latency_s: 90 })]), {
   main: ["LR-N4-0002"],
   spare: [],
   lag: null,
 });
+// standing by for one that stopped while another records elsewhere: no 「+1 备用」 beside that other one
+assert.deepEqual(
+  recordingNow([rec("LR-N4-0002", { standby: "LR-P3-0001", latency_s: 90 }), rec("LR-X1-0003")]),
+  { main: ["LR-N4-0002", "LR-X1-0003"], spare: [], lag: 3 },
+);
 i18n.global.locale.value = "en";
 assert.equal(importLine(imported), "Transcribed 2 / 10 min of audio");
 assert.equal(
@@ -152,7 +158,14 @@ try {
     ["zh", 120],
     ["en", 120],
   ] as const) {
-    status = { recording: true, devices: [{ ...imported, left_s: 480, eta_s: estimate }, live] };
+    status = {
+      recording: true,
+      devices: [
+        { ...imported, left_s: 480, eta_s: estimate },
+        live,
+        { ...live, device: "recorder-spare", standby: "recorder-demo" },
+      ],
+    };
     pageI18n.global.locale.value = locale;
     const root = node("root");
     const app = renderer.createApp(Page);
@@ -162,7 +175,7 @@ try {
     await nextTick();
     const cards = sections(root);
     const batch = cards.find((c) => text(c).includes("import-synthetic"))!;
-    const recorder = cards.find((c) => text(c).includes("recorder-demo"))!;
+    const recorder = cards.find((c) => text(c).startsWith("recorder-demo"))!;
     assert.ok(batch && recorder, "the real progress page renders both sources");
     assert.match(
       text(batch),
@@ -173,6 +186,10 @@ try {
     else assert.doesNotMatch(text(batch), /预计完成|ETA/);
     assert.match(text(recorder), locale === "zh" ? /实时延迟/ : /Live lag/);
     assert.match(text(recorder), /8/);
+    // the live page's 「+1 备用」 opens this page: a phone sees the standby's name here
+    const spare = cards.find((c) => text(c).includes("recorder-spare"))!;
+    assert.match(text(spare), locale === "zh" ? /和 recorder-demo 在同一处/ : /With recorder-demo/);
+    assert.doesNotMatch(text(recorder), /在同一处|With recorder/);
     app.unmount();
     const history = node("root");
     Object.assign(status, {

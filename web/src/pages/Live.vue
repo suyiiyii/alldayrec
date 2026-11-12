@@ -264,7 +264,7 @@ function jump(start: string) {
         <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
       </DayPicker>
       <!-- recording or not, on which recorders (one standing by for another in the same place: +1 备用, its name on
-           hover), and how far behind their newest sentence came up (each status, every 2 s); the rest is on the
+           hover and on the progress page a tap opens), and how far behind their newest sentence came up (each status, every 2 s); the rest is on the
            progress page -->
       <RouterLink class="status" to="/progress" :title="t('title.progress')">
         <template v-if="!connected">{{ t("live.reconnecting") }}</template>
