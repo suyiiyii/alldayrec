@@ -39,6 +39,7 @@ REFINE_WINDOW_S = int(os.environ.get("REFINE_WINDOW_S", "240"))    # draft layer
 REFINE_MARGIN_S = 1.0                      # audio re-read before the last drafted time: the engine's sentence starts come a little late
 DRAFT_BACK_S = 300                         # a page that opens gets drafts this far back at most (the minutes not final yet)
 LIVE_AUDIO_S = 120                         # a device whose audio came this recently is recording now: drafts and live analysis
+DRAFT_NEAR_S = 10                          # draft layer: how often it looks for another recorder drafting in the same place
 LIVE_EVERY_S = int(os.environ.get("LIVE_EVERY_S", "120"))  # new speech in the open conversation before the live analysis is redone
 # qwen-stream: a session given no new audio this long is finished by us; the server fails one after 23 s without audio
 # (10-25: "request timeout after 23 seconds" between the 60 s pieces of a phone with its screen off). Far above the
@@ -525,10 +526,29 @@ async def pipeline(device: str):
                 maybe_live()
                 await anyio.sleep(2)
 
+    near = [0.0, None]  # colocate.drafted_by(): when to look again, and what it found
+
     def drafting() -> bool:
-        """A page watches and this device is recording now (its newest audio is recent, backlog or not), not as a standby."""
-        return (time.time() < T().watch_until and bool(dseg.anchors) and st.edge_end is not None and not st.standby
-                and (dt.datetime.now() - st.edge_end).total_seconds() < LIVE_AUDIO_S)
+        """A page watches and this device is recording now (its newest audio is recent, backlog or not), not as a standby,
+        nor where another recorder drafts (colocate.drafted_by, every DRAFT_NEAR_S): what it hears the other drafts, so its
+        draft_to keeps up with the other's (not past its own audio, never back): when the other stops or leaves, it
+        drafts on from where the other stopped, not from minutes later. Not drafting clears st.drafting at once: of two
+        drafting as they come to correlate, the first to look stops and the other, looking after, sees it stopped."""
+        ok = (time.time() < T().watch_until and bool(dseg.anchors) and st.edge_end is not None and not st.standby
+              and (dt.datetime.now() - st.edge_end).total_seconds() < LIVE_AUDIO_S)
+        if ok and time.monotonic() >= near[0]:
+            was = near[1]
+            near[:] = time.monotonic() + DRAFT_NEAR_S, colocate.drafted_by(device)
+            if near[1] and near[1] != was:
+                log.info("%s: drafts left to %s (same place)", device, near[1])
+                ws.note(f"{device}：{near[1]} 在同一处出初稿，这台先不出", "state")
+        if ok and near[1]:
+            end, o = dseg.time_at(dseg.samples), T().devices.get(near[1])
+            to = min(end, o.draft_to or end) if o else None  # o None: not in this tenant (any more), stay put
+            ok, st.draft_to = False, max((t for t in (st.draft_to, to) if t), default=None)
+        if not ok:
+            st.drafting = False
+        return ok
 
     async def publish_drafts(rows: list[dict], upto: dt.datetime, engine: str):
         """Store, push and advance draft_to: a crash after this does not redo these rows."""
@@ -643,7 +663,6 @@ async def pipeline(device: str):
                 await st.wake.wait()
             by_vad = st.take_draft_wake()
             if not drafting():
-                st.drafting = False
                 continue
             # from where drafts or final rows stop, but no further back than DRAFT_BACK_S: a page that opens sees the
             # minutes not final yet, not a backlog
@@ -692,7 +711,6 @@ async def pipeline(device: str):
         while True:
             await anyio.sleep(1)
             if not drafting():
-                st.drafting = False
                 continue
             floor = dseg.time_at(dseg.samples) - dt.timedelta(seconds=DRAFT_BACK_S)
             st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
