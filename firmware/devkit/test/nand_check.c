@@ -29,8 +29,10 @@ static bool tear_spare;  // a cut program leaves the spare area (the header) who
 static bool mark_fails;  // a bad-block mark does not take
 static uint32_t rfail_page = INV;  // reads of this page fail (-EIO), rfail_n more times
 static int rfail_n;
-static uint32_t rflip_page = INV;  // the next read of this page's byte rflip_at comes back with rflip_mask flipped (SPI)
-static uint32_t rflip_at = NL_PAGE + 7, rflip_mask = 0x01;  // bit 24 of the header's seq
+static uint32_t rflip_page = INV;  // the next rflip_n reads of this page's byte rflip_at come back with rflip_mask
+static uint32_t rflip_at = NL_PAGE + 7, rflip_mask = 0x01;  // flipped (SPI); bit 24 of the header's seq
+static int rflip_n = 1;
+static uint32_t sim_top;  // the seq ceiling kept in NVS
 static int nprog[NP];   // programs of the page since its block's erase: NoP 4
 static int erases[NB];
 static uint32_t committed[1 << 12];  // per file (low 12 bits): bytes in pages whose program finished
@@ -55,7 +57,7 @@ static int sim_read(uint32_t page, uint16_t col, void *buf, uint16_t n, int *ecc
     memcpy(buf, mem[page] + col, n);
     if (page == rflip_page && col <= rflip_at && rflip_at < col + n) {
         ((uint8_t *) buf)[rflip_at - col] ^= rflip_mask;
-        rflip_page = INV;
+        rflip_page = --rflip_n > 0 ? rflip_page : INV;
     }
     *ecc = ecc_of[page];
     if (*ecc == 2 && n > 8) {
@@ -93,6 +95,7 @@ static int sim_program(uint32_t page, const uint8_t *data, const uint8_t *spare)
         }
     }
     programmed[page] = true;
+    ecc_of[page] = torn ? 2 : 0;  // cut mid-program: on the chip, ECC cannot correct it either
     for (int i = 0; i < PS; i++) {
         uint8_t v = i < NL_PAGE ? data[i] : spare[i - NL_PAGE];
         bool part = (torn && !(tear_spare && i >= NL_PAGE)) || (page == pfail && !pfail_good);
@@ -123,6 +126,7 @@ static int sim_erase(uint32_t block)
             memset(mem[p], 0xFF, PS);
             programmed[p] = false;
             nprog[p] = 0;
+            ecc_of[p] = 0;
         }
     }
     if (block == efail) {
@@ -141,7 +145,20 @@ static int sim_mark(uint32_t block)
     return 0;
 }
 
-static const struct nl_ops sim = {sim_read, sim_program, sim_erase, sim_mark};
+static void sim_save_top(uint32_t top)
+{
+    if (!dead) {
+        assert(top > sim_top);
+        sim_top = top;
+    }
+}
+
+static const struct nl_ops sim = {sim_read, sim_program, sim_erase, sim_mark, sim_save_top};
+
+static int mount(uint32_t up)
+{
+    return nl_mount(&sim, NB, up, sim_top);
+}
 
 static void fresh(void)
 {
@@ -153,8 +170,9 @@ static void fresh(void)
     memset(nprog, 0, sizeof(nprog));
     memset(erases, 0, sizeof(erases));
     pfail = efail = rfail_page = rflip_page = INV;
-    rflip_at = NL_PAGE + 7, rflip_mask = 0x01;
+    rflip_at = NL_PAGE + 7, rflip_mask = 0x01, rflip_n = 1;
     rfail_n = 0;
+    sim_top = 0;
     hung = pfail_good = tear_spare = mark_fails = false;
     ops_n = 0;
     cut_at = -1;
@@ -269,7 +287,7 @@ static void check_list_by_scan(void)
 static void test_basic(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0) && nl_files() == 0 && nl_total() == (uint64_t) NB * NL_PPB * NL_PAGE);
+    assert(!mount(0) && nl_files() == 0 && nl_total() == (uint64_t) NB * NL_PPB * NL_PAGE);
     put(1, 0, 5000);
     put(1, 5000, 3000);
     assert(size_of(1) == 8000);
@@ -285,7 +303,7 @@ static void test_basic(void)
     check_all(false);
     assert(nl_used() == 8000 + 100 + 4100);
 
-    assert(!nl_mount(&sim, NB, 0));  // remount: the same list, the halving's against a full scan
+    assert(!mount(0));  // remount: the same list, the halving's against a full scan
     assert(nl_files() == 3 && size_of(1) == 8000 && size_of(2) == 100 && size_of(3) == 4100);
     check_all(false);
     check_list_by_scan();
@@ -294,11 +312,11 @@ static void test_basic(void)
     assert(!nl_delete(1, &moved) && moved);
     uint32_t u = nl_up();
     assert(!nl_delete(3, &moved) && !moved && nl_files() == 1);
-    assert(!nl_mount(&sim, NB, u));
+    assert(!mount(u));
     assert(nl_files() == 2 && size_of(1) == INV && size_of(2) == 100 && size_of(3) == 4100);
     put(4, 0, 10);  // a new file after a remount
     assert(!nl_flush());
-    assert(!nl_mount(&sim, NB, u) && size_of(4) == 10);
+    assert(!mount(u) && size_of(4) == 10);
     check_list_by_scan();
     printf("basic ok\n");
 }
@@ -328,16 +346,16 @@ static void test_wrap(void)
 {
     uint32_t u = 0;
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     writer(1, 200, true, &u);  // ~6 MB through a 2 MB chip, the phone keeping up
     assert(nl_err[NL_LOST] == 0 && nl_files() == 1);
     check_all(false);
-    assert(!nl_mount(&sim, NB, u) && nl_files() == 1);
+    assert(!mount(u) && nl_files() == 1);
     check_all(false);
 
     fresh();
     u = 0;
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     writer(1, 200, false, &u);  // no phone: the oldest go
     assert(nl_err[NL_LOST] > 0 && nl_files() > 10);
     check_all(false);
@@ -347,7 +365,7 @@ static void test_wrap(void)
     for (int i = 0; i < n; i++) {
         d += lo != INV && files[i].seq >= lo && files[i].seq < hi;
     }
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     check_list_by_scan();
     check_all(false);
     assert(nl_files() == n - d);
@@ -361,9 +379,10 @@ static void test_cuts(bool wrapped)
 {
     static uint8_t mem0[NP][PS];
     static bool prog0[NP];
+    static int ecc0[NP];
     uint32_t u = 0;
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     if (wrapped) {
         rnd_state = 3;
         writer(500, 90, true, &u);
@@ -371,14 +390,16 @@ static void test_cuts(bool wrapped)
     }
     memcpy(mem0, mem, sizeof(mem));
     memcpy(prog0, programmed, sizeof(programmed));
+    memcpy(ecc0, ecc_of, sizeof(ecc_of));
     uint32_t u0 = u;
     long total = -1;
     for (long k = 0; k <= total + 1; k++) {  // k 0: no cut, counts the ops
         memset(committed, 0, sizeof(committed));
         memcpy(mem, mem0, sizeof(mem));
         memcpy(programmed, prog0, sizeof(programmed));
+        memcpy(ecc_of, ecc0, sizeof(ecc_of));
         dead = false;
-        assert(!nl_mount(&sim, NB, u0));
+        assert(!mount(u0));
         ops_n = 0;
         cut_at = k ? k : -1;
         tear_spare = k & 1;  // every other cut: the header whole, the data half done
@@ -391,7 +412,8 @@ static void test_cuts(bool wrapped)
         dead = false;
         cut_at = -1;
         tear_spare = false;
-        assert(!nl_mount(&sim, NB, u0));
+        assert(!mount(u0));
+        assert(!unknown);  // a page cut mid-program (ECC cannot correct it) is not kept: no block held at every cut
         check_list_by_scan();
         check_all(false);
         for (uint32_t f = 1; f <= 12; f++) {
@@ -402,7 +424,7 @@ static void test_cuts(bool wrapped)
             put(f, 0, 3000 + f);
             assert(!nl_flush());
         }
-        assert(!nl_mount(&sim, NB, u0));
+        assert(!mount(u0));
         check_list_by_scan();
         check_all(false);
         assert(size_of(102) == 3102);
@@ -416,7 +438,7 @@ static void test_bad(void)
     fresh();
     mem[3 * NL_PPB][0] = mem[3 * NL_PPB][NL_PAGE] = 0;  // factory bad, W25N01GV style: main and spare
     mem[5 * NL_PPB][0] = 0;                              // W25N02KV style: the main area's first byte only
-    assert(!nl_mount(&sim, NB, 0) && nl_total() == (uint64_t) (NB - 2) * NL_PPB * NL_PAGE);
+    assert(!mount(0) && nl_total() == (uint64_t) (NB - 2) * NL_PPB * NL_PAGE);
     pfail = 7 * NL_PPB + 9;  // a program fails mid-block
     efail = 10;              // an erase fails
     writer(1, 150, true, &u);  // round the ring a few times
@@ -429,7 +451,7 @@ static void test_bad(void)
     }
     assert(mem[7 * NL_PPB][NL_PAGE] == 0 && mem[10 * NL_PPB][NL_PAGE] == 0);  // marked
     check_all(false);
-    assert(!nl_mount(&sim, NB, u) && nl_total() == (uint64_t) (NB - 4) * NL_PPB * NL_PAGE);
+    assert(!mount(u) && nl_total() == (uint64_t) (NB - 4) * NL_PPB * NL_PAGE);
     check_all(false);
     printf("bad blocks ok\n");
 }
@@ -437,7 +459,7 @@ static void test_bad(void)
 static void test_ecc(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, 20000);
     assert(!nl_flush());
     uint32_t p = page_of(files[0].seq + 3);
@@ -455,7 +477,7 @@ static void test_ecc(void)
     assert(!nl_flush());
     uint32_t b2 = page_of(files[1].seq + 65) / NL_PPB;
     ecc_of[b2 * NL_PPB] = 2;
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     assert(size_of(1) == 20000 && size_of(2) == 70 * NL_PAGE);
     check_file(1, 20000, false);
     check_file(2, 70 * NL_PAGE, true);
@@ -466,7 +488,7 @@ static void test_ecc(void)
 static void test_hang(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, 10000);
     assert(!nl_flush());
     hung = true;
@@ -476,7 +498,7 @@ static void test_hang(void)
     }
     assert(nl_err[NL_FAILS] == 0);
     hung = false;
-    assert(!nl_mount(&sim, NB, 0) && nl_total() == (uint64_t) NB * NL_PPB * NL_PAGE);
+    assert(!mount(0) && nl_total() == (uint64_t) NB * NL_PPB * NL_PAGE);
     check_file(1, 10000, false);
     put(3, 0, 5000);
     assert(!nl_flush() && size_of(3) == 5000);
@@ -487,14 +509,14 @@ static void test_hang(void)
 static void test_delete_closed(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, 5000);
     bool moved;
     assert(nl_delete(1, &moved) == -EBUSY);  // its open page still in RAM
     assert(!nl_flush() && !nl_delete(1, &moved) && moved && nl_files() == 0);
     put(2, 0, 7000);
     assert(!nl_flush() && size_of(2) == 7000);
-    assert(!nl_mount(&sim, NB, nl_up()) && nl_files() == 1 && size_of(1) == INV);
+    assert(!mount(nl_up()) && nl_files() == 1 && size_of(1) == INV);
     check_file(2, 7000, false);
     printf("delete closed ok\n");
 }
@@ -507,52 +529,56 @@ static void test_pfail_good(void)
     for (int m = 0; m < 4; m++) {
         fresh();
         mark_fails = m & 1;
-        assert(!nl_mount(&sim, NB, 0));
+        assert(!mount(0));
         pfail = 2 * NL_PPB;  // block 0 and 1 fill up, block 2's first page fails
         pfail_good = true;
         put(1, 0, (m < 2 ? 64 + 64 + 10 : 64 * 4 + 5) * NL_PAGE);
         assert(!nl_flush() && nl_err[NL_FAILS] == 1);
         uint32_t want = size_of(1);
-        assert(!nl_mount(&sim, NB, 0));
+        assert(!mount(0));
         assert(size_of(1) == want);
         check_file(1, want, false);
         check_list_by_scan();
         put(2, 0, 9000);  // and on
-        assert(!nl_flush() && !nl_mount(&sim, NB, 0) && size_of(1) == want && size_of(2) == 9000);
+        assert(!nl_flush() && !mount(0) && size_of(1) == want && size_of(2) == 9000);
         check_all(false);
     }
     printf("p-fail, page good ok\n");
 }
 
-/* A bit read wrong at mount (an SPI glitch: an old block's seq looks the newest), and reads that fail at mount, once
- * or all through it: nothing erased, the file whole after the next mount */
+/* A bit read wrong all through a mount (past the two reads that agree: an old block's seq looks the newest), and reads
+ * that fail at mount, once, twice or all through it: nothing erased, the file whole after the next mount */
 static void test_mount_reads(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, 64 * 5 * NL_PAGE);
     assert(!nl_flush());
     uint32_t want = size_of(1);
-    rflip_page = 2 * NL_PPB;  // block 2's first page, an old block
-    assert(!nl_mount(&sim, NB, 0));
+    rflip_page = 2 * NL_PPB, rflip_n = 1000;  // block 2's first page, an old block, wrong all through the mount
+    assert(!mount(0));
+    rflip_page = INV;
     assert(size_of(1) == want);
     check_file(1, want, false);
-    assert(!nl_mount(&sim, NB, 0) && size_of(1) == want);
+    assert(!mount(0) && size_of(1) == want);
     // the newest block's seq read low (192 as 64): the one before it looks the newest, the newest the next to erase
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, (64 * 3 + 30) * NL_PAGE);
     assert(!nl_flush() && wblock == 3 && seq0[3] == 192);
     want = size_of(1);
-    rflip_page = 3 * NL_PPB;
+    rflip_page = 3 * NL_PPB, rflip_n = 1000;
     rflip_at = NL_PAGE + 4, rflip_mask = 0x80;
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
+    rflip_page = INV;
     assert(size_of(1) == want && erases[3] == 1);
     check_file(1, want, false);
 
-    for (int n = 1; n <= 100; n += 99) {  // once, then for the whole mount
+    static const int fails[] = {1, 2, 100};  // once, twice (the retries take both), then for the whole mount
+    for (int i = 0; i < 3; i++) {
+        int n = fails[i];
         fresh();
-        assert(!nl_mount(&sim, NB, 0));
+        assert(!mount(0));
         put(1, 0, (64 * 3 + 30) * NL_PAGE);
         assert(!nl_flush());
         want = size_of(1);
@@ -560,12 +586,12 @@ static void test_mount_reads(void)
         rfail_page = hb * NL_PPB;  // the newest block's first page
         rfail_n = n;
         int e0 = erases[hb];
-        assert(!nl_mount(&sim, NB, 0));
-        assert(erases[hb] == e0);
+        assert(!mount(0));
+        assert(erases[hb] == e0 && (n == 100) == (unknown > 0));
         put(2, 0, 5000);
         assert(!nl_flush());
         rfail_n = 0;
-        assert(!nl_mount(&sim, NB, 0));
+        assert(!mount(0));
         assert(size_of(1) == want && size_of(2) == 5000);
         check_all(false);
         check_list_by_scan();
@@ -579,10 +605,10 @@ static void test_odd_after_head(void)
 {
     fresh();
     mem[5 * NL_PPB][0] = 0;
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, (64 * 4 + 3) * NL_PAGE);  // blocks 0-3 full, 3 pages into block 4
     assert(!nl_flush() && wblock == 4);
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(2, 0, 70 * NL_PAGE);
     assert(!nl_flush());
     assert(erases[5] == 0 && bit(bad, 5));
@@ -594,7 +620,7 @@ static void test_odd_after_head(void)
 static void test_late_append(void)
 {
     fresh();
-    assert(!nl_mount(&sim, NB, 0));
+    assert(!mount(0));
     put(1, 0, 3 * NL_PAGE);
     bool moved;
     assert(!nl_delete(1, &moved));
@@ -602,6 +628,145 @@ static void test_late_append(void)
     put(2, 0, 100);
     assert(!nl_flush() && size_of(2) == 100);
     printf("late append ok\n");
+}
+
+/* Header reads at mount that come back wrong: once (an SPI glitch: read twice, taken when two agree), or all through
+ * the mount (blocks out of seq order, even level with the one before, read whole). The list and the data whole after
+ * that mount (nothing for the uploaded pointer to pass), and after the next. The newest block's bad-block byte (no ECC
+ * on W25N01GV) all through: it looks bad, its seqs not written again, the uploaded pointer held */
+static void test_mount_flips(void)
+{
+    static const struct {
+        uint32_t blk, at, mask;
+        int n;
+    } f[] = {
+        {3, NL_PAGE + 4, 0x10, 1},     // 192 as 208: in order, file 1 ends in it
+        {3, NL_PAGE + 4, 0x40, 1},     // 192 as 128, the one before it
+        {3, NL_PAGE + 4, 0x40, 1000},  //   all through: level with the one before
+        {4, NL_PAGE + 5, 0x01, 1000},  // 256 as 0: below it
+        {5, NL_PAGE, 0x01, 1},         // the newest block (320..331) looks bad
+        {5, NL_PAGE, 0x01, 1000},
+    };
+    for (int i = 0; i < 6; i++) {
+        fresh();
+        assert(!mount(0));
+        put(1, 0, (64 * 3 + 40) * NL_PAGE);
+        assert(!nl_flush());
+        put(2, 0, 100 * NL_PAGE);
+        assert(!nl_flush() && wblock == 5);
+        rflip_page = f[i].blk * NL_PPB, rflip_at = f[i].at, rflip_mask = f[i].mask, rflip_n = f[i].n;
+        assert(!mount(0));
+        rflip_page = INV;
+        bool held = i == 5;
+        assert(unknown == held && size_of(1) == (64 * 3 + 40) * NL_PAGE);
+        assert(held || size_of(2) == 100 * NL_PAGE);
+        check_all(false);
+        bool moved;
+        assert(!nl_delete(1, &moved) && moved != held);
+        uint32_t u = nl_up();
+        put(3, 0, 40 * NL_PAGE);
+        assert(!nl_flush());
+        assert(!mount(u));
+        assert(size_of(1) == (held ? (64 * 3 + 40) * NL_PAGE : INV));
+        assert(size_of(2) == 100 * NL_PAGE && size_of(3) == 40 * NL_PAGE);
+        check_all(false);
+        check_list_by_scan();
+    }
+    printf("mount bit flips ok\n");
+}
+
+/* A page whole into the chip as written: file f's bytes from off, len of them, seq; bad: its data not its CRC's */
+static void place(uint32_t page, uint32_t seq, uint32_t f, uint32_t off, uint32_t len, bool bad)
+{
+    struct hdr h = {seq, f, off, len, 0};
+    for (uint32_t i = 0; i < NL_PAGE; i++) {
+        mem[page][i] = i < len ? pat(f, off + i) : 0xFF;
+    }
+    h.crc = page_crc(&h, mem[page]);
+    mem[page][0] ^= bad;
+    pack(mem[page] + NL_PAGE, &h);
+    programmed[page] = true;
+}
+
+/* The block to be erased (after the newest) has two pages written that do not check: kept, not erased; the one after
+ * it is then the one to erase, checked first: it holds the newest data (its first page's seq read wrong) */
+static void test_erase_target(void)
+{
+    fresh();
+    assert(!mount(0));
+    put(1, 0, (64 * 3 + 30) * NL_PAGE);  // head block 3
+    assert(!nl_flush() && wblock == 3 && !erases[4] && !erases[5]);
+    place(4 * NL_PPB, 5, 1, 0, NL_PAGE, true);  // old, rotted
+    place(4 * NL_PPB + 1, 6, 1, NL_PAGE, NL_PAGE, true);
+    place(5 * NL_PPB, 7, 8, 0, 100, true);  // the newest: its first page says 7, its second 301
+    place(5 * NL_PPB + 1, 301, 9, 0, 100, false);
+    assert(!mount(0));
+    assert(!erases[4] && !erases[5] && bit(bad, 4) && seq0[5] == 300 && wblock == 6);
+    assert(size_of(1) == (64 * 3 + 30) * NL_PAGE && size_of(9) == 100);
+    printf("erase target checked ok\n");
+}
+
+/* Blocks kept (unreadable all through a mount) at two boots in a row: no seq written twice (the ceiling in NVS); the
+ * newest block kept while its file is not uploaded: the file listed short, the phone takes it and deletes it, the
+ * uploaded pointer stays (kept in NVS as it was): the next boot lists it whole */
+static void test_kept_boots(void)
+{
+    fresh();
+    assert(!mount(0));
+    put(1, 0, (64 * 3 + 10) * NL_PAGE);  // head block 3: 10 pages
+    assert(!nl_flush() && wblock == 3);
+    rfail_page = 3 * NL_PPB, rfail_n = 1000;  // boot 2: block 3 unreadable
+    assert(!mount(0) && unknown == 1);
+    rfail_n = 0;
+    put(2, 0, 40 * NL_PAGE);
+    assert(!nl_flush());
+    uint32_t h2 = wblock;
+    rfail_page = h2 * NL_PPB, rfail_n = 1000;  // boot 3: block 3 reads again, the one boot 2 wrote does not
+    assert(!mount(0) && unknown == 1);
+    rfail_n = 0;
+    put(3, 0, 20 * NL_PAGE);
+    assert(!nl_flush());
+    assert(!mount(0) && !unknown);  // boot 4: all read
+    assert(size_of(1) == (64 * 3 + 10) * NL_PAGE && size_of(2) == 40 * NL_PAGE && size_of(3) == 20 * NL_PAGE);
+    check_all(false);
+    check_list_by_scan();
+
+    fresh();
+    assert(!mount(0));
+    put(1, 0, (64 * 2 + 30) * NL_PAGE);  // file 1's tail in the head block
+    assert(!nl_flush());
+    rfail_page = wblock * NL_PPB, rfail_n = 1000;
+    assert(!mount(0));
+    rfail_n = 0;
+    assert(size_of(1) == 64 * 2 * NL_PAGE);
+    put(2, 0, 3 * NL_PAGE);
+    assert(!nl_flush());
+    bool moved;
+    assert(!nl_delete(1, &moved) && !moved);
+    assert(!mount(nl_up()) && size_of(1) == (64 * 2 + 30) * NL_PAGE && size_of(2) == 3 * NL_PAGE);
+    check_all(false);
+
+    // a block kept while the ring goes round it, readable again: its file (old) lists among new ones, out of seq order;
+    // a DELETE of the first listed does not take the uploaded pointer past it
+    fresh();
+    assert(!mount(0));
+    put(1, 0, 64 * NL_PAGE);  // block 0
+    put(2, 0, 30 * NL_PAGE);  // block 1
+    assert(!nl_flush());
+    rfail_page = NL_PPB, rfail_n = 1000;
+    assert(!mount(0) && unknown == 1);
+    for (uint32_t f = 10; f < 60; f++) {
+        put(f, 0, 20 * NL_PAGE);
+    }
+    assert(!nl_flush() && wblock == 2);
+    rfail_n = 0;
+    assert(!mount(0) && !unknown && size_of(2) == 30 * NL_PAGE);
+    uint32_t f0, s0;
+    nl_file(0, &f0, &s0);
+    assert(f0 != 2 && !nl_delete(f0, &moved));
+    assert(!mount(nl_up()) && size_of(2) == 30 * NL_PAGE);
+    check_all(false);
+    printf("kept at boots ok\n");
 }
 
 int main(int argc, char **argv)
@@ -612,7 +777,8 @@ int main(int argc, char **argv)
     } tests[] = {{"basic", test_basic}, {"wrap", test_wrap}, {"bad", test_bad}, {"ecc", test_ecc},
                  {"hang", test_hang}, {"delete_closed", test_delete_closed}, {"pfail_good", test_pfail_good},
                  {"mount_reads", test_mount_reads}, {"odd_after_head", test_odd_after_head},
-                 {"late_append", test_late_append}};
+                 {"late_append", test_late_append}, {"mount_flips", test_mount_flips},
+                 {"erase_target", test_erase_target}, {"kept_boots", test_kept_boots}};
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
         if (argc < 2 || !strcmp(argv[1], tests[i].name)) {
             tests[i].fn();
