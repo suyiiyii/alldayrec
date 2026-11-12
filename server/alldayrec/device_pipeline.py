@@ -378,10 +378,11 @@ async def pipeline(device: str):
             if st.standby and not was:
                 ws.note(f"{device}：和 {st.standby} 在同一处，转为备用：音频照存，不转写", "state")
             elif was and not st.standby:
-                ws.note(f"{device}：{was} 断开或不在同一处了，从 {base.strftime('%H:%M:%S')} 起接着转写", "state")
+                ws.note(f"{device}：不再给 {was} 当备用，从 {base.strftime('%H:%M:%S')} 起接着转写", "state")
         else:
             other = None
         cut_to, gate_at = hi, base
+        st.cut_to = hi  # colocate.busy(): done_to..cut_to on its way to the engine
         j = {"kind": "speech" if speech and not other else "quiet", "base": base, "hi": hi, "x": x, "a0": a0, "at": at,
              "heard": heard, "other": other, "took": 0.0, "cost": {}, "error": None}
         if j["kind"] == "speech":  # the loose VAD's speech as it is now (the buffer moves on); done: prepared

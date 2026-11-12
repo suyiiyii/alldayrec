@@ -37,6 +37,11 @@ def put(device: str, lv: np.ndarray, start_s: float = 0, piece_s: int = 2):
                           (device, round(T0 + start_s * 1000 + i * F), len(env) * F / 1000, env))
 
 
+def squash(lv: np.ndarray, k: float) -> np.ndarray:
+    """The same room heard with its rise and fall k times as deep (a worse microphone: k < 1)."""
+    return 50 + (lv - 50) * k
+
+
 def at(s: float) -> int:
     return round(T0 + s * 1000)
 
@@ -67,7 +72,7 @@ def test_correlation(store):
 
 def test_standby_waits_and_takes_over(store):
     room = walk(4, 2400)  # 20 min
-    put(X, room)
+    put(X, squash(room, 0.8))  # hears worse: stands by
     put(Y, room[:1200] + 5)  # Y's audio stops after 10 min
     a, b = at(400), at(420)
     assert colocate.decide(X, a, b) == Y and colocate.standby_of(X) == Y
@@ -125,7 +130,7 @@ def test_standby_left_to_a_third(store):
 def test_hole_in_the_others_audio(store):
     """Y's audio misses 8 s of X's 100 s piece (a BLE gap): X leaves Y the rest, the 8 s go to X's late layer."""
     room = walk(31, 2400)
-    put(X, room)
+    put(X, squash(room, 0.8))
     put(Y, room[:800] + 3)
     put(Y, room[816:] + 3, start_s=408)
     assert colocate.decide(X, at(340), at(440)) == Y
@@ -269,6 +274,143 @@ def test_imports_and_unknowns_transcribe(store):
     assert colocate.decide(X, at(400), at(420)) is None, "pieces from before envelopes: not judged"
 
 
+def test_quality(store):
+    """Speech over the floor, less what the speech falls short of QUIET_DB, less missing and clipped frames."""
+    room = walk(41, 600)
+    put(X, room)
+    put(Y, room + 27)  # 27 dB quieter, as a recorder at a low gain
+    put("LR-TEST-C", np.r_[room[:420], np.full(180, 127.5)])  # zeros for 30 % of it
+    put("LR-TEST-D", np.maximum(room - 40, 0))  # louder: some frames clip
+    q = {d: colocate.quality(d, at(0), at(300)) for d in (X, Y, "LR-TEST-C", "LR-TEST-D")}
+    lv = -room
+    assert abs(q[X] - (np.percentile(lv, 90) - np.percentile(lv, 10) - max(0, colocate.QUIET_DB - np.percentile(lv, 90)))) < 0.5, q
+    assert q[X] - q[Y] > 20, ("as loud over its floor, but under QUIET_DB", q)
+    assert q["LR-TEST-C"] < q[X] - colocate.BAD_DB * 0.3 + 3 and q["LR-TEST-D"] < q[X], q
+    assert colocate.quality(X, at(400), at(500)) is None, "no level"
+
+
+def test_new_device_waits_for_its_first_window(store):
+    """Alone, a device just started is not held up. With X recording, Y's first pieces wait (WAIT) for the window from
+    Y's start, at most FIRST_WAIT_S after the piece; once judged, Y stands by for X (X hears better) from its first."""
+    room = walk(42, 2400)
+    put(Y, room[1200:1260], start_s=600)  # Y's first 30 s
+    a, b = at(600), at(620)
+    assert colocate.decide(Y, a, b, now_ms=at(640)) is None, "alone: transcribed at once"
+    put(X, room - 5)
+    assert colocate.decide(Y, a, b, now_ms=at(640)) == colocate.WAIT, "X there: wait for Y's levels"
+    assert colocate.decide(Y, a, b, now_ms=b + colocate.FIRST_WAIT_S * 1000 + 1) is None, "not past FIRST_WAIT_S"
+    assert colocate.standby_of(Y) is None
+    put(Y, room[1260:1600], start_s=630)  # Y's audio on to 800 s
+    assert colocate.decide(Y, a, b, now_ms=at(640)) == X and colocate.standby_of(Y) == X
+
+
+def run_both(dur_s: int, lag_s: int = 0, off_s: int = 0):
+    """X's and Y's final layers by decide() over [0, dur_s): X's in pieces of 20 s, Y's of 20 s from off_s (a first
+    one shorter), each decided as it ends, Y's lag_s later; what the pipeline would record (split, final rows), only
+    where the device has audio. Then the late spans less what another device transcribed (left). Who transcribed
+    each piece (by its start), and the two devices' final and late ranges."""
+    cuts = {X: list(range(0, dur_s, 20)) + [dur_s], Y: sorted({0, *range(off_s, dur_s, 20), dur_s})}
+    who = {}
+    for _, _, d, s, e in sorted((b + lag_s * (d == Y), d == Y, d, a, b) for d, c in cuts.items() for a, b in zip(c, c[1:])):
+        if not (heard := colocate.meet([[at(s), at(e)]], colocate.audio(d, at(s), at(e)))):  # what it heard of the piece
+            continue
+        if (got := colocate.decide(d, heard[0][0], heard[-1][1])) is None:
+            with db.tx() as t:
+                db.record_processed(t, d, heard, "final")
+            who.setdefault(s, set()).add(d)
+        else:
+            assert got != colocate.WAIT, (d, s)
+            with db.tx() as t:
+                db.record_processed(t, d, colocate.split(d, got, heard), "standby")
+    late = {d: late_store.union([x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (d,))
+                                 for x in json.loads(r[0])]) for d in (X, Y)}
+    late = {d: late_store.subtract(late[d], colocate.left(d, late[d])) if late[d] else [] for d in (X, Y)}
+    final = {d: late_store.union(db.processed(d, at(0), at(dur_s), "final")) for d in (X, Y)}
+    return who, final, late
+
+
+def once(final: dict, late: dict, dur_s: int):
+    """Every ms of [0, dur_s) transcribed by one device, final or late: none twice, none by neither."""
+    rs = [r for d in (X, Y) for r in final[d] + late[d]]
+    assert late_store.subtract([[at(0), at(dur_s)]], rs) == [], ("by neither", final, late)
+    assert sum(b - a for a, b in rs) == at(dur_s) - at(0), ("twice", final, late)
+
+
+@pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
+def test_better_newcomer_takes_over(store, lag_s, off_s):
+    """X (worse: a squashed rise and fall) records; Y (better) starts at 300 s: Y transcribes from where X had got to
+    (what X transcribed before stays X's) and X stands by for Y; every ms once around the handover. lag_s: Y's final
+    layer that far behind X's (or ahead), its pieces off_s off X's."""
+    room = walk(43, 1800)
+    put(X, squash(room, 0.4))
+    put(Y, room[600:], start_s=300)
+    who, final, late = run_both(900, lag_s, off_s)
+    once(final, late, 900)
+    assert colocate.standby_of(X) == Y and colocate.standby_of(Y) is None, who
+    assert db.kv(f"standby_left:{X}") is None, "X never took over (no gone before Y's audio: since)"
+    after = [v for s, v in who.items() if s >= 560]
+    assert after and all(v == {Y} for v in after), ("Y from a window after it started on", who)
+
+
+@pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
+def test_switch_with_hysteresis(store, lag_s, off_s):
+    """X stands by for Y. X better by a few dB: stays a standby, also through 4 min of Y much worse (over SWITCH_DB
+    in one window, not two). Y then hears much worse for long: X transcribes, Y stands by for it, every ms once around
+    the switch. Y back a few dB better than X: no switch back (no flapping)."""
+    room = walk(44, 5400)  # 45 min
+    k = np.r_[np.full(600, 0.85), np.full(480, 0.3), np.full(720, 0.85), np.full(1800, 0.3), np.full(1800, 1.0)]  # Y's depth: X's 1, then 0.85
+    put(X, np.r_[room[:3600], squash(room[3600:], 0.85)])
+    put(Y, 50 + (room - 50) * k)
+    q = lambda s: colocate.lead(X, Y, at(s))
+    sw = colocate.SWITCH_DB
+    assert 0 < q(900) < sw < q(540) and sw < q(1800) and -sw < q(2700) < 0, (q(900), q(540), q(1800), q(2700))
+    db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
+    who, final, late = run_both(2700, lag_s, off_s)
+    once(final, late, 2700)
+    by = sorted(who.items())  # the pieces transcribed in final, by whom (around a handover some go to a late layer)
+    switched = [s for (_, a), (s, b) in zip(by, by[1:]) if a != b]
+    assert len(switched) == 1 and 900 < switched[0] < 1800 + abs(lag_s) + 60, (switched, who)
+    assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
+
+
+def test_no_take_in_the_window_the_other_took_over_in(store):
+    """Y hears better, but X took over from Y within the last window (apart, by X's window around its piece): Y does
+    not make X stand by again until that window is past (11-12: they took turns each 20 s)."""
+    room = walk(47, 2400)
+    put(X, squash(room, 0.4))
+    put(Y, room)
+    db.put_kv(f"standby_left:{X}", at(500))
+    assert colocate.decide(Y, at(600), at(620)) is None and colocate.standby_of(X) is None
+    assert colocate.decide(Y, at(800), at(820)) is None and colocate.standby_of(X) == Y
+
+
+def test_take_waits_for_the_piece_at_the_engine(store):
+    """Y (hears better) takes X while X's piece over it is at the engine: Y waits for it (X commits it as its own)."""
+    from alldayrec.pipeline_state import PipelineState
+    room = walk(46, 2400)
+    put(X, squash(room, 0.4))
+    put(Y, room)
+    dts = lambda s: dt.datetime.fromtimestamp(at(s) / 1000)
+    T().devices[X] = PipelineState(done_to=dts(400), cut_to=dts(430))
+    assert colocate.decide(Y, at(410), at(440)) == colocate.WAIT and colocate.standby_of(X) == Y
+    with db.tx() as t:
+        db.record_processed(t, X, [[at(400), at(430)]], "final")
+    T().devices[X].done_to = dts(430)
+    assert colocate.decide(Y, at(410), at(440)) == X, "what X has stays X's (split: the rest late)"
+
+
+def test_draft_where_the_better_one_drafts(store):
+    """Two drafting in one room: the one that hears worse (by over SWITCH_DB) leaves its drafts to the other, not the
+    other way."""
+    from alldayrec.pipeline_state import PipelineState
+    room = walk(45, 1200)
+    put(X, room)
+    put(Y, squash(room, 0.4))
+    T().devices.update({X: PipelineState(drafting=True), Y: PipelineState(drafting=True)})
+    assert colocate.lead(X, Y, at(600)) > colocate.SWITCH_DB
+    assert colocate.drafted_by(X, now_ms=at(600)) is None and colocate.drafted_by(Y, now_ms=at(600)) == X
+
+
 def test_late_audio_left_to_who_has_it(store, monkeypatch):
     room, away = walk(9, 2400), walk(10, 2400)
     put(X, np.r_[room[:1200], away[1200:]])
@@ -299,24 +441,25 @@ def test_late_audio_left_to_who_has_it(store, monkeypatch):
 PIECE_S, N = 10, 90  # 15 min in pieces of 10 s; a 2 s tone each 30 s (the fake engines read its number back)
 
 
-def recording(room: int, noise: int, first: int = 0, at: int = 10) -> np.ndarray:
+def recording(room: int, noise: int, first: int = 0, at: int = 10, floor: float = 0) -> np.ndarray:
     """15 min in a room whose level walks (seed room; noise the VAD hears no speech in, its own seed), a tone each
-    30 s from `at` s, numbered from first."""
+    30 s from `at` s, numbered from first; floor: the device's own hiss (RMS) under the room (hears it worse)."""
     lv = 10 ** (-walk(room, N * PIECE_S * 1000 // F) / 20) * 32768 * 0.25  # under the energy VAD's 500
-    x = (np.random.default_rng(noise).normal(0, 1, N * PIECE_S * audio.SR) * np.repeat(lv, audio.SR * F // 1000)).astype(np.int16)
+    x = (np.random.default_rng(noise).normal(0, 1, N * PIECE_S * audio.SR) * (np.repeat(lv, audio.SR * F // 1000) + floor)).astype(np.int16)
     for k in range(N * PIECE_S // 30):
         i = (k * 30 + at) * audio.SR
         x[i:i + 2 * audio.SR] = tone(first + k, 2)
     return x
 
 
-def run_two(tmp_path, monkeypatch, xa, xb, b_upto=N * PIECE_S, b_after=False, holes=None):
-    """X's and Y's pipelines over their stored audio of an hour ago, Y's only to b_upto; b_after: Y's starts once X's
-    is done (its final layer behind); holes: {device: piece index} saved 1 s short. Their final rows' texts."""
+def run_two(tmp_path, monkeypatch, xa, xb, b_upto=N * PIECE_S, b_after=False, holes=None, a_from=0):
+    """X's and Y's pipelines over their stored audio of an hour ago, X's from a_from s, Y's only to b_upto; b_after:
+    Y's starts once X's is done (its final layer behind); holes: {device: piece index} saved 1 s short. Their final
+    rows' texts."""
     rig(tmp_path, monkeypatch, hear)
     t0 = dt.datetime.fromtimestamp(time.time() - 3600).replace(microsecond=0)
-    for d, x, upto in ((X, xa, N * PIECE_S), (Y, xb, b_upto)):
-        for k in range(upto // PIECE_S):
+    for d, x, upto, start in ((X, xa, N * PIECE_S, a_from), (Y, xb, b_upto, 0)):
+        for k in range(start // PIECE_S, upto // PIECE_S):
             short = audio.SR if (holes or {}).get(d) == k else 0
             audio.save(d, round((t0 + dt.timedelta(seconds=k * PIECE_S)).timestamp() * 1000),
                        flac(x[k * PIECE_S * audio.SR:(k + 1) * PIECE_S * audio.SR - short]), "audio/flac")
@@ -382,6 +525,20 @@ def test_two_pipelines_first_one_gone(tmp_path, monkeypatch):
     assert not T().devices[X].standby and not T().devices[Y].standby
 
 
+def test_two_pipelines_better_one_joins(tmp_path, monkeypatch):
+    """Y (hears worse: its own hiss) records alone; X joins at 300 s: X transcribes from where Y had got to, Y stands
+    by for it; every tone once, in final rows or (around the handover) in a late span."""
+    a, b = run_two(tmp_path, monkeypatch, recording(11, 1), recording(11, 2, floor=60), a_from=300)
+    assert len(a) + len(b) == len(set(a + b)), ("none twice", a, b)
+    t0 = min(r[0] for d in (X, Y) for r in db.processed(d, 0, 2 ** 62))
+    spans = [x for r in db.conn().execute("SELECT ranges FROM late_spans") for x in json.loads(r[0])]
+    lost = [k for k in range(30) if str(k) not in a + b
+            and not any(lo <= t0 + (10 + 30 * k) * 1000 and hi >= t0 + (12 + 30 * k) * 1000 for lo, hi in spans)]
+    assert not lost, ("each tone transcribed or in a late span", lost, a, b, spans)
+    assert set(ALL[20:]) <= set(a), ("X from a window after it joined on", a, b)
+    assert T().devices[Y].standby == X and not T().devices[X].standby
+
+
 def test_conversation_lists_who_stood_by_short(store):
     """A 20 s conversation whose 20 s alone do not correlate (each its own noise in a quiet moment): judged on the
     WINDOW_S around it, as decide() did."""
@@ -428,7 +585,8 @@ def test_takeover_hands_back_a_standby_piece_cut_ahead(tmp_path, monkeypatch):
     rig(tmp_path, monkeypatch, slow)
     t0 = dt.datetime.fromtimestamp(time.time() - 3600).replace(microsecond=0)
     S = audio.SR
-    xa, xb = np.r_[recording(11, 1)[:600 * S], recording(13, 1, 50, 25)[600 * S:]], recording(11, 2, 100)  # elsewhere: other times
+    xa = np.r_[recording(11, 1, floor=60)[:600 * S], recording(13, 1, 50, 25)[600 * S:]]  # with Y (hears worse), then elsewhere
+    xb = recording(11, 2, 100)
     for d, x, first in ((X, xa, 0), (Y, xb, 27)):
         for k in range(first, N):
             audio.save(d, round((t0 + dt.timedelta(seconds=k * PIECE_S)).timestamp() * 1000),

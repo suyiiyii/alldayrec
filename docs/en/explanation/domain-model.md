@@ -47,7 +47,7 @@ The `kv` keys for a device `<d>`:
 | `read_to:<d>`, `read_end:<d>` | Start and end of the last piece the final reader took | `audio.stream` |
 | `hold:<d>` | The phone has older audio still to send; the final layer waits at this time | `audio.hold`, `audio.held` |
 | `end_at:<d>` | When the recorder stopped | `POST /api/chunks/end` |
-| `standby:<d>` | Which device this device stands by for | `colocate.decide` |
+| `standby:<d>` | Which device this device stands by for, and from when (`since`) | `colocate.decide`, `colocate.take` |
 
 ### Text
 
@@ -275,7 +275,7 @@ The server runs three transcription layers over one audio stream and two AI laye
 | Layer | When it runs | Reads | Writes |
 |---|---|---|---|
 | Final | Always, per device (`final_loop` in `device_pipeline.py`) | The device's stream from `finalized_to`, without what lies after a `hold` or what the late layer has processed | `sentences`, `processed_audio` (`final`), `conversations`, `summaries` (`pending`), `timelines`; `finalized_to`, `open_conversation`, `live` in `kv` |
-| └ Standby | A branch of the final layer: another device of the tenant records the same sound in the same place (their levels rise and fall together, `colocate.py`) | The level envelopes of both devices' pieces (`pieces.env`) | Only `processed_audio` (`standby`), and `finalized_to` moves on. No engine call, no sentences, conversations, drafts or live analysis. It transcribes again when the other device sends no audio for 90 s or the two stop correlating; in the second case, what it left to the other in the last 300 s goes to the late layer |
+| └ Standby | A branch of the final layer: another device of the tenant records the same sound in the same place (their levels rise and fall together, `colocate.py`) | The level envelopes of both devices' pieces (`pieces.env`) | Only `processed_audio` (`standby`), and `finalized_to` moves on. No engine call, no sentences, conversations, drafts or live analysis. Of the two, the one that hears better transcribes and the other stands by (`colocate.quality`: how many dB its speech is above its floor, less for speech too quiet, missing frames and clipping). It transcribes again when the other device sends no audio for 90 s or the two stop correlating; in the second case, what it left to the other in the last 300 s goes to the late layer. A standby that hears better by 6 dB or more in each of the last two 300 s windows takes over, and the other stands by. A device that just started waits, up to 180 s after the piece, for a window to be judged on |
 | Draft | A page watches, the device had new audio in the last 120 s, and it is not standing by (`drafting`) | The device's newest 300 s of audio (`edge_feed`, skipping any backlog) | `drafts`; `draft_to` in `kv` |
 | Late | One serial processor per tenant (`processor` in `late.py`) | `late_spans`; pieces read at exact times (`read_exact`) | `sentences` (`late = 1`), new or merged `conversations`, `voices`, `conversation_aliases`, `processed_audio` (`late` or `standby`), `summaries` (written again) |
 | Live analysis | A page is in front, the conversation going on has 60 s of speech, then after every 120 s of new speech; or 立即总结 (summarize now) is pressed | The open conversation's final sentences plus drafts (`open_view`) | `live:<d>` in `kv`; `timelines` when the conversation closes |
