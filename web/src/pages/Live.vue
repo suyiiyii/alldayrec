@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { I18nT } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import AppHeader from "../components/AppHeader.vue";
 import DayPicker from "../components/DayPicker.vue";
@@ -27,6 +28,7 @@ import { hasNative, inApp, openNative } from "../lib/app";
 import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
+import { recordingNow } from "../lib/progress";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -37,10 +39,9 @@ const route = useRoute(),
   router = useRouter();
 const today = todayOf();
 const day = computed(() => (route.query.day as string | undefined) || today);
-const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo, reload } = useLive(
-  day,
-  true,
-);
+const { live, rows, partials, convs, status, lives, ready, going, connected, doneTo, reload } =
+  useLive(day, true);
+const now = computed(() => recordingNow(status.value?.devices ?? []));
 const said = computed(() => new Set(Object.values(partials.value))); // the sentences being said now
 // the summary card while a conversation goes on; with none, the idle card under the captions says what the
 // recorders are doing, the last conversation today and how to start one
@@ -262,17 +263,31 @@ function jump(start: string) {
       <DayPicker :day="day" @pick="go">
         <button v-if="!live" class="back" @click="go(today)">{{ t("live.backToday") }}</button>
       </DayPicker>
-      <!-- recording or not, and how far behind the newest sentence came up (each status, every 2 s); the rest is on the
+      <!-- recording or not, on which recorders (one standing by for another in the same place: +1 备用, its name on
+           hover), and how far behind their newest sentence came up (each status, every 2 s); the rest is on the
            progress page -->
       <RouterLink class="status" to="/progress" :title="t('title.progress')">
         <template v-if="!connected">{{ t("live.reconnecting") }}</template>
         <template v-else-if="status">
           <span v-if="status.recording === false">{{ t("live.notRecording") }}</span>
-          <span v-else :class="{ bad: (status.latency_s ?? 0) > 30 }">{{
-            t("live.recordingLag", {
-              v: status.latency_s == null ? "—" : t("common.sec", { n: status.latency_s }),
-            })
-          }}</span>
+          <I18nT
+            v-else
+            keypath="live.recordingLag"
+            tag="span"
+            scope="global"
+            :class="{ bad: (now.lag ?? 0) > 30 }"
+          >
+            <template #d
+              >{{ now.main.join(t("common.list"))
+              }}<small
+                v-if="now.spare.length"
+                :title="t('live.standbyOf', { d: now.spare.join(t('common.list')) })"
+              >
+                {{ t("live.standbyMore", { n: now.spare.length }) }}</small
+              ></template
+            >
+            <template #v>{{ now.lag == null ? "—" : t("common.sec", { n: now.lag }) }}</template>
+          </I18nT>
         </template>
         <template v-else>{{ t("live.connecting") }}</template>
       </RouterLink>
@@ -295,7 +310,14 @@ function jump(start: string) {
           :menu="press"
           :who="closed(it.r) ? edit : undefined"
         />
-        <MediaFold v-else-if="it.k === 'fold'" :rows="it.rows" :hit="hit" caption :menu="press" :who="edit" />
+        <MediaFold
+          v-else-if="it.k === 'fold'"
+          :rows="it.rows"
+          :hit="hit"
+          caption
+          :menu="press"
+          :who="edit"
+        />
         <div v-else-if="it.k === 'conv'" class="conv">
           {{
             t(
@@ -382,6 +404,9 @@ function jump(start: string) {
   display: flex;
   gap: 14px;
   flex-wrap: wrap;
+}
+.status small {
+  margin-left: 4px;
 }
 .conv {
   color: var(--accent);

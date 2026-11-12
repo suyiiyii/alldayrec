@@ -6,7 +6,7 @@ import { createRenderer, h, markRaw, nextTick } from "vue";
 import { compileScript, parse } from "vue/compiler-sfc";
 import { i18n } from "./src/i18n.ts";
 import type { DeviceStatus } from "./src/lib/api.ts";
-import { importLine, showLiveLag } from "./src/lib/progress.ts";
+import { importLine, recordingNow, showLiveLag } from "./src/lib/progress.ts";
 
 const imported = {
   device: "import-synthetic",
@@ -20,6 +20,39 @@ assert.equal(showLiveLag(imported), false);
 assert.equal(showLiveLag({ ...imported, recording: true }), false);
 assert.equal(showLiveLag({ device: "recorder-demo", recording: true } as DeviceStatus), true);
 assert.equal(showLiveLag({ device: "recorder-demo", recording: false } as DeviceStatus), false);
+// the live page's status line: who records now, who stands by for one in the same place, the transcribing ones' lag
+const rec = (device: string, more: Partial<DeviceStatus> = {}) =>
+  ({ device, recording: true, latency_s: 3, ...more }) as DeviceStatus;
+assert.deepEqual(
+  recordingNow([
+    rec("LR-P3-0001"),
+    rec("LR-N4-0002", { recording: false, latency_s: 90 }),
+    imported,
+  ]),
+  {
+    main: ["LR-P3-0001"],
+    spare: [],
+    lag: 3,
+  },
+);
+assert.deepEqual(
+  recordingNow([rec("LR-P3-0001"), rec("LR-N4-0002", { standby: "LR-P3-0001", latency_s: 90 })]),
+  {
+    main: ["LR-P3-0001"],
+    spare: ["LR-N4-0002"],
+    lag: 3,
+  },
+);
+assert.deepEqual(recordingNow([rec("LR-P3-0001"), rec("LR-N4-0002", { latency_s: 5 })]), {
+  main: ["LR-P3-0001", "LR-N4-0002"],
+  spare: [],
+  lag: 5,
+});
+assert.deepEqual(recordingNow([rec("LR-N4-0002", { standby: "LR-P3-0001", latency_s: null })]), {
+  main: ["LR-N4-0002"],
+  spare: [],
+  lag: null,
+});
 i18n.global.locale.value = "en";
 assert.equal(importLine(imported), "Transcribed 2 / 10 min of audio");
 assert.equal(

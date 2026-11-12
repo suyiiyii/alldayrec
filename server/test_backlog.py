@@ -392,6 +392,15 @@ def test_hold_release(tmp_path, monkeypatch):
     assert d["hold"] is None and d["hold_seen"] is None and audio.held(DEVICE) is None
 
 
+def test_status_names_the_standby(tmp_path):
+    """The live page's status line names the recorders recording now and which of them stand by (colocate.py): each
+    device's status carries recording and the one it stands by for."""
+    db.open_db(tmp_path / "live.db")
+    save(dt.datetime.now() - dt.timedelta(seconds=5), flac(tone(0, 3)))
+    d = monitor.device_status(DEVICE, pipeline_state.PipelineState(standby="LR-P3-0001"))
+    assert d["recording"] and d["standby"] == "LR-P3-0001", d
+    assert monitor.device_status(DEVICE, pipeline_state.PipelineState())["standby"] is None
+
 def test_stop_drops_a_too_short_conversation(tmp_path, monkeypatch):
     """The recorder stops after less than MIN_S of speech (an imported file of a sentence or two): the conversation is
     dropped as too short, and with it goes the open one the pages show and the store keeps (10-24: still 进行中 after
