@@ -2,7 +2,8 @@
 (pieces.env, audio.envelope) rises and falls with the room's; two in one place correlate. A device whose audio another
 device transcribes, or will (its audio is in, it is not itself standing by), and correlates with it is that one's
 standby: its audio is kept, its final pieces and drafts send nothing to the engine (processed_audio layer `standby`),
-so no sentences, conversations, summaries, live analysis or drafts come of it twice. It takes over once the other's
+so no sentences, conversations, summaries, live analysis or drafts come of it twice. Drafts come before a
+piece is judged: none either while another recorder in the same place drafts (drafted_by). It takes over once the other's
 audio stops for GONE_S, or the two no longer correlate (then what it stood by for since they parted is transcribed
 late). Late audio (late.py) is left out where another device in the same place transcribed that time: first come,
 first transcribed. Not judged (no envelope: older pieces, quiet, a gap): as before this, each transcribes its own.
@@ -21,6 +22,7 @@ import numpy as np
 from alldayrec import db, late_store
 from alldayrec.audio import ENV_MS, devices
 from alldayrec.late_store import subtract, union
+from alldayrec.tenant import T
 
 log = logging.getLogger("live")
 
@@ -202,6 +204,17 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
         with db.tx() as t:
             resume(t, device, a, now_ms)
     return None
+
+
+def drafted_by(device: str, now_ms: int | None = None) -> str | None:
+    """Another recorder drafting now (device_pipeline: drafting()), no standby, whose last WINDOW_S correlate with
+    device's R_TOGETHER: device's drafts would be its sentences again. Not left to decide(): it judges a piece once
+    the piece is cut, a minute or more after its drafts (11-12: a recorder's first speech after its first window was
+    drafted twice for 90 s before it stood by)."""
+    now_ms = round(time.time() * 1000) if now_ms is None else now_ms
+    w = WINDOW_S * 1000
+    return next((y for y, st in T().devices.items() if y != device and st.drafting and not st.standby
+                 and (r := correlation(device, y, now_ms - w, now_ms)) is not None and r >= R_TOGETHER), None)
 
 
 def resume(t, device: str, a: int, now_ms: int):
