@@ -209,6 +209,15 @@ def busy(y: str, a: int, b: int) -> bool:
     return bool(st and st.cut_to and st.done_to and st.done_to < st.cut_to and ms(st.done_to) < b and ms(st.cut_to) > a)
 
 
+def parted(device: str, y: str, a: int) -> bool:
+    """device took over from y (apart, no levels: standby_left) and neither has a hole of GONE_S in its audio since
+    (off overnight, gone: back as one just started, judged on quality)."""
+    if db.kv(f"parted:{device}") != y:
+        return False
+    since = db.kv(f"standby_left:{device}")
+    return not any(hi - lo >= GONE_S * 1000 for z in (device, y) for lo, hi in subtract([[since, a]], audio(z, since, a)))
+
+
 def take(device: str, y: str, a: int, by: float):
     """device transcribes from a, y stands by for it (y's own decide() goes on from there)."""
     with db.tx() as t:
@@ -234,9 +243,9 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
     has not left any of it to another (so the last of them to get to a piece transcribes it); in the window after a
     takeover it does not stand by again. One that hears worse stands by for this one (take): of the piece it has
     transcribed, that is left to it, the rest goes to the late layer (split); a piece of it at the engine: WAIT
-    (busy). Not one that took over in the last window (apart, gone: its own call), nor one that begins in the window
-    (just started: its own first window judges). Back together after parting (apart, no levels): the one that stood by
-    stands by again, whichever hears better (the switch is a standby's: SWITCH_DB over two windows). Just started
+    (busy). Not one that took over in the last window (apart, gone: its own call). Back together after parting (apart,
+    no levels): the one that stood by stands by again, whichever hears better (the switch is a standby's: SWITCH_DB
+    over two windows), unless either has been off since (parted: as one just started). Just started
     (under MIN_FRAMES of its levels in the window): judged on the WINDOW_S from its first level, waiting for the audio
     up to FIRST_WAIT_S after the piece. Transcribing again after leaving pieces to another (but for gone): resume()."""
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
@@ -294,10 +303,9 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
         by = lead(device, y, end)
         # back together after parting: the one that stood by stands by again (it switches as a standby does, by
         # SWITCH_DB over two windows), whichever of the two looks first
-        was, back = db.kv(f"parted:{device}") == y, db.kv(f"parted:{y}") == device
+        was, back = parted(device, y, a), parted(y, device, a)
         if ((back or (not was and by is not None and by > 0)) and not standby_of(y) and not stood_for(y)
-                and (db.kv(f"standby_left:{y}") or 0) <= b - w  # not in the window y took over in (apart: its own call)
-                and not np.isnan(levels(y, end - w, end)[0])):  # not where y begins (just started: y's own call)
+                and (db.kv(f"standby_left:{y}") or 0) <= b - w):  # not in the window y took over in (apart: its own call)
             take(device, y, a, by or 0)
         if transcribed(y, a, b) >= COVER:
             return y  # first come: y has it already, whatever it does now

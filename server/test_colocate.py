@@ -405,6 +405,25 @@ def test_back_together_the_standby_stands_by_again(store, lag_s, off_s):
     assert all(v == {Y} for s, v in who.items() if s >= 1800 + 2 * colocate.WINDOW_S + abs(lag_s)), who
 
 
+@pytest.mark.parametrize("new", [X, Y])
+@pytest.mark.parametrize("x_first", [True, False])
+def test_off_since_parting_judged_as_new(store, new, x_first):
+    """X stood by for Y and took over (apart) an hour before either recorded again (off overnight: a hole in both).
+    Back in one place, one just started (from 300 s): X hears better by a few dB (under SWITCH_DB): X transcribes,
+    Y stands by, whoever looks first; not X standing by again for the parting (a: X new, b: Y new, takes X)."""
+    room = walk(51, 2400)
+    old = Y if new == X else X
+    put(old, room if old == X else squash(room, 0.8))
+    put(new, (room if new == X else squash(room, 0.8))[600:], start_s=300)
+    db.put_kv(f"standby_left:{X}", at(-3600))
+    db.put_kv(f"parted:{X}", Y)
+    assert 0 < colocate.lead(X, Y, at(600)) < colocate.SWITCH_DB
+    looks = [(old, at(470), at(490)), (new, at(300), at(320))]
+    for d, a, b in looks if x_first == (old == X) else looks[::-1]:
+        colocate.decide(d, a, b)
+    assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
+
+
 def test_no_take_in_the_window_the_other_took_over_in(store):
     """Y hears better, but X took over from Y within the last window (apart, by X's window around its piece): Y does
     not make X stand by again until that window is past (11-12: they took turns each 20 s)."""
