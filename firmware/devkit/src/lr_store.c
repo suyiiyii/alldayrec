@@ -1408,6 +1408,9 @@ static void store_thread(void)
             int err = -EBUSY;
             if (c.file != cur_file()) {
                 k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+                if (IS_ENABLED(CONFIG_LR_NAND)) {
+                    card_drain();  // its last batches first: a NAND file deleted takes no more bytes (nand_log.h)
+                }
                 err = card_up() ?: fs_unlink(file_path(p, c.file));
                 count_free();
                 k_mutex_unlock(&write_sdcard_mutex);

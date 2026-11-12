@@ -47,7 +47,8 @@ static int xfer(const uint8_t *cmd, size_t clen, const void *tx, size_t tlen, co
                                  {.buf = (void *) tx2, .len = t2len}};
     const struct spi_buf r[2] = {{.buf = NULL, .len = clen}, {.buf = rx, .len = rlen}};
     const struct spi_buf_set ts = {t, tx2 ? 3 : tx ? 2 : 1}, rs = {r, 2};
-    return rx ? spi_transceive(spi, &cfg, &ts, &rs) : spi_write(spi, &cfg, &ts);
+    int err = rx ? spi_transceive(spi, &cfg, &ts, &rs) : spi_write(spi, &cfg, &ts);
+    return err ? -ECOMM : 0;  // not -EIO (the SPI driver's own): that one is the chip's P-FAIL / E-FAIL, a bad block
 }
 
 static int op(uint8_t c)
@@ -140,12 +141,17 @@ static int n_erase(uint32_t block)
     return err ?: sr & 0x04 ? -EIO : 0;  // E-FAIL
 }
 
+/* 00h at 0x800 of the block's first page, with ECC off for it (as Linux's spinand writes the mark raw): the page may
+ * be programmed already, and with ECC on a second program writes parity over the old */
 static int n_mark_bad(uint32_t block)
 {
     static const uint8_t load[3] = {0x02, NL_PAGE >> 8, 0}, zero = 0;
-    uint8_t sr;
+    uint8_t sr, cfg2;
     wake();
-    return op(0x06) ?: xfer(load, 3, &zero, 1, NULL, 0, NULL, 0) ?: page_cmd(0x10, block * NL_PPB) ?: ready(&sr, 5);
+    int err = get_reg(0xB0, &cfg2) ?: set_reg(0xB0, cfg2 & ~0x10);
+    err = err ?: op(0x06) ?: xfer(load, 3, &zero, 1, NULL, 0, NULL, 0) ?: page_cmd(0x10, block * NL_PPB) ?: ready(&sr, 5);
+    int on = set_reg(0xB0, cfg2 | 0x10);
+    return err ?: on;
 }
 
 static const struct nl_ops ops = {n_read, n_program, n_erase, n_mark_bad};
@@ -474,10 +480,9 @@ void sd_power_off(void)
 static void power_on(void)
 {
 #if DT_NODE_HAS_PROP(DT_PATH(zephyr_user), sd_pwr_gpios)
-    if (!pwr_on) {
-        gpio_pin_configure_dt(&pwr, GPIO_OUTPUT_ACTIVE);
-        k_msleep(2);
-        pwr_on = true;
+    if (!pwr_on) {  // the first time off then on, as sdcard.c does at boot: CS was driven high from the SPI driver's
+        pwr_on = true;  // init with the LDO off, feeding the chip through its input diodes
+        sd_power_off();
     }
     if (!pwr_off) {
         return;

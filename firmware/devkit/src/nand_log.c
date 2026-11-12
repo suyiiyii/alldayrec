@@ -25,6 +25,7 @@ struct ent {
 static struct ent files[NL_MAX_FILES];
 static int nfiles;
 static uint32_t wfile;  // the file appended to: the last entry
+static uint32_t gone;   // the highest file deleted since the mount (INV: none): never appended to again
 static uint8_t pg[NL_PAGE];  // its open page: pg_len bytes from pg_off on
 static uint32_t pg_len, pg_off;
 
@@ -88,7 +89,21 @@ static void pack(uint8_t *sp, const struct hdr *h)
     put32(sp + 52, h->len | (uint32_t) h->crc << 16);
 }
 
-enum { H_OK, H_ERASED, H_BAD };
+enum { H_OK, H_ERASED, H_BAD, H_FAIL };  // H_FAIL: the read itself failed
+
+/* A read tried again on an error or an ECC failure: an SPI glitch passes, the chip's own state does not */
+static int read_op(uint32_t page, uint16_t col, void *buf, uint16_t n, int *ecc)
+{
+    int err = 0;
+    for (int i = 0; i < 3; i++) {
+        *ecc = 0;
+        err = ops->read(page, col, buf, n, ecc);
+        if (!err && *ecc != 2) {
+            return 0;
+        }
+    }
+    return err;  // 0 with *ecc 2: not correctable
+}
 
 static int unpack(const uint8_t *sp, int ecc, struct hdr *h)
 {
@@ -112,20 +127,26 @@ static int unpack(const uint8_t *sp, int ecc, struct hdr *h)
     return ecc == 2 || h->seq == INV || !h->len || h->len > NL_PAGE ? H_BAD : H_OK;
 }
 
-/* A page's header alone (its spare bytes into sp if given) */
+/* A page's header alone (its spare bytes into sp if given; H_FAIL: none) */
 static int read_hdr(uint32_t page, struct hdr *h, uint8_t *sp)
 {
     uint8_t s[NL_SPARE];
-    int ecc = 0;
-    if (ops->read(page, NL_PAGE, s, NL_SPARE, &ecc)) {
-        memset(s, 0, sizeof(s));  // unreadable: neither erased nor ours (nor a bad-block mark: s[0] is looked at alone)
-        s[0] = 0xFF;
-        ecc = 2;
+    int ecc;
+    if (read_op(page, NL_PAGE, s, NL_SPARE, &ecc)) {
+        return H_FAIL;
     }
     if (sp) {
         memcpy(sp, s, NL_SPARE);
     }
     return unpack(s, ecc, h);
+}
+
+/* Block a's data newer than block b's: a higher seq0, or the same one later round the ring (a first page whose program
+ * failed, its seq written again in the next block, and the failed block's bad mark did not take) */
+static bool newer(uint32_t a, uint32_t b)
+{
+    return b == INV || seq0[a] > seq0[b] ||
+           (seq0[a] == seq0[b] && (a + nblocks - b) % nblocks < (b + nblocks - a) % nblocks);
 }
 
 /* The page that has seq: INV if none does */
@@ -136,7 +157,7 @@ static uint32_t page_of(uint32_t seq)
         return INV;
     }
     for (uint32_t b = 0; b < nblocks; b++) {
-        if (seq0[b] != INV && seq0[b] <= seq && (best == INV || seq0[b] > seq0[best])) {
+        if (seq0[b] != INV && seq0[b] <= seq && newer(b, best)) {
             best = b;
         }
     }
@@ -152,20 +173,51 @@ static int hdr_at(uint32_t seq, struct hdr *h)
     if (r == H_BAD && p != INV) {
         r = unpack(sp, 0, h);
     }
-    return r == H_OK && h->seq != seq ? H_BAD : r;
+    return r == H_FAIL || (r == H_OK && h->seq != seq) ? H_BAD : r;
 }
 
-/* A page whole into rd: 0, or -EIO for one unreadable or with no header. *crc_ok false: its data does not match its
- * CRC (cut mid-program, or ECC could not correct it: the header taken as read, the caller checks its seq) */
-static int read_whole(uint32_t page, struct hdr *h, bool *crc_ok)
+/* A page whole into rd: 0, -EIO the read failed (*ecc 0), -ENODATA no header. *crc_ok false: its data does not match
+ * its CRC (cut mid-program, or ECC could not correct it, *ecc 2: the header taken as read, the caller checks its seq) */
+static int read_whole(uint32_t page, struct hdr *h, bool *crc_ok, int *ecc)
 {
-    int ecc = 0;
-    if (ops->read(page, 0, rd, NL_PAGE + NL_SPARE, &ecc) ||
-        (unpack(rd + NL_PAGE, ecc, h) != H_OK && (ecc != 2 || unpack(rd + NL_PAGE, 0, h) != H_OK))) {
+    if (read_op(page, 0, rd, NL_PAGE + NL_SPARE, ecc)) {
+        *ecc = 0;
         return -EIO;
+    }
+    if (unpack(rd + NL_PAGE, *ecc, h) != H_OK && (*ecc != 2 || unpack(rd + NL_PAGE, 0, h) != H_OK)) {
+        return -ENODATA;
     }
     *crc_ok = page_crc(h, rd) == h->crc;
     return 0;
+}
+
+enum { V_OK, V_EMPTY, V_UNKNOWN };
+
+/* Block b's seq0 from its pages read whole (mount): the first whose header and CRC hold gives it, its seq less its
+ * page. V_EMPTY: no page that holds and none can (the first blank, or the only one written cut mid-program); V_UNKNOWN:
+ * a read that failed, or written pages that do not check: may hold data */
+static int verify(uint32_t b, uint32_t *s0)
+{
+    for (uint32_t p = 0; p < 3; p++) {
+        struct hdr h;
+        bool crc_ok;
+        int ecc, err = read_whole(b * NL_PPB + p, &h, &crc_ok, &ecc);
+        if (err == -EIO) {
+            return V_UNKNOWN;
+        }
+        if (!err && crc_ok && h.seq >= p) {
+            *s0 = h.seq - p;
+            return V_OK;
+        }
+        bool blank = true;
+        for (int i = 0; i < NL_SPARE; i++) {
+            blank = blank && rd[NL_PAGE + i] == 0xFF;
+        }
+        if (blank) {
+            return p <= 1 ? V_EMPTY : V_UNKNOWN;  // two written pages that do not check: not one cut short
+        }
+    }
+    return V_UNKNOWN;
 }
 
 static uint32_t next_good(uint32_t b)
@@ -179,15 +231,17 @@ static uint32_t next_good(uint32_t b)
     return INV;
 }
 
-/* The seq after block b's last page: the next block with data in ring order, or next_seq for the newest */
+/* The seq after block b's last page: the next block round the ring that starts at or past it (older ones in between:
+ * a block left alone at a mount, its data kept), or next_seq for the newest; NL_PPB pages at most */
 static uint32_t block_end(uint32_t b)
 {
+    uint32_t end = seq0[b] + NL_PPB < next_seq ? seq0[b] + NL_PPB : next_seq;
     for (uint32_t c = (b + 1) % nblocks; c != b; c = (c + 1) % nblocks) {
-        if (seq0[c] != INV) {
-            return seq0[c] > seq0[b] ? seq0[c] : next_seq;
+        if (seq0[c] != INV && newer(c, b)) {
+            return MIN(seq0[c], end);
         }
     }
-    return next_seq;
+    return end;
 }
 
 /* Block b about to be erased: the files that start in it go (their rest in later blocks is not listed: a file starts
@@ -282,9 +336,11 @@ static int put_page(void)
             return 0;
         }
         nl_err[NL_FAILS]++;
-        set_bit(retire, wblock);
-        if (!wpage) {
-            seq0[wblock] = INV;
+        if (!wpage) {  // nothing else in it: marked bad now, or its first page (which may read back right) would
+            seq0[wblock] = INV;  // start a block with the same seq as the next one after a remount
+            retire_block(wblock);
+        } else {
+            set_bit(retire, wblock);  // its pages before this one are data: marked when the ring comes to it
         }
         wpage = NL_PPB;
     }
@@ -365,9 +421,24 @@ static void build(void)
     }
 }
 
+/* A block that may hold data but cannot be made out at this mount (reads that fail, pages that do not check): left as
+ * it is, not used, not erased; the next mount looks again.
+ * shortcut: one readable again later sits out of seq order round the ring, and build() walks the ring in place order,
+ * so its files may list out of order (none erased); sort the blocks by seq0 if it ever shows in the field */
+static uint32_t unknown;
+static void keep(uint32_t b)
+{
+    set_bit(bad, b);
+    seq0[b] = INV;
+    unknown++;
+}
+
+/* Recovery never erases a block that may hold data: the newest block's first page and the one to be erased next (the
+ * oldest) read whole and checked, blocks out of order round the ring checked again; what cannot be made out is kept */
 int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u)
 {
-    static uint8_t odd[NL_MAX_BLOCKS / 8];  // first page blank but its first main byte not: factory bad or torn
+    static uint8_t odd[NL_MAX_BLOCKS / 8];      // first page blank but its first main byte not: factory bad or torn
+    static uint8_t checked[NL_MAX_BLOCKS / 8];  // seq0 read whole
     struct hdr h;
     uint8_t sp[NL_SPARE];
     ops = o;
@@ -376,81 +447,144 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u)
     memset(bad, 0, sizeof(bad));
     memset(retire, 0, sizeof(retire));
     memset(odd, 0, sizeof(odd));
+    memset(checked, 0, sizeof(checked));
     nfiles = 0;
-    wfile = rd_seq = cur_file = INV;
+    unknown = 0;
+    wfile = gone = rd_seq = cur_file = INV;
     pg_len = pg_off = 0;
     up = u;
+    next_seq = INV;  // page_of: no bound yet
 
     // every block's first page: bad marks (0x800, ours and the factory's), seq0, blank
+    bool data = false;
     for (uint32_t b = 0; b < nblocks; b++) {
         int r = read_hdr(b * NL_PPB, &h, sp), ecc;
         uint8_t m0 = 0xFF;
-        if (sp[0] != 0xFF) {
+        uint32_t s0;
+        if (r == H_FAIL) {
+            keep(b);
+        } else if (sp[0] != 0xFF) {
             set_bit(bad, b);
         } else if (r == H_OK) {
             seq0[b] = h.seq;
-        } else if (r == H_ERASED && !ops->read(b * NL_PPB, 0, &m0, 1, &ecc) && m0 != 0xFF) {
-            set_bit(odd, b);  // W25N02KV marks some factory bad blocks in the main area's first byte only
+        } else if (r == H_BAD) {  // not ours, ECC failed, or cut mid-program: its pages say
+            set_bit(checked, b);
+            int v = verify(b, &s0);
+            if (v == V_UNKNOWN) {
+                keep(b);
+            } else if (v == V_OK) {
+                seq0[b] = s0;
+            }
+        } else if (read_op(b * NL_PPB, 0, &m0, 1, &ecc)) {
+            keep(b);
+        } else if (m0 != 0xFF) {
+            set_bit(odd, b);  // W25N02KV's datasheet marks factory bad blocks in both; a first page cut short too
+        }
+        data = data || seq0[b] != INV;
+    }
+    // a chip with nothing of ours on it: its odd blocks are the factory's, marked so for good
+    for (uint32_t b = 0; b < nblocks && !data && !unknown; b++) {
+        if (bit(odd, b)) {
+            ops->mark_bad(b);
+            set_bit(bad, b);
         }
     }
 
-    // the newest block, its last page: halves on "blank"; that page whole, else the one before it (a page cut
-    // mid-program is the newest, and only that one); none in it, it is not the newest
-    uint32_t last = INV, head = INV;
+    uint32_t last, head;
     for (;;) {
-        head = INV;
+        last = head = INV;
         for (uint32_t b = 0; b < nblocks; b++) {
-            if (seq0[b] != INV && (head == INV || seq0[b] > seq0[head])) {
+            if (seq0[b] != INV && newer(b, head)) {
                 head = b;
             }
         }
         if (head == INV) {
             break;
         }
+        uint32_t s0;
+        if (!bit(checked, head)) {
+            set_bit(checked, head);
+            int v = verify(head, &s0);
+            if (v != V_OK || s0 != seq0[head]) {  // V_OK: its first page read wrong in the scan
+                if (v == V_UNKNOWN) {
+                    keep(head);
+                } else {
+                    seq0[head] = v == V_OK ? s0 : INV;
+                }
+                continue;
+            }
+        }
+        // its last page: halves on "blank"; that page whole, else the one before it (a page cut mid-program is the
+        // newest, and only that one); a read that fails: kept
         uint32_t lo = 0, hi = NL_PPB;
-        while (hi - lo > 1) {
+        int r = H_OK;
+        while (hi - lo > 1 && r != H_FAIL) {
             uint32_t mid = (lo + hi) / 2;
-            if (read_hdr(head * NL_PPB + mid, &h, NULL) == H_ERASED) {
+            r = read_hdr(head * NL_PPB + mid, &h, NULL);
+            if (r == H_ERASED) {
                 hi = mid;
             } else {
                 lo = mid;
             }
         }
-        bool crc_ok;
-        if (!read_whole(head * NL_PPB + lo, &h, &crc_ok) && crc_ok && h.seq == seq0[head] + lo) {
+        bool crc_ok = false;
+        int ecc, err = r == H_FAIL ? -EIO : read_whole(head * NL_PPB + lo, &h, &crc_ok, &ecc);
+        if (err == -EIO) {
+            keep(head);
+            continue;
+        }
+        if (!err && crc_ok && h.seq == seq0[head] + lo) {
             last = h.seq;
-            break;
-        }
-        if (lo) {
+        } else if (lo) {
             last = seq0[head] + lo - 1;
+        } else {
+            seq0[head] = INV;
+            continue;
+        }
+        // the block to be erased next (after it round the ring, the oldest), and blocks out of order checked: one
+        // newer than the newest means a seq0 read wrong
+        uint32_t t = next_good(head), prev = INV;
+        bool again = false;
+        for (uint32_t c = t; c != INV && c != head && !again; c = (c + 1) % nblocks) {
+            if (bit(bad, c) || (seq0[c] == INV && c != t)) {
+                continue;
+            }
+            if ((c == t || seq0[c] > seq0[head] || (prev != INV && seq0[c] < prev)) && !bit(checked, c)) {
+                set_bit(checked, c);
+                int v = verify(c, &s0);
+                if (v == V_UNKNOWN) {
+                    keep(c);
+                    again = c == t;  // the next one is erased instead: checked first
+                    continue;
+                }
+                seq0[c] = v == V_OK ? s0 : INV;
+                again = seq0[c] != INV && newer(c, head);
+            }
+            prev = seq0[c] != INV ? seq0[c] : prev;
+        }
+        if (!again) {
             break;
         }
-        seq0[head] = INV;
     }
-    // blank-but-marked first pages are factory bad, but the block after the newest: that one may be ours, cut mid-program
-    uint32_t after = INV;
-    for (uint32_t b = head == INV ? 0 : (head + 1) % nblocks, i = 0; i < nblocks; b = (b + 1) % nblocks, i++) {
-        if (!bit(bad, b)) {
-            after = b;
-            break;
-        }
-    }
+    // odd blocks left are factory bad, but the next one to be written after the newest: that one is ours, cut
+    // mid-program (no newest: none is)
+    uint32_t t = head == INV ? INV : next_good(head);
     for (uint32_t b = 0; b < nblocks; b++) {
-        if (bit(odd, b) && b != after) {
+        if (bit(odd, b) && b != t) {
             set_bit(bad, b);
         }
     }
+    // past anything a kept block may hold: no seq written twice
     next_seq = last == INV ? 0 : last + 1;
-    next_seq = next_seq > up ? next_seq : up;
+    next_seq = (next_seq > up ? next_seq : up) + unknown * NL_PPB;
 
-    // writing goes on in the next block, erased now: nothing is programmed twice, and an erase cut short is done again
+    // the list first (the files the next erase takes are counted lost), then writing goes on in the next block, erased
+    // now: nothing is programmed twice, and an erase cut short is done again
     wblock = head;
     wpage = NL_PPB;
-    if (advance()) {
-        return -EIO;
-    }
     build();
-    return 0;
+    rd_seq = INV;
+    return advance();
 }
 
 int nl_flush(void)
@@ -466,8 +600,8 @@ int nl_append(uint32_t file, const void *d, uint32_t n)
         if (err) {
             return err;
         }
-        if (i >= 0 && i != nfiles - 1) {
-            return -EROFS;  // its pages would not be one run
+        if ((i >= 0 && i != nfiles - 1) || (i < 0 && gone != INV && file <= gone)) {
+            return -EROFS;  // its pages would not be one run; or a file deleted, not to come back with other bytes
         }
         if (i < 0) {
             new_file(file, next_seq, 0);
@@ -527,14 +661,15 @@ int nl_read(uint32_t file, uint32_t off, void *d, uint32_t n)
         s = lo;
     }
     bool crc_ok = true;
+    int ecc = 0;
     uint32_t p = page_of(s);
     if (s != rd_seq) {
         rd_seq = INV;
-        if (p == INV || read_whole(p, &h, &crc_ok) || h.seq != s) {
+        if (p == INV || read_whole(p, &h, &crc_ok, &ecc) || h.seq != s) {
             return -EIO;
         }
-        if (!crc_ok) {
-            nl_err[NL_ECC_BAD]++;  // sent as read: most of it is right
+        if (!crc_ok && ecc != 2) {
+            nl_err[NL_ECC_BAD]++;  // sent as read: most of it is right (ECC's own failure counted already)
         }
         rd_seq = s;
     }
@@ -563,6 +698,7 @@ int nl_delete(uint32_t file, bool *moved)
     if (file == wfile) {
         wfile = INV;  // closed and flushed (a segment just rolled over): the next append starts a new file
     }
+    gone = gone == INV || file > gone ? file : gone;
     memmove(files + i, files + i + 1, sizeof(files[0]) * (nfiles - i - 1));
     nfiles--;
     uint32_t u = nfiles ? files[0].seq : next_seq;

@@ -19,9 +19,10 @@
 #define NL_MAX_FILES 256
 
 struct nl_ops {
-    /* page into the chip's cache, then n bytes from column col; *ecc: 0 clean, 1 corrected, 2 not correctable */
+    /* page into the chip's cache, then n bytes from column col; *ecc: 0 clean, 1 corrected, 2 not correctable. Tried
+     * again on an error; a block whose pages still do not read at mount is kept as it is, unused, never erased */
     int (*read)(uint32_t page, uint16_t col, void *buf, uint16_t n, int *ecc);
-    /* a whole page: 2048 B, then the 56 spare bytes from 0x800; -EIO: P-FAIL */
+    /* a whole page: 2048 B, then the 56 spare bytes from 0x800; -EIO: P-FAIL (and only that: an SPI error is another) */
     int (*program)(uint32_t page, const uint8_t *data, const uint8_t *spare);
     int (*erase)(uint32_t block);  // -EIO: E-FAIL. Other errors (the chip does not answer) are passed up, no block blamed
     int (*mark_bad)(uint32_t block);  // 00h at 0x800 of its first page
@@ -30,9 +31,10 @@ struct nl_ops {
 enum { NL_ECC_FIXED, NL_ECC_BAD, NL_FAILS, NL_TIMEOUTS, NL_LOST, NL_ERR_N };
 extern uint32_t nl_err[NL_ERR_N];  // ECC corrected, not correctable or CRC, program/erase failures, busy timeouts, unuploaded files overwritten
 
-/* Scan the chip (nblocks of it) and recover; up: the uploaded pointer kept in NVS (0: none). 0 or -EIO (no good block) */
+/* Scan the chip (nblocks of it) and recover; up: the uploaded pointer kept in NVS (0: none). 0, -EIO (no good block),
+ * or the erase's error. The one block it erases is checked first to be older than the newest, or to hold no page */
 int nl_mount(const struct nl_ops *ops, uint32_t nblocks, uint32_t up);
-/* n bytes onto the end of file: the newest file, or a new one. n, or -EROFS (an older file), -EIO */
+/* n bytes onto the end of file: the newest file, or a new one. n, or -EROFS (an older file, or one deleted), -EIO */
 int nl_append(uint32_t file, const void *d, uint32_t n);
 /* The open page out to the chip, padded (a file closed, unmount) */
 int nl_flush(void);
