@@ -183,12 +183,15 @@ def started(device: str, lo: int, hi: int) -> int:
 def lead(x: str, y: str, end: int, windows: int = 1) -> float | None:
     """How much better x hears than y (quality, dB) in the WINDOW_S before end, the least of `windows` such back to
     back; None: one has no level in one, or (more than one: a switch) levels in under MIN_FRAMES of one (11-06: the
-    window before the last was from before a recorder came back from a gap, it was switched back 13 s after)."""
+    window before the last was from before a recorder came back from a gap, it was switched back 13 s after). Each
+    window from where both have begun: one just started is not short of the frames from before it started."""
     w, d = WINDOW_S * 1000, []
     for e in range(end, end - windows * w, -w):
-        if windows > 1 and any((~np.isnan(levels(z, e - w, e))).mean() < MIN_FRAMES for z in (x, y)):
+        has = [~np.isnan(levels(z, e - w, e)) for z in (x, y)]
+        if windows > 1 and any(v.mean() < MIN_FRAMES for v in has):
             return None
-        if (qx := quality(x, e - w, e)) is None or (qy := quality(y, e - w, e)) is None:
+        s = e - w + max(int(np.argmax(v)) for v in has) * ENV_MS
+        if (qx := quality(x, s, e)) is None or (qy := quality(y, s, e)) is None:
             return None
         d.append(qx - qy)
     return min(d)
@@ -211,6 +214,8 @@ def take(device: str, y: str, a: int, by: float):
     with db.tx() as t:
         db.put_kv(f"standby:{y}", {"of": device, "since": a}, t)
         db.put_kv(f"standby:{device}", None, t)
+        for d in (device, y):
+            db.put_kv(f"parted:{d}", None, t)
     log.info("%s transcribes for %s from %s: hears it better (%.1f dB)", device, y,
              dt.datetime.fromtimestamp(a / 1000), by)
 
@@ -229,9 +234,11 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
     has not left any of it to another (so the last of them to get to a piece transcribes it); in the window after a
     takeover it does not stand by again. One that hears worse stands by for this one (take): of the piece it has
     transcribed, that is left to it, the rest goes to the late layer (split); a piece of it at the engine: WAIT
-    (busy). Not one that took over in the last window (apart, gone: its own call). Just started (under MIN_FRAMES of
-    its levels in the window): judged on the WINDOW_S from its first level, waiting for the audio up to FIRST_WAIT_S
-    after the piece. Transcribing again after leaving pieces to another (but for gone): resume()."""
+    (busy). Not one that took over in the last window (apart, gone: its own call), nor one that begins in the window
+    (just started: its own first window judges). Back together after parting (apart, no levels): the one that stood by
+    stands by again, whichever hears better (the switch is a standby's: SWITCH_DB over two windows). Just started
+    (under MIN_FRAMES of its levels in the window): judged on the WINDOW_S from its first level, waiting for the audio
+    up to FIRST_WAIT_S after the piece. Transcribing again after leaving pieces to another (but for gone): resume()."""
     now_ms = round(time.time() * 1000) if now_ms is None else now_ms
     w = WINDOW_S * 1000
     sb = db.kv(f"standby:{device}") or {}
@@ -265,6 +272,7 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             with db.tx() as t:
                 db.put_kv(f"standby:{device}", None, t)
                 db.put_kv(f"standby_left:{device}", b, t)
+                db.put_kv(f"parted:{device}", y if why != "gone" else None, t)  # gone: back as one just started
                 if why != "gone":  # gone: the other's audio covered all it left, the other transcribes that
                     resume(t, device, a, now_ms)
             log.info("%s takes over from %s at %s: %s", device, y, dt.datetime.fromtimestamp(a / 1000), why)
@@ -284,9 +292,13 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             continue
         together = True
         by = lead(device, y, end)
-        if (by is not None and by > 0 and not standby_of(y) and not stood_for(y)
-                and (db.kv(f"standby_left:{y}") or 0) <= b - w):  # not in the window y took over in (apart: its own call)
-            take(device, y, a, by)
+        # back together after parting: the one that stood by stands by again (it switches as a standby does, by
+        # SWITCH_DB over two windows), whichever of the two looks first
+        was, back = db.kv(f"parted:{device}") == y, db.kv(f"parted:{y}") == device
+        if ((back or (not was and by is not None and by > 0)) and not standby_of(y) and not stood_for(y)
+                and (db.kv(f"standby_left:{y}") or 0) <= b - w  # not in the window y took over in (apart: its own call)
+                and not np.isnan(levels(y, end - w, end)[0])):  # not where y begins (just started: y's own call)
+            take(device, y, a, by or 0)
         if transcribed(y, a, b) >= COVER:
             return y  # first come: y has it already, whatever it does now
         if standby_of(y):
@@ -295,8 +307,12 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             if transcribed(y, a, b) > 0:
                 return y  # what y transcribed before it stood by stays y's, the rest goes to the late layer (split)
             continue
-        if (by is None or by <= 0) and not db.processed(y, a, b, "standby"):  # never to one that left it: nobody has it
-            db.put_kv(f"standby:{device}", {"of": y, "since": a})
+        # never to one that left it: nobody has it
+        if (was or (not back and (by is None or by <= 0))) and not db.processed(y, a, b, "standby"):
+            with db.tx() as t:
+                db.put_kv(f"standby:{device}", {"of": y, "since": a}, t)
+                for d in (device, y):
+                    db.put_kv(f"parted:{d}", None, t)
             log.info("%s stands by for %s from %s (r %.2f)", device, y, dt.datetime.fromtimestamp(a / 1000), r)
             return y
     # it left the piece before to another (first come), no longer: the newest it did in the window is leaving, not

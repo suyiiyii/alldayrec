@@ -373,6 +373,38 @@ def test_switch_with_hysteresis(store, lag_s, off_s):
     assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
 
 
+@pytest.mark.parametrize("x_first", [True, False])
+def test_newcomer_a_few_db_better_whoever_looks_first(store, x_first):
+    """Y starts at 300 s, a few dB better than X: Y transcribes, X stands by, also when X judges a piece of the window
+    Y started in before Y judges its first (X's window from before Y's start is no worse a Y: those frames were none)."""
+    room = walk(43, 2400)
+    put(X, squash(room, 0.8))
+    put(Y, room[600:], start_s=300)
+    assert 0 < colocate.lead(Y, X, at(600)) < colocate.SWITCH_DB and colocate.lead(X, Y, at(490)) < 0
+    looks = [(X, at(470), at(490)), (Y, at(300), at(320))]
+    for d, a, b in looks if x_first else looks[::-1]:
+        colocate.decide(d, a, b)
+    assert colocate.standby_of(X) == Y and colocate.standby_of(Y) is None
+
+
+@pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
+def test_back_together_the_standby_stands_by_again(store, lag_s, off_s):
+    """X stands by for Y, hearing a few dB better (under SWITCH_DB). X apart for 5 min (from 600 s): it takes over;
+    back together, Y transcribes again and X stands by again, whichever looks first. Every ms by one at least, X's
+    only around the time apart."""
+    room, away = walk(49, 5400), walk(50, 5400)
+    put(X, np.r_[room[:1200], away[1200:1800], room[1800:]])
+    put(Y, squash(room, 0.9))
+    assert 0 < colocate.lead(X, Y, at(2400)) < colocate.SWITCH_DB
+    db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
+    who, final, late = run_both(2700, lag_s, off_s)
+    assert late_store.subtract([[at(0), at(2700)]], final[Y] + late[Y]) == [], (final, late)
+    assert late_store.subtract(final[X] + late[X], [[at(300), at(1500)]]) == [], (final, late)
+    assert db.kv(f"standby_left:{X}"), "X took over while apart"
+    assert colocate.standby_of(X) == Y and colocate.standby_of(Y) is None, who
+    assert all(v == {Y} for s, v in who.items() if s >= 1800 + 2 * colocate.WINDOW_S + abs(lag_s)), who
+
+
 def test_no_take_in_the_window_the_other_took_over_in(store):
     """Y hears better, but X took over from Y within the last window (apart, by X's window around its piece): Y does
     not make X stand by again until that window is past (11-12: they took turns each 20 s)."""

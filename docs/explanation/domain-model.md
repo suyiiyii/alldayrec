@@ -275,7 +275,7 @@ erDiagram
 | 层 | 什么时候跑 | 读 | 写 |
 |---|---|---|---|
 | 定稿层 | 每台设备一直跑（`device_pipeline.py` 的 `final_loop`） | 设备的音频流：从 `finalized_to` 起，跳过 `hold` 之后的和迟到层已处理的 | `sentences`、`processed_audio`（`final`）、`conversations`、`summaries`（`pending`）、`timelines`；`kv` 的 `finalized_to`、`open_conversation`、`live` |
-| └ 备用（standby） | 定稿层里的一个分支：同一租户另一台设备在同一处录着同样的声音（两台的音量起伏相关，`colocate.py`） | 两台设备上传块的音量包络（`pieces.env`） | 只写 `processed_audio`（`standby`）、推进 `finalized_to`；不调引擎，不出句子、对话、草稿和实时分析。两台里听得清楚的那台转写，另一台当备用（`colocate.quality`：说话段电平比底噪高多少 dB，说话太小声、缺帧、削波扣分）。另一台 90 秒没有音频，或两台不再相关，就接着转写；不再相关时，之前 300 秒里留给对方的部分交给迟到层。备用在连续两个 300 秒窗口里都比对方好 6 dB 以上时接过来转写，对方转为备用。新开的设备先等，最多等到这一块之后 180 秒，攒够一个窗口再判 |
+| └ 备用（standby） | 定稿层里的一个分支：同一租户另一台设备在同一处录着同样的声音（两台的音量起伏相关，`colocate.py`） | 两台设备上传块的音量包络（`pieces.env`） | 只写 `processed_audio`（`standby`）、推进 `finalized_to`；不调引擎，不出句子、对话、草稿和实时分析。两台里听得清楚的那台转写，另一台当备用（`colocate.quality`：说话段电平比底噪高多少 dB，说话太小声、缺帧、削波扣分）。另一台 90 秒没有音频，或两台不再相关，就接着转写；不再相关时，之前 300 秒里留给对方的部分交给迟到层。备用在连续两个 300 秒窗口里都比对方好 6 dB 以上时接过来转写，对方转为备用；分开后再回到一处，原来的备用接着当备用，照这条规则才切。新开的设备先等，最多等到这一块之后 180 秒，攒够一个窗口再判 |
 | 草稿层 | 有网页在看、这台设备 120 秒内有新音频、不是备用（`drafting`） | 设备最新 300 秒音频（`edge_feed`，跳过积压） | `drafts`，`kv` 的 `draft_to` |
 | 迟到层 | 每个租户一个串行处理器（`late.py` 的 `processor`） | `late_spans`，按精确时间读上传块（`read_exact`） | `sentences`（`late = 1`）、新建或合并 `conversations`、`voices`、`conversation_aliases`、`processed_audio`（`late` 或 `standby`）、`summaries`（重写） |
 | 实时分析 | 有网页在前台，当前对话说话满 60 秒，之后每多 120 秒新语音；或点「立即总结」 | 进行中对话的定稿句子加草稿（`open_view`） | `kv` 的 `live:<d>`；对话结束时写进 `timelines` |
