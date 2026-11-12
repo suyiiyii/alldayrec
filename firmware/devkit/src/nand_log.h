@@ -27,7 +27,9 @@ struct nl_ops {
     int (*erase)(uint32_t block);  // -EIO: E-FAIL. Other errors (the chip does not answer) are passed up, no block blamed
     int (*mark_bad)(uint32_t block);  // 00h at 0x800 of its first page
     int (*save_top)(uint32_t top);      // the seq ceiling into NVS (before a seq at or past the last one is written)
-    int (*save_erase)(uint32_t block);  // the block an erase is about to begin on, into NVS
+    int (*save_erase)(uint32_t block);  // the block an erase is about to begin on into NVS (0xFFFFFFFF once it is
+                                        // done); an error: that erase not begun, the append fails (-EAGAIN), next
+                                        // page tries again
 };
 
 enum { NL_ECC_FIXED, NL_ECC_BAD, NL_FAILS, NL_TIMEOUTS, NL_LOST, NL_ERR_N };

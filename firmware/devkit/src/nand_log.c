@@ -22,7 +22,7 @@ static uint32_t next_seq, up;   // up: the files before it are all deleted (uplo
 static uint32_t top;            // every seq written is below it (kept in NVS, ops->save_top)
 static uint32_t erasing;        // the block an erase was last begun on (kept in NVS, ops->save_erase; INV: none)
 static bool held;               // up stays at this mount: something that may hold unlisted files could not be read
-static uint32_t hdr_fails;      // header reads that failed in hdr_at
+static uint32_t hdr_doubts;     // headers in hdr_at not read for sure: a read that failed, ECC, not the seq asked for
 
 struct ent {
     uint32_t file, seq, last, size;  // first and last page's seq (last INV: none written yet)
@@ -189,17 +189,20 @@ static uint32_t page_of(uint32_t seq)
     return best == INV || seq - seq0[best] >= NL_PPB ? INV : best * NL_PPB + seq - seq0[best];
 }
 
-/* The header of the page with seq. One ECC could not correct is taken as read when its seq is the one asked for */
+/* The header of the page with seq. One ECC could not correct is taken as read when its seq is the one asked for (its
+ * off or file may still be wrong: counted a doubt, as one that did not read or is not that seq) */
 static int hdr_at(uint32_t seq, struct hdr *h)
 {
     uint8_t sp[NL_SPARE];
     uint32_t p = page_of(seq);
     int r = p == INV ? H_BAD : read_hdr(p, h, sp);
+    bool doubt = p != INV && r != H_OK && r != H_ERASED;
     if (r == H_BAD && p != INV) {
         r = unpack(sp, 0, h);
     }
-    hdr_fails += r == H_FAIL;
-    return r == H_FAIL || (r == H_OK && h->seq != seq) ? H_BAD : r;
+    r = r == H_FAIL || (r == H_OK && h->seq != seq) ? H_BAD : r;
+    hdr_doubts += doubt || (p != INV && r == H_BAD);
+    return r;
 }
 
 /* A page whole into rd: 0, -EIO the read failed (*ecc 0), -ENODATA no header. *crc_ok false: its data does not match
@@ -217,13 +220,16 @@ static int read_whole(uint32_t page, struct hdr *h, bool *crc_ok, int *ecc)
     return 0;
 }
 
-enum { V_OK, V_EMPTY, V_UNKNOWN, V_FAIL };
+enum { V_OK, V_EMPTY, V_UNKNOWN, V_RUN, V_FAIL };
 
 /* Block b's seq0 from its pages read whole (mount): the first whose header and CRC hold gives it, its seq less its
  * page. V_EMPTY: no page that holds and none can (the first blank, or the only one written cut mid-program); V_UNKNOWN:
- * written pages that do not check, V_FAIL: a read that failed: may hold data */
+ * written pages that do not check; V_RUN: so, but two of their headers (as read) are one file's run of seqs: data, not
+ * an erase cut short; V_FAIL: a read that failed: may hold data */
 static int verify(uint32_t b, uint32_t *s0)
 {
+    uint32_t file = INV, s = INV;
+    bool run = false;
     for (uint32_t p = 0; p < 3; p++) {
         struct hdr h;
         bool crc_ok;
@@ -235,15 +241,19 @@ static int verify(uint32_t b, uint32_t *s0)
             *s0 = h.seq - p;
             return V_OK;
         }
+        if (!err) {
+            run = run || (h.file == file && h.seq - p == s);
+            file = h.file, s = h.seq - p;
+        }
         bool blank = true;
         for (int i = 0; i < NL_SPARE; i++) {
             blank = blank && rd[NL_PAGE + i] == 0xFF;
         }
         if (blank) {
-            return p <= 1 ? V_EMPTY : V_UNKNOWN;  // two written pages that do not check: not one cut short
+            return p <= 1 ? V_EMPTY : run ? V_RUN : V_UNKNOWN;  // two written pages that do not check: not one cut short
         }
     }
-    return V_UNKNOWN;
+    return run ? V_RUN : V_UNKNOWN;
 }
 
 static uint32_t next_good(uint32_t b)
@@ -312,10 +322,15 @@ static int advance(void)
             continue;
         }
         drop(b);
-        ops->save_erase(b);  // an erase cut short reads as pages ECC cannot correct: the next mount erases it again
+        if (ops->save_erase(b)) {  // an erase cut short reads as pages ECC cannot correct: the next mount erases it
+            return -EAGAIN;        // again. Not in NVS: not begun (it would be kept for good if cut); the next page tries
+        }
         int err = ops->erase(b);
         if (err && err != -EIO) {
             return err;  // the chip does not answer: no block to blame
+        }
+        if (!err) {
+            ops->save_erase(INV);  // done: NVS never names the block being written (one that fails: verify's run check)
         }
         if (err) {
             nl_err[NL_FAILS]++;
@@ -592,7 +607,6 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
             if ((c == t || seq0[c] > seq0[head] || (prev != INV && seq0[c] <= prev)) && !bit(checked, c)) {
                 set_bit(checked, c);
                 int v = verify(c, &s0);
-                v = v == V_UNKNOWN && c == t && c == erasing ? V_EMPTY : v;  // an erase cut short (header left whole)
                 if (v >= V_UNKNOWN) {
                     keep(c);
                     again = c == t;  // the next one is erased instead: checked first
@@ -631,11 +645,12 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32
     // now: nothing is programmed twice, and an erase cut short is done again
     wblock = head;
     wpage = NL_PPB;
-    hdr_fails = 0;
+    hdr_doubts = 0;
     build();
-    held = unknown || hdr_fails;  // a page in the list's range that did not read: its file may not be listed
+    held = unknown || hdr_doubts;  // a header in the list's range not read for sure: its file may not be listed
     rd_seq = INV;
-    return advance();
+    int err = advance();
+    return err == -EAGAIN ? 0 : err;  // NVS did not take the erase's block: the first page tries again
 }
 
 int nl_flush(void)
