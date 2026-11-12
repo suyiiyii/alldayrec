@@ -23,13 +23,14 @@ onMounted(load);
 onMounted(async () => (due.value = await get<Due[]>("/api/todos/due").catch(() => null)));
 useSocket((m) => m.type === "status" && (status.value = m), load);
 const STARS = 3; // the newest; the rest folded
-// the devices, their newest recording first: one whose pipeline runs as its full status; one that last recorded more
-// than OLD_DAYS ago folded at the bottom
+// the devices by name (the status every 2 s must not swap the cards under a finger, 11-13): one whose pipeline runs as
+// its full status; one that last recorded more than OLD_DAYS ago folded at the bottom
 const OLD_DAYS = 7;
 const recorders = computed(() => {
   const recent: Recorder[] = [],
     older: Recorder[] = [];
-  for (const r of status.value?.recorders ?? []) {
+  const byName = [...(status.value?.recorders ?? [])].sort((a, b) => (a.device < b.device ? -1 : 1));
+  for (const r of byName) {
     const d = status.value?.devices?.find((x) => x.device === r.device);
     const old = !d?.recording && Date.now() - +new Date(r.audio_end ?? 0) > OLD_DAYS * 86400000;
     (old ? older : recent).push(d ?? r);
