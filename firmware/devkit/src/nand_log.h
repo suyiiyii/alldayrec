@@ -26,16 +26,18 @@ struct nl_ops {
     int (*program)(uint32_t page, const uint8_t *data, const uint8_t *spare);
     int (*erase)(uint32_t block);  // -EIO: E-FAIL. Other errors (the chip does not answer) are passed up, no block blamed
     int (*mark_bad)(uint32_t block);  // 00h at 0x800 of its first page
-    void (*save_top)(uint32_t top);   // the seq ceiling into NVS (before a seq past the last one is written)
+    int (*save_top)(uint32_t top);      // the seq ceiling into NVS (before a seq at or past the last one is written)
+    int (*save_erase)(uint32_t block);  // the block an erase is about to begin on, into NVS
 };
 
 enum { NL_ECC_FIXED, NL_ECC_BAD, NL_FAILS, NL_TIMEOUTS, NL_LOST, NL_ERR_N };
 extern uint32_t nl_err[NL_ERR_N];  // ECC corrected, not correctable or CRC, program/erase failures, busy timeouts, unuploaded files overwritten
 
 /* Scan the chip (nblocks of it) and recover; up: the uploaded pointer kept in NVS (0: none), top: the seq ceiling kept
- * there (save_top; 0: none). 0, -EIO (no good block), or the erase's error. The one block it erases is checked first to
- * be older than the newest, or to hold no page */
-int nl_mount(const struct nl_ops *ops, uint32_t nblocks, uint32_t up, uint32_t top);
+ * there (save_top; 0: none), erasing: the block an erase was last begun on (save_erase; 0xFFFFFFFF: none). 0, -EIO (no
+ * good block), or the erase's error. The one block it erases is checked first to be older than the newest, or to hold
+ * no page, or to be an erase cut short */
+int nl_mount(const struct nl_ops *ops, uint32_t nblocks, uint32_t up, uint32_t top, uint32_t erasing);
 /* n bytes onto the end of file: the newest file, or a new one. n, or -EROFS (an older file, or one deleted), -EIO */
 int nl_append(uint32_t file, const void *d, uint32_t n);
 /* The open page out to the chip, padded (a file closed, unmount) */
@@ -44,7 +46,7 @@ int nl_flush(void);
 int nl_read(uint32_t file, uint32_t off, void *d, uint32_t n);
 /* The file off the list (the phone has it): 0, -ENOENT, -EBUSY (the one being written, its open page not flushed). A
  * file deleted is never appended to again (lr_store.c's names only go up). *moved: the uploaded pointer went on,
- * nl_up() to keep (never at a mount that kept a block it could not read: the files in it are not listed) */
+ * nl_up() to keep (never at a mount that kept a block, or could not read a page of the list: files may be unlisted) */
 int nl_delete(uint32_t file, bool *moved);
 uint32_t nl_up(void);
 /* The list, oldest first: n files; file i's number and size */

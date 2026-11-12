@@ -9,6 +9,7 @@
  * A file's pages are one run of seqs. */
 #define INV 0xFFFFFFFFu
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 uint32_t nl_err[NL_ERR_N];
 
@@ -19,6 +20,9 @@ static uint8_t bad[NL_MAX_BLOCKS / 8], retire[NL_MAX_BLOCKS / 8];  // retire: fa
 static uint32_t wblock, wpage;  // the block being written and its next page (NL_PPB: the next block first)
 static uint32_t next_seq, up;   // up: the files before it are all deleted (uploaded)
 static uint32_t top;            // every seq written is below it (kept in NVS, ops->save_top)
+static uint32_t erasing;        // the block an erase was last begun on (kept in NVS, ops->save_erase; INV: none)
+static bool held;               // up stays at this mount: something that may hold unlisted files could not be read
+static uint32_t hdr_fails;      // header reads that failed in hdr_at
 
 struct ent {
     uint32_t file, seq, last, size;  // first and last page's seq (last INV: none written yet)
@@ -107,7 +111,9 @@ static int read_op(uint32_t page, uint16_t col, void *buf, uint16_t n, int *ecc)
 }
 
 /* A read taken when two in a row agree: one bit wrong on the SPI lines (no ECC there) would go into the list and the
- * uploaded pointer for good. n: NL_SPARE at most */
+ * uploaded pointer for good. ECC 0 and 1 alike (a marginal bit corrected at one read, not there at the next); two that
+ * ECC cannot correct taken as the first (their wrong bits may differ: the callers check such a page). n: NL_SPARE at
+ * most */
 static int read2(uint32_t page, uint16_t col, uint8_t *buf, uint16_t n, int *ecc)
 {
     uint8_t b[NL_SPARE];
@@ -116,7 +122,8 @@ static int read2(uint32_t page, uint16_t col, uint8_t *buf, uint16_t n, int *ecc
         if (err) {
             return err;
         }
-        if (*ecc == e2 && !memcmp(buf, b, n)) {
+        if ((*ecc == 2) == (e2 == 2) && (*ecc == 2 || !memcmp(buf, b, n))) {
+            *ecc = *ecc > e2 ? *ecc : e2;
             return 0;
         }
     }
@@ -191,6 +198,7 @@ static int hdr_at(uint32_t seq, struct hdr *h)
     if (r == H_BAD && p != INV) {
         r = unpack(sp, 0, h);
     }
+    hdr_fails += r == H_FAIL;
     return r == H_FAIL || (r == H_OK && h->seq != seq) ? H_BAD : r;
 }
 
@@ -209,11 +217,11 @@ static int read_whole(uint32_t page, struct hdr *h, bool *crc_ok, int *ecc)
     return 0;
 }
 
-enum { V_OK, V_EMPTY, V_UNKNOWN };
+enum { V_OK, V_EMPTY, V_UNKNOWN, V_FAIL };
 
 /* Block b's seq0 from its pages read whole (mount): the first whose header and CRC hold gives it, its seq less its
  * page. V_EMPTY: no page that holds and none can (the first blank, or the only one written cut mid-program); V_UNKNOWN:
- * a read that failed, or written pages that do not check: may hold data */
+ * written pages that do not check, V_FAIL: a read that failed: may hold data */
 static int verify(uint32_t b, uint32_t *s0)
 {
     for (uint32_t p = 0; p < 3; p++) {
@@ -221,7 +229,7 @@ static int verify(uint32_t b, uint32_t *s0)
         bool crc_ok;
         int ecc, err = read_whole(b * NL_PPB + p, &h, &crc_ok, &ecc);
         if (err == -EIO) {
-            return V_UNKNOWN;
+            return V_FAIL;
         }
         if (!err && crc_ok && h.seq >= p) {
             *s0 = h.seq - p;
@@ -304,6 +312,7 @@ static int advance(void)
             continue;
         }
         drop(b);
+        ops->save_erase(b);  // an erase cut short reads as pages ECC cannot correct: the next mount erases it again
         int err = ops->erase(b);
         if (err && err != -EIO) {
             return err;  // the chip does not answer: no block to blame
@@ -334,10 +343,9 @@ static int put_page(void)
         if (err) {
             return err;
         }
-        if (next_seq >= top) {  // into NVS before a seq past it is on the chip: 8 MB on, about every 35 min recording
-            top = next_seq + 64 * NL_PPB;
-            ops->save_top(top);
-        }
+        if (next_seq >= top && !ops->save_top(next_seq + 64 * NL_PPB)) {  // into NVS before a seq at or past it is on
+            top = next_seq + 64 * NL_PPB;  // the chip: 8 MB on, about every 35 min recording; a write that fails: again
+        }                                  // at the next page
         if (!wpage) {
             seq0[wblock] = next_seq;
         }
@@ -460,7 +468,7 @@ static void keep(uint32_t b)
 
 /* Recovery never erases a block that may hold data: the newest block's first page and the one to be erased next (the
  * oldest) read whole and checked, blocks out of order round the ring checked again; what cannot be made out is kept */
-int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
+int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0, uint32_t e0)
 {
     static uint8_t odd[NL_MAX_BLOCKS / 8];      // first page blank but its first main byte not: factory bad or torn
     static uint8_t checked[NL_MAX_BLOCKS / 8];  // seq0 read whole
@@ -479,7 +487,9 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
     pg_len = pg_off = 0;
     up = u;
     top = t0;
+    erasing = e0;
     next_seq = INV;  // page_of: no bound yet
+    uint32_t half = INV;  // the block NVS has an erase begun on, its pages not checking: erased again if next to erase
 
     // every block's first page: bad marks (0x800, ours and the factory's), seq0, blank
     bool data = false;
@@ -498,7 +508,9 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
         } else if (r == H_BAD) {  // not ours, ECC failed, or cut mid-program: its pages say
             set_bit(checked, b);
             int v = verify(b, &s0);
-            if (v == V_UNKNOWN) {
+            if (v == V_UNKNOWN && b == erasing) {
+                half = b;
+            } else if (v >= V_UNKNOWN) {
                 keep(b);
             } else if (v == V_OK) {
                 seq0[b] = s0;
@@ -534,7 +546,7 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
             set_bit(checked, head);
             int v = verify(head, &s0);
             if (v != V_OK || s0 != seq0[head]) {  // V_OK: its first page read wrong in the scan
-                if (v == V_UNKNOWN) {
+                if (v >= V_UNKNOWN) {
                     keep(head);
                 } else {
                     seq0[head] = v == V_OK ? s0 : INV;
@@ -580,7 +592,8 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
             if ((c == t || seq0[c] > seq0[head] || (prev != INV && seq0[c] <= prev)) && !bit(checked, c)) {
                 set_bit(checked, c);
                 int v = verify(c, &s0);
-                if (v == V_UNKNOWN) {
+                v = v == V_UNKNOWN && c == t && c == erasing ? V_EMPTY : v;  // an erase cut short (header left whole)
+                if (v >= V_UNKNOWN) {
                     keep(c);
                     again = c == t;  // the next one is erased instead: checked first
                     continue;
@@ -602,18 +615,25 @@ int nl_mount(const struct nl_ops *o, uint32_t n, uint32_t u, uint32_t t0)
             set_bit(bad, b);
         }
     }
+    // an erase cut short is on the block after the newest, the oldest (its files dropped before it began); a block NVS
+    // names anywhere else that does not check may hold data: kept
+    if (half != INV && half != t) {
+        keep(half);
+    }
     // a block kept, or one marked bad that says it holds seqs from here on (the newest, its mark read wrong, or the
     // bit gone in the chip: 0x800 has no ECC on W25N01GV): past every seq written, none written twice
     next_seq = last == INV ? 0 : last + 1;
     next_seq = next_seq > up ? next_seq : up;
     unknown += bad_end > next_seq;
-    next_seq = unknown && top > next_seq ? top : next_seq;
+    next_seq = unknown ? MAX(top, next_seq + unknown * NL_PPB) : next_seq;  // top 0: NVS cleared, the chip not
 
     // the list first (the files the next erase takes are counted lost), then writing goes on in the next block, erased
     // now: nothing is programmed twice, and an erase cut short is done again
     wblock = head;
     wpage = NL_PPB;
+    hdr_fails = 0;
     build();
+    held = unknown || hdr_fails;  // a page in the list's range that did not read: its file may not be listed
     rd_seq = INV;
     return advance();
 }
@@ -736,7 +756,7 @@ int nl_delete(uint32_t file, bool *moved)
     for (int k = 0; k < nfiles; k++) {
         u = MIN(u, files[k].seq);
     }
-    if (u > up && !unknown) {  // a block kept: what it holds is not listed, so not uploaded either
+    if (u > up && !held) {  // what a block kept or a page that did not read holds is not listed, so not uploaded either
         up = u;
         *moved = true;
     }

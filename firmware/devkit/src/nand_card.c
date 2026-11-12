@@ -158,15 +158,23 @@ static int n_mark_bad(uint32_t block)
     return err ?: on;
 }
 
-/* The seq ceiling (nand_log.h) in NVS: written as the log's seqs reach it, about every 8 MB */
+/* In NVS (nand_log.h): the seq ceiling, written as the log's seqs reach it (about every 8 MB); the block an erase is
+ * begun on, written before each erase (every 128 KB recorded, a few thousand a day: 12 B each, the 16 KB settings
+ * partition's four 4 KB sectors each erased once or twice a day: 10 000 cycles last over ten years) */
 #define TOP_KEY "lr/nand_top"
+#define ERASE_KEY "lr/nand_erase"
 
-static void n_save_top(uint32_t top)
+static int n_save_top(uint32_t top)
 {
-    settings_save_one(TOP_KEY, &top, sizeof(top));
+    return settings_save_one(TOP_KEY, &top, sizeof(top));
 }
 
-static const struct nl_ops ops = {n_read, n_program, n_erase, n_mark_bad, n_save_top};
+static int n_save_erase(uint32_t block)
+{
+    return settings_save_one(ERASE_KEY, &block, sizeof(block));
+}
+
+static const struct nl_ops ops = {n_read, n_program, n_erase, n_mark_bad, n_save_top, n_save_erase};
 
 /* Reset, identify, writes allowed (SR-1 protects every block at power-up), ECC on and buffer reads (SR-2 ECC-E, BUF:
  * W25N01GV's IT parts start with BUF 0). The block count by the chip */
@@ -367,14 +375,15 @@ static int nfs_closedir(struct fs_dir_t *dp)
 
 static int nfs_mount(struct fs_mount_t *mp)
 {
-    uint32_t blocks, up = 0, top = 0;
+    uint32_t blocks, up = 0, top = 0, erasing = UINT32_MAX;
     int64_t t0 = k_uptime_get();
     int err = chip_init(&blocks);
     if (!err) {
         settings_subsys_init();
         settings_load_subtree_direct(UP_KEY, up_loaded, &up);
         settings_load_subtree_direct(TOP_KEY, up_loaded, &top);
-        err = nl_mount(&ops, blocks, up, top);
+        settings_load_subtree_direct(ERASE_KEY, up_loaded, &erasing);
+        err = nl_mount(&ops, blocks, up, top, erasing);
     }
     lr_sd_sectors = err ? 0 : nl_total() / 512;
     mounted = !err;
