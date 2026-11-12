@@ -452,23 +452,28 @@ def test_takeover_hands_back_a_standby_piece_cut_ahead(tmp_path, monkeypatch):
     assert late_store.subtract([[final[0][1], final[-1][0]]], spans + final) == [], (final, spans)
 
 
-def test_two_live_draft_once(tmp_path, monkeypatch):
-    """Two recorders in one room recording now, a page watching, their final layers far behind (as a piece is judged
-    only once it is cut): both draft until their levels can be judged, then one of them only (drafted_by); every
-    sentence drafted. Time short: a 6 s window, a look each second."""
+def live_rig(tmp_path, monkeypatch, window: int):
+    """Live drafts by the stream engine, final layers out of the way, colocate's window `window` s, a look each second."""
     async def never(x, partial=None):
         await anyio.sleep_forever()
     rig(tmp_path, monkeypatch, never)
     monkeypatch.setattr(asr, "DRAFT_ENGINE", "qwen-stream")
     monkeypatch.setattr(qwen_stream, "Session", FakeSession)
     monkeypatch.setattr(FakeSession, "ends_first", False)
-    monkeypatch.setattr(colocate, "WINDOW_S", 6)
+    monkeypatch.setattr(colocate, "WINDOW_S", window)
     monkeypatch.setattr(device_pipeline, "DRAFT_NEAR_S", 1)
     FakeSession.opened = []
 
     async def broadcast(msg):
         pass
     monkeypatch.setattr(ws, "broadcast", broadcast)
+
+
+def test_two_live_draft_once(tmp_path, monkeypatch):
+    """Two recorders in one room recording now, a page watching, their final layers far behind (as a piece is judged
+    only once it is cut): both draft until their levels can be judged, then one of them only (drafted_by); every
+    sentence drafted. Time short: a 6 s window, a look each second."""
+    live_rig(tmp_path, monkeypatch, 6)
     S, n = audio.SR, 8  # a tone each 3 s; each device its own noise under the VAD's
     xs = {d: np.concatenate([np.r_[tone(7 + j, 1), (np.random.default_rng(seed * 10 + j).normal(0, 60, 2 * S)).astype(np.int16)]
                              for j in range(n)]) for d, seed in ((X, 1), (Y, 2))}
@@ -491,3 +496,36 @@ def test_two_live_draft_once(tmp_path, monkeypatch):
     assert a | b == every, (a, b)
     later = {str(7 + j) for j in range(4, n)}  # from 12 s: judged after ~4 s (MIN_FRAMES of 6 s), a look at most 1 s after
     assert later <= a ^ b, ("one device drafts them, not both", a, b)
+
+
+def test_drafter_leaves_no_gap(tmp_path, monkeypatch):
+    """Two in one room until one drafts for both; then that one stops sending (walks off, BLE drops) and the other
+    records on: it drafts every tone after, from where the other stopped, not from when it next judges itself alone
+    (a window later: 2 min live). A 12 s window, a look each second, a tone each 3 s."""
+    live_rig(tmp_path, monkeypatch, 12)
+    S, n, m = audio.SR, 8, 8
+    sec = lambda j, seed: np.r_[tone(7 + j, 1), np.random.default_rng(seed * 100 + j).normal(0, 60, 2 * S).astype(np.int16)]
+    live0 = dt.datetime.fromtimestamp(round(time.time()) + 2)
+    gone = {}
+
+    async def run():
+        async with anyio.create_task_group() as tg:
+            for d in (X, Y):
+                tg.start_soon(device_pipeline.pipeline, d)
+            for k in range(3 * (n + m)):
+                j = k // 3
+                if j == n and not gone:  # the one drafting for both leaves
+                    on = [d for d in (X, Y) if T().devices[d].drafting]
+                    gone["d"] = on[0] if len(on) == 1 else on
+                await anyio.sleep(live0.timestamp() + k + 1 - time.time())
+                for d, seed in ((X, 1), (Y, 2)):
+                    if j < n or d != gone.get("d"):
+                        await anyio.to_thread.run_sync(audio.save, d, round((live0 + dt.timedelta(seconds=k)).timestamp() * 1000),
+                                                       flac(sec(j, seed)[(k % 3) * S:(k % 3 + 1) * S]), "audio/flac")
+            await anyio.sleep(3)
+            tg.cancel_scope.cancel()
+    anyio.run(run)
+    assert gone["d"] in (X, Y), ("one device drafts for both before one leaves", gone)
+    stay = {r["text"] for r in db.drafts("", None, Y if gone["d"] == X else X)}
+    after = {str(7 + j) for j in range(n, n + m)}
+    assert after <= stay, ("tones after the drafter left, drafted by no one", sorted(after - stay, key=int))

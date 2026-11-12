@@ -531,14 +531,21 @@ async def pipeline(device: str):
     def drafting() -> bool:
         """A page watches and this device is recording now (its newest audio is recent, backlog or not), not as a standby,
         nor where another recorder drafts (colocate.drafted_by, every DRAFT_NEAR_S): what it hears the other drafts, so its
-        draft_to moves on as in silence. Not drafting clears st.drafting at once: of two drafting as they come to
-        correlate, the first to look stops and the other, looking after, sees it stopped."""
+        draft_to keeps up with the other's (not past its own audio, never back): when the other stops or leaves, it
+        drafts on from where the other stopped, not from minutes later. Not drafting clears st.drafting at once: of two
+        drafting as they come to correlate, the first to look stops and the other, looking after, sees it stopped."""
         ok = (time.time() < T().watch_until and bool(dseg.anchors) and st.edge_end is not None and not st.standby
               and (dt.datetime.now() - st.edge_end).total_seconds() < LIVE_AUDIO_S)
         if ok and time.monotonic() >= near[0]:
+            was = near[1]
             near[:] = time.monotonic() + DRAFT_NEAR_S, colocate.drafted_by(device)
+            if near[1] and near[1] != was:
+                log.info("%s: drafts left to %s (same place)", device, near[1])
+                ws.note(f"{device}：{near[1]} 在同一处出初稿，这台先不出", "state")
         if ok and near[1]:
-            ok, st.draft_to = False, dseg.time_at(dseg.samples)
+            end, o = dseg.time_at(dseg.samples), T().devices.get(near[1])
+            to = min(end, o.draft_to or end) if o else None  # o None: not in this tenant (any more), stay put
+            ok, st.draft_to = False, max((t for t in (st.draft_to, to) if t), default=None)
         if not ok:
             st.drafting = False
         return ok
