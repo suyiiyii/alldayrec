@@ -128,6 +128,16 @@ def test_later_not_asked_again(store):
     assert card() is None and db.apart() == set() and db.conversation(ca)["participants"] == ["S1"]
 
 
+def test_unanswered_card_expires(store):
+    """A card nobody answers for CHECK_H is taken down (logged expired): the cards after it are not held up for good."""
+    old = (dt.datetime.now() - dt.timedelta(hours=selfvoice.CHECK_H + 1)).isoformat(timespec="seconds")
+    db.put_kv("voicecheck", {"card": {"kind": "c", "conv": "c-gone", "label": "P", "name": "P", "score": 0.2, "at": old}, "asked": {"c-gone": old}})
+    ca = conv(1, "S1", near(ME, 0.68))
+    anyio.run(routes_voices.check_round)
+    assert card()["conv"] == ca and card()["kind"] == "a"
+    assert [(x["kind"], x["answer"]) for x in db.kv("voicecheck")["log"]] == [("c", "expired")]
+
+
 def test_a_once_a_day(store):
     conv(1, "S1", near(ME, 0.68)), conv(2, "S1", near(ME, 0.69, E[2]))
     anyio.run(routes_voices.check_round)
