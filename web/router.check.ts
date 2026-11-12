@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import { createServer } from "vite-plus";
 
 const assigned: string[] = [];
+// what the page logs: vue-router logs no navigation error itself once an onError handler is there
+const logged: unknown[] = [];
+console.error = (e: unknown) => void logged.push(e);
 const stored = new Map<string, string>();
 const loc = {
   protocol: "https:",
@@ -80,6 +83,11 @@ try {
   });
   await router.push("/broken").catch(() => {});
   assert.equal(assigned.length, 3);
+  // it is logged, as without the handler; the chunks loaded anew above are not
+  assert.deepEqual(
+    logged.map((e) => (e as Error).message),
+    ["render failed"],
+  );
 } finally {
   await server.close();
 }
