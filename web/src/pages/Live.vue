@@ -405,6 +405,9 @@ function jump(start: string) {
   gap: 14px;
   flex-wrap: wrap;
 }
+.status small {
+  margin-left: 4px;
+}
 .conv {
   color: var(--accent);
   font-size: var(--fs-xs);
