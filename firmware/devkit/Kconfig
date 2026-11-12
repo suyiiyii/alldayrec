@@ -10,14 +10,27 @@ config OMI_CODEC_OPUS
 
 config OMI_ENABLE_OFFLINE_STORAGE
 	bool "Offline SD Card Storage"
-    select DISK_ACCESS
+    select DISK_ACCESS if !LR_NAND
     select FILE_SYSTEM
-    select FAT_FILESYSTEM_ELM
-    select FS_FATFS_MOUNT_MKFS
-    select FS_FATFS_EXFAT
+    select FAT_FILESYSTEM_ELM if !LR_NAND
+    select FS_FATFS_MOUNT_MKFS if !LR_NAND
+    select FS_FATFS_EXFAT if !LR_NAND
     help
         "Enable the offline storage support. Requires a SD Card."
 	default n
+
+config LR_NAND
+    bool "A bare SPI NAND (W25N01GV / W25N02KV) on SPIM3 in place of the SD card"
+    depends on OMI_ENABLE_OFFLINE_STORAGE
+    select SPI
+    help
+        The record stream's files as a ring log on the chip (nand_log.c, docs/nand-store.md), at /SD: as on a card.
+        No USB disk (CTRL 0x06 answers -ENOTSUP), no FORMAT.
+
+config LR_NAND_SPI_HZ
+    int "NAND SPI clock (Hz)"
+    depends on LR_NAND
+    default 16000000
 
 config OMI_ENABLE_ACCELEROMETER
     bool "Accelerometer Support"

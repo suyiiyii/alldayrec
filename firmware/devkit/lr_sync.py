@@ -335,12 +335,16 @@ def health(x, a, b):
 
 
 def card_id(x, a, b):
+    if a >> 8 == 0xEFAA:  # a NAND board's chip (nand_card.c): its JEDEC ID, and how long recovery took
+        return f"{'W25N02KV' if a & 0xFF == 0x22 else 'W25N01GV'} NAND, recovered in {b} ms"
     name = (struct.pack("<I", a) + bytes([b & 0xFF])).decode("ascii", "replace")
     oem = bytes([b >> 8 & 0xFF, b >> 16 & 0xFF]).decode("ascii", "replace")
     return f"manufacturer 0x{x:02x}, OEM {oem!r}, product {name!r} rev {b >> 28}.{b >> 24 & 0xF}"
 
 
 def card_size(x, a, b):
+    if x == 2:
+        return f"NAND, {a * 512 / 1e6:.0f} MB in good blocks, {b} files"
     return (f"{'SDHC/SDXC' if x else 'SDSC'}, {a * 512 / 1e9:.2f} GB ({a} sectors), "
             f"made {2000 + (b >> 4)}-{b & 0xF:02d}")
 
@@ -376,7 +380,8 @@ EVENTS = {
     4: ("STORE", lambda x, a, b: f"audio boot {a} (files {a:04X}xxxx), {b // 1024} MB free" + ", BOOT unread" * (x & 1) + ", BOOT unwritten" * (x >> 1 & 1)),
     5: ("SLOW", lambda x, a, b: f"SD append {a} ms ({b} B)"),
     6: ("APPEND_ERR", lambda x, a, b: f"{APPEND[x] if x < len(APPEND) else ''}{err(a)} ({b} B)"),
-    7: ("CARD_FULL", lambda x, a, b: f"{'recording stopped' if x else 'resumed'}, {a} KB free"),
+    7: ("CARD_FULL", lambda x, a, b: f"{a} files overwritten before they were uploaded (NAND ring)" if x == 2 else
+        f"{'recording stopped' if x else 'resumed'}, {a} KB free"),
     8: ("USB_DISK", lambda x, a, b: f"card lent to USB" if x else f"card back{f' ({BACK[b] if b < len(BACK) else b})' if b else ''}: {err(a)}"),
     9: ("CONNECT", lambda x, a, b: param(a, b)),
     10: ("DISCONNECT", lambda x, a, b: f"0x{x:02x} {HCI.get(x, '')}".strip()),
@@ -528,6 +533,9 @@ def selftest():
     assert EVENTS[25][1](1, 601 | 250 << 20, 4 | 2 << 10 | 2 << 20) == \
         "9 appends, 601 ms in all, slowest 250 ms; under 20 ms 4, 20-49 ms 2, 50-200 ms 2, over 200 ms 1"
     assert EVENTS[3][1](0, (-116) & 0xFFFFFFFF, 0) == "again: -116 -ETIMEDOUT"
+    assert EVENTS[32][1](0xEF, 0xEFAA22, 41) == "W25N02KV NAND, recovered in 41 ms"
+    assert EVENTS[33][1](2, 254 * 64 * 4, 7) == "NAND, 33 MB in good blocks, 7 files"
+    assert EVENTS[7][1](2, 3, 0) == "3 files overwritten before they were uploaded (NAND ring)"
     assert EVENTS[19][1](0, 3, 9) == "3 frames, 9 this boot" and EVENTS[19][1](40, 75, 81) == "75 frames in 40 gaps, 81 this boot"
     assert EVENTS[28][1](0, 1, 0) == "off: System OFF" and EVENTS[28][1](1, 9, 0) == "on: 9"
     assert EVENTS[29][1](204, 0, 0) == "on battery, VDDH 4080 mV"

@@ -14,7 +14,6 @@ target_sources(app PRIVATE
     src/lib/battery/battery.c
     src/button.c
     src/speaker.c
-    src/sdcard.c
     src/lr_store.c
     src/lr_log.c
     src/lr_power.c
@@ -23,6 +22,11 @@ target_sources(app PRIVATE
 	# src/nfc.c future release
 )
 target_sources_ifdef(CONFIG_LR_SDHC_SPI app PRIVATE src/sdhc_spi.c)
+if(CONFIG_LR_NAND)
+    target_sources(app PRIVATE src/nand_card.c src/nand_log.c)
+else()
+    target_sources(app PRIVATE src/sdcard.c)
+endif()
 target_sources_ifdef(CONFIG_LR_SWITCH app PRIVATE src/lr_switch.c)
 
 target_sources_ifdef(CONFIG_OMI_CODEC_OPUS app PRIVATE

@@ -22,6 +22,7 @@ jobs:
           for h in bluetooth/conn bluetooth/gatt bluetooth/uuid fs/fs kernel logging/log sys/byteorder sys/ring_buffer drivers/sensor random/random drivers/sdhc drivers/gpio drivers/spi sys/crc; do touch $d/zephyr/$h.h; done
           for o in "" -DPHONE=0 -DCARD_OFF=0; do cc -O1 -w $o -I$d -o $d/store_check test/store_check.c && $d/store_check || exit 1; done  # LR-P3, the other boards, LR-P3 with the card left on
           cc -w -I$d -o $d/sdhc_check test/sdhc_check.c && $d/sdhc_check  # the SD card's SPI waits (src/sdhc_spi.c)
+          cc -O1 -o $d/nand_check test/nand_check.c && $d/nand_check  # the NAND ring log: wrap, bad blocks, ECC, power cut at every op (src/nand_log.c)
           mkdir -p $d/zephyr/storage $d/hal && touch $d/zephyr/fs/fcb.h $d/zephyr/storage/flash_map.h $d/hal/nrf_power.h $d/mpsl_temp.h
           cc -w -I$d -o $d/log_check test/log_check.c && $d/log_check  # a second's DROPPED gaps are one record (src/lr_log.c)
           mkdir -p $d/zephyr/storage $d/zephyr/usb/class $d/hal && touch $d/zephyr/drivers/disk.h $d/zephyr/drivers/uart.h $d/zephyr/storage/disk_access.h $d/zephyr/usb/class/usbd_msc.h $d/zephyr/usb/usbd.h $d/zephyr/sys/iterable_sections.h $d/hal/nrf_power.h
