@@ -27,7 +27,9 @@ extern uint32_t transport_frame_no;        // transport.c: frames the codec has 
 
 #define DIR "/SD:/LR"
 #define REC_FRAMES 10        // a record per 100 ms: a phone following the stream gets each one as it closes
-#define SEG_MAX (16u << 20)  // a long offline stretch still ends in files a phone can take one by one
+// a long offline stretch still ends in files a phone can take one by one; NAND: the ring overwrites whole files, 4 MB
+// at most lost at a time (docs/nand-store.md 6)
+#define SEG_MAX (IS_ENABLED(CONFIG_LR_NAND) ? 4u << 20 : 16u << 20)
 #define CHUNK 4096           // SD read size while sending a file
 #define RESERVE_KB CONFIG_LR_STORE_RESERVE_KB  // recording stops (-ENOSPC) below this much free space, resumes at twice it
 #define BATCH CONFIG_LR_STORE_BATCH            // finished records kept in RAM until there are this many bytes
@@ -228,7 +230,7 @@ static int append(uint32_t len)
     int err = 0;
     uint32_t taken = 0;
     bool unsynced = false;
-    if (free_kb < RESERVE_KB) {
+    if (free_kb < RESERVE_KB && !IS_ENABLED(CONFIG_LR_NAND)) {  // a NAND is never full: the oldest goes
         LOG_ERR("card full (%u KB free): not recording", free_kb);
         lr_log(LR_CARD_FULL, 1, free_kb, 0);
         err = -ENOSPC;
@@ -994,6 +996,9 @@ static int lend(bool on, uint8_t why)
     if (on == usb_disk_lent) {
         return 0;
     }
+    if (IS_ENABLED(CONFIG_LR_NAND)) {
+        return -ENOTSUP;  // no USB disk on a NAND board
+    }
     if (on && (!usb_charge || store_err)) {
         return usb_charge ? store_err : -ENOTCONN;  // not on a computer, or no card to lend
     }
@@ -1403,6 +1408,9 @@ static void store_thread(void)
             int err = -EBUSY;
             if (c.file != cur_file()) {
                 k_mutex_lock(&write_sdcard_mutex, K_FOREVER);
+                if (IS_ENABLED(CONFIG_LR_NAND)) {
+                    card_drain();  // its last batches first: a NAND file deleted takes no more bytes (nand_log.h)
+                }
                 err = card_up() ?: fs_unlink(file_path(p, c.file));
                 count_free();
                 k_mutex_unlock(&write_sdcard_mutex);

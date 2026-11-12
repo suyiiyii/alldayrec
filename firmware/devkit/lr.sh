@@ -6,8 +6,10 @@
 #   ./lr.sh build promicro-p2         the same board as LR-P2: the spare ProMicro kept for tests (bootloader 0.10.0)
 #   ./lr.sh build promicro-p3         the same board as LR-P3: the ProMicro wired into the boxed recorder
 #   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
-#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
-#   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
+#   ./lr.sh build n5                  LR-N5 and LR-N5-S: LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
+#   ./lr.sh build promicro-nand       LR-PN: a ProMicro with a W25N NAND on the SD module's pins, for tests
+#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
+#   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
 #                                     builds, packs and uploads it to the server, where the app finds it
 set -euo pipefail
 D="$(cd "$(dirname "$0")" && pwd)"
@@ -19,10 +21,12 @@ EXTRA=(-DCONFIG_OMI_ENABLE_SPEAKER=n -DCONFIG_OMI_ENABLE_HAPTIC=n -DCONFIG_OMI_E
 case $V in
   sdmod) OVL="$OVL;$D/overlay/lr_sdmod.overlay" ;;
   expansion) OVL="$OVL;$D/overlay/xiao_expansion_base.overlay" ;;
-  promicro|promicro-p2|promicro-p3|n4) M=LR-P1; [ "$V" = promicro ] || M=LR-P${V#promicro-p}  # LR-P2/P3: the same board, their own model and name
+  promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand)
+            M=LR-P1; [ "$V" = promicro ] || M=LR-P${V#promicro-p}  # LR-P2/P3: the same board, their own model and name
+            [ "$V" != promicro-nand ] || M=LR-PN
             OVL="$OVL;$D/overlay/lr_promicro.overlay"
-            if [ "$V" = n4 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
-              M=LR-N4 HW="LR-N4 nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
+            if [ "$V" = n4 ] || [ "$V" = n5 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
+              M=LR-N${V#n} HW="LR-N${V#n} nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
               # battery on AIN0, CHRG on P0.29; Fxx chips ship locked: the UICR's APPROTECT 0x5A (written at the first
               # flash) only opens SWD if the app writes APPROTECT.DISABLE at every boot, which SystemInit does with this
               # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its 32.768 kHz crystal X1 (Seiko SC-16S
@@ -42,7 +46,16 @@ case $V in
             # card mounts it, from a DFU write (BT RX) and the switch, low battery or 1200 bps touch (the system
             # workqueue) too: 1.9-2.2 KB at the most (-fcallgraph-info) plus an FPU frame, past their 2200 and 2048
             [ "$V" != promicro-p3 ] && [ "$V" != n4 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y -DCONFIG_LR_STORE_PHONE=y
-                                               -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560) ;;
+                                               -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560)
+            # LR-N5's switch and power trail; no phone mode (the NAND idles at 1-50 uA, no card to spare). The NAND
+            # in place of the card (docs/nand-store.md 8): no FAT, no USB disk; SPIM3 wants errata 198's workaround
+            [ "$V" != n5 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y
+                                      -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560)
+            if [ "$V" = n5 ] || [ "$V" = promicro-nand ]; then
+              OVL="$OVL;$D/overlay/lr_nand.overlay"
+              EXTRA+=(-DCONFIG_LR_NAND=y -DCONFIG_USBD_MSC_CLASS=n -DCONFIG_DISK_ACCESS=n -DCONFIG_FAT_FILESYSTEM_ELM=n
+                      -DCONFIG_FS_FATFS_MOUNT_MKFS=n -DCONFIG_FS_FATFS_EXFAT=n -DCONFIG_NRF52_ANOMALY_198_WORKAROUND=y)
+            fi ;;
   *) echo "unknown variant $V" >&2; exit 2 ;;
 esac
 # LR_CARD_ON=1 ./lr.sh build promicro-p3: phone mode with the card's supply left on (A/B of its power), in build/lr-V-cardon

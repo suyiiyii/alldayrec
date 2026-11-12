@@ -32,6 +32,7 @@
 #endif
 #define CONFIG_LR_STORE_PHONE PHONE
 #define CONFIG_LR_STORE_CARD_OFF CARD_OFF
+#define CONFIG_LR_NAND 0  // the SD card build (NAND: test/nand_check.c)
 #define IS_ENABLED(x) (x)
 #define __DMB()
 static unsigned int irq_lock(void) { return 0; }

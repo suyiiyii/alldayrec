@@ -25,11 +25,13 @@ USBD_DESC_MANUFACTURER_DEFINE(lr_mfr, "live-record");
 USBD_DESC_PRODUCT_DEFINE(lr_product, CONFIG_LR_NAME_PREFIX " recorder");
 USBD_DESC_SERIAL_NUMBER_DEFINE(lr_sn);
 USBD_CONFIGURATION_DEFINE(lr_fs_config, 0, 250);
-USBD_DEFINE_MSC_LUN(LR, "liverec", "SD card", "1.00");
 
 volatile bool usb_disk_lent;
 volatile uint32_t usb_disk_used;  // k_uptime_get_32() at the computer's last read or write that worked: a card left alone comes back (lr_store.c)
 extern struct k_mutex write_sdcard_mutex;  // transport.c: one SPI bus, one user at a time
+
+#ifndef CONFIG_LR_NAND  // a NAND board has no USB disk: its log is no FAT volume (docs/nand-store.md)
+USBD_DEFINE_MSC_LUN(LR, "liverec", "SD card", "1.00");
 
 static int lr_disk_init(struct disk_info *disk)
 {
@@ -98,6 +100,7 @@ static const struct disk_operations lr_disk_ops = {
     .ioctl = lr_disk_ioctl,
 };
 static struct disk_info lr_disk = {.name = "LR", .ops = &lr_disk_ops};
+#endif
 
 // Opening the USB serial port at 1200 baud reboots into the UF2 bootloader (the Arduino "1200 bps touch"),
 // so a host flashes without anyone double-tapping reset: GPREGRET 0x57 is the Adafruit bootloader's UF2 magic.
@@ -166,7 +169,10 @@ void usb_reattach(void)
 
 int init_usb()
 {
-    int err = disk_access_register(&lr_disk);
+    int err = 0;
+#ifndef CONFIG_LR_NAND
+    err = disk_access_register(&lr_disk);
+#endif
     err = err ?: usbd_add_descriptor(&lr_usbd, &lr_lang);
     err = err ?: usbd_add_descriptor(&lr_usbd, &lr_mfr);
     err = err ?: usbd_add_descriptor(&lr_usbd, &lr_product);
@@ -186,8 +192,10 @@ int init_usb()
     // the codec (4) got no CPU for over a second and the mic's 1 s ring overflowed (BDAE 10-13, a computer reading the
     // lent card: 1.3-1.8 s of audio lost in 10 minutes). Below everything that records (the codec 4, LIVE and
     // the pusher 7, the card writer 8, the store 9, which answers the phone's CTRL to take the card back)
+#ifndef CONFIG_LR_NAND
     extern const k_tid_t usbd_msc;
     k_thread_priority_set(usbd_msc, K_PRIO_PREEMPT(10));
+#endif
     err = usbd_init(&lr_usbd);
     usb_charge = nrf_power_usbregstatus_vbusdet_get(NRF_POWER);
     usb_diag[0] = err;
