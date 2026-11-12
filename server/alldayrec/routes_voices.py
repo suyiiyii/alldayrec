@@ -172,15 +172,18 @@ async def self_answer(body: dict):
 
 
 async def check_round():
-    """Pop the next card when none is up and the day has cards left: the first voice of selfvoice.unsure of a
-    conversation not asked yet that has a clip to hear (a conversation without one is passed over for good), and of
-    kind c, sentences a yes would teach; of kind a, CHECK_ME_DAY a day."""
+    """Pop the next card when none is up (one unanswered CHECK_H is taken down, logged expired) and the day has cards
+    left: the first voice of selfvoice.unsure of a conversation not asked yet that has a clip to hear (a conversation
+    without one is passed over for good), and of kind c, sentences a yes would teach; of kind a, CHECK_ME_DAY a day."""
     st = await anyio.to_thread.run_sync(db.kv, "voicecheck", limiter=threads.DB) or {}
     today = dt.date.today().isoformat()
     day = (st.get("day") if (st.get("day") or [None])[0] == today else [today, 0]) + [0]
+    since = (dt.datetime.now() - dt.timedelta(hours=selfvoice.CHECK_H)).isoformat()
+    if gone := (c := st.get("card")) and c["at"] < since:  # unanswered that long: it went away, or no card ever came after it
+        st["card"] = None
+        st["log"] = (st.get("log") or [])[-199:] + [{"at": dt.datetime.now().isoformat(timespec="seconds"), "kind": c["kind"], "score": c["score"], "answer": "expired"}]
     if st.get("card") or day[1] >= selfvoice.CHECK_DAY:
         return
-    since = (dt.datetime.now() - dt.timedelta(hours=selfvoice.CHECK_H)).isoformat()
     st["asked"] = {k: v for k, v in (st.get("asked") or {}).items() if v >= since}
 
     def voices():
@@ -200,7 +203,7 @@ async def check_round():
             log.info("voice check card %s %.3f", c["kind"], c["score"])
             break
     db.put_kv("voicecheck", st)
-    if st.get("card"):
+    if st.get("card") or gone:
         await ws.broadcast({"type": "voicecheck"})
 
 
