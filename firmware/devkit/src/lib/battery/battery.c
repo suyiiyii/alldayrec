@@ -24,6 +24,8 @@
 #include <zephyr/logging/log.h>
 #include <hal/nrf_gpio.h>
 #include <hal/nrf_power.h>
+
+#include "../../config.h"
 LOG_MODULE_REGISTER(battery, LOG_LEVEL_INF);
 
 static const struct device *gpio_battery_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
@@ -37,10 +39,10 @@ static K_MUTEX_DEFINE(battery_mut);
 // only kept the LED lit on the battery (~0.65 mA). The pull-up: a bare input costs ~50 uA (Seeed's forum).
 #define GPIO_BATTERY_CHG 17
 #define GPIO_BATTERY_READ_ENABLE 14
-// LR-N4's TP4054 CHRG on P0.29 (open drain, no resistor on the board): low while it charges, a weak pull-down when
-// done, open without USB. Pulled up inside only for the read and only with VBUS there: unpowered, the charger would be
-// fed through that pin. Neither the XIAO's nor the ProMicro's charger pins exist there (VDDH and AIN0 builds).
-#define GPIO_N4_CHRG 29
+// LR-N4's TP4054 CHRG (CHRG_PIN, the overlay's chrg-gpios; open drain, no resistor on the board): low while it
+// charges, a weak pull-down when done, open without USB. Pulled up inside only for the read, 50 us: unpowered, the
+// charger would be fed through that pin while it is on. Neither the XIAO's nor the ProMicro's charger pins exist there
+// (VDDH and AIN0 builds).
 #define OWN_CHARGER_PINS !(IS_ENABLED(CONFIG_LR_BATTERY_VDDH) || IS_ENABLED(CONFIG_LR_BATTERY_AIN0))
 
 // Change this to a higher number for better averages
@@ -148,17 +150,24 @@ int battery_set_slow_charge()
     return gpio_pin_set(gpio_battery_dev, GPIO_BATTERY_CHARGE_SPEED, 0); // SLOW charge 50mA
 }
 
+#ifdef CHRG_PIN
+bool battery_chrg_low(void)
+{
+    nrf_gpio_cfg_input(CHRG_PIN, NRF_GPIO_PIN_PULLUP);
+    k_busy_wait(50);
+    bool low = !nrf_gpio_pin_read(CHRG_PIN);  // the weak pull-down when done loses to the ~13k pull-up: high
+    nrf_gpio_cfg_default(CHRG_PIN);
+    return low;
+}
+#endif
+
 int battery_charging()
 {
-#ifdef CONFIG_LR_BATTERY_AIN0
+#ifdef CHRG_PIN
     if (!nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {
         return -ENODATA;
     }
-    nrf_gpio_cfg_input(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG), NRF_GPIO_PIN_PULLUP);
-    k_busy_wait(50);
-    int level = nrf_gpio_pin_read(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG));
-    nrf_gpio_cfg_default(NRF_GPIO_PIN_MAP(0, GPIO_N4_CHRG));
-    return !level;  // the weak pull-down when done loses to the ~13k pull-up: high
+    return battery_chrg_low();
 #endif
     if (IS_ENABLED(CONFIG_LR_BATTERY_VDDH)) {
         return -ENOTSUP; // the ProMicro's charger drives its blue LED only (a wire from its CHRG would read it)

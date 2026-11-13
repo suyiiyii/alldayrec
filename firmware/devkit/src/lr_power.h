@@ -13,7 +13,8 @@ void lr_power_init(void);
 /* The open file written out and closed, the phone told: before a restart that stops recording */
 void lr_power_stop(void);
 /* The log to flash, then System OFF with the card's and the mic's supplies off; USB (VBUS) wakes it, and LR-P3's
- * switch moving. Does not return. */
+ * switch moving. CONFIG_LR_PARK: parked in System ON instead, the same wakes as a restart (lr_power.c). Does not
+ * return. */
 void lr_power_off(void);
 
 /* What the board runs on, for the status read (lr_store.c, byte 47): the phone shows it next to the battery */
@@ -32,6 +33,15 @@ static inline uint8_t lr_charge_state(bool usb, int chg)
 static inline int lr_low_count(int count, bool usb, int err, uint16_t mv, uint16_t limit)
 {
     return !usb && !err && mv > 2000 && mv < limit ? count + 1 : 0;
+}
+
+/* A second of the park (CONFIG_LR_PARK), what restarts it: the switch moved, USB; after a low battery (low) also the
+ * charger charging, or the battery read (err 0) back at LR_PARK_UP_MV. Switched off, charging is no reason: on a board
+ * that cannot see VBUS, every boot would find the switch off and park again. */
+#define LR_PARK_UP_MV 3600  // a cell rested after the 3.3 V cut reads ~3.35-3.45 V: this is charging
+static inline bool lr_park_wake(bool moved, bool usb, bool low, bool charging, int err, uint16_t mv)
+{
+    return moved || usb || (low && (charging || (!err && mv >= LR_PARK_UP_MV)));
 }
 
 #endif

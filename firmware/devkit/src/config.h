@@ -24,6 +24,9 @@
 #define PDM_DIN_PIN LR_PIN(pdm_din_gpios)
 #define PDM_CLK_PIN LR_PIN(pdm_clk_gpios)
 #define PDM_PWR_PIN LR_PIN(pdm_pwr_gpios)
+#if DT_NODE_HAS_PROP(LR_USER, chrg_gpios)  // the charger's status pin (LR-N4's TP4054 CHRG): battery.c, lr_power.c
+#define CHRG_PIN LR_PIN(chrg_gpios)
+#endif
 #else  // the XIAO nRF52840 Sense's own mic
 #define PDM_DIN_PIN NRF_GPIO_PIN_MAP(0, 16)
 #define PDM_CLK_PIN NRF_GPIO_PIN_MAP(1, 0)

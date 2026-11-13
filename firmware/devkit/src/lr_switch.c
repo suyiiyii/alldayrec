@@ -55,6 +55,17 @@ void lr_switch_arm(void)
     nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP, on() ? NRF_GPIO_PIN_SENSE_HIGH : NRF_GPIO_PIN_SENSE_LOW);
 }
 
+/* The park (lr_power.c, CONFIG_LR_PARK): the pin's level, its pull-up on for this read only (on, the switch closed to
+ * GND would draw ~0.23 mA through it all along, as it does in System OFF) */
+bool lr_switch_read(void)
+{
+    nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
+    k_busy_wait(10);
+    bool level = nrf_gpio_pin_read(SWITCH);
+    nrf_gpio_cfg_default(SWITCH);
+    return level;
+}
+
 /* Running: off for 0.5 s, the open file closed and the phone told before the restart that decides what comes next */
 static void poll(struct k_work *w)
 {

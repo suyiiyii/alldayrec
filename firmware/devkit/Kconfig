@@ -90,7 +90,7 @@ config LR_BATTERY_VDDH
     default n
 
 config LR_BATTERY_AIN0
-    bool "Battery on AIN0 (LR-N4): P0.02 through a 1M / 1M divider, read x2, the charger's CHRG on P0.29; VDDH there is the system rail, USB's while plugged in"
+    bool "Battery on AIN0 (LR-N4): P0.02 through a 1M / 1M divider, read x2, the charger's CHRG from the overlay (chrg-gpios); VDDH there is the system rail, USB's while plugged in"
     default n
 
 config LR_SWITCH
@@ -101,8 +101,14 @@ config LR_SWITCH
         "Only on a board with the switch wired: elsewhere P1.15 is open and reads off, and the board would never record."
 
 config LR_LOW_BATTERY_MV
-    int "On battery, three readings a minute apart under this many mV end recording and go to System OFF until USB, or LR-P3's switch, wakes it (lr_power.c); 0: never"
+    int "On battery, three readings a minute apart under this many mV end recording and go to System OFF (or park, LR_PARK) until USB, or LR-P3's switch, wakes it (lr_power.c); 0: never"
     default 3300
+
+config LR_PARK
+    bool "Park in System ON wherever System OFF would come (a low battery, the switch off, the cable gone), checking once a second: the switch moving or USB restarts it, and after a low battery also the charger charging (CHRG, chrg-gpios) or the battery back at 3.6 V (read every 10 s) (lr_power.c)"
+    default y if LR_BATTERY_AIN0
+    help
+        "LR-N4 and LR-N5 (the AIN0 builds): one LR-N4 sent to System OFF at 3.28 V lost VDD and never came back on its own; the other boards' low-battery System OFF has always woken."
 
 config LR_POWER_TRACE
     bool "On battery a POWER log record with the battery reading every minute, and the power-fail warning, written to flash at once (lr_power.c)"
