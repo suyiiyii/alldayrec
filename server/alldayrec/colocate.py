@@ -7,7 +7,8 @@ live analysis or drafts come of it twice. Drafts come before a piece is judged: 
 the same place that hears as well drafts (drafted_by). It takes over once the other's audio stops for GONE_S, the two
 no longer correlate (then what it stood by for since they parted is transcribed late), or it hears better by
 SWITCH_DB over two windows on end (then what it stood by for in those two is transcribed late too, though the other
-transcribed it: #324, the wearer walked out of the room and the other heard on through the door). A
+transcribed it, and what the other's final layer had transcribed past the switch is transcribed again: #324, the
+wearer walked out of the room and the other heard on through the door). A
 recorder just started waits up to FIRST_WAIT_S for a window to be judged on, rather than transcribe its first minutes
 again. Late audio (late.py) is left out where another device in the same
 place transcribed that time: first come, first transcribed. Not judged (no envelope: older pieces, quiet, a gap): as
@@ -239,7 +240,8 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
     audio missing GONE_S after the piece, apart, or no levels from it (zeros, a stuck input): takes over. Hearing
     better by SWITCH_DB over each of the last two WINDOW_S (over one, it switched back a minute later): it transcribes
     and the other stands by for it (take), when no third stands by for that one, and what it left the other in those
-    two windows goes to its late layer (resume), the other may be in the same place (r over R_TOGETHER) all along.
+    two windows goes to its late layer (resume), the other may be in the same place (r over R_TOGETHER) all along;
+    its pieces the other's final layer had transcribed past the switch it transcribes too (took: not left to it).
     Its pieces before the take (since: the other may take it ahead of where it is) are judged as if not standing by.
     Not standing by: leaves the piece to another whose audio covers it and whose last WINDOW_S correlate R_TOGETHER,
     that has transcribed it, or will: one that hears as well or better, is no standby (none waits on the other) and
@@ -269,9 +271,14 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             elif r is not None and r < R_APART:
                 why = f"apart (r {r:.2f})"
             elif ((by := lead(device, y, b, 2)) or 0) >= SWITCH_DB and not standby_of(y) and stood_for(y) == [device]:
-                take(device, y, a, by)  # on as one transcribing: what y has of this piece stays y's
-                with db.tx() as t:  # it heard better over both windows: what it left y in them, late (left: y as good)
-                    resume(t, device, a, now_ms, 2 * WINDOW_S)
+                with db.tx() as t:  # one transaction: no take without its resume
+                    take(device, y, a, by)  # on as one transcribing: what y has of this piece stays y's
+                    # it heard better over both windows: what it left y in them goes late, and what y's final layer
+                    # has past a (ahead of this one's, a standby waits: a window at most) this one transcribes again
+                    # too: neither is left to y (took)
+                    ahead = min(a + w, max((r[1] for r in db.processed(y, a, now_ms, "final")), default=a))
+                    keep = [r for r in db.kv(f"took:{device}") or [] if r[1] > a - 7 * 86400_000]  # a week: late is done
+                    db.put_kv(f"took:{device}", union(keep + resume(t, device, a, now_ms, 2 * WINDOW_S) + [[a, ahead]]), t)
             elif db.processed(y, a, b, "standby") and transcribed(y, a, b) < COVER:
                 # y left (some of) it to a third device, or had it taken (take, ahead of this one): this one cannot tell
                 # that one will have it; what y will have is still left to y (split)
@@ -291,8 +298,8 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
                     resume(t, device, a, now_ms)
             log.info("%s takes over from %s at %s: %s", device, y, dt.datetime.fromtimestamp(a / 1000), why)
             return None
-    if b - w < (db.kv(f"standby_left:{device}") or 0):
-        return None
+    if b - w < (db.kv(f"standby_left:{device}") or 0) or meet([[a, b]], db.kv(f"took:{device}") or []):
+        return None  # took: past the switch, y transcribed it before it stood by (take above)
     together = False
     for y in others(device, a, b):
         if audio_in(y, a, b) < COVER:
@@ -354,24 +361,25 @@ def drafted_by(device: str, now_ms: int | None = None) -> str | None:
 def resume(t, device: str, a: int, now_ms: int, back_s: int = WINDOW_S):
     """A device transcribes again from a after leaving pieces to another: what it left in the back_s before goes to
     the late layer (the correlation that let it go shows a parting a minute or two late), which leaves out again the
-    parts the other has in the same place (left) and transcribes the rest."""
+    parts the other has in the same place (left) and transcribes the rest. Returns what went."""
     where = "FROM processed_audio WHERE device = ? AND layer = 'standby' AND start_ms < ? AND end_ms > ?"  # whole rows
     back = [list(r) for r in t.execute("SELECT start_ms, end_ms " + where, (device, a, a - back_s * 1000))]
     t.execute("DELETE " + where, (device, a, a - back_s * 1000))
     late_store.enqueue_ranges(t, device, back, now_ms, ready=True)
+    return back
 
 
 def left(device: str, ranges: list) -> list:
     """Of late audio (unix ms ranges), what another device in the same place transcribed: by PART_S parts, in each one
     another's transcript covers COVER of and the WINDOW_S up to its end and from its start (those with levels) show the
-    two together (R_TOGETHER) and the other hearing as well (under SWITCH_DB worse), what that transcript covers. Both:
-    a window around a part where the two part (walked out of the room, #324) or meet looks together on one side of it,
-    and a part transcribed twice is better than one by neither. Reads the store: off the event loop (late.py)."""
+    two together (R_TOGETHER), what that transcript covers. Both: a window around a part where the two part (walked out
+    of the room, #324) or meet looks together on one side of it, and a part transcribed twice is better than one by
+    neither. Never what a switch handed over (took: decide()). Reads the store: off the event loop (late.py)."""
     w, out = WINDOW_S * 1000, []
 
     def same(y: str, a: int, b: int) -> bool | None:
         r = correlation(device, y, a, b)
-        return None if r is None else r >= R_TOGETHER and (lead(device, y, b) or 0) < SWITCH_DB
+        return None if r is None else r >= R_TOGETHER
 
     for a, b in union(ranges):
         for lo in range(a, b, PART_S * 1000):
@@ -381,7 +389,7 @@ def left(device: str, ranges: list) -> list:
                 if v and all(v):
                     out += meet([[lo, hi]], done(y, lo, hi))
                     break
-    return out
+    return subtract(out, db.kv(f"took:{device}") or [])
 
 
 def stood_by(device: str, start: str, end: str) -> list[str]:

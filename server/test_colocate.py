@@ -353,10 +353,11 @@ def test_better_newcomer_takes_over(store, lag_s, off_s):
 
 
 @pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
-def test_switch_with_hysteresis(store, lag_s, off_s):
+def test_switch_with_hysteresis(store, capsys, lag_s, off_s):
     """X stands by for Y. X better by a few dB: stays a standby, also through 4 min of Y much worse (over SWITCH_DB
     in one window, not two). Y then hears much worse for long: X transcribes, Y stands by for it, every ms by one at
-    least, twice only in the two windows before the switch (X takes them again: resume). Y back a few dB better than X:
+    least, twice only in the two windows before the switch (X takes them again: resume) and, with Y's final layer
+    ahead, what Y had past it (X transcribes it too: took). Y back a few dB better than X:
     no switch back (no flapping)."""
     room = walk(44, 5400)  # 45 min
     k = np.r_[np.full(600, 0.85), np.full(480, 0.3), np.full(720, 0.85), np.full(1800, 0.3), np.full(1800, 1.0)]  # Y's depth: X's 1, then 0.85
@@ -369,12 +370,15 @@ def test_switch_with_hysteresis(store, lag_s, off_s):
     who, final, late = run_both(2700, lag_s, off_s)
     x, y = (final[d] + late[d] for d in (X, Y))
     assert late_store.subtract([[at(0), at(2700)]], x + y) == [], ("by neither", final, late)
-    by = sorted(who.items())  # the pieces transcribed in final, by whom (around a handover some go to a late layer)
-    switched = [s for (_, a), (s, b) in zip(by, by[1:]) if a != b]
-    assert len(switched) == 1 and 900 < switched[0] < 1800 + abs(lag_s) + 60, (switched, who)
-    took = db.kv(f"standby:{Y}")["since"]  # where X took over (its first final piece later when Y was ahead: first come)
-    twice = colocate.meet(x, y)
-    assert twice and late_store.subtract(twice, [[took - 2 * colocate.WINDOW_S * 1000, took]]) == [], (took, twice)
+    # one switch, none back: Y's final pieces up to it, X's from it on (with Y ahead, both in the time Y had past it)
+    xs, ys = ([s for s, v in sorted(who.items()) if d in v] for d in (X, Y))
+    assert 900 < xs[0] < 1800 + abs(lag_s) + 60 and xs == list(range(xs[0], 2700, 20)), (xs, who)
+    assert ys == [s for s in sorted({0, *range(off_s, 2700, 20)}) if s <= ys[-1]] and ys[-1] < xs[0] - min(0, lag_s) + 20, (ys, who)
+    twice, took = colocate.meet(x, y), db.kv(f"took:{X}")  # the two windows before it and what Y's final had past it
+    sec = lambda rs: sum(b - a for a, b in rs) / 1000
+    assert twice and late_store.subtract(twice, took) == [] and sec(took) <= 2 * colocate.WINDOW_S - min(0, lag_s) + 20, (took, twice)
+    with capsys.disabled():
+        print(f"\nswitch, lag {lag_s} s: twice {sec(twice):.0f} s")
     assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
 
 
@@ -483,26 +487,29 @@ def walkout(talk: float, room: float) -> tuple:
     return lambda s: colocate.correlation(X, Y, at(s - 150), at(s + 150)), lambda s: colocate.lead(X, Y, at(s))
 
 
+@pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
 @pytest.mark.parametrize("case,talk,room,r_lo,r_hi", [
     ("a: apart", 0, 0.38, -1, colocate.R_APART),
     ("b: r 0.3-0.6", 0.22, 0.38, colocate.R_APART, colocate.R_TOGETHER),
     ("c: through the door", 0.3, 0.25, colocate.R_TOGETHER, 1)])
-def test_walk_out_of_the_room(store, capsys, case, talk, room, r_lo, r_hi):
+def test_walk_out_of_the_room(store, capsys, case, talk, room, r_lo, r_hi, lag_s, off_s):
     """X stands by for Y; the wearer walks out with X at OUT and talks on, all of it X's speech: from OUT every ms of X's
     audio transcribed by X (final, or late less what Y has: left), not left to Y, who heard it worse or not at all.
-    Before OUT Y's, but around it (a window at most) X's too. Prints when X transcribes again, what is by neither, twice."""
+    Before OUT Y's, but around it (a window at most) X's too. Prints when X transcribes again, what is by neither, twice.
+    lag_s: Y's final layer that far behind X's (-: ahead, as a standby waits for the window after its piece)."""
     r, q = walkout(talk, room)
     rs = {s: r(s + 10) for s in range(300, DUR - 150, 20)}  # the window decide() judges each of run_both's pieces by
     assert min(rs.values()) >= r_lo and max(v for s, v in rs.items() if s >= OUT + 300) < r_hi, case
     assert all(q(s) >= colocate.SWITCH_DB for s in range(OUT + 300, DUR, 60)), case
-    who, final, late = run_both(DUR)
+    who, final, late = run_both(DUR, lag_s, off_s)
     took = min(s for s, v in who.items() if X in v)
     lost = late_store.subtract([[at(OUT), at(DUR)]], final[X] + late[X])
     twice = colocate.meet(final[X] + late[X], [[at(0), at(OUT)]])
     sec = lambda rs: sum(b - a for a, b in rs) / 1000
     with capsys.disabled():
-        print(f"\n{case}: walked out at {OUT} s, X transcribes from {took} s ({took - OUT} s after); after it by "
-              f"neither: {sec(lost):.0f} s; before it by both: {sec(twice):.0f} s")
+        print(f"\n{case}, lag {lag_s} s: walked out at {OUT} s, X transcribes from {took} s ({took - OUT} s after); "
+              f"after it by neither: {sec(lost):.0f} s; before it by both: {sec(twice):.0f} s; "
+              f"twice in all: {sec(colocate.meet(final[X] + late[X], final[Y] + late[Y])):.0f} s")
     assert not lost, (case, took, lost)
     assert sec(twice) <= colocate.WINDOW_S, (case, twice)
 
@@ -521,6 +528,18 @@ def test_walk_out_drafts(store, capsys):
         with capsys.disabled():
             print(f"\n{case}: drafted_by() frees X's drafts {free - OUT} s after walking out")
         assert free - OUT <= colocate.WINDOW_S, (case, free)
+
+
+def test_late_audio_where_one_hears_worse_but_none_switched(store):
+    """Together all along, Y transcribed it all, Y 10 dB worse from 600 s (no switch: X's audio came late, a catch-up):
+    left() leaves all of it to Y. Only what a switch handed over (take) is transcribed again."""
+    room = walk(11, 2400)
+    put(X, room)
+    put(Y, np.r_[room[:1200], squash(room[1200:], 0.5)])
+    assert colocate.lead(X, Y, at(1200)) > colocate.SWITCH_DB
+    with db.tx() as t:
+        db.record_processed(t, Y, [[at(0), at(1200)]], "final")
+    assert late_store.subtract([[at(0), at(1200)]], colocate.left(X, [[at(0), at(1200)]])) == []
 
 
 def test_late_audio_left_to_who_has_it(store, monkeypatch):
