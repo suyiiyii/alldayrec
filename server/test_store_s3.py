@@ -117,6 +117,18 @@ def test_interface(s3):
         s.read(path, 0, 1)
 
 
+def test_refused_put_connection_not_reused(s3):
+    """MinIO closes the connection of every refused PUT (412), saying nothing: no PUT's connection is kept for the next
+    request, or that request goes out on it when the close lands late (a ReadError, store.Unreachable)."""
+    s = store.s3()
+    pool = s.http._transport._pool  # httpx2's connections kept for reuse
+    s.write("s3:x", b"1")
+    assert not pool.connections, "a PUT's connection is not kept, refused or not"
+    with pytest.raises(store.Conflict):
+        s.write("s3:x", b"2")
+    assert not pool.connections and s.head("s3:x")[0] == 1
+
+
 def test_seal(s3):
     kept = sealed_hour()
     assert {p["path"] for p in rows()} == {"s3:" + HOUR} and [p["pos"] for p in rows()] == [0, len(kept[H10])], "pos unchanged"

@@ -185,6 +185,8 @@ class S3:
         signed = sigv4.sign(method, request.headers["host"], uri, {}, headers or {}, sha, self.access_key, self.secret_key,
                             self.region, dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
         request.headers.update(signed)
+        if method == "PUT":  # a store may drop it after refusing a PUT, unannounced (MinIO: every 412): never reused
+            request.headers["Connection"] = "close"  # unsigned: a hop-by-hop header a proxy may strip
         with timed({"GET": "read", "PUT": "write", "HEAD": "head", "DELETE": "delete"}[method]):
             try:
                 r = self.http.send(request, stream=stream)
