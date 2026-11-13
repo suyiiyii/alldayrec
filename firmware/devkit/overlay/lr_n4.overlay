@@ -20,8 +20,7 @@
 		/* SD_EN: the card's LDO enable (U3, 100k pull-down) */
 		sd-pwr-gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
 		/* CHRG: the charger's status (TP4054, open drain), read with the pull-up on for 50 us only (battery.c).
-		 * TODO LR-N5 / LR-N5-S: their boards swap the two, MEM_EN on P0.29 and CHRG on P0.31; the n5 build still
-		 * takes this overlay until an lr_n5.overlay carries both */
+		 * LR-N5 / LR-N5-S swap the two balls: lr_n5.overlay, applied after this one, sets both */
 		chrg-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
 	};
 };

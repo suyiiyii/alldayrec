@@ -27,8 +27,10 @@ case $V in
             OVL="$OVL;$D/overlay/lr_promicro.overlay"
             if [ "$V" = n4 ] || [ "$V" = n5 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
               M=LR-N${V#n} HW="LR-N${V#n} nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
-              # battery on AIN0, CHRG on P0.29; Fxx chips ship locked: the UICR's APPROTECT 0x5A (written at the first
-              # flash) only opens SWD if the app writes APPROTECT.DISABLE at every boot, which SystemInit does with this
+              [ "$V" != n5 ] || OVL="$OVL;$D/overlay/lr_n5.overlay"  # its card LDO enable and CHRG swapped balls
+              # battery on AIN0, CHRG from chrg-gpios (P0.29 on N4, P0.31 on N5); Fxx chips ship locked: the UICR's
+              # APPROTECT 0x5A (written at the first flash) only opens SWD if the app writes APPROTECT.DISABLE at
+              # every boot, which SystemInit does with this
               # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its 32.768 kHz crystal X1 (Seiko SC-16S
               # Q-SC16S0322070AAAN, delivery spec WF11077297 [3]): ±20 ppm at 25 °C, -0.036 ppm/°C² ±10% about a 25 ±5 °C
               # turnover (-194 ppm at -40 °C, -167 at +85: its -40..+85 range), ±3 ppm a year, ±10 after two reflows

@@ -1,7 +1,7 @@
 /* CONFIG_LR_NAND boards (LR-N5, LR-N5-S; a ProMicro on a breadboard for tests): a bare SPI NAND, W25N01GV or
  * W25N02KV (WSON-8 8x6), in place of the SD card, applied after the board's overlays (docs/nand-store.md 8, 11).
- * The chip on SPIM3 (EasyDMA, up to 32 MHz; SPIM0-2 stop at 8), on the SD card's four pins until the N5 pin plan
- * settles: CS P0.20, MOSI (DI) P0.22, SCK P0.24, MISO (DO) P1.00, all full-speed pins. SCK and MOSI at high drive
+ * The chip on SPIM3 (EasyDMA, up to 32 MHz; SPIM0-2 stop at 8), on the SD card's four pins, as N5's PINS.md routes
+ * them: CS P0.20, MOSI (DI) P0.22, SCK P0.24, MISO (DO) P1.00, all full-speed pins. SCK and MOSI at high drive
  * (H0H1): the nRF52840 PS asks for it above 8 MHz. Its supply: the SD card's LDO (sd-pwr-gpios, nand_card.c). */
 /delete-node/ &sdhc0;
 &spi2 { status = "disabled"; };

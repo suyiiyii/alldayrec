@@ -173,7 +173,7 @@
 - 板子：`overlay/lr_nand.overlay` 删掉 `sdhc0` 和 `spi2`，NAND 挂在 `spi3` 上（引脚高驱动，§11），片选用 `cs-gpios`，暂用 SD 卡那组引脚。
 - 构建：
   - `./lr.sh build promicro-nand`：Pro Micro 开发板上飞线接 NAND，实测用；
-  - `./lr.sh build n5`：N5 / N5-S 正式板共用一个固件（型号 LR-N5，带拨动开关和电源记录，不开手机模式）。引脚等两块板的 PINS 定了再填，现在先照 N4 的 SD 引脚（CS P0.20、MOSI P0.22、SCK P0.24、MISO P1.00、电源使能 P0.31）。
+  - `./lr.sh build n5`：N5 / N5-S 正式板共用一个固件（型号 LR-N5，带拨动开关和电源记录，不开手机模式）。数据线照 N4 的 SD 引脚（CS P0.20、MOSI P0.22、SCK P0.24、MISO P1.00）；电源使能和充电状态 CHRG 在 N5 上对调了球（硬件 PINS.md 11-13）：使能 P0.29、CHRG P0.31，由 `overlay/lr_n5.overlay` 覆盖 N4 的 `sd-pwr-gpios`、`chrg-gpios`。
 - 本地构建（NCS 2.7.0）：n5 FLASH 318 KB（39.3%）、RAM 240 KB（91.7%）；promicro-nand RAM 91.3%；TF 版 n4 RAM 96.9%，和改之前一样。环形日志的表约 17 KB RAM（W25N02KV 的 2048 块按最大算）。
 - 正式发布用的变体列表（`.github/scripts/firmware-*.py`、`lr_release.py`）没加 n5：板子还没做出来，先不发 OTA 包。
 - TF 各版（sdmod、promicro、P2、P3、N4）不开 `CONFIG_LR_NAND`，行为不变。
@@ -289,7 +289,7 @@ power cuts ok (232 cut points) / power cuts (ring gone round) ok (232 cut points
 **电源**
 - 保留原来给 TF 用的 SGM2036-3.0 LDO（U3），由 VSYS 供电，输出 3.0 V 给 NAND。C54、C55、R25 都留着，NAND 旁边再放一颗 0.1 µF 去耦。
 - 不能接 VDD：REG0 对外最多给 25 mA，NAND 峰值 35 mA。
-- EN 仍接 P0.31（`sd-pwr-gpios`）。固件开机拉高，之后一直开着；NAND 卡死（BUSY 超时）时断电再上电救它（`mount_sd_card_reset`）；System OFF 前关掉。
+- EN 接 P0.29（`sd-pwr-gpios`，N5 布线时和 CHRG 对调；N4 的 TF 卡是 P0.31）。固件开机拉高，之后一直开着；NAND 卡死（BUSY 超时）时断电再上电救它（`mount_sd_card_reset`）；System OFF 前关掉。
 - **R25 要改大**：EN 被拉高时，100 kΩ 下拉一直在耗 3.0 V / 100 kΩ = 30 µA，比 LDO 自己的静态电流还多。SGM2036 的 EN 自带约 7 MΩ 内部下拉，外接电阻只管首次烧录前 GPIO 悬空的那段时间，建议改成 1 MΩ（3 µA）。
 - 电源分档：W25N02KV 空闲时进深度掉电（B9h，1 µA），写之前唤醒（ABh，等 1.5 ms）；W25N01GV 没有深度掉电（指令表里没有 B9h），空闲时就是待机，10 典型 / 50 最大 µA。
 - `/WP`（引脚 3）、`/HOLD`（引脚 7）各用 10 kΩ 上拉到 NAND 的 3.0 V。单线 SPI 用不到它们，但悬空会误触发写保护或暂停。
@@ -299,7 +299,7 @@ power cuts ok (232 cut points) / power cuts (ring gone round) ok (232 cut points
 **SPIM3 跑 16 或 32 MHz 的要求**（nRF52840 PS v1.5）
 1. **不能用标着 low frequency I/O 的引脚**（引脚表 7.1，在射频附近）：P0.02、P0.03、P0.09、P0.10、P0.28–P0.31、P1.01–P1.07、P1.10–P1.15。
    - N4 现在 SD 用的 CS P0.20、MOSI P0.22、SCK P0.24、MISO P1.00 都不在这张表里，可以照用。
-   - 电源使能 P0.31 是低频脚，但它只在开机和救芯片时翻一次，不受这条限制。
+   - 电源使能 P0.29 是低频脚，但它只在开机和救芯片时翻一次，不受这条限制。
 2. **高驱动**：PS 6.25.7 的注 32 写着高码率可能需要高驱动。SCK、MOSI、CS 设成 H0H1（overlay 里 `nordic,drive-mode = <NRF_DRIVE_H0H1>`）。高驱动 25 pF 时上升 / 下降沿 5 ns，标准驱动要慢得多。
 3. **时序**：nRF 要求 MISO 在采样沿之前 19 ns 建立（tSPIM,SUMI）；NAND 在 CLK 下降沿之后 7 ns 内出数据（tCLQV，W25N01GV 和 W25N02KV 都是 7 ns）。
    - 16 MHz：半个周期 31 ns，减去 7 ns 加沿和走线约 3 ns，剩约 21 ns，刚好满足 19 ns，余量只有约 2 ns。
