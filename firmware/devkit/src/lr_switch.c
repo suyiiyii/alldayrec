@@ -1,11 +1,11 @@
 /* LR-P3's slide switch, CONFIG_LR_SWITCH: P1.15 on its pull-up, closed to GND = on. A position counts once
  * it has read the same for 0.5 s (lr_switch_debounce): 116C's lever bounced on and off for seconds on 10-07, four
  * boots in a row, two of them mounting the card. Off ends the open file, drops the phone and restarts; a boot that
- * finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at once, before the card or the radio, its
- * BOOT the only record, and wakes when the switch moves or USB comes (VBUS). On USB it stays up instead, not
- * recording (the USB port still takes a firmware), until the switch is on (restart, recording) or the cable goes
- * (System OFF).
- * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB). */
+ * finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at once (CONFIG_LR_PARK: the park,
+ * lr_power.c), before the card or the radio, its BOOT the only record, and wakes when the switch moves or USB comes
+ * (VBUS). On USB it stays up instead, not recording (the USB port still takes a firmware), until the switch is on
+ * (restart, recording) or the cable goes (System OFF or the park).
+ * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB; parked: SREQ). */
 #include "lr_switch.h"
 
 #include <hal/nrf_gpio.h>
@@ -53,6 +53,17 @@ void lr_switch_arm(void)
     nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
     k_msleep(1);
     nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP, on() ? NRF_GPIO_PIN_SENSE_HIGH : NRF_GPIO_PIN_SENSE_LOW);
+}
+
+/* The park (lr_power.c, CONFIG_LR_PARK): the pin's level, its pull-up on for this read only (on, the switch closed to
+ * GND would draw ~0.23 mA through it all along, as it does in System OFF) */
+bool lr_switch_read(void)
+{
+    nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
+    k_busy_wait(10);
+    bool level = nrf_gpio_pin_read(SWITCH);
+    nrf_gpio_cfg_default(SWITCH);
+    return level;
 }
 
 /* Running: off for 0.5 s, the open file closed and the phone told before the restart that decides what comes next */

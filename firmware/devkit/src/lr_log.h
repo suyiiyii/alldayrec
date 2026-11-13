@@ -62,6 +62,8 @@
  *    29 POWER       power (lr_power.c): x battery mV / 20 (LR-P3: VDDH), a 0: once a minute on battery (LR-P3), 1: the
  *                   chip's power-fail warning (LR-P3: VDDH under 3.3 V or VDD under 2.8 V; x 0, not measured in the
  *                   interrupt), 2: low battery, recording ended, System OFF next until USB (or LR-P3's switch) wakes it
+ *                   (CONFIG_LR_PARK: parked in System ON, also until charging or 3.6 V). b with a 0 on a board with
+ *                   CHRG (LR-N4): 0x100 | its level, 0 charging, 1 not (USB on a board that cannot see VBUS)
  *    30 LIVE_LOST   a records, b bytes left out of LIVE; on the card all the same, the phone READs them. x 0: in a
  *                   row, its queue full (the link stalled), by the next one that goes; x 1: queued, then lost
  *                   to the link (gone, or the phone unsubscribed; a record cut short counts whole), once the queue is
@@ -117,6 +119,9 @@ uint16_t lr_log_boot(void);
 void lr_log_reset(uint8_t gpregret);
 /* The RAM batch to flash now, on this thread: before a reset or System OFF. */
 void lr_log_sync(void);
+/* No more heartbeats or 5-minute flushes: parked (lr_power.c), a heartbeat every 10 min would take the log round in a
+ * day and with it the records of why it parked. Records still come and flush at the restart (lr_log_init). */
+void lr_log_stop(void);
 /* Everything from seq `from` on, to send() at most max records at a time (consecutive seqs, read into buf); stops
  * when send() returns false. Returns the seq the next record will get. */
 uint32_t lr_log_read(uint32_t from, uint8_t *buf, uint16_t max,

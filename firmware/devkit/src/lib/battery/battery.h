@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifndef __BATTERY_H__
@@ -39,6 +40,12 @@ int battery_set_slow_charge(void);
  * @retval 1 charging, 0 not (done, or no USB). -ENOTSUP: the board cannot read its charger (ProMicro).
  */
 int battery_charging(void);
+
+/**
+ * @brief One read of the charger's CHRG (CHRG_PIN, LR-N4), its pull-up on for 50 us: true low (charging). Without VBUS
+ * too: lr_power.c's park reads it on a board whose USB detect cannot be trusted.
+ */
+bool battery_chrg_low(void);
 
 /**
  * @brief Calculates the battery voltage using the ADC.

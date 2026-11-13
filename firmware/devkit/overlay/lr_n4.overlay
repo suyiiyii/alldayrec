@@ -2,7 +2,7 @@
  * and partitions as the ProMicro (nice!nano UF2 bootloader 0.10.0 on S140 6.1.1, the app at 0x26000), and the same
  * pins for the PDM mic (DAT P0.06, CLK P0.08), the SD card (CS P0.20, MOSI P0.22, SCK P0.24, MISO P1.00) and the slide
  * switch (P1.15 to GND = on, CONFIG_LR_SWITCH). What differs is below; the battery is read on AIN0 (P0.02) through a
- * 1M/1M divider and the charger's CHRG on P0.29 (CONFIG_LR_BATTERY_AIN0, battery.c).
+ * 1M/1M divider (CONFIG_LR_BATTERY_AIN0, battery.c), and the charger's CHRG on P0.29 (chrg-gpios).
  *
  * Power: VDDH comes from the system rail (the battery, or USB through a Schottky diode while plugged in), so the chip
  * runs in high-voltage mode: REG0 (VDDH -> VDD) and REG1 (VDD -> DEC4), each with its DCDC inductor fitted (L1 on
@@ -19,6 +19,10 @@
 		pdm-pwr-gpios = <&gpio0 12 0>;
 		/* SD_EN: the card's LDO enable (U3, 100k pull-down) */
 		sd-pwr-gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
+		/* CHRG: the charger's status (TP4054, open drain), read with the pull-up on for 50 us only (battery.c).
+		 * TODO LR-N5 / LR-N5-S: their boards swap the two, MEM_EN on P0.29 and CHRG on P0.31; the n5 build still
+		 * takes this overlay until an lr_n5.overlay carries both */
+		chrg-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
 	};
 };
 

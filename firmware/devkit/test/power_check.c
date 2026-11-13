@@ -1,4 +1,4 @@
-// Host check of lr_low_count (src/lr_power.h), what turns a recorder off: cc -o power_check test/power_check.c && ./power_check
+// Host check of lr_low_count and lr_park_wake (src/lr_power.h), what turns a recorder off and on again: cc -o power_check test/power_check.c && ./power_check
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -31,6 +31,15 @@ int main(void)
     assert(lr_charge_state(true, 1) == LR_CHARGING);
     assert(lr_charge_state(true, 0) == LR_CHARGED);  // the X1's charger done
     assert(lr_charge_state(true, -ENOTSUP) == LR_CHARGING);  // the ProMicro: USB is all it knows
+    // a second of the park (lr_park_wake): what restarts it
+    assert(!lr_park_wake(false, false, true, false, -EAGAIN, 0));  // low, nothing new: parked on
+    assert(lr_park_wake(true, false, false, false, -EAGAIN, 0));   // the switch moved
+    assert(lr_park_wake(false, true, false, false, -EAGAIN, 0));   // USB
+    assert(lr_park_wake(false, false, true, true, -EAGAIN, 0));    // low and charging: USB the board cannot see
+    assert(!lr_park_wake(false, false, false, true, 0, 4000));     // switched off: charging or a full cell, parked on
+    assert(lr_park_wake(false, false, true, false, 0, 3600));      // low, the battery back at 3.6 V
+    assert(!lr_park_wake(false, false, true, false, 0, 3590));
+    assert(!lr_park_wake(false, false, true, false, -EIO, 3700));  // a failed read
     puts("power_check ok");
     return 0;
 }

@@ -408,7 +408,7 @@ EVENTS = {
         ["recording", "System OFF", "up on USB, not recording", "restart"][a] if a < 4 else str(a))),
     29: ("POWER", lambda x, a, b: {0: f"on battery, VDDH {x * 20} mV",
                                    1: "power-fail warning: VDDH under 3.3 V or VDD under 2.8 V",
-                                   2: f"low battery ({x * 20} mV): recording ended, System OFF until USB or the switch"}.get(a, str(a))),
+                                   2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch"}.get(a, str(a))),
     30: ("LIVE_LOST", lambda x, a, b: f"{a} records ({b} B) left out of LIVE ({'link lost' if x else 'link stalled'}),"
                                       " on the card all the same"),
     31: ("HEALTH", health),

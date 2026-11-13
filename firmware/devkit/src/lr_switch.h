@@ -25,5 +25,7 @@ bool lr_switch_boot(void);
 void lr_switch_park(void);
 /* Before System OFF (lr_power_off): the switch moving either way wakes it */
 void lr_switch_arm(void);
+/* Parked instead of System OFF (CONFIG_LR_PARK): the pin read once, its pull-up on only meanwhile */
+bool lr_switch_read(void);
 
 #endif

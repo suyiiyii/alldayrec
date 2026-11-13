@@ -3,6 +3,13 @@
  * the phone told, and a restart into System OFF until USB (VBUS) comes, or LR-P3's switch moves. Without it the X1 ran
  * to ~3.0 V and browned out over and over, a card mount each time; at 3.3 V there were still 25-29 minutes left.
  *
+ * LR-N4 and LR-N5 (CONFIG_LR_PARK) park in System ON instead of System OFF: one LR-N4, sent to System OFF at 3.28 V,
+ * never came back. 129 boots followed, each over within 0.6 s with VDD at 0.44 V and VDDH there, as if REG0 had
+ * let VDD go (REG0 wants VDDH 0.3 V over its 3.0 V); its USB detect is open, so VBUS could not have woken it either.
+ * Parked (PS ION_RAMON_RTC 3.16 uA), each second the watchdog is fed and the switch and USB read; after a low battery
+ * also CHRG (charging: USB came on a board that cannot see it) and every 10 s the battery. The switch moving, USB,
+ * charging or the battery back at LR_PARK_UP_MV restart it (lr_park_wake): the old wakes, the reset reason SREQ.
+ *
  * LR-P3 (CONFIG_LR_POWER_TRACE) also keeps a power trail: a POWER record with VDDH every minute, and the chip's
  * power-fail warning (VDDH under 3.3 V or VDD under 2.8 V) as it comes, each written to flash at once (lr_log.c
  * URGENT). A board that loses all power (a battery protection cutting out) keeps its last minute and the voltage. */
@@ -22,10 +29,50 @@
 #include "lr_switch.h"
 #include "sdcard.h"
 #include "transport.h"
+#include "wdog_facade.h"
 
 #define LOW_READINGS 3
 #define OFF_MAGIC 0x10B477E7
 static __noinit uint32_t off_at_boot;  // OFF_MAGIC: the restart was a low battery's (a cold start's RAM fails it)
+
+#ifdef CONFIG_LR_PARK
+static bool low_park;  // parked by a low battery (lr_power_init), not by the switch
+static bool parked;    // minute() does nothing from here on
+static struct k_work_delayable minute_work;  // defined below
+
+/* Parked, nothing runs that System OFF stopped: no POWER record a minute and no power-fail warning (each an urgent
+ * flash write: 16 KB of log gone round in ~7 h), no low-battery restart turning a switch-off park into a low one, no
+ * log tick (lr_log_stop). Why it parked is in flash already (lr_power_off); the restart's BOOT ends it. */
+static void park(void)
+{
+    parked = true;
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&minute_work, &sync);  // a minute under way ends first: it could arm the warning again
+#ifdef CONFIG_LR_POWER_TRACE
+    nrfx_power_pof_disable();
+#endif
+    lr_log_stop();
+#ifdef CONFIG_LR_SWITCH
+    bool sw = lr_switch_read();
+#endif
+    for (uint32_t s = 1;; s++) {
+        watchdog_feed();
+        k_sleep(K_SECONDS(1));
+        bool moved = false, charging = false;
+#ifdef CONFIG_LR_SWITCH
+        moved = lr_switch_read() != sw;
+#endif
+#ifdef CHRG_PIN
+        charging = low_park && battery_chrg_low();
+#endif
+        uint16_t mv = 0;
+        int err = low_park && s % 10 == 0 ? battery_get_millivolt(&mv) : -EAGAIN;
+        if (lr_park_wake(moved, nrf_power_usbregstatus_vbusdet_get(NRF_POWER), low_park, charging, err, mv)) {
+            NVIC_SystemReset();
+        }
+    }
+}
+#endif
 
 #ifdef CONFIG_LR_POWER_TRACE
 static void warn(void);
@@ -67,6 +114,9 @@ void lr_power_off(void)
 #endif
     nrf_gpio_pin_clear(PDM_PWR_PIN);
     nrf_gpio_cfg_output(PDM_PWR_PIN);
+#ifdef CONFIG_LR_PARK
+    park();
+#endif
 #ifdef CONFIG_LR_SWITCH
     lr_switch_arm();
 #endif
@@ -83,12 +133,21 @@ uint8_t lr_charge(void)
 static void minute(struct k_work *w)
 {
     static int low;
+#ifdef CONFIG_LR_PARK
+    if (parked) {  // the run park() waited for may have rescheduled it (a cancel does not stop that)
+        return;
+    }
+#endif
     bool usb = nrf_power_usbregstatus_vbusdet_get(NRF_POWER);  // on USB the reading is the cable's, not the battery's
     uint16_t mv = 0;
     int err = usb ? 0 : battery_get_millivolt(&mv);
 #ifdef CONFIG_LR_POWER_TRACE
     if (!usb) {
+#ifdef CHRG_PIN
+        lr_log(LR_POWER, MIN(mv / 20, 255), LR_POWER_MINUTE, 0x100 | !battery_chrg_low());  // b: CHRG, for USB unseen
+#else
         lr_log(LR_POWER, MIN(mv / 20, 255), LR_POWER_MINUTE, 0);
+#endif
     }
     nrfx_power_pof_enable(&pof);
 #endif
@@ -109,6 +168,9 @@ void lr_power_init(void)
     bool off = off_at_boot == OFF_MAGIC;
     off_at_boot = 0;
     if (off && !nrf_power_usbregstatus_vbusdet_get(NRF_POWER)) {  // plugged in meanwhile: no VBUS rising would wake it
+#ifdef CONFIG_LR_PARK
+        low_park = true;
+#endif
         lr_power_off();
     }
 #ifdef CONFIG_LR_POWER_TRACE
