@@ -2,6 +2,7 @@
 with envelopes (together, apart, a lagging clock, no levels, the standby's wait and takeover, never to a device that
 left it), the late path, and two real pipelines over stored audio: together, apart, and the first one gone midway."""
 import datetime as dt
+import heapq
 import json
 import threading
 import time
@@ -304,24 +305,46 @@ def test_new_device_waits_for_its_first_window(store):
     assert colocate.decide(Y, a, b, now_ms=at(640)) == X and colocate.standby_of(Y) == X
 
 
-def run_both(dur_s: int, lag_s: int = 0, off_s: int = 0):
+def run_both(dur_s: int, lag_s: int = 0, off_s: int = 0, lat_s: int = 0):
     """X's and Y's final layers by decide() over [0, dur_s): X's in pieces of 20 s, Y's of 20 s from off_s (a first
     one shorter), each decided as it ends, Y's lag_s later; what the pipeline would record (split, final rows), only
-    where the device has audio. Then the late spans less what another device transcribed (left). Who transcribed
-    each piece (by its start), and the two devices' final and late ranges."""
+    where the device has audio. lat_s: the engine's delay, a piece transcribed commits that long after it was decided
+    and is on its way meanwhile (busy); WAIT: the same piece again 5 s later, the device's next ones after it. Then the
+    late spans less what another device transcribed (left). Who transcribed each piece (by its start), and the two
+    devices' final and late ranges."""
+    from alldayrec.pipeline_state import PipelineState
     cuts = {X: list(range(0, dur_s, 20)) + [dur_s], Y: sorted({0, *range(off_s, dur_s, 20), dur_s})}
+    dts = lambda s: dt.datetime.fromtimestamp(at(s) / 1000)
+    if lat_s:
+        T().devices.update({d: PipelineState(done_to=dts(0), cut_to=dts(0)) for d in (X, Y)})
     who = {}
-    for _, _, d, s, e in sorted((b + lag_s * (d == Y), d == Y, d, a, b) for d, c in cuts.items() for a, b in zip(c, c[1:])):
-        if not (heard := colocate.meet([[at(s), at(e)]], colocate.audio(d, at(s), at(e)))):  # what it heard of the piece
+    ev = [(cuts[d][1] + lag_s * (d == Y), 1 + (d == Y), d, 0, None) for d in (X, Y)]  # each one's next piece, or a commit
+    while ev:
+        t, _, d, i, heard = heapq.heappop(ev)
+        if heard:  # back from the engine
+            with db.tx() as tx:
+                db.record_processed(tx, d, heard, "final")
+            T().devices[d].done_to = dts(i)
             continue
-        if (got := colocate.decide(d, heard[0][0], heard[-1][1])) is None:
-            with db.tx() as t:
-                db.record_processed(t, d, heard, "final")
-            who.setdefault(s, set()).add(d)
-        else:
-            assert got != colocate.WAIT, (d, s)
-            with db.tx() as t:
-                db.record_processed(t, d, colocate.split(d, got, heard), "standby")
+        s, e = cuts[d][i], cuts[d][i + 1]
+        if heard := colocate.meet([[at(s), at(e)]], colocate.audio(d, at(s), at(e))):  # what it heard of the piece
+            if (got := colocate.decide(d, heard[0][0], heard[-1][1])) == colocate.WAIT:
+                assert lat_s, (d, s)
+                heapq.heappush(ev, (t + 5, 1 + (d == Y), d, i, None))
+                continue
+            if got is None:
+                if lat_s:
+                    T().devices[d].cut_to = dts(e)
+                    heapq.heappush(ev, (t + lat_s, 0, d, e, heard))
+                else:
+                    with db.tx() as tx:
+                        db.record_processed(tx, d, heard, "final")
+                who.setdefault(s, set()).add(d)
+            else:
+                with db.tx() as tx:
+                    db.record_processed(tx, d, colocate.split(d, got, heard), "standby")
+        if i + 2 < len(cuts[d]):
+            heapq.heappush(ev, (max(t, cuts[d][i + 2] + lag_s * (d == Y)), 1 + (d == Y), d, i + 1, None))
     late = {d: late_store.union([x for r in db.conn().execute("SELECT ranges FROM late_spans WHERE device = ?", (d,))
                                  for x in json.loads(r[0])]) for d in (X, Y)}
     late = {d: late_store.subtract(late[d], colocate.left(d, late[d])) if late[d] else [] for d in (X, Y)}
@@ -356,9 +379,8 @@ def test_better_newcomer_takes_over(store, lag_s, off_s):
 def test_switch_with_hysteresis(store, capsys, lag_s, off_s):
     """X stands by for Y. X better by a few dB: stays a standby, also through 4 min of Y much worse (over SWITCH_DB
     in one window, not two). Y then hears much worse for long: X transcribes, Y stands by for it, every ms by one at
-    least, twice only in the two windows before the switch (X takes them again: resume) and, with Y's final layer
-    ahead, what Y had past it (X transcribes it too: took). Y back a few dB better than X:
-    no switch back (no flapping)."""
+    least, twice only in the two windows before the switch (X takes them again: resume, took) and, with Y's final layer
+    ahead, what Y had past it (X transcribes it too). Y back a few dB better than X: no switch back (no flapping)."""
     room = walk(44, 5400)  # 45 min
     k = np.r_[np.full(600, 0.85), np.full(480, 0.3), np.full(720, 0.85), np.full(1800, 0.3), np.full(1800, 1.0)]  # Y's depth: X's 1, then 0.85
     put(X, np.r_[room[:3600], squash(room[3600:], 0.85)])
@@ -374,12 +396,30 @@ def test_switch_with_hysteresis(store, capsys, lag_s, off_s):
     xs, ys = ([s for s, v in sorted(who.items()) if d in v] for d in (X, Y))
     assert 900 < xs[0] < 1800 + abs(lag_s) + 60 and xs == list(range(xs[0], 2700, 20)), (xs, who)
     assert ys == [s for s in sorted({0, *range(off_s, 2700, 20)}) if s <= ys[-1]] and ys[-1] < xs[0] - min(0, lag_s) + 20, (ys, who)
-    twice, took = colocate.meet(x, y), db.kv(f"took:{X}")  # the two windows before it and what Y's final had past it
+    twice, took = colocate.meet(x, y), db.kv(f"took:{X}")  # the two windows before it, and what Y's final had past it
     sec = lambda rs: sum(b - a for a, b in rs) / 1000
-    assert twice and late_store.subtract(twice, took) == [] and sec(took) <= 2 * colocate.WINDOW_S - min(0, lag_s) + 20, (took, twice)
+    assert twice and sec(took) <= 2 * colocate.WINDOW_S + 20, (took, twice)
+    assert late_store.subtract(twice, took + [[at(xs[0]), at(xs[0] - min(0, lag_s) + 20)]]) == [], (took, twice)
     with capsys.disabled():
         print(f"\nswitch, lag {lag_s} s: twice {sec(twice):.0f} s")
     assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
+
+
+def test_switches_keep_what_each_handed_over(store):
+    """X stands by for Y; Y much worse: X transcribes (switch); X much worse: Y again; Y much worse: X again. What
+    each of X's switches handed over stays in took, the first too, so late audio requeued after the second (#313)
+    is still not skipped there (left)."""
+    room, n = walk(52, 7600), [1800, 1800, 1800, 2200]  # 15 min each, the last one on past 60 min (a standby waits)
+    put(X, 50 + (room - 50) * np.repeat([0.85, 1.0, 0.3, 1.0], n))
+    put(Y, 50 + (room - 50) * np.repeat([1.0, 0.3, 1.0, 0.3], n))
+    db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
+    who, final, late = run_both(3600)
+    xs = [s for s, v in sorted(who.items()) if v == {X}]
+    first = [s for s, n in zip(xs, xs[1:]) if n - s > 20]  # X's last piece before Y took over again
+    assert len(first) == 1 and 900 < xs[0] < first[0] < 2700 < xs[-1], xs
+    took = db.kv(f"took:{X}")
+    assert len(took) == 2 and took[0][1] <= at(xs[0]) and at(first[0]) < took[1][0] <= took[1][1] <= at(3600), (took, xs)
+    assert colocate.left(X, took) == [], "neither switch's windows skipped"
 
 
 @pytest.mark.parametrize("x_first", [True, False])
@@ -487,27 +527,29 @@ def walkout(talk: float, room: float) -> tuple:
     return lambda s: colocate.correlation(X, Y, at(s - 150), at(s + 150)), lambda s: colocate.lead(X, Y, at(s))
 
 
+@pytest.mark.parametrize("lat_s", [0, 30, 90])
 @pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
 @pytest.mark.parametrize("case,talk,room,r_lo,r_hi", [
     ("a: apart", 0, 0.38, -1, colocate.R_APART),
     ("b: r 0.3-0.6", 0.22, 0.38, colocate.R_APART, colocate.R_TOGETHER),
     ("c: through the door", 0.3, 0.25, colocate.R_TOGETHER, 1)])
-def test_walk_out_of_the_room(store, capsys, case, talk, room, r_lo, r_hi, lag_s, off_s):
+def test_walk_out_of_the_room(store, capsys, case, talk, room, r_lo, r_hi, lag_s, off_s, lat_s):
     """X stands by for Y; the wearer walks out with X at OUT and talks on, all of it X's speech: from OUT every ms of X's
     audio transcribed by X (final, or late less what Y has: left), not left to Y, who heard it worse or not at all.
     Before OUT Y's, but around it (a window at most) X's too. Prints when X transcribes again, what is by neither, twice.
-    lag_s: Y's final layer that far behind X's (-: ahead, as a standby waits for the window after its piece)."""
+    lag_s: Y's final layer that far behind X's (-: ahead, as a standby waits for the window after its piece); lat_s: the
+    engine's delay (Y's piece on its way at the switch: Y commits it after, it is still X's to transcribe)."""
     r, q = walkout(talk, room)
     rs = {s: r(s + 10) for s in range(300, DUR - 150, 20)}  # the window decide() judges each of run_both's pieces by
     assert min(rs.values()) >= r_lo and max(v for s, v in rs.items() if s >= OUT + 300) < r_hi, case
     assert all(q(s) >= colocate.SWITCH_DB for s in range(OUT + 300, DUR, 60)), case
-    who, final, late = run_both(DUR, lag_s, off_s)
+    who, final, late = run_both(DUR, lag_s, off_s, lat_s)
     took = min(s for s, v in who.items() if X in v)
     lost = late_store.subtract([[at(OUT), at(DUR)]], final[X] + late[X])
     twice = colocate.meet(final[X] + late[X], [[at(0), at(OUT)]])
     sec = lambda rs: sum(b - a for a, b in rs) / 1000
     with capsys.disabled():
-        print(f"\n{case}, lag {lag_s} s: walked out at {OUT} s, X transcribes from {took} s ({took - OUT} s after); "
+        print(f"\n{case}, lag {lag_s} s, engine {lat_s} s: walked out at {OUT} s, X transcribes from {took} s ({took - OUT} s after); "
               f"after it by neither: {sec(lost):.0f} s; before it by both: {sec(twice):.0f} s; "
               f"twice in all: {sec(colocate.meet(final[X] + late[X], final[Y] + late[Y])):.0f} s")
     assert not lost, (case, took, lost)

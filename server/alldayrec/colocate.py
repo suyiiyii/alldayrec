@@ -221,13 +221,18 @@ def parted(device: str, y: str, a: int) -> bool:
     return not any(hi - lo >= GONE_S * 1000 for z in (device, y) for lo, hi in subtract([[since, a]], audio(z, since, a)))
 
 
-def take(device: str, y: str, a: int, by: float):
-    """device transcribes from a, y stands by for it (y's own decide() goes on from there)."""
-    with db.tx() as t:
-        db.put_kv(f"standby:{y}", {"of": device, "since": a}, t)
+def take(device: str, y: str, a: int, by: float, switch: bool = False, now_ms: int = 0):
+    """device transcribes from a, y stands by for it (y's own decide() goes on from there). switch (it heard better by
+    SWITCH_DB over two windows): what it left y in those two goes to its late layer (resume) and is kept in took (left()
+    never skips it), and what y transcribed past a is not left to y (decide()): neither is left to the worse one."""
+    with db.tx() as t:  # one transaction: no switch without its resume
+        db.put_kv(f"standby:{y}", {"of": device, "since": a} | ({"switch": True} if switch else {}), t)
         db.put_kv(f"standby:{device}", None, t)
         for d in (device, y):
             db.put_kv(f"parted:{d}", None, t)
+        if switch:
+            keep = [r for r in db.kv(f"took:{device}") or [] if r[1] > a - 7 * 86400_000]  # a week: late is done
+            db.put_kv(f"took:{device}", union(keep + resume(t, device, a, now_ms, 2 * WINDOW_S)), t)
     log.info("%s transcribes for %s from %s: hears it better (%.1f dB)", device, y,
              dt.datetime.fromtimestamp(a / 1000), by)
 
@@ -241,7 +246,7 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
     better by SWITCH_DB over each of the last two WINDOW_S (over one, it switched back a minute later): it transcribes
     and the other stands by for it (take), when no third stands by for that one, and what it left the other in those
     two windows goes to its late layer (resume), the other may be in the same place (r over R_TOGETHER) all along;
-    its pieces the other's final layer had transcribed past the switch it transcribes too (took: not left to it).
+    its pieces past the switch it transcribes, though the other has (some of) them (switch: not left to it).
     Its pieces before the take (since: the other may take it ahead of where it is) are judged as if not standing by.
     Not standing by: leaves the piece to another whose audio covers it and whose last WINDOW_S correlate R_TOGETHER,
     that has transcribed it, or will: one that hears as well or better, is no standby (none waits on the other) and
@@ -271,14 +276,7 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
             elif r is not None and r < R_APART:
                 why = f"apart (r {r:.2f})"
             elif ((by := lead(device, y, b, 2)) or 0) >= SWITCH_DB and not standby_of(y) and stood_for(y) == [device]:
-                with db.tx() as t:  # one transaction: no take without its resume
-                    take(device, y, a, by)  # on as one transcribing: what y has of this piece stays y's
-                    # it heard better over both windows: what it left y in them goes late, and what y's final layer
-                    # has past a (ahead of this one's, a standby waits: a window at most) this one transcribes again
-                    # too: neither is left to y (took)
-                    ahead = min(a + w, max((r[1] for r in db.processed(y, a, now_ms, "final")), default=a))
-                    keep = [r for r in db.kv(f"took:{device}") or [] if r[1] > a - 7 * 86400_000]  # a week: late is done
-                    db.put_kv(f"took:{device}", union(keep + resume(t, device, a, now_ms, 2 * WINDOW_S) + [[a, ahead]]), t)
+                take(device, y, a, by, switch=True, now_ms=now_ms)  # on as one transcribing, this piece too
             elif db.processed(y, a, b, "standby") and transcribed(y, a, b) < COVER:
                 # y left (some of) it to a third device, or had it taken (take, ahead of this one): this one cannot tell
                 # that one will have it; what y will have is still left to y (split)
@@ -298,8 +296,8 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
                     resume(t, device, a, now_ms)
             log.info("%s takes over from %s at %s: %s", device, y, dt.datetime.fromtimestamp(a / 1000), why)
             return None
-    if b - w < (db.kv(f"standby_left:{device}") or 0) or meet([[a, b]], db.kv(f"took:{device}") or []):
-        return None  # took: past the switch, y transcribed it before it stood by (take above)
+    if b - w < (db.kv(f"standby_left:{device}") or 0):
+        return None
     together = False
     for y in others(device, a, b):
         if audio_in(y, a, b) < COVER:
@@ -319,6 +317,8 @@ def decide(device: str, a: int, b: int, now_ms: int | None = None) -> str | None
         if ((back or (not was and by is not None and by > 0)) and not standby_of(y) and not stood_for(y)
                 and (db.kv(f"standby_left:{y}") or 0) <= b - w):  # not in the window y took over in (apart: its own call)
             take(device, y, a, by or 0)
+        if (ys := db.kv(f"standby:{y}") or {}).get("of") == device and ys.get("switch") and a >= ys["since"]:
+            continue  # this one switched: what y has past it (committed, or at the engine) y heard worse
         if transcribed(y, a, b) >= COVER:
             return y  # first come: y has it already, whatever it does now
         if standby_of(y):
