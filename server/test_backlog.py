@@ -137,6 +137,8 @@ def test_backlog_does_not_hold_drafts(tmp_path, monkeypatch):
             edge = live0 - dt.timedelta(seconds=PIECE_S + device_pipeline.DRAFT_BACK_S)
             assert all(r["start"] >= core.iso(edge) for r in drafts), "the backlog is not drafted"
             assert sent["draft"] < device_pipeline.DRAFT_BACK_S + LIVE_S, sent
+            started = [e["text"] for e in T().events if "开始出初稿" in e["text"]]
+            assert len(started) == 1 and re.fullmatch(rf"{DEVICE}：页面在看，开始出初稿（从 \d\d:\d\d:\d\d 起）", started[0]), started
             for _ in range(20):  # the analysis of the last pause's drafts
                 if fed and fed[-1] and fed[-1][-1] == N + LIVE_S // 5 - 1:
                     break
