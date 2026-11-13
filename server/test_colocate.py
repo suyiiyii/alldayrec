@@ -355,8 +355,9 @@ def test_better_newcomer_takes_over(store, lag_s, off_s):
 @pytest.mark.parametrize("lag_s,off_s", [(0, 0), (120, 10), (-120, 10)])
 def test_switch_with_hysteresis(store, lag_s, off_s):
     """X stands by for Y. X better by a few dB: stays a standby, also through 4 min of Y much worse (over SWITCH_DB
-    in one window, not two). Y then hears much worse for long: X transcribes, Y stands by for it, every ms once around
-    the switch. Y back a few dB better than X: no switch back (no flapping)."""
+    in one window, not two). Y then hears much worse for long: X transcribes, Y stands by for it, every ms by one at
+    least, twice only in the two windows before the switch (X takes them again: resume). Y back a few dB better than X:
+    no switch back (no flapping)."""
     room = walk(44, 5400)  # 45 min
     k = np.r_[np.full(600, 0.85), np.full(480, 0.3), np.full(720, 0.85), np.full(1800, 0.3), np.full(1800, 1.0)]  # Y's depth: X's 1, then 0.85
     put(X, np.r_[room[:3600], squash(room[3600:], 0.85)])
@@ -366,10 +367,14 @@ def test_switch_with_hysteresis(store, lag_s, off_s):
     assert 0 < q(900) < sw < q(540) and sw < q(1800) and -sw < q(2700) < 0, (q(900), q(540), q(1800), q(2700))
     db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
     who, final, late = run_both(2700, lag_s, off_s)
-    once(final, late, 2700)
+    x, y = (final[d] + late[d] for d in (X, Y))
+    assert late_store.subtract([[at(0), at(2700)]], x + y) == [], ("by neither", final, late)
     by = sorted(who.items())  # the pieces transcribed in final, by whom (around a handover some go to a late layer)
     switched = [s for (_, a), (s, b) in zip(by, by[1:]) if a != b]
     assert len(switched) == 1 and 900 < switched[0] < 1800 + abs(lag_s) + 60, (switched, who)
+    took = db.kv(f"standby:{Y}")["since"]  # where X took over (its first final piece later when Y was ahead: first come)
+    twice = colocate.meet(x, y)
+    assert twice and late_store.subtract(twice, [[took - 2 * colocate.WINDOW_S * 1000, took]]) == [], (took, twice)
     assert colocate.standby_of(Y) == X and colocate.standby_of(X) is None
 
 
@@ -462,6 +467,62 @@ def test_draft_where_the_better_one_drafts(store):
     assert colocate.drafted_by(X, now_ms=at(600)) is None and colocate.drafted_by(Y, now_ms=at(600)) == X
 
 
+# walking out of the room (#324): X worn, Y in the room. Y hears better, X stands by; at OUT s the wearer leaves with X
+
+OUT, DUR = 600, 2700
+
+
+def walkout(talk: float, room: float) -> tuple:
+    """The wearer's speech (a level that walks) heard by both until OUT: Y as it is, X a little worse (squashed). From OUT X hears
+    it as it is (better) and Y the wearer `talk` deep through the door over its own room's noise (7 dB) `room` deep:
+    talk 0, the two apart; a little talk, r 0.3-0.6; more, r over R_TOGETHER; X better by over SWITCH_DB in each."""
+    p, q, k = walk(61, 2 * DUR), np.random.default_rng(62).normal(0, 7, 2 * DUR), 2 * OUT
+    put(X, np.r_[squash(p[:k], 0.9), p[k:]])
+    put(Y, np.r_[p[:k], 50 + talk * (p[k:] - 50) + room * q[k:]])
+    db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
+    return lambda s: colocate.correlation(X, Y, at(s - 150), at(s + 150)), lambda s: colocate.lead(X, Y, at(s))
+
+
+@pytest.mark.parametrize("case,talk,room,r_lo,r_hi", [
+    ("a: apart", 0, 0.38, -1, colocate.R_APART),
+    ("b: r 0.3-0.6", 0.22, 0.38, colocate.R_APART, colocate.R_TOGETHER),
+    ("c: through the door", 0.3, 0.25, colocate.R_TOGETHER, 1)])
+def test_walk_out_of_the_room(store, capsys, case, talk, room, r_lo, r_hi):
+    """X stands by for Y; the wearer walks out with X at OUT and talks on, all of it X's speech: from OUT every ms of X's
+    audio transcribed by X (final, or late less what Y has: left), not left to Y, who heard it worse or not at all.
+    Before OUT Y's, but around it (a window at most) X's too. Prints when X transcribes again, what is by neither, twice."""
+    r, q = walkout(talk, room)
+    rs = {s: r(s + 10) for s in range(300, DUR - 150, 20)}  # the window decide() judges each of run_both's pieces by
+    assert min(rs.values()) >= r_lo and max(v for s, v in rs.items() if s >= OUT + 300) < r_hi, case
+    assert all(q(s) >= colocate.SWITCH_DB for s in range(OUT + 300, DUR, 60)), case
+    who, final, late = run_both(DUR)
+    took = min(s for s, v in who.items() if X in v)
+    lost = late_store.subtract([[at(OUT), at(DUR)]], final[X] + late[X])
+    twice = colocate.meet(final[X] + late[X], [[at(0), at(OUT)]])
+    sec = lambda rs: sum(b - a for a, b in rs) / 1000
+    with capsys.disabled():
+        print(f"\n{case}: walked out at {OUT} s, X transcribes from {took} s ({took - OUT} s after); after it by "
+              f"neither: {sec(lost):.0f} s; before it by both: {sec(twice):.0f} s")
+    assert not lost, (case, took, lost)
+    assert sec(twice) <= colocate.WINDOW_S, (case, twice)
+
+
+def test_walk_out_drafts(store, capsys):
+    """Drafts on walking out: drafted_by() leaves X's drafts to Y while r over R_TOGETHER and X not better by SWITCH_DB
+    (one window); in b (r 0.3-0.6) and c (through the door) when does it stop? (The pipeline drafts on X only when X is
+    no standby too: device_pipeline drafting().)"""
+    from alldayrec.pipeline_state import PipelineState
+    for case, talk, room in (("b", 0.22, 0.38), ("c", 0.3, 0.25)):
+        db.conn().execute("DELETE FROM pieces")
+        walkout(talk, room)
+        T().devices.update({X: PipelineState(standby=Y), Y: PipelineState(drafting=True)})
+        assert colocate.drafted_by(X, now_ms=at(OUT)) == Y
+        free = next(s for s in range(OUT, DUR, device_pipeline.DRAFT_NEAR_S) if colocate.drafted_by(X, now_ms=at(s)) is None)
+        with capsys.disabled():
+            print(f"\n{case}: drafted_by() frees X's drafts {free - OUT} s after walking out")
+        assert free - OUT <= colocate.WINDOW_S, (case, free)
+
+
 def test_late_audio_left_to_who_has_it(store, monkeypatch):
     room, away = walk(9, 2400), walk(10, 2400)
     put(X, np.r_[room[:1200], away[1200:]])
@@ -469,7 +530,8 @@ def test_late_audio_left_to_who_has_it(store, monkeypatch):
     with db.tx() as t:
         db.record_processed(t, Y, [[at(0), at(1200)]], "final")
     skip = colocate.left(X, [[at(0), at(1200)]])
-    assert late_store.subtract([[at(60), at(480)]], skip) == [] and skip[-1][1] <= at(660), ("together: Y has it; apart: not", skip)
+    # the window from a part's start reaches past the parting (600 s) from 420 s: X transcribes those again
+    assert late_store.subtract([[at(60), at(420)]], skip) == [] and skip[-1][1] <= at(600), ("together: Y has it; apart: not", skip)
     db.put_kv(f"finalized_to:{X}", core.iso(dt.datetime.fromtimestamp(at(1300) / 1000)))
     with db.tx() as t:
         late_store.enqueue(t, X, at(0), at(1200), round(time.time() * 1000), True)
