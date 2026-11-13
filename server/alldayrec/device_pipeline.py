@@ -658,6 +658,18 @@ async def pipeline(device: str):
             return len(x) / SR >= REFINE_WINDOW_S
         return (dseg.time_at(dseg.samples) - hi).total_seconds() > REFINE_WINDOW_S - REFINE_MARGIN_S
 
+    def catch_up(how: str) -> bool:
+        """Moves draft_to to where drafts or final rows stop, but no further back than DRAFT_BACK_S: a page that opens
+        sees the minutes not final yet, not a backlog. True when this starts a watch."""
+        floor = dseg.time_at(dseg.samples) - dt.timedelta(seconds=DRAFT_BACK_S)
+        st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
+        if st.drafting:
+            return False
+        st.drafting = True
+        st.latency.clear()  # counted afresh: the rows of an earlier watch say nothing of this one
+        ws.note(f"{device}：页面在看，开始出初稿（{how}从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
+        return True
+
     async def draft_loop():
         while True:
             with anyio.move_on_after(REFINE_EVERY_S):  # a pause after speech drafts at once; the timer covers pause-less speech
@@ -665,14 +677,7 @@ async def pipeline(device: str):
             by_vad = st.take_draft_wake()
             if not drafting():
                 continue
-            # from where drafts or final rows stop, but no further back than DRAFT_BACK_S: a page that opens sees the
-            # minutes not final yet, not a backlog
-            floor = dseg.time_at(dseg.samples) - dt.timedelta(seconds=DRAFT_BACK_S)
-            st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
-            if not st.drafting:
-                st.drafting = True
-                st.latency.clear()  # counted afresh: the rows of an earlier watch say nothing of this one
-                ws.note(f"{device}：页面在看，开始出初稿（从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
+            if catch_up(""):
                 while await draft_pass():  # what came before the page opened, in windows
                     pass
             if by_vad:
@@ -713,12 +718,7 @@ async def pipeline(device: str):
             await anyio.sleep(1)
             if not drafting():
                 continue
-            floor = dseg.time_at(dseg.samples) - dt.timedelta(seconds=DRAFT_BACK_S)
-            st.draft_to = max(t for t in (st.draft_to, st.done_to, floor, dseg.time_at(dseg.audio_base)) if t)
-            if not st.drafting:
-                st.drafting = True
-                st.latency.clear()  # counted afresh: the rows of an earlier watch say nothing of this one
-                ws.note(f"{device}：页面在看，开始出初稿（实时流，从 {st.draft_to.strftime('%H:%M:%S')} 起）", "state")
+            catch_up("实时流，")
             base = max(dseg.audio_base, dseg.sample_at(st.draft_to))
             if dseg.samples <= base:
                 continue  # nothing to send: the server would end the session after 23 s and count it failed
