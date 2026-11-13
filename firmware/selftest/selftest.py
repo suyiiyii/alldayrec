@@ -243,7 +243,7 @@ SD_HINTS = {  # where the card start-up stops, and what to look at
 
 
 NAND_HINTS = {  # where the NAND test stops, and what to look at
-    "busy": "the chip stayed busy after its reset (or MISO P1.00 is held high)",
+    "busy": "the chip stayed busy after its reset or a page read (or MISO P1.00 is held high)",
     "id": "no W25N JEDEC ID (EF AA 21 / EF AA 22): 00 00 00 is nobody on MISO P1.00; check MEM_VDD (U3, MEM_EN P0.29), "
           "/CS P0.20, CLK P0.24, DI P0.22, DO P1.00 and U4's joints",
     "status": "the status registers did not take the writes (protection bits, ECC-E / BUF): DI P0.22 or /WP (R28)",
@@ -328,8 +328,8 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, board="promicro", cover=5
     if n5:
         nd = res["nand"] = b.cmd("nand", 30)
         row("NAND (U4, MEM_EN P0.29, SPI)", bool(nd["ok"]), f"JEDEC ID {nd['id']} ({nd['blocks']} blocks), SR-1 {nd['sr1']} "
-            f"SR-2 {nd['sr2']}; block {nd['block']} erased, first and last pages programmed and read back (ECC status "
-            f"{nd['ecc']}), erased again: erase {nd['erase_us'] / 1000:.1f} ms, program {nd['program_us'] / 1000:.2f} ms; "
+            f"SR-2 {nd['sr2']}; block {nd['block']} erased, first and last pages programmed and read back (ECC "
+            f"{nd['ecc']}: 0 clean, 1 corrected, 2 not), erased again: erase {nd['erase_us'] / 1000:.1f} ms, program {nd['program_us'] / 1000:.2f} ms; "
             f"{nd['bad_seen']} bad blocks at the end" + (f"; failed at {nd['fail']}: {NAND_HINTS.get(nd['fail'], '')}"
                                                          if nd["fail"] else ""))
         # no SAADC input reaches either LDO's output: MEM_VDD by the /CS line its R26 pulls up, MIC_VDD by the mics' data

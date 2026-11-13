@@ -960,12 +960,19 @@ static void cmd_nand(bool force)
 	for (int b = blocks - 1; b >= blocks - 16 && block < 0; b--) {
 		uint8_t mark;
 
-		nand_read(b * NAND_PPB, NAND_PAGE, &mark, 1);
+		/* still BUSY: the buffer is stale, the mark and the blank check would be garbage */
+		if (nand_read(b * NAND_PPB, NAND_PAGE, &mark, 1) & 1) {
+			fail = "busy";
+			goto out;
+		}
 		if (mark != 0xFF) {
 			bad++;
 			continue;
 		}
-		nand_read(b * NAND_PPB, 0, nand_back, NAND_PAGE);
+		if (nand_read(b * NAND_PPB, 0, nand_back, NAND_PAGE) & 1) {
+			fail = "busy";
+			goto out;
+		}
 		if (force || all_ff(nand_back, NAND_PAGE)) {
 			block = b;
 		}
@@ -996,7 +1003,11 @@ static void cmd_nand(bool force)
 			break;
 		}
 		srx = nand_read(page, 0, nand_back, NAND_PAGE);
-		ecc = MAX(ecc, srx >> 4 & 3);
+		/* as the recorder (nand_card.c): ECC-1/0 01 corrected, W25N02KV's 11 corrected past its bit-flip threshold;
+		 * 10 (and W25N01GV's 11) not: 0 clean, 1 corrected, 2 uncorrectable */
+		uint8_t e = srx >> 4 & 3;
+
+		ecc = MAX(ecc, !e ? 0 : e == 1 || (e == 3 && id[2] == 0x22) ? 1 : 2);
 		if (memcmp(nand_back, nand_pat, NAND_PAGE)) {
 			fail = "verify";
 		}
