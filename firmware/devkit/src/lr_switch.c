@@ -5,7 +5,8 @@
  * lr_power.c), before the card or the radio, its BOOT the only record, and wakes when the switch moves or USB comes
  * (VBUS). On USB it stays up instead, not recording (the USB port still takes a firmware), until the switch is on
  * (restart, recording) or the cable goes (System OFF or the park).
- * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB; parked: SREQ). */
+ * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB), parked the POWER a 3
+ * before it (its RESETREAS SREQ). */
 #include "lr_switch.h"
 
 #include <hal/nrf_gpio.h>

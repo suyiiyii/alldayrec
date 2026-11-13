@@ -62,8 +62,12 @@
  *    29 POWER       power (lr_power.c): x battery mV / 20 (LR-P3: VDDH), a 0: once a minute on battery (LR-P3), 1: the
  *                   chip's power-fail warning (LR-P3: VDDH under 3.3 V or VDD under 2.8 V; x 0, not measured in the
  *                   interrupt), 2: low battery, recording ended, System OFF next until USB (or LR-P3's switch) wakes it
- *                   (CONFIG_LR_PARK: parked in System ON, also until charging or 3.6 V). b with a 0 on a board with
- *                   CHRG (LR-N4): 0x100 | its level, 0 charging, 1 not (USB on a board that cannot see VBUS)
+ *                   (CONFIG_LR_PARK: parked in System ON, also until charging or 3.6 V), 3: the park's end, just
+ *                   before its restart (CONFIG_LR_PARK; the wake's RESETREAS is SREQ): b seconds parked (bits 0-27,
+ *                   saturating) | what woke it << 28 (lr_power.h LR_WAKE_*: 1 the switch, 2 USB, 4 charging, 8 the
+ *                   battery back at 3.6 V; several at once possible), x the battery only with 8, else 0. b with a 0
+ *                   on a board with CHRG (LR-N4): 0x100 | its level, 0 charging, 1 not (USB on a board that cannot
+ *                   see VBUS)
  *    30 LIVE_LOST   a records, b bytes left out of LIVE; on the card all the same, the phone READs them. x 0: in a
  *                   row, its queue full (the link stalled), by the next one that goes; x 1: queued, then lost
  *                   to the link (gone, or the phone unsubscribed; a record cut short counts whole), once the queue is

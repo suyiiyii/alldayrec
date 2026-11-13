@@ -373,6 +373,12 @@ def read_done(x, a, b):
             f"{b >> 22} B a packet, interval {x * 1.25:g} ms")
 
 
+def park_end(b):
+    """POWER a 3, the park's end (lr_power.h lr_park_end): b seconds parked (bits 0-27) | what woke it << 28"""
+    why = "+".join(w for i, w in enumerate(["switch", "USB", "charging", "battery back at 3.6 V"]) if b >> 28 + i & 1)
+    return f"park ended after {(b & 0xFFFFFFF) // 60} min {(b & 0xFFFFFFF) % 60} s, woken by {why or '?'}"
+
+
 EVENTS = {
     1: ("BOOT", lambda x, a, b: f"reset {reas(a)} (0x{a:x}), battery {x * 20} mV, fw {b & 0xFFFFFFF:07x}{'+' * (b >> 28 & 1)}"),
     2: ("FAULT", lambda x, a, b: f"{FAULT[a] if a < len(FAULT) else a}, PC 0x{b:08x} (previous boot)"),
@@ -408,7 +414,8 @@ EVENTS = {
         ["recording", "System OFF", "up on USB, not recording", "restart"][a] if a < 4 else str(a))),
     29: ("POWER", lambda x, a, b: {0: f"on battery, VDDH {x * 20} mV",
                                    1: "power-fail warning: VDDH under 3.3 V or VDD under 2.8 V",
-                                   2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch"}.get(a, str(a))),
+                                   2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch",
+                                   3: park_end(b)}.get(a, str(a))),
     30: ("LIVE_LOST", lambda x, a, b: f"{a} records ({b} B) left out of LIVE ({'link lost' if x else 'link stalled'}),"
                                       " on the card all the same"),
     31: ("HEALTH", health),
@@ -544,6 +551,8 @@ def selftest():
     assert EVENTS[36][1](0, 124735488, 30000) == "63.86 GB card made exFAT in 30.0 s"
     assert EVENTS[36][1](17, 62333952, 900) == "31.91 GB card not formatted: it mounted after all"
     assert EVENTS[29][1](165, 2, 0).startswith("low battery (3300 mV)")
+    assert EVENTS[29][1](0, 3, 0x60000000 | 125) == "park ended after 2 min 5 s, woken by USB+charging"
+    assert EVENTS[29][1](180, 3, 0x80000E10) == "park ended after 60 min 0 s, woken by battery back at 3.6 V"
     assert EVENTS[8][1](0, 0, 3) == "card back (the computer left it 3 min): ok" and EVENTS[8][1](0, 0, 0) == "card back: ok"
     assert EVENTS[30][0] == "LIVE_LOST" and EVENTS[30][1](0, 12, 4800).startswith("12 records (4800 B) left out of LIVE (link stalled)")
     assert EVENTS[30][1](1, 3, 1100).startswith("3 records (1100 B) left out of LIVE (link lost)")
