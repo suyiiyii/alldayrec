@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 FORMAL_VARIANTS = ["sdmod", "promicro", "promicro-p2", "promicro-p3", "n4"]
+BUILD_ONLY_VARIANTS = ["n5", "promicro-nand"]  # the NAND boards: built and kept as artifacts, never released
 FAMILIES = ["devkit", "selftest", "blerelay"]
 
 
@@ -17,17 +18,18 @@ def git(*args):
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     tag = os.environ["GITHUB_EVENT_NAME"] == "push" and os.environ["GITHUB_REF"].startswith("refs/tags/firmware-")
-    variants = FORMAL_VARIANTS
+    variants = FORMAL_VARIANTS + BUILD_ONLY_VARIANTS
     if tag:
+        variants = FORMAL_VARIANTS
         subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", "origin/main"], check=True)
         families = [f for f in FAMILIES if f != "blerelay"]  # the formal relay is built on the maintainer's machine: its key stays out of CI
     elif os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
         target = event.get("inputs", {}).get("target", "all")
         variant = event.get("inputs", {}).get("variant", "all")
-        if target not in ["all", *FAMILIES] or variant not in ["all", *FORMAL_VARIANTS, "expansion"]:
+        if target not in ["all", *FAMILIES] or variant not in ["all", *variants, "expansion"]:
             raise SystemExit("Unknown firmware target/variant")
         families = FAMILIES if target == "all" else [target]
-        variants = FORMAL_VARIANTS if variant == "all" else [variant]
+        variants = variants if variant == "all" else [variant]
     else:
         # Compare with this branch's last successful push build, not the push's `before`: a newer push cancels the
         # run before it, and what that run would have built must not be skipped for good.

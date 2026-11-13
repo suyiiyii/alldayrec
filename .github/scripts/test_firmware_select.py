@@ -42,7 +42,7 @@ class FirmwareSelection(unittest.TestCase):
         outputs = dict(line.split("=", 1) for line in output_path.read_text().splitlines())
         return result, json.loads(outputs["matrix"])["include"]
 
-    def test_main_devkit_change_builds_all_recorder_models_only(self):
+    def test_main_devkit_change_builds_all_recorder_models_and_nand_boards(self):
         source = self.root / "firmware/devkit/src/main.c"
         source.parent.mkdir(parents=True)
         source.write_text("int value;\n")
@@ -51,7 +51,7 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {
             ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"), ("devkit", "promicro-p3"),
-            ("devkit", "n4")})
+            ("devkit", "n4"), ("devkit", "n5"), ("devkit", "promicro-nand")})
 
     def test_manual_dispatch_at_tag_stays_requested_test_family(self):
         # Dispatching a tag is not a formal tag-push event.
@@ -60,7 +60,7 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(jobs, [{"family": "devkit", "variant": "expansion", "sdk": "ncs"}])
 
-    def test_formal_tag_builds_exact_six_targets(self):
+    def test_formal_tag_builds_exact_six_targets(self):  # never the NAND boards: not released yet
         result, jobs = self.select("push", "refs/tags/firmware-test", {})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {

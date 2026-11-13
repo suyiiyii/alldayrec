@@ -1,13 +1,14 @@
 name: firmware-check
 on:
   pull_request:  # only on PRs: main gets what a green PR ran
-    paths: ['firmware/devkit/**', 'fixtures/**', '.github/workflows/firmware-check.yml']
+    paths: ['firmware/devkit/**', 'fixtures/**', '.github/workflows/firmware-check.yml', '.github/scripts/firmware-setup-ncs.sh']
 
 concurrency:  # a new push to a PR cancels its run still going
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# host checks of the firmware's logic only; the boards' builds (lr.sh build) are made and flashed where they are tested
+# host checks of the firmware's logic, and builds of the NAND boards; the released boards are built on main
+# (firmware-build.yml) and flashed where they are tested
 jobs:
   firmware-check:  # the record stream and its timing events (test/store_check.c), and lr_sync.py's decoding of them
     runs-on: ubuntu-24.04
@@ -36,3 +37,25 @@ jobs:
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
+
+  nand-build:  # n5 and promicro-nand compile (lr.sh build): not released, so a PR is where a broken one shows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [n5, promicro-nand]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - run: pipx install uv==0.13.0
+      # not cached: the SDK and toolchain are 8 GB as a cache (10 GB for the whole repo), and save ~3 of ~6 minutes
+      - name: Set up official native toolchain and full SDK
+        id: setup
+        run: bash .github/scripts/firmware-setup-ncs.sh
+      - name: Build
+        env:
+          FIRMWARE_ENV_FILE: ${{ steps.setup.outputs.env_file }}
+          VARIANT: ${{ matrix.variant }}
+        run: source "$FIRMWARE_ENV_FILE" && LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "$VARIANT"

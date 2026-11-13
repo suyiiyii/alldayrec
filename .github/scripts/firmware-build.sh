@@ -14,7 +14,7 @@ unset LR_LOG
 VERSION="$(git log -1 --format=%cd --date=format:%Y%m%d.%H%M%S)-$(git rev-parse --short HEAD)"
 case "$FAMILY" in
   devkit)
-    case "$VARIANT" in sdmod|promicro|promicro-p2|promicro-p3|n4|expansion) ;; *) echo 'Invalid recorder variant' >&2; exit 1 ;; esac
+    case "$VARIANT" in sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand|expansion) ;; *) echo 'Invalid recorder variant' >&2; exit 1 ;; esac
     git diff --quiet HEAD -- firmware/devkit || { echo 'Recorder source must be clean for a versioned artifact' >&2; exit 1; }
     bash firmware/devkit/lr.sh build "$VARIANT"
     uvx --from adafruit-nrfutil==0.5.3.post16 adafruit-nrfutil dfu genpkg \

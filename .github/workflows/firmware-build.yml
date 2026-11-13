@@ -18,9 +18,9 @@ on:
         options: [all, devkit, selftest, blerelay]
         default: all
       variant:
-        description: Recorder variant (all excludes experimental expansion)
+        description: Recorder variant (all excludes experimental expansion; n5 and promicro-nand are never released)
         type: choice
-        options: [all, sdmod, promicro, promicro-p2, promicro-p3, n4, expansion]
+        options: [all, sdmod, promicro, promicro-p2, promicro-p3, n4, n5, promicro-nand, expansion]
         default: all
 
 permissions:
