@@ -553,6 +553,8 @@ def selftest():
     assert EVENTS[29][1](165, 2, 0).startswith("low battery (3300 mV)")
     assert EVENTS[29][1](0, 3, 0x60000000 | 125) == "park ended after 2 min 5 s, woken by USB+charging"
     assert EVENTS[29][1](180, 3, 0x80000E10) == "park ended after 60 min 0 s, woken by battery back at 3.6 V"
+    assert EVENTS[29][1](0, 3, 5) == "park ended after 0 min 5 s, woken by ?"
+    assert EVENTS[29][1](0, 3, 0xFFFFFFFF) == "park ended after 4473924 min 15 s, woken by switch+USB+charging+battery back at 3.6 V"
     assert EVENTS[8][1](0, 0, 3) == "card back (the computer left it 3 min): ok" and EVENTS[8][1](0, 0, 0) == "card back: ok"
     assert EVENTS[30][0] == "LIVE_LOST" and EVENTS[30][1](0, 12, 4800).startswith("12 records (4800 B) left out of LIVE (link stalled)")
     assert EVENTS[30][1](1, 3, 1100).startswith("3 records (1100 B) left out of LIVE (link lost)")

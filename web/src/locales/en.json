@@ -724,15 +724,15 @@
     },
     "switch": {
       "0": "recording",
-      "1": "power off (parked; flip the switch or plug in USB to wake)",
+      "1": "power off (flip the switch or plug in USB to wake)",
       "2": "USB plugged in, not recording",
       "3": "restart"
     },
     "power": {
       "0": "on battery, VDDH {mv} mV",
       "1": "brownout warning: VDDH below 3.3 V or VDD below 2.8 V",
-      "2": "battery too low ({mv} mV): recording stopped, powered off (parked); plug in USB or flip the switch to wake",
-      "3": "park ended after {took}, woken by {why}"
+      "2": "battery too low ({mv} mV): recording stopped, powered off; plug in USB or flip the switch to wake",
+      "3": "back on after {took} off, woken by {why}"
     },
     "wake": {
       "switch": "the switch",
