@@ -27,6 +27,7 @@ case $V in
             OVL="$OVL;$D/overlay/lr_promicro.overlay"
             if [ "$V" = n4 ] || [ "$V" = n5 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
               M=LR-N${V#n} HW="LR-N${V#n} nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
+              [ "$V" != n5 ] || OVL="$OVL;$D/overlay/lr_n5.overlay"  # its card LDO enable and CHRG swapped balls
               # battery on AIN0, CHRG on P0.29; Fxx chips ship locked: the UICR's APPROTECT 0x5A (written at the first
               # flash) only opens SWD if the app writes APPROTECT.DISABLE at every boot, which SystemInit does with this
               # (the NCS 2.7 default, spelled out); never NRF_APPROTECT_LOCK. Its 32.768 kHz crystal X1 (Seiko SC-16S

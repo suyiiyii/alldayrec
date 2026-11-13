@@ -1,0 +1,9 @@
+/* LR-N5 (and LR-N5-S): LR-N4's pins (lr_n4.overlay) with the NAND's LDO enable and the charger's CHRG swapped, as
+ * routed (the hardware's PINS.md, 11-13): MEM_EN on P0.29 (ball A10; U3, 1M pull-down), CHRG on P0.31 (A8). Both are
+ * plain GPIOs; the battery stays on AIN0 (P0.02). Applied after lr_n4.overlay, before lr_nand.overlay. */
+/ {
+	zephyr,user {
+		sd-pwr-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+		chrg-gpios = <&gpio0 31 GPIO_ACTIVE_LOW>;
+	};
+};
