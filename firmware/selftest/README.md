@@ -88,3 +88,68 @@ UICR REGOUT0 不是 4（3.0 V）时（比如 UICR 漏烧，bootloader 会自己�
 - **充电电流**：要接电池。
 - **VCC 开关**（P0.13 控制的 VCC 排针）：要在 VCC 排针上量电压。
 - **LR-N4**：两颗 LDO 的输出电压、SD_VDD 断电后是否真的掉到 0.2 V 以下（`vcc N` 打开后用表量）；两颗麦的频响对比（要扫频声源）；I2C 波形（要示波器）；外设线之间、外设线和电源域之间在断电状态下的桥连（上电前用万用表查）。
+
+## LR-N5
+
+LR-N5 是 LR-N4 加一颗裸 SPI NAND（W25N01GV，或同脚位的 W25N02KV），用 SD 卡那四根线（/CS P0.20、DI P0.22、CLK P0.24、DO P1.00）。和 N4 不同的脚：NAND 的 LDO 使能 **MEM_EN P0.29**、充电状态 **CHRG P0.31**（布线时对调了），UART 调试脚 P0.13（TX）、P0.17（RX）只接调试口。
+
+### SWD：首烧和回流后的快速检查（`swd.py`）
+
+Pico 跑 debugprobe（或 lr-probe，带三路 ADC），**电池、板子的 USB 都不接，Pico 的 3V3 接 VDD**。pyOCD 固定 0.45.1，装在脚本自己的 uv 环境里；探针用 `-u` 指定（`pyocd list` 里的序列号）。
+
+```bash
+uv run firmware/selftest/swd.py check -u PROBE                                   # 只读：芯片、锁没锁、UICR 现状、下一步
+uv run firmware/selftest/swd.py flash -u PROBE --bootloader nice_nano_bootloader-0.10.0_s140_6.1.1.hex [--unlock]
+uv run firmware/selftest/swd.py diag -u PROBE [--usb yes|no] [--adc auto]        # 回流后、焊 B 面前
+uv run firmware/selftest/swd.py uicr [--fxx] -o uicr-n5.hex                      # 只生成 UICR 文件
+uv run firmware/selftest/swd.py test                                             # 离线自测
+```
+
+- **`check`** 只用 attach 连接，不停核、不复位、不写任何东西。锁着的芯片（build code F 及以后出厂就锁）只报告，不解锁。
+- **`flash`**：先核 bootloader 的 sha256（nice!nano 0.10.0，`9b6bd9fd…0d8e`）；`--connect halt` 读 INFO.VARIANT 定 build code；生成 N5 的 UICR 文件；**bootloader 和 UICR 一条 `pyocd load`**（`--no-reset -O load.pre_reset=off`：芯片从头到尾不运行、不复位）；读回 UICR 各字、NRFFW、CTRL-AP、CPU 状态，再用 `savemem` 把两个 HEX 定义的每个字节读回来比对。全部 PASS 才打印「现在拔掉 Pico 的全部线，再接电池」。这时芯片里只有 bootloader，第一个应用走 UF2（下面「自检固件」）；B 面的 Q1、D3 没焊时，接电池不一定能上电。芯片锁着时不加 `--unlock` 就停；加了才做一次 mass erase（擦 flash、UICR、RAM），**只用于新片**。
+- **N5 的 UICR**（nRF52840 PS v1.11，地址和位域已对 Nordic 的 SVD 核过）：
+
+  | 地址 | 字 | 意思 |
+  |---|---|---|
+  | `0x10001200` / `0x10001204` | `0x00000012` | PSELRESET[0] / [1]：P0.18 是复位脚（两个都要写） |
+  | `0x10001208` | `0x0000005A`（只 build code F 及以后） | APPROTECT = HwDisabled：应用每次启动写 APPROTECT.DISABLE 后 SWD 保持打开 |
+  | `0x1000120C` | `0xFFFFFFFE` | NFCPINS PROTECT = 0：P0.09 / P0.10 当 GPIO 用（N5 没有 NFC 天线，这两个球悬空；当 GPIO 时自检的 gpio 能查它们） |
+  | `0x10001304` | `0xFFFFFFFC` | REGOUT0 VOUT = 4：VDD 3.0 V（NAND、麦、IMU 都是 3.0 V） |
+
+  NRFFW[0] / [1] 由 bootloader 的 HEX 自己写（`0x000F4000` / `0x000FE000`）。和 LR-N4 的文件只差 NFCPINS 这一个字；生成函数先用 N4 的两个手核文件做了逐字节回归。
+- **`diag`**（CPU 停住，只写 GPIO、SAADC 寄存器和 RAM 顶上一个字，结束时都恢复；**不复位**，跑完拔 Pico 断电）：
+
+  | 项 | 怎么读 | 判据 |
+  |---|---|---|
+  | RESETREAS | 寄存器，逐位翻译 | 只记录 |
+  | USBREGSTATUS.VBUSDETECT | 寄存器 | 插着 USB 应为 1（U1 的 AD2 球）。用 `--usb yes/no` 说明插没插，或者 `--adc` 用探针量到的 TP1 VBUS 对照 |
+  | MAINREGSTATUS、POFCON、DCDCEN / DCDCEN0 | 寄存器 | 只记录 |
+  | VDD | SAADC（1/6 增益、内部 0.6 V 参考） | 2.70–3.45 V；有探针 ADC 时并列 |
+  | VDDH | SAADC VDDHDIV5 × 5 | 探针量到 TP11 VSYS > 3 V 而芯片看到的差 300 mV 以上判 FAIL（U1 的 Y2 球）；高压模式却没有 VDDH 也判 FAIL |
+  | 电池 | SAADC AIN0 × 2 | 只记录 |
+  | 28 个空球（含 UART 两个调试脚） | 全部上拉读一次、下拉读一次 | 上拉读 0 = 对地（或和接地的网连锡），下拉读 1 = 对电源 |
+  | MEM_EN（R25 1 MΩ）、MIC_PWR（R31 100 kΩ） | 上拉充电后松开再读，两个空球做对照 | 松开后变低 = 球和下拉电阻都在 |
+  | 接了器件的线 | 不加上下拉读一次 | 只记录（不给没上电的器件灌电） |
+
+  **板子的 USB 只在焊 B 面之前可以和 Pico 的 3V3 同时接**：那时 D2 没焊，USB 只把 5 V 送到 U1 的 VBUS 球，VDD 仍是 Pico 供。焊了 B 面以后插 USB，REG0 会和 Pico 抢着驱动 VDD；`diag` 看到 VDDH 有电会提示立刻拔掉。
+- **lr-probe 的 ADC**（`--adc auto` 或 `--adc /dev/cu.usbmodemXXXX`）：GP26 经 10 kΩ 接 VDD（×1）、GP27 经 100k/100k 接 TP11 VSYS（×2）、GP28 经 100k/100k 接 TP1 VBUS（×2），取 1.5 s 的中位数。
+
+### 自检固件（`--n5`）
+
+```bash
+python3 firmware/selftest/selftest.py build --n5             # build-n5/zephyr/zephyr.uf2
+uv run firmware/selftest/selftest.py flash SERIAL --n5       # 拆光 Pico 的线、插 USB：板子停在 NICENANO 盘
+uv run firmware/selftest/selftest.py run SERIAL --n5 [--no-dcdc] [--flip 20] [--cover 5]
+```
+
+N4 的各项照旧（芯片和 UICR 另查 NFCPINS 的 GPIO 位、晶振、射频、GPIO、VDD、VDDH、电池、CHRG、两颗麦、IMU、开关、两颗灯、DCDC），SD 卡换成：
+
+| 项目 | 怎么测 | 通过标准 |
+|---|---|---|
+| NAND（`nand`） | MEM_EN 拉高；JEDEC ID（9Fh）；写 SR-1 = 0、SR-2 开 ECC 和 BUF（和录音固件一样）；从最后一块往前找第一块好块（第一页 0x800 处是 0xFF）且是空块；擦除、写第一页和最后一页、经 ECC 读回比对、再擦掉（留成原样）。最后 16 块都有数据时不写（录音的环形日志）；`nand w` 强制用最后一块好块，会丢掉上面的数据 | ID 是 EF AA 21 或 EF AA 22，擦写读全过 |
+| MEM_VDD | 上电前和断电后 300 ms 各读一次 /CS（R26 10 kΩ 上拉到 MEM_VDD，不加片内上下拉） | 上电时读 1；断电后读 0（读 1 报 LOOK，用表量 TP4） |
+| MIC_VDD | 两颗麦都有数据 | 同两颗麦的安静项 |
+| GPIO | 外设上电后应读高的线只剩 3 根：NAND /CS、IMU SDA、SCL（N5 去掉了 MOSI / MISO 的上拉）；NAND DI、DO 改成「看着的线」 | 同 N4 |
+
+- 两颗 LDO 的输出（MEM_VDD、MIC_VDD）**SAADC 读不到**：这两个网没接到任何 AIN 脚。固件用上面的数字间接判断；要电压值，跑 `vcc 30`（两路 LDO 开 30 s），用表量 TP4（MEM_VDD）、TP5（MIC_VDD）。
+- 第一块板如果没装 L1，跑 `run --no-dcdc`：REG0 开 DCDC 会把 VDD 拉塌（11-11 实验室）。

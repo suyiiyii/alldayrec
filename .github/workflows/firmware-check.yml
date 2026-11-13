@@ -1,7 +1,7 @@
 name: firmware-check
 on:
   pull_request:  # only on PRs: main gets what a green PR ran
-    paths: ['firmware/devkit/**', 'fixtures/**', '.github/workflows/firmware-check.yml', '.github/scripts/firmware-setup-ncs.sh']
+    paths: ['firmware/devkit/**', 'firmware/selftest/**', 'fixtures/**', '.github/workflows/firmware-check.yml', '.github/scripts/firmware-setup-ncs.sh']
 
 concurrency:  # a new push to a PR cancels its run still going
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -37,14 +37,15 @@ jobs:
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
+      - run: python3 ../selftest/selftest.py check && uv run ../selftest/swd.py test  # the self-test's verdicts, LR-N5's SWD flash / diag and UICR file
 
-  nand-build:  # n5 and promicro-nand compile (lr.sh build): not released, so a PR is where a broken one shows
+  nand-build:  # n5 and promicro-nand compile (lr.sh build), and LR-N5's self-test: not released, so a PR is where a broken one shows
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        variant: [n5, promicro-nand]
+        variant: [n5, promicro-nand, selftest-n5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -58,4 +59,13 @@ jobs:
         env:
           FIRMWARE_ENV_FILE: ${{ steps.setup.outputs.env_file }}
           VARIANT: ${{ matrix.variant }}
-        run: source "$FIRMWARE_ENV_FILE" && LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "$VARIANT"
+        run: |
+          source "$FIRMWARE_ENV_FILE"
+          if [ "$VARIANT" = selftest-n5 ]; then  # as firmware-build.sh builds the released (ProMicro) self-test
+            nrfutil sdk-manager toolchain launch --ncs-version v2.7.0 --install-dir "$LR_NCS_INSTALL_DIR" --chdir "$NCS" -- \
+              west build -b xiao_ble/nrf52840 -d "$GITHUB_WORKSPACE/firmware/selftest/build-n5" \
+              "$GITHUB_WORKSPACE/firmware/selftest" -o=-j4 -- -DNCS_TOOLCHAIN_VERSION=NONE \
+              "-DDTC_OVERLAY_FILE=$GITHUB_WORKSPACE/firmware/selftest/promicro.overlay" -DLR_N5=1
+          else
+            LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "$VARIANT"
+          fi
