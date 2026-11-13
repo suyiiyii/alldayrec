@@ -42,11 +42,14 @@ static struct k_work_delayable minute_work;  // defined below
 
 /* Parked, nothing runs that System OFF stopped: no POWER record a minute and no power-fail warning (each an urgent
  * flash write: 16 KB of log gone round in ~7 h), no low-battery restart turning a switch-off park into a low one, no
- * log tick (lr_log_stop). Why it parked is in flash already (lr_power_off); the restart's BOOT ends it. */
+ * log tick (lr_log_stop). Why it parked is in flash already (lr_power_off); a POWER a 3 ends it: how long, what woke
+ * it (every wake's RESETREAS is SREQ, and records carry their boot's uptime only). */
 static void park(void)
 {
     parked = true;
     struct k_work_sync sync;
+    // from minute() (the system workqueue) this would wait on itself until the watchdog: lr_power_off only on main
+    __ASSERT_NO_MSG(k_current_get() != &k_sys_work_q.thread);
     k_work_cancel_delayable_sync(&minute_work, &sync);  // a minute under way ends first: it could arm the warning again
 #ifdef CONFIG_LR_POWER_TRACE
     nrfx_power_pof_disable();
@@ -67,7 +70,11 @@ static void park(void)
 #endif
         uint16_t mv = 0;
         int err = low_park && s % 10 == 0 ? battery_get_millivolt(&mv) : -EAGAIN;
-        if (lr_park_wake(moved, nrf_power_usbregstatus_vbusdet_get(NRF_POWER), low_park, charging, err, mv)) {
+        uint32_t wake = lr_park_wake(moved, nrf_power_usbregstatus_vbusdet_get(NRF_POWER), low_park, charging, err, mv);
+        if (wake) {
+            // x: the battery only when it woke it (else not read this second, or the cable's)
+            lr_log(LR_POWER, wake & LR_WAKE_BATTERY ? MIN(mv / 20, 255) : 0, LR_POWER_PARK_END, lr_park_end(s, wake));
+            lr_log_sync();  // a cell at the cut can brown out across the reset and lose the RAM batch
             NVIC_SystemReset();
         }
     }

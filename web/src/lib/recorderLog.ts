@@ -66,6 +66,19 @@ const reas = (v: number) =>
     .join("+") || t("rec.powerOn");
 const param = (a: number, b: number) =>
   t("rec.param", { interval: (a & 0xffff) * 1.25, latency: a >>> 16, timeout: b * 10 });
+// POWER a 3, the park's end (lr_power.h lr_park_end): b seconds parked (bits 0-27) | what woke it << 28 (LR_WAKE_*)
+const WAKES = ["switch", "usb", "charging", "battery"];
+const parkEnd = (b: number) => {
+  const s = b & 0xfffffff,
+    m = Math.floor(s / 60);
+  return t("rec.power.3", {
+    took: m < 60 ? span(s * 1000) : t("common.hourMin", { h: Math.floor(m / 60), m: m % 60 }),
+    why:
+      WAKES.filter((_, i) => (b >>> (28 + i)) & 1)
+        .map((w) => t(`rec.wake.${w}`))
+        .join("+") || "?",
+  });
+};
 // USB_DISK x 0's b (lr_log.h): why the card came back, rec.back.1..3 (0: firmware older than this field)
 const back = (v: number) => (v >= 1 && v <= 3 ? t(`rec.back.${v}`) : String(v));
 // APPEND_ERR's x (lr_log.h): which part of an append failed, rec.append.1..3
@@ -255,7 +268,12 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   ],
   29: [
     "POWER",
-    (r) => (r.a >= 0 && r.a <= 2 ? t(`rec.power.${r.a}`, { mv: r.x * 20 }) : `${r.a}`),
+    (r) =>
+      r.a === 3
+        ? parkEnd(r.b)
+        : r.a >= 0 && r.a <= 2
+          ? t(`rec.power.${r.a}`, { mv: r.x * 20 })
+          : `${r.a}`,
   ],
   30: ["LIVE_LOST", (r) => t(r.x ? "rec.lostDown" : "rec.lostStuck", { n: r.a, b: r.b }, r.a)],
   31: ["HEALTH", health],
@@ -289,7 +307,7 @@ export function describe(r: Rec): Said {
     (code === 3 && r.a !== 0) ||
     (code === 7 && r.x !== 0) ||
     (code === 24 && r.b !== 1) ||
-    (code === 29 && r.a !== 0) || // the power-fail warning, a low battery's System OFF
+    (code === 29 && (r.a === 1 || r.a === 2)) || // the power-fail warning, a low battery's power off
     (code === BOOT && (r.a & 0b1010) !== 0); // the last boot ended by the watchdog or a lockup
   const warn =
     [BOOT, DISCONNECT, DFU, 5, 8, 18, 30, 34, 37].includes(code) ||
