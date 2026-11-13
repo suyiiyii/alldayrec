@@ -1,13 +1,18 @@
 """Behavioral regressions for changed-family and formal/manual trigger boundaries."""
+import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name("firmware-select.py")
+PACKAGE = Path(__file__).with_name("firmware-package.py")
+RELEASE = Path(__file__).with_name("firmware-release.sh")
 
 
 class FirmwareSelection(unittest.TestCase):
@@ -66,6 +71,23 @@ class FirmwareSelection(unittest.TestCase):
         self.assertEqual({(j["family"], j["variant"]) for j in jobs}, {
             ("devkit", "sdmod"), ("devkit", "promicro"), ("devkit", "promicro-p2"),
             ("devkit", "promicro-p3"), ("devkit", "n4"), ("selftest", "selftest")})
+
+    def test_release_whitelist_covers_every_formal_model(self):
+        # a formal variant missing from the release checks fails the next firmware tag (#335)
+        def definitions(script):
+            spec = importlib.util.spec_from_file_location(script.stem, script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        release = RELEASE.read_text()
+        expected = ast.literal_eval(re.search(r"^expected = (\{.*\})$", release, re.M).group(1))
+        count = int(re.search(r'archives\[@\]\}" -eq (\d+)', release).group(1))
+        select = definitions(SCRIPT)
+        package = definitions(PACKAGE)
+        built = {package.MODELS[variant] for variant in select.FORMAL_VARIANTS} | {"LR-selftest-ProMicro"}
+        self.assertEqual(expected, built)
+        self.assertEqual(count, len(select.FORMAL_VARIANTS) + 1)  # recorders plus the selftest
 
     def test_formal_tag_outside_main_is_rejected(self):
         (self.root / "README").write_text("unmerged\n")
