@@ -150,10 +150,15 @@ static uint16_t unused_stack(struct k_thread *t)
     return t && t->stack_info.size && !k_thread_stack_space_get(t, &n) ? MIN(n, 0xFFFE) : 0xFFFF;
 }
 
+static bool stopped;  // lr_log_stop
+
 /* Every 5 minutes the batch goes to flash, every 10 a heartbeat (and the stacks, the mic's health) comes first */
 static void tick(struct k_work *w)
 {
     static uint32_t ticks;
+    if (stopped) {
+        return;
+    }
     if (++ticks % 2 == 0) {
         lr_log(LR_HEARTBEAT, battery_20mv(), free_kb, dropped);
         lr_log(LR_STACKS, 0, (uint32_t) unused_stack(&codec_thread) << 16 | unused_stack(&pusher_thread),
@@ -169,6 +174,12 @@ static void tick(struct k_work *w)
     k_work_reschedule(k_work_delayable_from_work(w), K_MINUTES(5));
 }
 static K_WORK_DELAYABLE_DEFINE(tick_work, tick);
+
+void lr_log_stop(void)
+{
+    stopped = true;
+    k_work_cancel_delayable(&tick_work);
+}
 
 int lr_log_init(void)
 {

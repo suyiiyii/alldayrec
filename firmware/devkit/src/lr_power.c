@@ -37,9 +37,21 @@ static __noinit uint32_t off_at_boot;  // OFF_MAGIC: the restart was a low batte
 
 #ifdef CONFIG_LR_PARK
 static bool low_park;  // parked by a low battery (lr_power_init), not by the switch
+static bool parked;    // minute() does nothing from here on
+static struct k_work_delayable minute_work;  // defined below
 
+/* Parked, nothing runs that System OFF stopped: no POWER record a minute and no power-fail warning (each an urgent
+ * flash write: 16 KB of log gone round in ~7 h), no low-battery restart turning a switch-off park into a low one, no
+ * log tick (lr_log_stop). Why it parked is in flash already (lr_power_off); the restart's BOOT ends it. */
 static void park(void)
 {
+    parked = true;
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&minute_work, &sync);  // a minute under way ends first: it could arm the warning again
+#ifdef CONFIG_LR_POWER_TRACE
+    nrfx_power_pof_disable();
+#endif
+    lr_log_stop();
 #ifdef CONFIG_LR_SWITCH
     bool sw = lr_switch_read();
 #endif
@@ -121,6 +133,11 @@ uint8_t lr_charge(void)
 static void minute(struct k_work *w)
 {
     static int low;
+#ifdef CONFIG_LR_PARK
+    if (parked) {  // the run park() waited for may have rescheduled it (a cancel does not stop that)
+        return;
+    }
+#endif
     bool usb = nrf_power_usbregstatus_vbusdet_get(NRF_POWER);  // on USB the reading is the cable's, not the battery's
     uint16_t mv = 0;
     int err = usb ? 0 : battery_get_millivolt(&mv);

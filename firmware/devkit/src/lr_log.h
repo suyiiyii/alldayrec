@@ -119,6 +119,9 @@ uint16_t lr_log_boot(void);
 void lr_log_reset(uint8_t gpregret);
 /* The RAM batch to flash now, on this thread: before a reset or System OFF. */
 void lr_log_sync(void);
+/* No more heartbeats or 5-minute flushes: parked (lr_power.c), a heartbeat every 10 min would take the log round in a
+ * day and with it the records of why it parked. Records still come and flush at the restart (lr_log_init). */
+void lr_log_stop(void);
 /* Everything from seq `from` on, to send() at most max records at a time (consecutive seqs, read into buf); stops
  * when send() returns false. Returns the seq the next record will get. */
 uint32_t lr_log_read(uint32_t from, uint8_t *buf, uint16_t max,

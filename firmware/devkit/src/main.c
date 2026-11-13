@@ -211,9 +211,9 @@ int main(void)
 
     lr_log_init();  // after the battery (its voltage goes in the boot record), before the SD card (its mount tries)
 
-    lr_power_init();  // the restart after a low battery goes to System OFF here, before the card and the radio
+    lr_power_init();  // the restart after a low battery goes to System OFF (or the park) here, before card and radio
 #ifdef CONFIG_LR_SWITCH
-    // switched off: System OFF from here, or on USB up for the USB port only (a firmware can still come that way)
+    // switched off: System OFF (or the park) from here, or on USB up for the USB port only (a firmware can come)
     if (!lr_switch_boot()) {
         init_usb();
         lr_switch_park();

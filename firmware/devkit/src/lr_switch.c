@@ -1,11 +1,11 @@
 /* LR-P3's slide switch, CONFIG_LR_SWITCH: P1.15 on its pull-up, closed to GND = on. A position counts once
  * it has read the same for 0.5 s (lr_switch_debounce): 116C's lever bounced on and off for seconds on 10-07, four
  * boots in a row, two of them mounting the card. Off ends the open file, drops the phone and restarts; a boot that
- * finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at once, before the card or the radio, its
- * BOOT the only record, and wakes when the switch moves or USB comes (VBUS). On USB it stays up instead, not
- * recording (the USB port still takes a firmware), until the switch is on (restart, recording) or the cable goes
- * (System OFF).
- * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB). */
+ * finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at once (CONFIG_LR_PARK: the park,
+ * lr_power.c), before the card or the radio, its BOOT the only record, and wakes when the switch moves or USB comes
+ * (VBUS). On USB it stays up instead, not recording (the USB port still takes a firmware), until the switch is on
+ * (restart, recording) or the cable goes (System OFF or the park).
+ * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB; parked: SREQ). */
 #include "lr_switch.h"
 
 #include <hal/nrf_gpio.h>

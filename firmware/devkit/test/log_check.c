@@ -39,7 +39,9 @@ static int k_mutex_lock(struct k_mutex *m, int t) { return 0; }
 static int k_mutex_unlock(struct k_mutex *m) { return 0; }
 static int k_work_submit(struct k_work *w) { return 0; }
 static int k_work_schedule(struct k_work_delayable *w, int t) { return 0; }
-static int k_work_reschedule(struct k_work_delayable *w, int t) { return 0; }
+static int rescheduled;
+static int k_work_reschedule(struct k_work_delayable *w, int t) { return ++rescheduled; }
+static bool k_work_cancel_delayable(struct k_work_delayable *w) { return false; }
 static struct k_work_delayable *k_work_delayable_from_work(struct k_work *w) { return (void *) w; }
 static struct k_thread *k_current_get(void) { return 0; }
 static uint32_t k_uptime_get_32(void) { return 0; }
@@ -121,6 +123,14 @@ int main(void)
     while_writing = 0;
     drop(1180, 5);  // flushed: the batch's new last record takes gaps again
     assert(ram.n == 1 && ram.r[0].a == 9 && ram.r[0].x == 2 && ram.r[0].b == dropped);
+
+    // parked (lr_log_stop): a tick already due neither logs (a heartbeat every 10 min) nor comes back
+    tick(&tick_work.work);
+    assert(rescheduled == 1);
+    uint16_t n = ram.n;
+    lr_log_stop();
+    tick(&tick_work.work);  // the tenth minute: would be HEARTBEAT, STACKS x2, HEALTH
+    assert(rescheduled == 1 && ram.n == n);
     printf("log_check ok\n");
     return 0;
 }
