@@ -7,8 +7,8 @@ set -euo pipefail
 git merge-base --is-ancestor HEAD origin/main
 shopt -s nullglob
 archives=(firmware-artifacts/*.tar.gz)
-# Four formal recorder variants and the separate selftest; the relay is built locally with its key.
-[ "${#archives[@]}" -eq 5 ] || { echo 'Release requires all five formal firmware archives' >&2; exit 1; }
+# Five formal recorder variants and the separate selftest; the relay is built locally with its key.
+[ "${#archives[@]}" -eq 6 ] || { echo 'Release requires all six formal firmware archives' >&2; exit 1; }
 for archive in "${archives[@]}"; do
   (cd firmware-artifacts && sha256sum --check "$(basename "$archive").sha256")
 done
@@ -23,7 +23,7 @@ while target["type"] == "tag":
     target = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/git/tags/{target['sha']}"]))["object"]
 if target["type"] != "commit" or target["sha"] != commit:
     raise SystemExit("Release tag moved or differs from the built source")
-expected = {"LR-X1", "LR-P1", "LR-P2", "LR-P3", "LR-selftest-ProMicro"}
+expected = {"LR-X1", "LR-P1", "LR-P2", "LR-P3", "LR-N4", "LR-selftest-ProMicro"}
 models = set()
 for path in pathlib.Path("firmware-artifacts").glob("*.tar.gz"):
     with tarfile.open(path) as archive:
