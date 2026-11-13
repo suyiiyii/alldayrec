@@ -521,8 +521,8 @@ def walkout(talk: float, room: float) -> tuple:
     it as it is (better) and Y the wearer `talk` deep through the door over its own room's noise (7 dB) `room` deep:
     talk 0, the two apart; a little talk, r 0.3-0.6; more, r over R_TOGETHER; X better by over SWITCH_DB in each."""
     p, q, k = walk(61, 2 * DUR), np.random.default_rng(62).normal(0, 7, 2 * DUR), 2 * OUT
-    put(X, np.r_[squash(p[:k], 0.9), p[k:]])
-    put(Y, np.r_[p[:k], 50 + talk * (p[k:] - 50) + room * q[k:]])
+    put(X, np.r_[squash(p[:k], 0.9), p[k:]], piece_s=10)  # pieces of 10 s: levels() reads each one an hour back
+    put(Y, np.r_[p[:k], 50 + talk * (p[k:] - 50) + room * q[k:]], piece_s=10)
     db.put_kv(f"standby:{X}", {"of": Y, "since": at(0)})
     return lambda s: colocate.correlation(X, Y, at(s - 150), at(s + 150)), lambda s: colocate.lead(X, Y, at(s))
 
