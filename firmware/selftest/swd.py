@@ -6,7 +6,8 @@
 board. pyOCD is pinned (0.45.1) and run from this script's own environment; the probe is named by its unique ID (-u),
 and a locked chip is never unlocked without --unlock.
 
-  uv run swd.py check -u PROBE                           read only: probe, chip, UICR, lock state; what to do next
+  uv run swd.py check -u PROBE                           no halt, no reset, no flash / UICR / peripheral write: probe,
+                                                         chip, UICR, lock state, supply; what to do next
   uv run swd.py flash -u PROBE --bootloader HEX [--unlock] [--out DIR]
                                                          bootloader + N5's UICR in one load, then every byte read back
   uv run swd.py diag -u PROBE [--usb yes|no] [--adc PORT|auto] [--out DIR]
@@ -17,11 +18,17 @@ and a locked chip is never unlocked without --unlock.
 
 The board is powered by the Pico's 3V3 on VDD, battery and the board's USB off (the hardware's first-flash procedure,
 M11 = A); "diag" may have the board's USB plugged in only before its B side (D2) is fitted, to put 5 V on the VBUS ball.
+"flash" refuses to load while the chip sees VDDH or VBUS.
+
+Every connect, "check"'s attach too, writes the core's debug registers (pyOCD sets DHCSR.C_DEBUGEN, DEMCR.TRCENA, DWT
+and FPB) and, with resume_on_disconnect=false, leaves them set: the chip stays in debug mode, drawing more current,
+until it is powered off.
 """
 import argparse, datetime, hashlib, json, os, re, subprocess, sys, time
 
-# The probe and target options of every pyocd call: no resume at exit, never an implicit unlock (mass erase)
-TARGET = ["-t", "nrf52840", "-O", "resume_on_disconnect=false"]
+# The probe and target options of every pyocd call: no resume at exit, never an implicit unlock (mass erase), sector
+# erase only, and no pyocd.yaml from the working directory to change any of that
+TARGET = ["-t", "nrf52840", "--no-config", "-O", "resume_on_disconnect=false", "-O", "chip_erase=sector"]
 NO_UNLOCK = ["-O", "auto_unlock=false"]
 PYOCD = [sys.executable, "-m", "pyocd"]
 
@@ -126,7 +133,12 @@ def need_probe(uid):
 # ---- check: read only -------------------------------------------------------------------------------------------
 
 STATE = {**FICR, "pselreset0": 0x10001200, "pselreset1": 0x10001204, "approtect": 0x10001208, "nfcpins": 0x1000120C,
-         "regout0": 0x10001304, "nrffw0": 0x10001014, "nrffw1": 0x10001018}
+         "regout0": 0x10001304, "nrffw0": 0x10001014, "nrffw1": 0x10001018, "usbregstatus": 0x40000438,
+         "mainregstatus": 0x40000640}
+# A chip swd.py flash has written, power-cycled since: it sits in the bootloader, which does not open SWD, so build code F
+# reads as locked again. That is expected and needs no mass erase
+FLASHED_LOCKED = ("a board swd.py flash has already done and that was powered off since reads locked too (build code "
+                  "F, sitting in the bootloader): that is expected, do NOT use --unlock; its first app goes over UF2")
 
 
 def state(out):
@@ -140,13 +152,23 @@ def build_code(s):
     return v, v[2] >= "F"
 
 
+def supply_problem(s):
+    """M11 = A: only the Pico's 3V3 on VDD. What else the chip sees (battery or USB), or None"""
+    on = [what for k, what in (("mainregstatus", "VDDH (MAINREGSTATUS 1: battery, or USB through D2; REG0 drives VDD "
+                                                 "against the Pico's 3V3)"),
+                               ("usbregstatus", "VBUS (USBREGSTATUS.VBUSDETECT 1: the board's USB)"))
+          if s[k] is None or s[k] & 1]
+    return ", ".join(on) or None
+
+
 def check_rows(out):
     """(rows, next step) from an attach-mode read of the chip"""
     s, ap = state(out), ap_status(out)
     if s["part"] is None:
         if locked(out):
             return [("chip", "FAIL", "access port protected (APPROTECT): a new build code F chip ships locked")], \
-                "a NEW chip only: swd.py flash --unlock (mass erase of flash and UICR; never on a board with data)"
+                "a NEW chip only: swd.py flash --unlock (mass erase of flash and UICR; never on a board with data). " \
+                + FLASHED_LOCKED
         return [("chip", "FAIL", "no answer over SWD: " + out.strip()[-300:])], \
             "check the wires by their silkscreen names (GND, DIO, CLK, RST, 3V3 on VDD) and that VDD is up"
     variant, fxx = build_code(s)
@@ -232,13 +254,16 @@ def cmd_flash(uid, bootloader, unlock, out_dir):
             sys.exit("no answer over SWD (swd.py check says more):\n" + out.strip()[-500:])
         if not unlock:
             sys.exit("the chip is locked (APPROTECT). If this is a NEW chip, run again with --unlock: a mass erase "
-                     "(flash, UICR, RAM). Never on a board with recordings or settings on it")
+                     "(flash, UICR, RAM). Never on a board with recordings or settings on it; " + FLASHED_LOCKED)
         print("locked: mass erase through CTRL-AP (--unlock). Keep the board powered until the end")
         print(pyocd(["erase", "-u", uid, *TARGET, "--mass", "-O", "auto_unlock=true"], check=True).strip()[-500:])
         out = commander(uid, "halt", check_cmds())
         if state(out)["part"] is None:
             sys.exit("still no access after the mass erase; stop and note this down:\n" + out.strip()[-500:])
     s = state(out)
+    if supply_problem(s):
+        sys.exit(f"not loading: the chip sees {supply_problem(s)}. The first flash is M11 = A, the Pico's 3V3 on VDD "
+                 "with the battery and the board's USB unplugged: unplug them and run flash again")
     variant, fxx = build_code(s)
     os.makedirs(out_dir, exist_ok=True)
     uicr = f"{out_dir}/uicr-n5{'-fxx-engineering' if fxx else ''}.hex"
@@ -312,8 +337,8 @@ REGS = {"RESETREAS": 0x40000400, "USBREGSTATUS": 0x40000438, "POFCON": 0x4000051
 
 def diag_cmds(free, ram_word=0):
     """The commander script: (commands, the label of each read32 in order). CPU halted; only GPIO and SAADC registers
-    are written, put back to their reset values at the end, and the RAM word the sample lands in (top of RAM: the
-    bootloader's stack), put back to ram_word"""
+    are written, left at their reset values at the end (not at what they held before), and the RAM word the sample lands
+    in (top of RAM: the bootloader's stack), put back to ram_word"""
     cmds, labels = [], []
 
     def rd(addr, label):
@@ -517,9 +542,14 @@ def test():
     flashed = {**erased, **uicr_words(True), **NRFFW}
     assert check_rows(dump({**blank, **flashed}))[1].startswith("flashed already")
     rows, nxt = check_rows("Error: The target is locked, so cannot connect (APPROTECT)")
-    assert rows[0][1] == "FAIL" and "--unlock" in nxt
+    assert rows[0][1] == "FAIL" and "--unlock" in nxt and "do NOT use --unlock" in nxt
+    pico = state(dump({**blank, **erased, 0x40000438: 0, 0x40000640: 0}))
+    assert supply_problem(pico) is None
+    assert supply_problem({**pico, "mainregstatus": 1}).startswith("VDDH")
+    assert supply_problem({**pico, "usbregstatus": 1}).startswith("VBUS")
+    assert supply_problem({**pico, "usbregstatus": None}).startswith("VBUS")  # not read: not judged as off
     assert "check the wires" in check_rows("No ACK")[1]
-    print("check_rows: ok")
+    print("check_rows, supply_problem: ok")
 
     # readback: right, then REGOUT0 erased and one byte off
     out = dump({**flashed}) + "Core 0 (cortex_m):  Halted\n"

@@ -98,15 +98,16 @@ LR-N5 是 LR-N4 加一颗裸 SPI NAND（W25N01GV，或同脚位的 W25N02KV）�
 Pico 跑 debugprobe（或 lr-probe，带三路 ADC），**电池、板子的 USB 都不接，Pico 的 3V3 接 VDD**。pyOCD 固定 0.45.1，装在脚本自己的 uv 环境里；探针用 `-u` 指定（`pyocd list` 里的序列号）。
 
 ```bash
-uv run firmware/selftest/swd.py check -u PROBE                                   # 只读：芯片、锁没锁、UICR 现状、下一步
+uv run firmware/selftest/swd.py check -u PROBE                                   # 不停核、不复位、不写 flash / UICR / 外设：芯片、锁没锁、UICR 现状、下一步
 uv run firmware/selftest/swd.py flash -u PROBE --bootloader nice_nano_bootloader-0.10.0_s140_6.1.1.hex [--unlock]
 uv run firmware/selftest/swd.py diag -u PROBE [--usb yes|no] [--adc auto]        # 回流后、焊 B 面前
 uv run firmware/selftest/swd.py uicr [--fxx] -o uicr-n5.hex                      # 只生成 UICR 文件
 uv run firmware/selftest/swd.py test                                             # 离线自测
 ```
 
-- **`check`** 只用 attach 连接，不停核、不复位、不写任何东西。锁着的芯片（build code F 及以后出厂就锁）只报告，不解锁。
-- **`flash`**：先核 bootloader 的 sha256（nice!nano 0.10.0，`9b6bd9fd…0d8e`）；`--connect halt` 读 INFO.VARIANT 定 build code；生成 N5 的 UICR 文件；**bootloader 和 UICR 一条 `pyocd load`**（`--no-reset -O load.pre_reset=off`：芯片从头到尾不运行、不复位）；读回 UICR 各字、NRFFW、CTRL-AP、CPU 状态，再用 `savemem` 把两个 HEX 定义的每个字节读回来比对。全部 PASS 才打印「现在拔掉 Pico 的全部线，再接电池」。这时芯片里只有 bootloader，第一个应用走 UF2（下面「自检固件」）；B 面的 Q1、D3 没焊时，接电池不一定能上电。芯片锁着时不加 `--unlock` 就停；加了才做一次 mass erase（擦 flash、UICR、RAM），**只用于新片**。
+- **所有命令（包括 `check`）一连上就会写内核的调试寄存器**：pyOCD 置 DHCSR.C_DEBUGEN、DEMCR.TRCENA，打开 DWT 计数器和 FPB。因为 `resume_on_disconnect=false`，断开时不清，芯片一直留在调试状态（电流偏大），**直到断电**。要量待机电流，先拔 Pico 断一次电。所有 pyocd 调用都带 `--no-config -O chip_erase=sector`：工作目录里的 `pyocd.yaml` 改不了擦除方式，mass erase 只在 `--unlock` 时发生。
+- **`check`** 只用 attach 连接：不停核、不复位、不写 flash、UICR 和外设寄存器（调试寄存器见上一条）。锁着的芯片（build code F 及以后出厂就锁）只报告，不解锁。**已经 `flash` 过的 F 片，断过电后也报 locked**：它停在 bootloader 里，bootloader 不开 SWD，这是正常的，**不要再走 `--unlock`**（会擦掉 bootloader 和 UICR），第一个应用走 UF2。
+- **`flash`**：先核 bootloader 的 sha256（nice!nano 0.10.0，`9b6bd9fd…0d8e`）；`--connect halt` 读 INFO.VARIANT 定 build code；生成 N5 的 UICR 文件；**bootloader 和 UICR 一条 `pyocd load`**（`--no-reset -O load.pre_reset=off`：芯片从头到尾不运行、不复位）；读回 UICR 各字、NRFFW、CTRL-AP、CPU 状态，再用 `savemem` 把两个 HEX 定义的每个字节读回来比对。全部 PASS 才打印「现在拔掉 Pico 的全部线，再接电池」。**load 之前先读 MAINREGSTATUS 和 USBREGSTATUS**：芯片看到 VDDH（电池，或焊了 D2 后的 USB）或 VBUS（板子的 USB）就拒绝烧录，要求拔掉再来。M11 = A 是「电池、USB 都不接，Pico 3V3 接 VDD」；VDDH 有电时 REG0 和 Pico 同时驱动 VDD（REGOUT0 还没写时 REG0 出 1.8 V），选拒绝而不是警告，是因为警告会被刷屏淹掉，而拒绝的代价只是拔根线重跑。芯片锁着时读不到这两个寄存器，mass erase 之后、load 之前再查。这时芯片里只有 bootloader，第一个应用走 UF2（下面「自检固件」）；B 面的 Q1、D3 没焊时，接电池不一定能上电。芯片锁着时不加 `--unlock` 就停；加了才做一次 mass erase（擦 flash、UICR、RAM），**只用于新片**。
 - **N5 的 UICR**（nRF52840 PS v1.11，地址和位域已对 Nordic 的 SVD 核过）：
 
   | 地址 | 字 | 意思 |
@@ -117,7 +118,7 @@ uv run firmware/selftest/swd.py test                                            
   | `0x10001304` | `0xFFFFFFFC` | REGOUT0 VOUT = 4：VDD 3.0 V（NAND、麦、IMU 都是 3.0 V） |
 
   NRFFW[0] / [1] 由 bootloader 的 HEX 自己写（`0x000F4000` / `0x000FE000`）。和 LR-N4 的文件只差 NFCPINS 这一个字；生成函数先用 N4 的两个手核文件做了逐字节回归。
-- **`diag`**（CPU 停住，只写 GPIO、SAADC 寄存器和 RAM 顶上一个字，结束时都恢复；**不复位**，跑完拔 Pico 断电）：
+- **`diag`**（CPU 停住，只写 GPIO、SAADC 寄存器和 RAM 顶上一个字。结束时 GPIO 和 SAADC 写回**复位值**，不是跑之前的值；只有 RAM 那个字写回原值。**不复位**，跑完拔 Pico 断电）：
 
   | 项 | 怎么读 | 判据 |
   |---|---|---|
