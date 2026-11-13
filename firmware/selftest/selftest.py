@@ -1,15 +1,17 @@
 # /// script
 # dependencies = ["pyserial", "bleak"]
 # ///
-"""Board self-test for nRF52840 Pro Micro boards and LR-N4 (README.md). macOS host; boards are named by their USB
+"""Board self-test for nRF52840 Pro Micro boards, LR-N4 and LR-N5 (README.md). macOS host; boards are named by their USB
 serial number (the chip's DEVICEID, the same in the UF2 bootloader and in this firmware).
 
-  python3 selftest.py build [--n4]       the firmware (NCS v2.7.0, as lr.sh); --n4: LR-N4's, in build-n4
-  uv run selftest.py flash SERIAL [--n4] UF2 onto that board only: its bootloader drive, or this firmware's dfu command
+  python3 selftest.py build [--n4|--n5] the firmware (NCS v2.7.0, as lr.sh); --n4 / --n5: LR-N4's / LR-N5's, in build-n4/5
+  uv run selftest.py flash SERIAL [--n4|--n5]   UF2 onto that board only: its bootloader drive, or this firmware's dfu
   uv run selftest.py flash SERIAL --uf2 F   another UF2 the same way (the recording firmware after the self-test)
   uv run selftest.py run SERIAL [--clk S] [--json FILE]   every check, a PASS/FAIL report; exit 1 on any FAIL
   uv run selftest.py run SERIAL --p3 [--flip S]           a board wired into an LR-P3: also its SD card, mic and switch
   uv run selftest.py run SERIAL --n4 [--flip S] [--cover S]   an LR-N4: also SD, both mics, IMU, CHRG, switch
+  uv run selftest.py run SERIAL --n5 [--flip S] [--cover S]   an LR-N5: the same with its NAND in place of the SD card
+  ... run ... --no-dcdc                  without the DCDC test (a board without L1 / L3: VDD would collapse)
   python3 selftest.py swd                an LR-N4 on the Pico probe after its first flash: reads back FICR and UICR
   python3 selftest.py check              the mic verdicts and the SWD read-back parser on recorded output (no board)
 """
@@ -19,18 +21,18 @@ D = os.path.dirname(os.path.abspath(__file__))
 PRODUCT = "LR selftest"
 
 
-def out_dir(n4):
-    return f"{D}/build-n4" if n4 else f"{D}/build"
+def out_dir(board):
+    return f"{D}/build" if board == "promicro" else f"{D}/build-{board}"
 
 
-def build(n4):
+def build(board):
     os.chdir(os.environ.get("NCS", "/opt/nordic/ncs/v2.7.0"))  # a west workspace of NCS v2.7.0
     tc = [] if os.environ.get("ZEPHYR_SDK_INSTALL_DIR") else ["nrfutil", "sdk-manager", "toolchain", "launch",
                                                              "--ncs-version", "v2.7.0", "--"]  # CI: loaded already
-    subprocess.run(tc + ["west", "build", "-b", "xiao_ble/nrf52840", "-d", out_dir(n4), D, "--",
+    subprocess.run(tc + ["west", "build", "-b", "xiao_ble/nrf52840", "-d", out_dir(board), D, "--",
                          "-DNCS_TOOLCHAIN_VERSION=NONE", f"-DDTC_OVERLAY_FILE={D}/promicro.overlay"]
-                   + (["-DLR_N4=1"] if n4 else []), check=True)
-    print(f"built {out_dir(n4)}/zephyr/zephyr.uf2 (UF2) and zephyr.hex (SWD, at 0x26000)")
+                   + ({"n4": ["-DLR_N4=1"], "n5": ["-DLR_N5=1"]}.get(board, [])), check=True)
+    print(f"built {out_dir(board)}/zephyr/zephyr.uf2 (UF2) and zephyr.hex (SWD, at 0x26000)")
 
 
 def usb_devices(serial):
@@ -62,8 +64,8 @@ def port(serial):
     return ports[0].device if len(ports) == 1 else None
 
 
-def flash(serial, n4, uf2=None):
-    selftest, uf2 = not uf2, uf2 or f"{out_dir(n4)}/zephyr/zephyr.uf2"
+def flash(serial, board, uf2=None):
+    selftest, uf2 = not uf2, uf2 or f"{out_dir(board)}/zephyr/zephyr.uf2"
     if not drive(serial):
         if not port(serial):
             sys.exit(f"{serial}: neither its UF2 drive nor {PRODUCT} on USB; double-tap RST to enter the bootloader")
@@ -240,28 +242,41 @@ SD_HINTS = {  # where the card start-up stops, and what to look at
     "verify": "it read back different"}
 
 
-def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
+NAND_HINTS = {  # where the NAND test stops, and what to look at
+    "busy": "the chip stayed busy after its reset (or MISO P1.00 is held high)",
+    "id": "no W25N JEDEC ID (EF AA 21 / EF AA 22): 00 00 00 is nobody on MISO P1.00; check MEM_VDD (U3, MEM_EN P0.29), "
+          "/CS P0.20, CLK P0.24, DI P0.22, DO P1.00 and U4's joints",
+    "status": "the status registers did not take the writes (protection bits, ECC-E / BUF): DI P0.22 or /WP (R28)",
+    "bad": "16 blocks at the end all marked bad", "no_blank": "no blank block among the last 16: the recorder's data "
+    "is on them (nand w would erase one)", "erase": "a block erase failed or timed out", "program": "a page program "
+    "failed or timed out", "verify": "a page read back different", "blank": "the block did not read blank after its erase"}
+
+
+def run(serial, clk_secs, json_out, p3=False, flip=20, board="promicro", cover=5, dcdc=True):
     b = Board(serial)
     rows, res = [], {}
+    n4, n5 = board in ("n4", "n5"), board == "n5"  # LR-N5 is LR-N4 with a NAND in place of the SD card
+    name = {"n4": "LR-N4", "n5": "LR-N5"}.get(board, "ProMicro")
 
     def row(item, ok, detail):
         rows.append((item, "PASS" if ok is True else "FAIL" if ok is False else ok, detail))
 
     info = res["info"] = b.cmd("info")
-    if (info.get("board") == "n4") != n4:  # the other build's pins: its gpio would drive this board's parts
-        sys.exit(f"{serial} runs the {info.get('board', 'promicro')} self-test; flash the {'LR-N4' if n4 else 'ProMicro'} "
-                 f"one first (selftest.py flash {serial}{' --n4' if n4 else ''})")
+    if info.get("board", "promicro") != board:  # the other build's pins: its gpio would drive this board's parts
+        sys.exit(f"{serial} runs the {info.get('board', 'promicro')} self-test; flash the {name} one first "
+                 f"(selftest.py flash {serial}{'' if board == 'promicro' else ' --' + board})")
     chip = (f"nRF{info['part']} {info['variant']} id {info['id']} RAM {info['ram_kb']} KB flash "
             f"{info['flash_kb']} KB; UICR REGOUT0 {info['regout0']} PSELRESET {info['pselreset']} APPROTECT "
             f"{info['approtect']} NFCPINS {info['nfcpins']}; reset reason {info['resetreas']}; BLE name suffix {info['ble']}")
+    nfc_ok = not n5 or int(info["nfcpins"], 16) & 1 == 0  # LR-N5's UICR makes P0.09/P0.10 GPIOs (swd.py)
     if n4:  # what the first flash wrote (the UICR) and the app's unlock at boot on build code F and later
         fxx = info["variant"][2] >= "F"
         approtect = int(info["approtect"], 16) == (0x5A if fxx else 0xFFFFFFFF)
         unlocked = not fxx or int(info["approtect_disable"], 16) & 0xFF == 0x5A
         row("chip, UICR", int(info["regout0"], 16) & 7 == 4 and int(info["pselreset"], 16) == 0x12 and approtect
-            and unlocked, f"{chip}; APPROTECT.DISABLE {info['approtect_disable']} (pass: REGOUT0 VOUT 4 = 3.0 V, "
-            "PSELRESET 0x12, " + ("Fxx: UICR APPROTECT 0x5A and DISABLE 0x5A, SWD open)" if fxx else
-                                   "pre-Fxx: UICR APPROTECT erased)"))
+            and unlocked and nfc_ok, f"{chip}; APPROTECT.DISABLE {info['approtect_disable']} (pass: REGOUT0 VOUT 4 = "
+            "3.0 V, PSELRESET 0x12, " + ("NFCPINS bit 0 clear (P0.09/P0.10 GPIOs), " if n5 else "")
+            + ("Fxx: UICR APPROTECT 0x5A and DISABLE 0x5A, SWD open)" if fxx else "pre-Fxx: UICR APPROTECT erased)"))
         if int(info["regout0"], 16) & 7 != 4:  # VDD is then 3.3 V (the bootloader writes it into an erased REGOUT0)
             sys.exit(f"{serial}: UICR REGOUT0 {info['regout0']} is not VOUT 4 (3.0 V), so VDD is likely the bootloader's "
                      "3.3 V, past what the 3.0 V card, mics and IMU take on their pins: nothing powered (the firmware "
@@ -282,9 +297,10 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
 
     g = res["gpio"] = b.cmd("gpio p3" if p3 else "gpio")  # p3: never drives a pin with a part on it
     if n4:
+        lines = "the 3 pulled-up lines (NAND /CS, IMU SDA SCL)" if n5 else "the 5 pulled-up lines (SD CS MOSI MISO, IMU SDA SCL)"
         row("GPIO balls", bool(g["ok"]), f"{g['pins']} free balls: stuck {g['stuck'] or 'none'}, shorts "
-            f"{g['shorts'] or 'none'}; with the SD, mic and IMU supplies on, the 5 pulled-up lines (SD CS MOSI MISO, IMU "
-            f"SDA SCL) stuck {g['lines_stuck'] or 'none'}, shorts {g['lines_shorts'] or 'none'}"
+            f"{g['shorts'] or 'none'}; with the {'NAND' if n5 else 'SD'}, mic and IMU supplies on, {lines} stuck "
+            f"{g['lines_stuck'] or 'none'}, shorts {g['lines_shorts'] or 'none'}"
             + (f"; low at rest, not watched: {g['watched_low']}" if g["watched_low"] else "")
             + ("" if g["nfc_as_gpio"] else "; P0.09/P0.10 skipped (NFC mode)"))
     else:
@@ -302,14 +318,25 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
         state = {0: "charging (low)", 1: "done or no cell (high)"}.get(c["level"], "not read: no VBUS")
         # a cell well below 4.2 V on USB must be charging; full, or no cell (the charger's output hunts): not judged
         judge = 2500 < c["vbat_mv"] < 4100
-        row("charge status (CHRG P0.29)", (c["level"] == 0) if judge else "INFO", f"{state}, battery {c['vbat_mv']} "
+        row(f"charge status (CHRG {'P0.31' if n5 else 'P0.29'})", (c["level"] == 0) if judge else "INFO", f"{state}, battery {c['vbat_mv']} "
             "mV" + (" (under 4.1 V on USB: must read charging)" if judge else " (judged only with a cell under 4.1 V)"))
     else:
         row("VDDH (USB/battery input)", 4300 < a["vddh_mv"] < 5500,
             f"{a['vddh_mv']} mV on USB (4300-5500); P0.04 (nice!nano v2 battery divider) {a['p0_04_mv']} mV")
         row("charge status pin", "INFO", "none on this footprint (the charge LED is wired to the charger only)")
 
-    if p3 or n4:
+    if n5:
+        nd = res["nand"] = b.cmd("nand", 30)
+        row("NAND (U4, MEM_EN P0.29, SPI)", bool(nd["ok"]), f"JEDEC ID {nd['id']} ({nd['blocks']} blocks), SR-1 {nd['sr1']} "
+            f"SR-2 {nd['sr2']}; block {nd['block']} erased, first and last pages programmed and read back (ECC status "
+            f"{nd['ecc']}), erased again: erase {nd['erase_us'] / 1000:.1f} ms, program {nd['program_us'] / 1000:.2f} ms; "
+            f"{nd['bad_seen']} bad blocks at the end" + (f"; failed at {nd['fail']}: {NAND_HINTS.get(nd['fail'], '')}"
+                                                         if nd["fail"] else ""))
+        # no SAADC input reaches either LDO's output: MEM_VDD by the /CS line its R26 pulls up, MIC_VDD by the mics' data
+        row("MEM_VDD (U3 on / off)", nd["cs_on"] == 1 and ("PASS" if nd["cs_off"] == 0 else "LOOK"),
+            f"/CS P0.20 read {nd['cs_on']} with MEM_EN up (R26 to MEM_VDD: 1 = on), {nd['cs_off']} 300 ms after it went "
+            "down (0: off; 1: MEM_VDD still up, measure TP4 with `vcc 30`)")
+    if p3 or (n4 and not n5):
         sd_label = "SD card (SD_EN P0.31, SPI)" if n4 else "SD card (VCC P0.13, SPI)"
         sd = res["sd"] = b.cmd("sd", 60)
         reads = (f"{sd['reads']} blocks read at 8 MHz, {sd['read_errs']} failed ({sd['crc_errs']} CRC errors: bits "
@@ -325,6 +352,7 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
                 f"CMD8 {sd['cmd8']}, ACMD41 {sd['acmd41']}, write response {sd['resp']}; {reads}. Check "
                 + ("SD_VDD (U3's 3.0 V, enabled by P0.31)" if n4 else "the module's 3V3 (VCC) and GND")
                 + ", CS P0.20, MOSI P0.22, SCK P0.24, MISO P1.00, and that a card is in")
+    if p3 or n4:
         def mic(secs, stereo=False):  # the mic's result, and each block's AC RMS (stereo: a list per channel)
             blocks = [[], []]
             for _, line in b.lines(f"mic {secs}{' s' if stereo else ''}", secs + 15):
@@ -345,6 +373,9 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
         loud, lb = res["mic_speech"] = speech()
         if n4:
             n4_mics(row, res, quiet, qb, loud, lb, speech, cover)
+        if n5:  # no SAADC input on MIC_VDD either: both mics giving data is U5's output on
+            row("MIC_VDD (U5 on)", bool(quiet["ok"]), "both mics gave data with MIC_PWR P0.12 up (measure TP5 with `vcc 30` "
+                "for the voltage)")
     if p3:
         quiet_ok, floor, heard, rise = mic_verdict(quiet, qb, loud, lb)
         row("mic (PDM, 2 s quiet)", quiet_ok, f"noise floor {floor:.0f} "
@@ -402,9 +433,11 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
         "the board drops phone links, replace the 32.768 kHz crystal" if not n4 else ": check X1 and its two load "
         "capacitors (its CL is 7 pF), or replace X1") if lf_ok else "no crystal")
 
+    if not dcdc:  # a board without L1 (the first N5): REG0 on its DCDC would pull VDD down (lab 11-11)
+        row("DCDC converters (inductors)", "LOOK", "not run (--no-dcdc)")
     try:
         stage = None
-        for _, line in b.lines("dcdc", 15):
+        for _, line in b.lines("dcdc", 15) if dcdc else ():
             if line.startswith("S "):
                 stage = line.split()[2]
             elif line.startswith("R "):
@@ -416,7 +449,7 @@ def run(serial, clk_secs, json_out, p3=False, flip=20, n4=False, cover=5):
             "is missing or broken (our firmware must stay on the LDO)")
 
     width = max(len(r[0]) for r in rows)
-    print(f"\nself-test {serial}{' LR-P3' if p3 else ' LR-N4' if n4 else ''} {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"\nself-test {serial}{' LR-P3' if p3 else ' ' + name if n4 else ''} {time.strftime('%Y-%m-%d %H:%M:%S')}")
     for item, verdict, detail in rows:
         print(f"{verdict:4}  {item:{width}}  {detail}")
     failed = [r[0] for r in rows if r[1] == "FAIL"]
@@ -468,22 +501,26 @@ if __name__ == "__main__":
                     "zephyr.uf2)")
     ap.add_argument("--n4", action="store_true", help="LR-N4 (build, flash, run): its own build, pins and checks: SD, "
                     "both mics, IMU, CHRG, switch, both LEDs")
-    ap.add_argument("--flip", type=int, default=20, help="--p3, --n4: seconds to wait for the switch to be flipped "
+    ap.add_argument("--no-dcdc", action="store_true", help="run: skip the DCDC test (a board without its L1 or L3)")
+    ap.add_argument("--n5", action="store_true", help="LR-N5 (build, flash, run): LR-N4's checks with its NAND in place "
+                    "of the SD card")
+    ap.add_argument("--flip", type=int, default=20, help="--p3, --n4, --n5: seconds to wait for the switch to be flipped "
                     "(default 20)")
-    ap.add_argument("--cover", type=int, default=5, help="--n4: seconds to cover each mic's hole before its run (default "
+    ap.add_argument("--cover", type=int, default=5, help="--n4, --n5: seconds to cover each mic's hole before its run (default "
                     "5; 0: skip)")
     a = ap.parse_args()
     if a.action == "check":
         sys.exit(check())
     if a.action == "swd":
         sys.exit(swd())
-    if a.p3 and a.n4:
-        ap.error("--p3 or --n4, not both")
+    if a.p3 + a.n4 + a.n5 > 1:
+        ap.error("one of --p3, --n4, --n5")
+    board = "n5" if a.n5 else "n4" if a.n4 else "promicro"
     if a.action != "build" and not re.fullmatch(r"[0-9A-F]{16}", a.serial or ""):
         ap.error("SERIAL: 16 hex digits, as ioreg shows it")
     if a.action == "build":
-        build(a.n4)
+        build(board)
     elif a.action == "flash":
-        flash(a.serial, a.n4, a.uf2)
+        flash(a.serial, board, a.uf2)
     else:
-        run(a.serial, a.clk, a.json, a.p3, a.flip, a.n4, a.cover)
+        run(a.serial, a.clk, a.json, a.p3, a.flip, board, a.cover, not a.no_dcdc)

@@ -5,7 +5,9 @@
  * against the Mac's clock, the board's advertising as the Mac hears it). README.md says what each check proves and its
  * pass mark.
  * Built with LR_N4 (selftest.py build --n4) it is LR-N4's, our own board around a bare nRF52840: its own pins (as
- * firmware/devkit's lr_n4.overlay), gpio over its free balls and its pulled-up lines, mic N s (both mics), imu, chrg. */
+ * firmware/devkit's lr_n4.overlay), gpio over its free balls and its pulled-up lines, mic N s (both mics), imu, chrg.
+ * Built with LR_N5 (build --n5; LR_N4 too) it is LR-N5's: LR-N4 with a W25N SPI NAND (nand) on the SD card's pins, its
+ * LDO enable and the charger's CHRG on swapped balls (lr_n5.overlay), and the NAND's /CS the one line pulled up to it. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -108,13 +110,18 @@ static const uint8_t pins[] = {
 };
 #define LED_PIN P(0, 15)  /* D1 yellow-green, through 1k */
 #define LED_RED P(1, 13)  /* D1 red, through 1k */
+#ifdef LR_N5
+#define SD_PWR P(0, 29)  /* MEM_EN: the NAND's 3.0 V LDO (U3), 1M pull-down */
+#define CHRG P(0, 31)  /* TP4054 CHRG, open drain, no resistor on the board */
+#else
 #define SD_PWR P(0, 31)  /* SD_EN: the card's 3.0 V LDO (U3), 100k pull-down */
+#define CHRG P(0, 29)
+#endif
 #define MIC_PWR P(0, 12)  /* the mics' 3.0 V LDO (U5), 100k pull-down */
 #define IMU_PWR P(1, 8)  /* the IMU's supply (and its I2C pull-ups'), from the pin as on the XIAO Sense */
 #define IMU_SDA P(0, 23)
 #define IMU_SCL P(0, 19)
 #define IMU_INT P(0, 11)  /* INT1 (push-pull, from the IMU); INT2 is open */
-#define CHRG P(0, 29)  /* TP4054 CHRG, open drain, no resistor on the board */
 #else
 /* The Pro Micro footprint's GPIOs (USB up; left row, right row, the three pads at the bottom edge). Not here: RST
  * (P0.18), the LED (P0.15) and the VCC switch (P0.13), which have parts on them */
@@ -196,8 +203,13 @@ static void domains(bool on)
  * is shorted to it, among these, the free balls (pulled up inside meanwhile) and SD SCK, MIC CLK and DAT (pulled up
  * inside, counted only if they read high before). Never driven high, so never against a part's output, and nothing
  * is pulled or driven while the supplies are off: a part without power would be fed through its pins */
+#ifdef LR_N5  /* only the NAND's /CS has a pull-up (10k to its 3.0 V); DI is ours, DO three-state while /CS is high */
+static const uint8_t pulled[] = {SD_CS, IMU_SDA, IMU_SCL};
+static const uint8_t watched[] = {SD_SCK, SD_MOSI, SD_MISO, MIC_CLK, MIC_DAT};
+#else
 static const uint8_t pulled[] = {SD_CS, SD_MOSI, SD_MISO, IMU_SDA, IMU_SCL};
 static const uint8_t watched[] = {SD_SCK, MIC_CLK, MIC_DAT};
+#endif
 
 static int gpio_lines(char *out, int size, int *bad, int *shorts)
 {
@@ -624,7 +636,7 @@ static void pdm_stop(void);
 
 /* read_only: no write test, reads only (a card with recordings on a board whose wiring is in doubt). with_mic: the
  * mic powered and clocked meanwhile, as when recording (its 1.28 MHz clock runs beside the SD wires) */
-static void cmd_sd(int khz, bool with_mic, bool read_only)
+static void __maybe_unused cmd_sd(int khz, bool with_mic, bool read_only)  /* not on LR-N5 */
 {
 	static uint8_t old[512], pat[512], back[512];
 	const char *fail = "";
@@ -777,6 +789,243 @@ out:
 	       r41, ocr, r9, init_ms, sectors, mbr, part, w_us, r_us, sd_resp, sd_busy_ms, restored, reads,
 	       read_errs, sd_crc_errs, read_ms, sd_first_bad & 0xFFFF);
 }
+
+#ifdef LR_N5
+/* LR-N5's NAND, W25N01GV (or W25N02KV: same pins, commands, page and block sizes), on the legacy SPI at 8 MHz like the
+ * SD card above (the recorder runs it on SPIM3 at 16 MHz, nand_card.c): MEM_EN up (its LDO, U3), then /CS read with no
+ * pull before it is driven, which R26 holds at MEM_VDD (the LDO's output is on); the chip's reset (FFh), its JEDEC ID
+ * (9Fh: EF AA 21 or EF AA 22), writes allowed (SR-1 = 0) and ECC on, buffer mode (SR-2 ECC-E, BUF), as the recorder.
+ * Then one block from the end, the first that is good (byte 0x800 of its first page 0xFF: no factory or ring-log bad
+ * mark) and blank (that page all 0xFF): erased, its first and last pages programmed with a pattern and read back
+ * through the chip's ECC, erased again, so it is left as found. A block with data on it is the recorder's ring log: no
+ * blank block among the last 16, no write test ("nand w" takes the last good block anyway, losing what is on it).
+ * MEM_EN back to its pull-down, every NAND pin released, and /CS read once more: low once MEM_VDD is gone */
+#define NAND_PAGE 2048
+#define NAND_PPB 64
+static uint8_t nand_pat[NAND_PAGE], nand_back[NAND_PAGE];
+
+static void nand_sel(bool on)
+{
+	nrf_gpio_pin_write(SD_CS, !on);
+}
+
+static void nand_cmd(const uint8_t *c, int n)  /* a whole command, /CS low throughout */
+{
+	nand_sel(true);
+	for (int i = 0; i < n; i++) {
+		spi(c[i]);
+	}
+	nand_sel(false);
+}
+
+static uint8_t nand_get(uint8_t reg)
+{
+	nand_sel(true);
+	spi(0x0F);
+	spi(reg);
+	uint8_t v = spi(0xFF);
+
+	nand_sel(false);
+	return v;
+}
+
+static void nand_set(uint8_t reg, uint8_t v)
+{
+	const uint8_t c[3] = {0x1F, reg, v};
+
+	nand_cmd(c, 3);
+}
+
+/* Status register 3 once BUSY (bit 0) clears, within ms; BUSY still set: a timeout */
+static uint8_t nand_wait(int ms)
+{
+	uint8_t sr;
+
+	for (int64_t end = k_uptime_get() + ms; (sr = nand_get(0xC0)) & 1 && k_uptime_get() < end;) {
+		k_busy_wait(20);
+	}
+	return sr;
+}
+
+static void nand_page_op(uint8_t op, uint32_t page)  /* 13h read into the buffer, 10h program, D8h erase */
+{
+	const uint8_t c[4] = {op, page >> 16, page >> 8, page};
+
+	nand_cmd(c, 4);
+}
+
+/* A page into buf from column col (n bytes); its status register 3 (ECC-1/0 in bits 4-5, BUSY) */
+static uint8_t nand_read(uint32_t page, uint16_t col, uint8_t *buf, int n)
+{
+	nand_page_op(0x13, page);
+	uint8_t sr = nand_wait(2);
+
+	nand_sel(true);
+	spi(0x03);
+	spi(col >> 8);
+	spi(col);
+	spi(0);
+	for (int i = 0; i < n; i++) {
+		buf[i] = spi(0xFF);
+	}
+	nand_sel(false);
+	return sr;
+}
+
+static uint8_t nand_erase(uint32_t block)  /* status register 3: E-FAIL bit 2, BUSY: timeout */
+{
+	nand_cmd((const uint8_t[]){0x06}, 1);
+	nand_page_op(0xD8, block * NAND_PPB);
+	return nand_wait(30);
+}
+
+static uint8_t nand_program(uint32_t page, const uint8_t *buf)  /* P-FAIL bit 3 */
+{
+	nand_cmd((const uint8_t[]){0x06}, 1);
+	nand_sel(true);
+	spi(0x02);  /* load from column 0; the spare area stays FFh */
+	spi(0);
+	spi(0);
+	for (int i = 0; i < NAND_PAGE; i++) {
+		spi(buf[i]);
+	}
+	nand_sel(false);
+	nand_page_op(0x10, page);
+	return nand_wait(5);
+}
+
+static bool all_ff(const uint8_t *b, int n)
+{
+	for (int i = 0; i < n; i++) {
+		if (b[i] != 0xFF) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static void cmd_nand(bool force)
+{
+	const char *fail = "";
+	uint8_t id[3] = {0}, sr1 = 0, sr2 = 0, srx = 0, ecc = 0;
+	int cs_on = -1, cs_off = -1, bad = 0, block = -1, blocks = 0;
+	uint32_t erase_us = 0, prog_us = 0;
+
+	nrf_gpio_cfg_input(SD_CS, NRF_GPIO_PIN_NOPULL);
+	nrf_gpio_pin_set(SD_PWR);
+	nrf_gpio_cfg_output(SD_PWR);
+	k_msleep(20);  /* tVSL 50 us, then the chip loads page 0 (busy, waited out below) */
+	cs_on = nrf_gpio_pin_read(SD_CS);
+	nrf_gpio_pin_set(SD_CS);
+	nrf_gpio_cfg_output(SD_CS);
+	nrf_gpio_pin_clear(SD_SCK);
+	nrf_gpio_cfg_output(SD_SCK);
+	nrf_gpio_pin_clear(SD_MOSI);
+	nrf_gpio_cfg_output(SD_MOSI);
+	nrf_gpio_cfg_input(SD_MISO, NRF_GPIO_PIN_PULLDOWN);  /* nobody answering reads 0x00 */
+	NRF_SPI2->PSEL.SCK = SD_SCK;
+	NRF_SPI2->PSEL.MOSI = SD_MOSI;
+	NRF_SPI2->PSEL.MISO = SD_MISO;
+	NRF_SPI2->CONFIG = 0;  /* mode 0, MSB first */
+	NRF_SPI2->FREQUENCY = SPI_FREQUENCY_FREQUENCY_M8;
+	NRF_SPI2->ENABLE = SPI_ENABLE_ENABLE_Enabled;
+
+	nand_cmd((const uint8_t[]){0xAB}, 1);  /* W25N02KV: out of deep power-down; W25N01GV ignores it */
+	k_msleep(2);
+	nand_cmd((const uint8_t[]){0xFF}, 1);
+	if (nand_wait(5) & 1) {
+		fail = "busy";
+		goto out;
+	}
+	nand_sel(true);
+	spi(0x9F);
+	spi(0);
+	for (int i = 0; i < 3; i++) {
+		id[i] = spi(0xFF);
+	}
+	nand_sel(false);
+	if (id[0] != 0xEF || id[1] != 0xAA || (id[2] != 0x21 && id[2] != 0x22)) {
+		fail = "id";
+		goto out;
+	}
+	blocks = id[2] == 0x22 ? 2048 : 1024;
+	nand_set(0xA0, 0);
+	nand_set(0xB0, nand_get(0xB0) | 0x18);
+	sr1 = nand_get(0xA0);
+	sr2 = nand_get(0xB0);
+	if (sr1 & 0x7C || (sr2 & 0x18) != 0x18) {  /* BP3-0, TB still set; ECC-E, BUF not */
+		fail = "status";
+		goto out;
+	}
+	for (int b = blocks - 1; b >= blocks - 16 && block < 0; b--) {
+		uint8_t mark;
+
+		nand_read(b * NAND_PPB, NAND_PAGE, &mark, 1);
+		if (mark != 0xFF) {
+			bad++;
+			continue;
+		}
+		nand_read(b * NAND_PPB, 0, nand_back, NAND_PAGE);
+		if (force || all_ff(nand_back, NAND_PAGE)) {
+			block = b;
+		}
+	}
+	if (block < 0) {
+		fail = bad == 16 ? "bad" : "no_blank";
+		goto out;
+	}
+	for (int i = 0; i < NAND_PAGE; i++) {
+		nand_pat[i] = (uint8_t)(i * 7 + (i >> 8) + 0x5A);
+	}
+	uint32_t c = cyc();
+
+	srx = nand_erase(block);
+	erase_us = (cyc() - c) / CYC_PER_US;
+	if (srx & 0x05) {
+		fail = "erase";
+		goto out;
+	}
+	for (int k = 0; k < 2 && !*fail; k++) {
+		uint32_t page = block * NAND_PPB + (k ? NAND_PPB - 1 : 0);
+
+		c = cyc();
+		srx = nand_program(page, nand_pat);
+		prog_us = MAX(prog_us, (cyc() - c) / CYC_PER_US);
+		if (srx & 0x09) {
+			fail = "program";
+			break;
+		}
+		srx = nand_read(page, 0, nand_back, NAND_PAGE);
+		ecc = MAX(ecc, srx >> 4 & 3);
+		if (memcmp(nand_back, nand_pat, NAND_PAGE)) {
+			fail = "verify";
+		}
+	}
+	srx = nand_erase(block);  /* left blank, as found */
+	if (!*fail && srx & 0x05) {
+		fail = "erase";
+	}
+	nand_read(block * NAND_PPB, 0, nand_back, NAND_PAGE);
+	if (!*fail && !all_ff(nand_back, NAND_PAGE)) {
+		fail = "blank";
+	}
+out:
+	NRF_SPI2->ENABLE = 0;
+	NRF_SPI2->PSEL.SCK = NRF_SPI2->PSEL.MOSI = NRF_SPI2->PSEL.MISO = 0xFFFFFFFF;
+	nrf_gpio_cfg_default(SD_SCK);
+	nrf_gpio_cfg_default(SD_MOSI);
+	nrf_gpio_cfg_default(SD_MISO);
+	nrf_gpio_cfg_input(SD_CS, NRF_GPIO_PIN_NOPULL);
+	nrf_gpio_cfg_default(SD_PWR);
+	k_msleep(300);  /* MEM_VDD drains through the chip and R26-R29 */
+	cs_off = nrf_gpio_pin_read(SD_CS);
+	nrf_gpio_cfg_default(SD_CS);
+	printk("R {\"test\":\"nand\",\"ok\":%d,\"fail\":\"%s\",\"cs_on\":%d,\"cs_off\":%d,\"id\":\"%02X %02X %02X\","
+	       "\"blocks\":%d,\"sr1\":\"0x%02X\",\"sr2\":\"0x%02X\",\"block\":%d,\"bad_seen\":%d,\"ecc\":%d,\"erase_us\":%u,"
+	       "\"program_us\":%u,\"forced\":%d}\n", !*fail && cs_on == 1 && ecc < 2, fail, cs_on, cs_off, id[0], id[1],
+	       id[2], blocks, sr1, sr2, block, bad, ecc, erase_us, prog_us, force);
+}
+#endif
 
 /* An EasyDMA event within 1 s */
 static bool event(volatile uint32_t *ev)
@@ -1098,7 +1347,12 @@ static void cmd_info(void)
 #ifdef LR_N4
 	       /* APPROTECT.DISABLE (0x40000558, PS v1.11 p.70-71), written by SystemInit from UICR APPROTECT on build code Fxx
 		* and later (CONFIG_NRF_APPROTECT_USE_UICR): 0x5A there keeps SWD open */
-	       "n4", *(volatile uint32_t *)0x40000558);
+#ifdef LR_N5
+	       "n5",
+#else
+	       "n4",
+#endif
+	       *(volatile uint32_t *)0x40000558);
 #else
 	       "promicro", 0);
 #endif
@@ -1110,7 +1364,7 @@ static void run(char *line)
 	/* REGOUT0 not VOUT 4 (3.0 V), e.g. the UICR file left out of the first flash: the bootloader then writes 3.3 V there
 	 * itself (it does so when it finds REGOUT0 erased), and pins driven at 3.3 V sit on the 3.0 V card's, mics' and IMU's
 	 * VDD + 0.3 limit. Nothing that powers them runs until the UICR is rewritten (ASSEMBLY-SELF 12.2) */
-	if ((NRF_UICR->REGOUT0 & 7) != 4 && (!strncmp(line, "gpio", 4) || !strncmp(line, "sd", 2) ||
+	if ((NRF_UICR->REGOUT0 & 7) != 4 && (!strncmp(line, "gpio", 4) || !strncmp(line, "sd", 2) || !strncmp(line, "nand", 4) ||
 	    !strncmp(line, "vcc", 3) || !strncmp(line, "mic", 3) || !strcmp(line, "imu") || !strcmp(line, "all"))) {
 		printk("R {\"test\":\"%s\",\"ok\":0,\"err\":\"regout0\"}\n", line);
 		return;
@@ -1131,8 +1385,13 @@ static void run(char *line)
 		cmd_clk(CLAMP(atoi(line + 3), 1, 600));
 	} else if (!strcmp(line, "dcdc")) {
 		cmd_dcdc();
+#ifdef LR_N5  /* no SD card: its pins are the NAND's */
+	} else if (!strcmp(line, "nand") || !strcmp(line, "nand w")) {
+		cmd_nand(line[4] != 0);
+#else
 	} else if (!strncmp(line, "sd", 2)) {
 		cmd_sd(line[2] ? atoi(line + 2) : 8000, strchr(line, 'm') != NULL, strchr(line, 'r') != NULL);
+#endif
 	} else if (!strncmp(line, "vcc", 3)) {  /* the SD module's supply on for N s, its pins left open: measure it */
 		nrf_gpio_pin_set(SD_PWR);
 		nrf_gpio_cfg_output(SD_PWR);
@@ -1167,7 +1426,7 @@ static void run(char *line)
 		NRF_POWER->GPREGRET = 0x57;
 		NVIC_SystemReset();
 	} else {
-		printk("R {\"test\":\"?\",\"commands\":\"info gpio [p3] adc rx led clk N dcdc sd [kHz] [m] [r] vcc N mic N [r|s] sw imu chrg all dfu\"}\n");
+		printk("R {\"test\":\"?\",\"commands\":\"info gpio [p3] adc rx led clk N dcdc sd [kHz] [m] [r] (LR-N5: nand [w]) vcc N mic N [r|s] sw imu chrg all dfu\"}\n");
 	}
 }
 
