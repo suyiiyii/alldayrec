@@ -373,7 +373,7 @@ async def mcp_links_revoke(link_id: str, request: Request):
 async def recap_get(date: str = ""):
     """A day's recap, the newest one when no day is given; null when there is none. Its todos as the due list has them
     (id, the sentence, whom to), a todo closed since left out; auto: how many todos closed automatically that day
-    (closed) and how many of mine are due the day after (due)."""
+    (closed) and, on yesterday's, how many of mine are due today (due)."""
     if date:
         r = db.kv(f"recap:{date}")
     else:
@@ -399,9 +399,10 @@ async def recap_get(date: str = ""):
             if v.get("id") not in shut:
                 todos.append(v)
         r["todos"] = todos
-        if r.get("date"):
+        if r.get("date"):  # due: only yesterday's recap says it (today's), and due_todos reads every summary
             nxt = (dt.date.fromisoformat(r["date"]) + dt.timedelta(days=1)).isoformat()
-            r["auto"] = {"closed": db.auto_closed_on(r["date"]), "due": sum(t["due_date"] == nxt for t in db.due_todos(nxt))}
+            due = sum(t["due_date"] == nxt for t in db.due_todos(nxt)) if nxt == dt.date.today().isoformat() else 0
+            r["auto"] = {"closed": db.auto_closed_on(r["date"]), "due": due}
         for h in r.get("highlights") or []:
             if h.get("conv") and (c := db.conversation(h["conv"])):
                 h["participants"] = c["participants"]

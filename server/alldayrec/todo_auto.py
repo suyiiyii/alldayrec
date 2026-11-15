@@ -6,21 +6,16 @@ STALE_DAYS with no mention since as stale (可能不需要了). Every one is a d
 model's words), the row (its id, start, speaker, its text as the quote, not the model's), the conversation, the model,
 when; a todo is never deleted and never re-marked over a mark by hand (db.add_auto). A row number not in the transcript
 drops the item; done / dropped whose row and the 3 before (the question it answers) share no word with the todo only hint.
-
-    uv run python -m alldayrec.todo_auto <live.db> <conversation id>...   # what the pass says, from a db opened read only
+The todos are listed by number, not id: the model copies a number, never a long id wrong.
 """
 import datetime as dt
-import logging
 import re
 
 from alldayrec import db
 from alldayrec import summary
-from alldayrec.core import conversation_rows
-
-log = logging.getLogger("live")
 
 WINDOW_DAYS = 14  # todos of the conversations started this many days before are looked at
-MAX_TODOS = 120   # at most this many of them, the newest (~25 tokens each); 14 days held 112 todos in all (11-16)
+MAX_TODOS = 120   # at most this many of them, the newest (~25 tokens each)
 STALE_DAYS = 7    # past due this many days with no mention since: stale
 
 SYSTEM = """你在核对待办的进展。输入是之前还没完成的待办（编了号）、这段对话里新出的待办（也编了号，只用来找重复），和这段对话的原文（每行 [句子编号 时间] 说话人: 文本）。
@@ -134,17 +129,3 @@ def age_out(day: str) -> list[dict]:
                         "quote": quote, "model": None, "at": now})
     return db.add_auto(out)
 
-
-if __name__ == "__main__":
-    import json
-    import sys
-
-    import anyio
-    ro = db.read_only(sys.argv[1])
-    db.conn = lambda: ro
-    for cid in sys.argv[2:]:
-        c = db.conversation(cid)
-        rows, (cands, own) = [r for r in conversation_rows(c) if r.get("text")], candidates(c)
-        res, raw = anyio.run(call, c, rows, cands, own)
-        print(json.dumps({"conv": cid, "todos": len(cands), "rows": len(rows), "usage": raw.get("usage"),
-                          "found": judged(c, rows, cands, own, res, raw.get("model"))}, ensure_ascii=False), flush=True)

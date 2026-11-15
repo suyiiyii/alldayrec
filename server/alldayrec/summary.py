@@ -126,7 +126,7 @@ def failover(e: Exception) -> bool:
 
 async def call(messages: list[dict], timeout: int = 300, kind: str = "summary", on_delta=None, **extra) -> dict:
     """One chat call, extra fields as they are (tools, response_format): the raw response; raises on HTTP errors. Kept
-    in the calls table as `kind` (summary, split, hints, profile, recap, live, ask): time, tokens, the error, never the text;
+    in the calls table as `kind` (summary, split, hints, profile, recap, resolve, live, ask): time, tokens, the error, never the text;
     a call cut off (the task cancelled) too, as CancelledError. on_delta: streamed (stream: true), each piece of the
     reply's text awaited as on_delta(text) as it comes, the response put together as a whole one (stream_reply).
     A failure worth it (failover) goes once to LLM_FALLBACK_* when set, its row's engine `fallback:<model>`; not once

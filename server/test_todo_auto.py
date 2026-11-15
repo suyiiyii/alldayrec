@@ -178,14 +178,17 @@ def test_failure_and_bad_reply_keep_nothing(store, monkeypatch):
 def test_recap_counts(store, monkeypatch):
     import datetime as dt
     today = dt.date.today()
+    yesterday = (today - dt.timedelta(days=1)).isoformat()
     db.add_auto([{"todo": store["report"], "kind": "done", "src": B, "sentence": f"{B}-1", "at_said": "2026-11-03T10:00:01.000",
-                  "at": f"{today}T09:00:00"}])
+                  "at": f"{yesterday}T09:00:00"}])
     with db.tx() as t:
         s = db.summary(A)
-        s["todos"][3]["due_date"] = (today + dt.timedelta(days=1)).isoformat()
+        s["todos"][3]["due_date"] = today.isoformat()
         db.put_summary(s, t)
-    db.put_kv(f"recap:{today}", {"date": today.isoformat(), "todos": [], "highlights": []})
-    assert anyio.run(recap_get, today.isoformat())["auto"] == {"closed": 1, "due": 1}
+    for d in (yesterday, "2026-11-01"):
+        db.put_kv(f"recap:{d}", {"date": d, "todos": [], "highlights": []})
+    assert anyio.run(recap_get, yesterday)["auto"] == {"closed": 1, "due": 1}, "closed that day, mine due today"
+    assert anyio.run(recap_get, "2026-11-01")["auto"] == {"closed": 0, "due": 0}, "an older recap: no due count"
 
 
 def test_carries_over_old_done_hints(tmp_path):

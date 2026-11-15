@@ -219,8 +219,11 @@ async def recap_loop():
     while True:
         now = dt.datetime.now()
         if db.kv("todo_age_out") != (today := now.date().isoformat()):  # once a day, before the recap counts what closed
-            todo_auto.age_out(today)
-            db.put_kv("todo_age_out", today)
+            db.put_kv("todo_age_out", today)  # first: one that fails is tried tomorrow, not every minute
+            try:
+                todo_auto.age_out(today)
+            except Exception as e:  # a locked store: the recaps go on
+                log.warning("todo age-out %s failed: %r", today, e)
         await refresh_stale_recaps(now)
         day = (now.date() - dt.timedelta(days=1)).isoformat()
         if now.time() >= at and db.kv(f"recap:{day}") is None:
