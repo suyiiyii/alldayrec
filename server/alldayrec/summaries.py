@@ -14,6 +14,7 @@ from alldayrec import recap
 from alldayrec import split
 from alldayrec import speakers
 from alldayrec import summary
+from alldayrec import todo_auto
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, queue_summary, tag_counts
 from alldayrec.routes_speakers import make_profile
@@ -43,8 +44,7 @@ async def summarize(c: dict, tags: list[str]) -> dict:
     rows = conversation_rows(c)
     tl = db.timeline(c["id"]) if c.get("via_live") else None
     if tl and tl.get("messages") and (c.get("speech_s", 0) >= summary.MIN_SPEECH_S or tl.get("asked")):  # asked: 立即总结 on a short one
-        todos, opened = summary.todo_context(c)
-        return {**summary.result(c, rows, *await live.final(tl, rows, tags, c["start"], todos), opened), "via": "live"}
+        return {**summary.result(c, rows, *await live.final(tl, rows, tags, c["start"], summary.todo_context(c))), "via": "live"}
     return await summary.summarize(c, rows, tags)
 
 
@@ -105,6 +105,8 @@ async def summarize_loop():
             await ws.broadcast({"type": "summary", **res})
             if res["status"] == "done" and res.get("model") and not db.name_hints(c["id"]):
                 await name_hints(c, media)
+            if res["status"] == "done":
+                await resolve_todos(c)
             if res["status"] == "done":  # a profile kept up to date once it exists
                 for p in c.get("participants") or []:
                     if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
@@ -135,6 +137,25 @@ async def name_hints(c: dict, media: set[str]):
     if h["names"]:
         T().speakers["at"] = 0.0
         ws.note(f"对话 {c['start'][11:19]}：听出 {len(h['names'])} 个称呼，可在对话页确认", "state")
+
+
+async def resolve_todos(c: dict):
+    """The todos this conversation shows done, dropped or the same as another (todo_auto.py); a failure is logged, the
+    summary worker goes on."""
+    revision = db.kv(f"conversation_revision:{c['id']}")
+    try:
+        rows, (cands, own) = [r for r in conversation_rows(c) if r.get("text")], todo_auto.candidates(c)
+        if not rows or not cands:
+            return
+        res, raw = await todo_auto.call(c, rows, cands, own)
+        if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
+            return  # merged or grown meanwhile: its rows are not the ones the reply cites
+        took = todo_auto.keep(c, rows, cands, own, res, raw)
+    except Exception as e:  # HTTP errors, timeouts, a reply that is not JSON or not in the format
+        log.warning("resolve todos %s failed: %r", c["id"], e)
+        return
+    if closed := [r for r in took if r["kind"] in db.CLOSE]:
+        ws.note(f"对话 {c['start'][11:19]}：自动整理了 {len(closed)} 条待办，可在待办页撤销", "state")
 
 
 RECAP_AT = os.environ.get("RECAP_AT", "10:00")  # yesterday's recap (recap.py) is written then; empty: never
@@ -197,6 +218,12 @@ async def recap_loop():
     at = dt.time.fromisoformat(RECAP_AT)
     while True:
         now = dt.datetime.now()
+        if db.kv("todo_age_out") != (today := now.date().isoformat()):  # once a day, before the recap counts what closed
+            db.put_kv("todo_age_out", today)  # first: one that fails is tried tomorrow, not every minute
+            try:
+                todo_auto.age_out(today)
+            except Exception as e:  # a locked store: the recaps go on
+                log.warning("todo age-out %s failed: %r", today, e)
         await refresh_stale_recaps(now)
         day = (now.date() - dt.timedelta(days=1)).isoformat()
         if now.time() >= at and db.kv(f"recap:{day}") is None:

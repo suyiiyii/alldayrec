@@ -372,14 +372,15 @@ async def mcp_links_revoke(link_id: str, request: Request):
 @router.get("/api/recap")
 async def recap_get(date: str = ""):
     """A day's recap, the newest one when no day is given; null when there is none. Its todos as the due list has them
-    (id, the sentence, whom to), a todo marked done or wrong since left out."""
+    (id, the sentence, whom to), a todo closed since left out; auto: how many todos closed automatically that day
+    (closed) and, on yesterday's, how many of mine are due today (due)."""
     if date:
         r = db.kv(f"recap:{date}")
     else:
         row = db.conn().execute("SELECT value FROM kv WHERE key LIKE 'recap:%' ORDER BY key DESC LIMIT 1").fetchone()
         r = json.loads(row[0]) if row else None
     if r:
-        closed, al, hints, todos = db.closed_todos(), db.aliases(), db.done_hints(), []
+        closed, shut, al, auto, todos = db.closed_todos(), db.shut_todos(), db.aliases(), db.auto_marks(), []
         for x in r["todos"]:
             c, s = db.conversation(x["conv"]), db.summary(x["conv"]) or {}
             ts = s.get("todos") or []
@@ -392,12 +393,16 @@ async def recap_get(date: str = ""):
             if c and len(matches) == 1:
                 if matches[0][1].get("owner") != "我":  # a resolved action owned by someone else is not an orphan of mine
                     continue
-                v = {**x, **db.todo_view(c, s, *matches[0], closed, al, hints)}
+                v = {**x, **db.todo_view(c, s, *matches[0], closed, al, auto)}
             else:
                 v = {**x, "id": None} if x.get("id") else x
-            if v.get("id") not in closed:
+            if v.get("id") not in shut:
                 todos.append(v)
         r["todos"] = todos
+        if r.get("date"):  # due: only yesterday's recap says it (today's), and due_todos reads every summary
+            nxt = (dt.date.fromisoformat(r["date"]) + dt.timedelta(days=1)).isoformat()
+            due = sum(t["due_date"] == nxt for t in db.due_todos(nxt)) if nxt == dt.date.today().isoformat() else 0
+            r["auto"] = {"closed": db.auto_closed_on(r["date"]), "due": due}
         for h in r.get("highlights") or []:
             if h.get("conv") and (c := db.conversation(h["conv"])):
                 h["participants"] = c["participants"]
@@ -411,6 +416,20 @@ async def todos_due():
 
 
 MARKS = ("done", "wrong")
+
+
+@router.get("/api/todos/auto")
+async def todos_auto(days: int = 14):
+    """The todos closed automatically in the last days (db.auto_todos), anyone's: why, and the sentence."""
+    return db.auto_todos((dt.datetime.now() - dt.timedelta(days=days)).isoformat(timespec="seconds"))
+
+
+@router.delete("/api/todos/{todo_id}/auto")
+async def todo_auto_undo(todo_id: str):
+    """The undo of a todo's automatic marks (its group's): open again, not closed again on the same sentence."""
+    if not db.todo(todo_id):
+        raise HTTPException(404, "no such todo")
+    return {"id": todo_id, "undone": db.undo_auto(todo_id)}
 
 
 @router.put("/api/todos/{todo_id}/mark")
@@ -494,9 +513,10 @@ async def conversation(conv_id: str):
         raise HTTPException(404, "no such conversation")
     conv_id = c["id"]
     s, closed = db.summary(conv_id), db.closed_todos()
-    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark), and a later sentence saying it is done
-        hints = db.done_hints()
-        s["todos"] = [{**t, "id": i, "mark": closed.get(i), "done_hint": hints.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
+    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark), and its automatic one
+        auto = db.auto_marks()
+        s["todos"] = [{**t, "id": i, "mark": closed.get(i), **{k: v[k] for v in [db.todo_view(c, s, i, t, closed, {}, auto)] for k in ("done_hint", "auto")}}
+                      for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
             "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"])}
 

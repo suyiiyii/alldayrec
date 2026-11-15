@@ -269,6 +269,18 @@ type: reference
 |---|---|---|
 | `GET` | My todos due today or before, not marked done or wrong, with how stale each is (db.due_todos). | — |
 
+### `/api/todos/auto`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The todos closed automatically in the last days (db.auto_todos), anyone's: why, and the sentence. | `days?` (query, integer) |
+
+### `/api/todos/{todo_id}/auto`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `DELETE` | The undo of a todo's automatic marks (its group's): open again, not closed again on the same sentence. | `todo_id` (path, string) |
+
 ### `/api/todos/{todo_id}/mark`
 
 | 方法 | 说明 | 参数 |

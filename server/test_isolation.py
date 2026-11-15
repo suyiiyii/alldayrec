@@ -139,6 +139,8 @@ REQUESTS = {
     ("DELETE", "/api/mcp-links/{link_id}"): ("DELETE", "/api/mcp-links/not-present", {}),
     ("GET", "/api/recap"): ("GET", "/api/recap", {}),
     ("GET", "/api/todos/due"): ("GET", "/api/todos/due", {}),
+    ("GET", "/api/todos/auto"): ("GET", "/api/todos/auto", {}),
+    ("DELETE", "/api/todos/{todo_id}/auto"): ("DELETE", f"/api/todos/{TODO}/auto", {}),
     ("PUT", "/api/todos/{todo_id}/mark"): ("PUT", f"/api/todos/{TODO}/mark", dict(json={"mark": "done"})),
     ("DELETE", "/api/todos/{todo_id}/mark"): ("DELETE", f"/api/todos/{TODO}/mark", {}),
     ("POST", "/api/todos/marks"): ("POST", "/api/todos/marks", dict(json={"ids": [TODO], "mark": "wrong"})),

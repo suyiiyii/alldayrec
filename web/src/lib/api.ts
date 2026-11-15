@@ -80,6 +80,7 @@ export interface Summary {
     id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
     mark?: Mark | null;
     done_hint?: DoneHint | null;
+    auto?: AutoMark | null;
   })[];
   ai_requests?: (At & { text: string })[];
   ai_spans?: Span[];
@@ -317,7 +318,7 @@ export const engines = (s: Status) =>
 
 // GET /api/calls: the ASR and LLM calls since a time, by kind and engine, and the StepFun balance
 export interface CallSum {
-  kind: string; // final, draft (ASR); summary, split, hints, profile, recap, live, ask (LLM)
+  kind: string; // final, draft (ASR); summary, split, hints, profile, recap, resolve, live, ask (LLM)
   engine: string;
   n: number;
   failed: Record<string, number>; // by HTTP code, else exception class
@@ -346,20 +347,41 @@ export interface Recap {
   highlights: { text: string; conv: string | null; participants?: string[] }[];
   todos: TodoView[];
   people: { who: string; note: string }[];
+  auto?: { closed: number; due: number }; // todos closed automatically that day, mine due the day after
 }
 // One of my todos with where it came from (server db.todo_view): GET /api/todos/due, a recap's todos
 // a todo's due as said: confirmed (that day, for sure) or tentative (大概, 争取, 看情况)
 export type Certainty = "confirmed" | "tentative";
-// a later sentence saying a todo is done (server db.done_hints, summary prompt v15): shown, never a mark
-export interface DoneHint {
-  conv: string;
-  at: string;
+// an automatic mark (server db.auto_view, todo_auto.py): done / dropped (a quote closed it), stale (past due, no
+// mention since: its last mention as at), hint (only maybe done: shown, closes nothing); the sentence it rests on in conv
+export interface AutoMark {
+  kind: "done" | "dropped" | "stale" | "hint";
+  reason: string;
+  conv: string | null;
+  at: string | null;
+  sentence?: string | null;
+  speaker?: string | null;
   quote?: string | null;
+  model?: string | null;
+  judged_at: string;
+}
+export type DoneHint = AutoMark;
+// where one todo of a group of the same todo said several times was said (server db.sources)
+export interface Source {
+  id: string;
+  conv: string;
+  at?: string | null;
+  quote?: string | null;
+  title?: string | null;
+  start: string;
 }
 export interface TodoView {
   id?: string; // none: a recap's todo from before ids whose text names no todo of a summary (no marks then)
   mark?: Mark | null;
   done_hint?: DoneHint | null;
+  auto?: AutoMark | null; // closed automatically (GET /api/todos/auto)
+  sources?: Source[]; // the same todo said several times: each
+  owner?: string; // in GET /api/todos/auto (anyone's)
   conv: string;
   text: string; // the summary's
   short?: string; // a recap's wording

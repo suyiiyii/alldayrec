@@ -67,6 +67,8 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 | 总结 | 对话的标题、摘要、要点、待办、决定、标签 | `conversation` | `summaries`（`body` 是 JSON） | 对话关闭时写一行 `pending`（`commit`），总结 worker 生成（`summaries.py`） | 改名、改人、迟到合并后重写 | `pending` → `done` 或 `failed` |
 | 待办 | 总结里的一条待办 | 对话 `id` 加说出它的时刻，同一时刻第二条起加 `#2`、`#3`；重新生成后靠 `preserve_todos` 保住原 `id` | `summaries.body` 的 `todos`，没有单独的表 | 总结 | 重新生成总结 | 随总结 |
 | 待办标记 | 待办上的「完成」或「不对」 | 待办 `id` | `todo_marks` | 网页 | 删除这一行就是撤销 | — |
+| 自动标记 | 自动判定的完成、取消、可能不需要了、提示，带理由、原句和模型 | 待办 `id` | `todo_auto` | `todo_auto.py`（摘要之后、每天一次） | 撤销只填 `undone_at`，行不删；手动标记优先 | `undone_at` 为空才算数 |
+| 重复待办 | 几段对话里说的同一件事 | 待办 `id` 指向组里最早的一条 | `todo_same` | `todo_auto.py` | 只合并，不拆 | — |
 | 收藏 | 收藏的一句话 | 句子 `id` | `stars`，另记所在对话 `conv` | 网页 | 切分、合并时改 `conv` | 取消收藏时删除 |
 | 反馈 | 用户说总结哪里错了 | 无 | `feedback` | 网页 | — | 一直保留，写下一次总结时读 |
 | 称呼线索 | 每个标签在对话里被怎么称呼，只用于建议名字 | `conv` | `name_hints` | 总结完成后（`hints.py`） | 改名时跟着改 | — |

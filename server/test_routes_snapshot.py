@@ -69,6 +69,8 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("DELETE", "/api/mcp-links/{link_id}", "mcp_links_revoke"),
     ("GET", "/api/recap", "recap_get"),
     ("GET", "/api/todos/due", "todos_due"),
+    ("GET", "/api/todos/auto", "todos_auto"),
+    ("DELETE", "/api/todos/{todo_id}/auto", "todo_auto_undo"),
     ("PUT", "/api/todos/{todo_id}/mark", "todo_mark"),
     ("DELETE", "/api/todos/{todo_id}/mark", "todo_unmark"),
     ("POST", "/api/todos/marks", "todo_marks"),

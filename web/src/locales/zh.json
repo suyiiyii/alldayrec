@@ -528,6 +528,7 @@
       "hints": "认人提示",
       "profile": "人物档案",
       "recap": "每日回顾",
+      "resolve": "待办整理",
       "live": "实时分析",
       "ask": "问 AI",
       "late": "补转写"
@@ -831,7 +832,9 @@
     "of": "{day}的回顾",
     "mine": "我要做的",
     "people": "聊过的人",
-    "person": "{who}：{note}"
+    "person": "{who}：{note}",
+    "autoClosed": "自动整理了 {n} 条待办",
+    "dueToday": "今天到期 {n} 条"
   },
   "record": {
     "recording": "录音中",
@@ -1038,7 +1041,9 @@
     "overdue": "过期 {n} 天",
     "tentative": "暂定",
     "maybeDone": "可能已完成：{q}",
-    "done": "完成"
+    "done": "完成",
+    "said": "提到 {n} 次",
+    "notDone": "不是，还没做完"
   },
   "todoMarks": {
     "doneToast": "已完成",
@@ -1047,6 +1052,14 @@
     "markDone": "标为完成",
     "more": "更多",
     "notTodo": "不对，不是待办"
+  },
+  "autoTodos": {
+    "title": "自动整理",
+    "done": "已完成",
+    "dropped": "已取消",
+    "stale": "可能不需要了",
+    "hint": "可能已完成",
+    "why": "{kind}：{reason}"
   },
   "todos": {
     "week": "本周",

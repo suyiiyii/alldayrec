@@ -11,6 +11,15 @@ import { labelText } from "../lib/speakers";
 // the newest daily recap, folded to its headline unless open; a todo marked 完成 or 不对 leaves it at once
 const props = defineProps<{ recap: Recap; open?: boolean }>();
 const todos = computed(() => unmarked(props.recap.todos));
+// what closed itself that day, and what is due today: only on yesterday's recap, read this morning
+const autoLine = computed(() => {
+  const a = props.recap.auto;
+  const parts = [
+    a?.closed && t("recapCard.autoClosed", a.closed),
+    a?.due && props.recap.date === shiftDay(today(), -1) && t("recapCard.dueToday", a.due),
+  ];
+  return parts.filter(Boolean).join(" · ");
+});
 const when = computed(() =>
   props.recap.date === shiftDay(today(), -1)
     ? t("recapCard.yesterday")
@@ -44,6 +53,7 @@ const when = computed(() =>
         ><template v-else>{{ labelText(h.text, h.participants) }}</template>
       </li>
     </ul>
+    <RouterLink v-if="autoLine" class="auto" to="/todos">{{ autoLine }}</RouterLink>
     <template v-if="todos.length">
       <div class="sub">{{ t("recapCard.mine") }}</div>
       <ul class="todos">
@@ -118,5 +128,11 @@ ul {
   font-size: var(--fs-xs);
   color: var(--muted);
   margin-top: 8px;
+}
+.auto {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  font-size: var(--fs-xs);
 }
 </style>

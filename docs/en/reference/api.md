@@ -269,6 +269,18 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | My todos due today or before, not marked done or wrong, with how stale each is (db.due_todos). | — |
 
+### `/api/todos/auto`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | The todos closed automatically in the last days (db.auto_todos), anyone's: why, and the sentence. | `days?` (query, integer) |
+
+### `/api/todos/{todo_id}/auto`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `DELETE` | The undo of a todo's automatic marks (its group's): open again, not closed again on the same sentence. | `todo_id` (path, string) |
+
 ### `/api/todos/{todo_id}/mark`
 
 | Method | Description | Parameters |

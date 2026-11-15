@@ -239,6 +239,9 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
                 todos[ids.index(pid)].append({**todo, "id": owner[tid][0]})
         for tid, (nid, pid) in owner.items():
             t.execute("UPDATE todo_marks SET id = ?, conv = ? WHERE id = ?", (nid, pid, tid))
+        db.move_todos(t, {tid: nid for tid, (nid, _) in owner.items()})
+        for rowid, at in t.execute("SELECT rowid, at_said FROM todo_auto WHERE src = ?", (cid,)).fetchall():
+            t.execute("UPDATE todo_auto SET src = ? WHERE rowid = ?", (where(at), rowid))  # the quote's part
         starts = {r["id"]: r["start"] for r in rows}  # a star (its id: the sentence's) goes to its sentence's part
         for sid, in t.execute("SELECT id FROM stars WHERE conv = ?", (cid,)).fetchall():
             t.execute("UPDATE stars SET conv = ? WHERE id = ?", (where(starts.get(sid)), sid))
