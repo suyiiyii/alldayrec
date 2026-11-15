@@ -30,7 +30,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { recordingNow } from "../lib/progress";
-import { convWeights, ownerOf, runsOf } from "../lib/scrub";
+import { atTarget, convWeights, ownerOf, runsOf } from "../lib/scrub";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -177,7 +177,7 @@ const stops = computed<Stop[]>(() => {
 const owner = computed(() => ownerOf(convs.value)); // its device's, or one with no device
 const convOf = (r: Row) => owner.value(r);
 const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
-// a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu). A tap
+// a long press on a row: copied or reported; a final row starred; its speaker fixed once its conversation has closed (RowMenu). A tap
 // on its speaker, by the same rule: their sheet (SpeakerSheet), as on the conversation page
 const rowMenu = useTemplateRef("rowMenu");
 const press = (r: Row, x: number, y: number) => rowMenu.value?.open(r, x, y, convOf(r));
@@ -273,6 +273,33 @@ onUnmounted(() => {
   sizer?.disconnect();
 });
 
+// ?at= (我的: a star or report while its conversation went on): the shown row starting at it, the sentence being said
+// too, as soon as it shows; then dropped, so a reconnect does not jump again. A draft's report whose row has since
+// changed: the nearest, once AT_WAIT_MS after the rows came gave the socket's (the sentence being said) time to come
+const AT_WAIT_MS = 3000;
+let atWait = 0,
+  settled = false;
+async function toAt() {
+  const at = route.query.at;
+  if (!ready.value || typeof at !== "string") return;
+  const best = atTarget(
+    timeline.value.flatMap((it) => (it.k === "row" ? [it.r.start] : it.k === "fold" ? [it.rows[0].start] : [])),
+    at,
+    settled,
+  );
+  if (!best) {
+    atWait ||= window.setTimeout(() => {
+      settled = true;
+      void toAt();
+    }, AT_WAIT_MS);
+    return;
+  }
+  clearTimeout(atWait);
+  await nextTick();
+  jump(best);
+  void router.replace({ query: { ...route.query, at: undefined } });
+}
+watch(() => ready.value && route.query.at && timeline.value.length, () => void toAt(), { immediate: true });
 // scrub: from the rail, at once and nothing lit (lighting a row paints the whole day's list again, at every stop)
 function jump(start: string, scrub = false) {
   if (!scrub) hit.value = start;

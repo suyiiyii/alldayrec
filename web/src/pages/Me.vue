@@ -5,7 +5,7 @@ import Avatar from "../components/Avatar.vue";
 import DeviceCard from "../components/DeviceCard.vue";
 import Icon, { type IconName } from "../components/Icon.vue";
 import { lang, setLang, t, type Lang } from "../i18n";
-import { engines, get, hhmm, post, type Due, type Recorder, type Status } from "../lib/api";
+import { engines, get, hhmm, post, type Due, type Recorder, type Row, type Status } from "../lib/api";
 import { inApp } from "../lib/app";
 import { dayLabel } from "../lib/calendar";
 import { useSocket } from "../lib/socket";
@@ -14,8 +14,9 @@ import { loadStars, stars } from "../lib/stars";
 import { open } from "../lib/todos";
 import { toast } from "../lib/toast";
 
-// 我的: each device with audio as a status card (the details on its own page), the starred sentences (a long press on
-// one stars it; each opens its conversation's 原文 there), then the pages that are not a daily read
+// 我的: each device with audio as a status card (the details on its own page), the starred sentences and the
+// reported ones (a long press on a row; each opens its conversation's 原文 there, or the live page at that time while
+// the conversation goes on), then the pages that are not a daily read
 const status = ref<Status | null>(null);
 const due = ref<Due[] | null>(null);
 const load = async () => (status.value = await get<Status>("/api/status"));
@@ -39,6 +40,15 @@ const recorders = computed(() => {
 });
 const allStars = ref(false);
 onMounted(() => void loadStars().catch(() => {}));
+type Report = { id: number; at: string; note: string; start: string; conv: string | null; row: Row };
+const reports = ref<Report[]>([]),
+  allReports = ref(false);
+onMounted(async () => (reports.value = await get<Report[]>("/api/reports").catch(() => [])));
+const there = (conv: string | null | undefined, start: string) =>
+  conv
+    ? { path: `/c/${conv}`, query: { at: start } }
+    : { path: "/live", query: { day: start.slice(0, 10), at: start } };
+const head = (s = "") => [...s].slice(0, 24).join("") + ([...s].length > 24 ? "…" : "");
 
 const LINKS = computed(() => {
   const all: { to: string; icon: IconName; title: string; sub: string }[] = [
@@ -100,7 +110,7 @@ function pick(l: Lang) {
         v-for="s in allStars ? stars : stars.slice(0, STARS)"
         :key="s.id"
         class="star"
-        :to="{ path: `/c/${s.conv}`, query: { at: s.start } }"
+        :to="there(s.conv, s.start)"
       >
         <Avatar :name="s.speaker" />
         <span class="text"
@@ -113,6 +123,27 @@ function pick(l: Lang) {
       </RouterLink>
       <button v-if="stars.length > STARS" class="btn-ghost all" @click="allStars = !allStars">
         {{ allStars ? t("me.starsLess") : t("me.starsAll", { n: stars.length }) }}
+      </button>
+    </section>
+    <section class="card stars reports">
+      <h2><Icon name="alert-circle" :size="18" />{{ t("me.reports") }}</h2>
+      <p v-if="!reports.length" class="muted">{{ t("me.reportsEmpty") }}</p>
+      <RouterLink
+        v-for="r in allReports ? reports : reports.slice(0, STARS)"
+        :key="r.id"
+        class="star"
+        :to="there(r.conv, r.start)"
+      >
+        <span class="text"
+          ><span class="said">{{ r.note }}</span
+          ><span class="muted sub"
+            >{{ dayLabel(r.start.slice(0, 10)) }} {{ hhmm(r.start) }} ·
+            {{ speakerLabel(r.row.speaker) }}：{{ head(r.row.text) }}</span
+          ></span
+        >
+      </RouterLink>
+      <button v-if="reports.length > STARS" class="btn-ghost all" @click="allReports = !allReports">
+        {{ allReports ? t("me.starsLess") : t("me.starsAll", { n: reports.length }) }}
       </button>
     </section>
     <div class="card list">
@@ -227,6 +258,9 @@ a.link {
 .stars h2 .icon {
   color: var(--warn);
   fill: currentColor;
+}
+.reports h2 .icon {
+  fill: none;
 }
 .stars > p {
   margin: 0;

@@ -202,6 +202,20 @@ def terms() -> str:
     return f"# 热词和术语 {len(w)} 个（最近用到的在前）\n" + "、".join(w)
 
 
+def reports(limit: int = 30) -> str:
+    rs = db.reports()
+    n = max(1, min(int(limit), 100))
+    more = f"（只列了最新的 {n} 条，共 {len(rs)} 条）" if len(rs) > n else ""
+    out = [f"# 我上报的问题 {len(rs)} 条，最新的在前{more}"]
+    for r in rs[:n]:
+        w = r["row"]
+        how = "，".join(x for x in (w.get("state"), w.get("source"), w.get("engine")) if x)
+        out.append(f"- {r['at'].replace('T', ' ')} 在{'实时页' if r['page'] == 'live' else '对话页'}上报：{r['note']}\n"
+                   f"  那一句 {r['start'][:10]} {r['start'][11:19]}–{(w.get('end') or '')[11:19]} {w.get('speaker') or 'S?'}（{how}）：{w.get('text') or ''}"
+                   f" `{r['conv'] or ('对话还在进行' if r['going'] else '不在任何对话里')}`")
+    return "\n".join(out)
+
+
 def mark_todo(id: str, text: str, mark: str) -> str:
     """The web page's 完成 / 不对 (db.mark_todos); once is enough."""
     if mark not in ("done", "wrong"):
@@ -245,6 +259,9 @@ TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [
     (person, "一个认出名字的说话人：和我聊过几段、最早最近、最近 12 段里 TA 说了什么、TA 的待办、我答应 TA 的事。问某个人的事先用它，比关键词搜全。",
      {"name": S}, ["name"]),
     (names, "认出名字的说话人，按一起出现的对话段数从多到少。", {}, []),
+    (reports, "我在网页上对某一句点「上报问题」留下的记录，最新的在前：上报时间、我写的问题、那一句当时的样子（时间、说话人、原文、"
+     "draft 初稿或 final 定稿、设备、转写引擎）和所在对话 id（对话还在进行，或这句不在任何对话里时没有）。用来分诊转写、说话人、断句的问题；对话 id 可再用 transcript 看上下文。",
+     {"limit": {"type": "integer", "description": "最多几条，默认 30，最多 100"}}, []),
     (terms, "录音者的热词和术语表（人名、公司、产品、术语），加上认出名字的说话人，最近用到的在前。转写里和其中某个同音、近音的词多半就是它："
      "搜索、grep 时也用这里的写法再找一次。", {}, []),
 ]}

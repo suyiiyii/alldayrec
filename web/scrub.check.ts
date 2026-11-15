@@ -1,6 +1,6 @@
 // node --experimental-strip-types scrub.check.ts: the fast-scroll rail's layout and lookups (src/lib/scrub.ts)
 import assert from "node:assert/strict";
-import { convWeights, layout, ownerOf, runsOf, stopAt, timeWeights } from "./src/lib/scrub.ts";
+import { atTarget, convWeights, layout, ownerOf, runsOf, stopAt, timeWeights } from "./src/lib/scrub.ts";
 
 assert.deepEqual(layout([1, 1, 2]), [0, 0.25, 0.5, 1]);
 assert.deepEqual(layout([0, 0]), [0, 0, 1]); // no weight at all: nothing divides by zero
@@ -79,4 +79,12 @@ assert.deepEqual(
 );
 assert.equal(runs[1].c?.id, "B");
 assert.notEqual(runs[2].key, runs[4].key); // two runs in none, apart: two stops
+// ?at= on the live page, a report on the sentence being said (10:59:01.5) right after a short draft (10:59:00): the
+// rows come first, the sentence being said a moment later on the socket. Not the draft meanwhile, however near
+const at = "2026-11-16T10:59:01.500",
+  rows = ["2026-11-16T10:58:00.000", "2026-11-16T10:59:00.000"];
+assert.equal(atTarget(rows, at, false), null); // wait
+assert.equal(atTarget([...rows, at], at, false), at); // it came: there, at once
+assert.equal(atTarget(rows, at, true), "2026-11-16T10:59:00.000"); // settled without it (a draft since redone): the nearest
+assert.equal(atTarget([], at, true), null);
 console.log("scrub ok");

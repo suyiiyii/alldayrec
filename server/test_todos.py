@@ -133,7 +133,7 @@ def test_redo_keeps_summary_and_marks(tmp_path, monkeypatch):
     a = "2026-10-01T10:01:00.000"
     store(tmp_path, [mine("发文档", today, at=a, quote="我把文档发你"), mine("约会议", today, at="2026-10-01T10:02:00.000", quote="周五开会"),
                      mine("买票", today), mine("没标的", today, at="2026-10-01T10:09:00.000")])
-    db.conn().execute("INSERT INTO stars VALUES (?, ?, ?)", ("sentence", C1, today))
+    db.conn().execute("INSERT INTO stars (id, conv, at) VALUES (?, ?, ?)", ("sentence", C1, today))
     recap = {"date": today, "headline": "before", "todos": []}
     db.put_kv(f"recap:{today}", recap)
     old = db.todo_ids(C1, db.summary(C1)["todos"])
@@ -159,7 +159,7 @@ def test_redo_keeps_summary_and_marks(tmp_path, monkeypatch):
         ("把文档发给他", "done"), ("约个会", "done"), ("买票", "done"), ("新的", None)]
     assert set(old[:3]) == set(db.closed_todos()), "the original mark rows never move or duplicate"
     assert db.todo_ids(C1, db.summary(C1)["todos"])[:3] == old[:3]
-    assert [tuple(x) for x in db.conn().execute("SELECT * FROM stars")] == [("sentence", C1, today)]
+    assert [tuple(x) for x in db.conn().execute("SELECT id, conv, at FROM stars")] == [("sentence", C1, today)]
     assert db.kv(f"recap:{today}") == recap
 
 

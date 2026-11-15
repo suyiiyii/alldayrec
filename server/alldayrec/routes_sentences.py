@@ -1,9 +1,9 @@
-"""One sentence of a closed conversation, as a long press on its row offers: starred (收藏, the list on the 我的 page),
-or its speaker fixed alone, which the answer's undo takes back like a rename (POST /api/speakers/undo)."""
+"""One sentence, as a long press on its row offers: starred (收藏, the list on the 我的 page; a final row), reported
+(上报问题; any row), or, in a closed conversation, its speaker fixed alone, which the answer's undo takes back like a
+rename (POST /api/speakers/undo)."""
 import datetime as dt
 import json
 import re
-
 from fastapi import APIRouter, HTTPException
 
 from alldayrec import bank
@@ -34,18 +34,24 @@ def sentence(sid: str, conv_id: str | None) -> tuple[dict, dict]:
 @router.get("/api/stars")
 async def stars():
     """The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start
-    and title. ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list."""
+    and title (none while it goes on). ponytail: a star whose row a replay re-cut (another start, another id) drops out
+    of the list."""
     return [dict(r) for r in db.conn().execute(
-        "SELECT s.id, s.conv, s.at, x.start, x.end, x.speaker, x.text, c.start AS conv_start, json_extract(m.body, '$.title') AS title"
-        " FROM stars s JOIN conversations c ON c.id = s.conv"
-        " JOIN sentences x ON x.id = s.id AND x.start >= c.start AND x.start <= c.end AND (c.device IS NULL OR x.source = c.device)"
-        " LEFT JOIN summaries m ON m.conversation = s.conv ORDER BY s.at DESC")]
+        # MATERIALIZED: conv_at once a star (inlined, each use of s.conv would run it again); conv: an old star's
+        f"WITH s AS MATERIALIZED (SELECT id, at, device, COALESCE(conv, {db.conv_at('stars')}) AS conv FROM stars)"
+        " SELECT s.id, s.conv, s.at, s.device, x.start, x.end, x.speaker, x.text, c.start AS conv_start, json_extract(m.body, '$.title') AS title"
+        " FROM s JOIN sentences x ON x.id = s.id AND x.source IS s.device"
+        " LEFT JOIN conversations c ON c.id = s.conv LEFT JOIN summaries m ON m.conversation = s.conv ORDER BY s.at DESC")]
 
 
 @router.put("/api/sentences/{sid}/star")
 async def star(sid: str, body: dict):
-    c, _ = sentence(sid, body.get("conv"))
-    db.conn().execute("INSERT OR IGNORE INTO stars VALUES (?, ?, ?)", (sid, c["id"], dt.datetime.now().isoformat(timespec="seconds")))
+    """A final row of `device`, its conversation closed or still going on."""
+    r = db.conn().execute("SELECT source, start FROM sentences WHERE id = ? AND source IS ?", (sid, body.get("device"))).fetchone()
+    if not r:
+        raise HTTPException(404, "no such sentence")
+    db.conn().execute("INSERT OR IGNORE INTO stars (id, at, device, start) VALUES (?, ?, ?, ?)",
+                      (sid, dt.datetime.now().isoformat(timespec="seconds"), r["source"], r["start"]))
     return {"starred": True}
 
 
@@ -53,6 +59,28 @@ async def star(sid: str, body: dict):
 async def unstar(sid: str):
     db.conn().execute("DELETE FROM stars WHERE id = ?", (sid,))
     return {"starred": False}
+
+
+@router.post("/api/sentences/{sid}/report")
+async def report(sid: str, body: dict):
+    """上报问题 on a row as the page showed it (a draft or the sentence being said too: the row is the client's), with the
+    owner's note. Its conversation is found as it is read (db.conv_at), never the page's: a split may have just cut that
+    one in two."""
+    note, page, snap = body.get("note"), body.get("page"), db.snapshot(body.get("row"))
+    if not (isinstance(note, str) and 0 < len(note := note.strip()) <= 2000 and page in ("live", "conversation") and len(sid) <= 80 and snap):
+        raise HTTPException(400, "bad report")
+    with db.tx(durable=True) as t:
+        rid = t.execute("INSERT INTO reports (at, note, page, sentence, device, start, row) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (dt.datetime.now().isoformat(timespec="seconds"), note, page, sid, snap.get("source"), snap["start"],
+                         json.dumps(snap, ensure_ascii=False))).lastrowid
+    return {"id": rid}
+
+
+@router.get("/api/reports")
+async def reports():
+    """Every 上报问题, the newest first: the note, the page, the row as it read then (row), the closed conversation that
+    holds its start (none: it goes on, then going, or its words made none)."""
+    return db.reports()
 
 
 @router.post("/api/sentences/{sid}/speaker")

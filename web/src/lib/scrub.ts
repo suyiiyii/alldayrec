@@ -94,3 +94,11 @@ export function runsOf<R extends { start: string; source?: string }, C extends {
     else if (it.k === "fold" && it.rows) for (const r of it.rows) add(r, it.rows[0].start);
   return runs;
 }
+
+/** Where a page's ?at= lands among the shown rows' starts (the live page's: the sentence being said among them): the
+ * row starting at it; none such, once `settled` (what was coming has come), the nearest; else null: wait. */
+export function atTarget(starts: string[], at: string, settled: boolean) {
+  const d = (s: string) => Math.abs(Date.parse(s) - Date.parse(at));
+  const best = starts.reduce<string | null>((a, s) => (a === null || d(s) < d(a) ? s : a), null);
+  return best !== null && (d(best) === 0 || settled) ? best : null;
+}

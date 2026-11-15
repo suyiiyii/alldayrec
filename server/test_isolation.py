@@ -69,6 +69,8 @@ def seed(t: tenant.Tenant):
             c.execute("INSERT INTO people VALUES (?, 1, ?)", (f"{mark}人", db.blob(VEC)))
             c.execute("INSERT INTO aliases VALUES (?, ?)", (f"{mark}哥", f"{mark}人"))
             c.execute("INSERT INTO terms VALUES (?, ?)", (f"{mark}词", AT))
+            c.execute("INSERT INTO reports (at, note, page, sentence, device, start, row) VALUES (?, ?, 'live', 'f1', ?, ?, '{}')",
+                      (AT, f"{mark} 上报", DEV, AT))
             db.put_name_hints({"conv": CID, "names": [{"who": "S1", "name": f"{mark}人", "kind": "self", "at": AT, "by": "S1", "quote": mark}]}, c)
             db.put_kv(f"recap:{TODAY}", {"date": TODAY, "headline": mark, "todos": [], "highlights": [], "people": []}, c)
         db.put_profile({"name": f"{mark}人", "facts": [{"text": mark, "src": []}]})
@@ -173,7 +175,10 @@ REQUESTS = {
     ("POST", "/api/voice-check"): ("POST", "/api/voice-check", dict(json={"answer": "later"})),
     ("GET", "/api/audio"): ("GET", "/api/audio", dict(params={"start": AT, "end": f"{TODAY}T10:00:06.000", "device": DEV})),
     ("GET", "/api/listen"): ("GET", "/api/listen", dict(params={"device": DEV})),
-    ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"conv": CID})),
+    ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"device": DEV})),
+    ("POST", "/api/sentences/{sid}/report"): ("POST", "/api/sentences/f1/report",
+                                              dict(json={"note": "MARKa 上报", "page": "live", "row": {"start": AT, "source": DEV}})),
+    ("GET", "/api/reports"): ("GET", "/api/reports", {}),
     ("GET", "/api/stars"): ("GET", "/api/stars", {}),
     ("DELETE", "/api/sentences/{sid}/star"): ("DELETE", "/api/sentences/f1/star", {}),
     ("POST", "/api/sentences/{sid}/speaker"): ("POST", "/api/sentences/f1/speaker", dict(json={"conv": CID, "to": "我"})),

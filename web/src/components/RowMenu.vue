@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useTemplateRef } from "vue";
+import { useRoute } from "vue-router";
 import { t } from "../i18n";
 import { get, hhmm, hhmmss, post, type Row } from "../lib/api";
 import { anonymous, speakerLabel } from "../lib/speakers";
@@ -8,18 +9,20 @@ import { toast } from "../lib/toast";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
-// What a long press (or a right click) on a sentence offers, one per page (open(row, x, y, conv)): 复制, 收藏 and
-// 纠正说话人, this sentence alone (POST /api/sentences/{id}/speaker; 撤销 for 10 s). A phone and the app get a sheet
-// from the bottom, a mouse a small menu at the pointer: one modal <dialog> either way, so Escape and a tap outside
-// close it. Only a final row of a closed conversation (conv) can be starred or fixed: a draft, the sentence being said
-// and an open conversation's rows (all relabelled when it closes) are only copied. changed: a speaker was fixed or
-// put back, the page reloads what shows it
+// What a long press (or a right click) on a sentence offers, one per page (open(row, x, y, conv)): 复制, 收藏,
+// 纠正说话人, this sentence alone (POST /api/sentences/{id}/speaker; 撤销 for 10 s), and 上报问题 with a note (POST
+// /api/sentences/{id}/report). A phone and the app get a sheet from the bottom, a mouse a small menu at the pointer:
+// one modal <dialog> either way, so Escape and a tap outside close it. Every row can be reported; a final row can be
+// starred, its conversation going on too; only a final row of a closed conversation (conv) can be fixed: an open
+// one's rows are all relabelled when it closes. A draft and the sentence being said are copied or reported only.
+// changed: a speaker was fixed or put back, the page reloads what shows it
 const emit = defineEmits<{ changed: [] }>();
 type Conv = { id: string; participants: string[] };
+const route = useRoute();
 const dlg = useTemplateRef<HTMLDialogElement>("dlg");
 const row = ref<Row | null>(null),
-  conv = ref<Conv | null>(null),
-  fixing = ref(false),
+  conv = ref<Conv | null>(null), // the closed conversation the row is in
+  mode = ref<"menu" | "fix" | "report">("menu"),
   sheet = ref(true),
   at = ref({ left: "0px", top: "0px" });
 let x0 = 0,
@@ -27,8 +30,8 @@ let x0 = 0,
 
 function open(r: Row, x: number, y: number, c?: Conv | null) {
   row.value = r;
-  conv.value = r.state === "final" ? (c ?? null) : null;
-  fixing.value = false;
+  conv.value = c ?? null;
+  mode.value = "menu";
   sheet.value =
     matchMedia("(max-width: 600px)").matches ||
     document.documentElement.classList.contains("in-app");
@@ -84,11 +87,10 @@ async function copy() {
 
 async function star() {
   const r = row.value!,
-    c = conv.value!,
     on = !starred.value.has(r.id);
   close();
   try {
-    await setStar(r.id, c.id, on);
+    await setStar(r.id, r.source, on);
     toast(t(on ? "rowMenu.starred" : "rowMenu.unstarred"));
   } catch (e) {
     toast((e as Error).message);
@@ -107,7 +109,7 @@ const choices = computed(() => {
   ].filter((p) => p !== row.value?.speaker);
 });
 async function toFix() {
-  fixing.value = true;
+  mode.value = "fix";
   name.value = "";
   void place();
   names.value = await get<string[]>("/api/names").catch(() => []);
@@ -133,6 +135,36 @@ async function fix(to: string) {
     });
   } catch (e) {
     toast((e as Error).message);
+  }
+}
+// 上报问题: what is wrong with this row, kept with the row as it reads now (a draft may be gone by the time it is looked at)
+const note = ref(""),
+  sending = ref(false),
+  box = useTemplateRef<HTMLTextAreaElement>("box");
+async function toReport() {
+  mode.value = "report";
+  note.value = "";
+  await place();
+  await nextTick();
+  box.value?.focus();
+}
+async function report() {
+  const r = row.value!,
+    text = note.value.trim();
+  if (!text || sending.value) return;
+  sending.value = true;
+  try {
+    await post(`/api/sentences/${encodeURIComponent(r.id)}/report`, {
+      note: text,
+      page: route.path.startsWith("/c/") ? "conversation" : "live", // its conversation: the server's
+      row: r,
+    });
+    close();
+    toast(t("rowMenu.reported"));
+  } catch (e) {
+    toast((e as Error).message); // the form stays open with the note
+  } finally {
+    sending.value = false;
   }
 }
 async function undo(r: Row, id: string, from: string, music?: number) {
@@ -162,19 +194,38 @@ async function undo(r: Row, id: string, from: string, music?: number) {
         <span class="meta">{{ hhmmss(row.start) }} · {{ speakerLabel(row.speaker) }}</span>
         <span class="quote">{{ head }}{{ more ? "…" : "" }}</span>
       </div>
-      <template v-if="!fixing">
+      <template v-if="mode === 'menu'">
         <button class="item" @click="copy"><Icon name="copy" />{{ t("rowMenu.copy") }}</button>
-        <template v-if="conv">
+        <template v-if="row.state === 'final'">
           <button class="item" @click="star">
             <Icon name="star" :class="{ on: starred.has(row.id) }" />{{
               starred.has(row.id) ? t("rowMenu.unstar") : t("rowMenu.star")
             }}
           </button>
-          <button class="item" @click="toFix">
+          <button v-if="conv" class="item" @click="toFix">
             <Icon name="user-pen" />{{ t("rowMenu.fix") }}
           </button>
         </template>
+        <button class="item" @click="toReport">
+          <Icon name="alert-circle" />{{ t("rowMenu.report") }}
+        </button>
       </template>
+      <form v-else-if="mode === 'report'" class="report" @submit.prevent="report">
+        <textarea
+          ref="box"
+          v-model="note"
+          rows="3"
+          maxlength="2000"
+          :aria-label="t('rowMenu.reportWhat')"
+          :placeholder="t('rowMenu.reportWhat')"
+        ></textarea>
+        <div class="acts">
+          <button type="button" class="btn-ghost" @click="close">{{ t("rowMenu.cancel") }}</button>
+          <button class="btn-primary" :disabled="!note.trim() || sending">
+            {{ t("rowMenu.reportSend") }}
+          </button>
+        </div>
+      </form>
       <form v-else class="fix" @submit.prevent="fix(name.trim())">
         <p class="who">{{ t("rowMenu.fixWho") }}</p>
         <button v-for="p in choices" :key="p" type="button" class="item" @click="fix(p)">
@@ -335,6 +386,37 @@ async function undo(r: Row, id: string, from: string, music?: number) {
 }
 .pop .new input,
 .pop .new .btn-primary {
+  min-height: 36px;
+}
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+}
+.report textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  resize: vertical;
+}
+.report textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.acts button {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+}
+.pop .report {
+  padding: var(--space-2) var(--space-3);
+}
+.pop .acts button {
   min-height: 36px;
 }
 /* 复制's textarea over plain http: in the dialog, out of sight */
