@@ -67,7 +67,8 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `walls` | Where long conversations were split (one row per device and time): late audio never merges the two sides back (since v0.5.0) |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
-| `stars` | Starred sentences: the sentence id, its conversation, when it was starred (since v0.3.0) |
+| `stars` | Starred sentences: the sentence id, device and start, its conversation (only stars from before this change have one; the rest are looked up when read, as for reports), when it was starred (since v0.3.0) |
+| `reports` | 「上报问题」 (Report a problem): the note, when it was reported, the page (live or conversation), the sentence id, device and start, (its conversation is not stored: it is looked up when read, as the closed conversation on that device whose span holds the start; none means the conversation is still going on, or the row is in no conversation), and the row as it read then (text, speaker, start and end, draft or final, device, ASR engine) |
 | `mcp_links` | AI connection links: the name, the secret's SHA-256 hash and first 8 characters, when it was created and last used; never the secret itself (since v0.4.0) |
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |

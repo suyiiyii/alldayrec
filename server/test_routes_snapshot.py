@@ -108,6 +108,8 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("GET", "/api/stars", "stars"),
     ("PUT", "/api/sentences/{sid}/star", "star"),
     ("DELETE", "/api/sentences/{sid}/star", "unstar"),
+    ("POST", "/api/sentences/{sid}/report", "report"),
+    ("GET", "/api/reports", "reports"),
     ("POST", "/api/sentences/{sid}/speaker", "sentence_speaker"),
     ("WS", "/ws", "ws_endpoint"),
 ]

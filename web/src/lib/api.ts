@@ -12,6 +12,7 @@ export interface Row {
   dictation?: string;
   music?: number; // 1: the server heard music here (a song played aloud): no voiceprint, speaker S?
   source?: string; // the device that recorded it
+  engine?: string; // the ASR that heard it
 }
 
 export interface Span {

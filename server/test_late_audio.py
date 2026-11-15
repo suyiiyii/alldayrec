@@ -263,7 +263,7 @@ def test_bridge_moves_every_reference_and_alias_api(store):
         db.put_timeline(B, {"conversation": B, "speaker": "S1", "messages": []}, t)
         db.put_name_hints({"conv": B, "names": [{"who": "S1", "by": "S2", "name": "test"}]}, t)
         t.execute("INSERT INTO feedback VALUES (?,?,?)", (B, "now", "keep feedback"))
-        t.execute("INSERT INTO stars VALUES (?,?,?)", ("f600", B, "now"))
+        t.execute("INSERT INTO stars (id, conv, at) VALUES (?,?,?)", ("f600", B, "now"))
         t.execute("INSERT INTO enrolled VALUES (?,?,?,1,?)", ("Named", B, 2, db.blob(E1)))
         t.execute("INSERT INTO apart VALUES (?,?)", (B+"|S1", B+"|S2"))
         db.put_profile({"name": "Named", "facts": [{"text": "fact", "src": [{"conv": B}]}]})

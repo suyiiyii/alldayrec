@@ -76,7 +76,7 @@ def long_conv(store, monkeypatch):
                              {"conv": A, "label": "S2", "device": "live", "e": E2, "k": 1},
                              {"conv": A, "label": "我", "device": "live", "e": E3, "k": 1}])
         t.execute("INSERT INTO apart VALUES (?, ?)", (A + "|S2", "Named"))
-        t.executemany("INSERT INTO stars VALUES (?, ?, ?)", [("r30", A, "now"), ("r630", A, "now")])
+        t.executemany("INSERT INTO stars (id, conv, at) VALUES (?, ?, ?)", [("r30", A, "now"), ("r630", A, "now")])
         db.put_timeline(A, {"conversation": A, "messages": []}, t)
     tids = db.todo_ids(A, db.summary(A)["todos"])
     db.mark_todos(tids, "done")

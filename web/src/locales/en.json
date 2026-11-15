@@ -442,9 +442,11 @@
     "version": "server version {commit}",
     "engine": "speech engine {engine}",
     "stars": "Starred",
-    "starsEmpty": "Press and hold a sentence to copy it, star it or fix who said it",
+    "starsEmpty": "Press and hold a sentence to copy it, star it, report a problem or fix who said it",
     "starsAll": "All {n}",
     "starsLess": "Show less",
+    "reports": "Reported problems",
+    "reportsEmpty": "Press and hold a sentence, then Report a problem",
     "older": "Earlier devices ({n})",
     "terms": "Terms",
     "termsSub": "Names, companies, products and jargon, spelled right in transcripts and summaries"
@@ -1103,7 +1105,12 @@
     "save": "OK",
     "fixed": "This sentence is now {to}",
     "fixedLearn": "This sentence is now {to}; learning their voice from it",
-    "fixedBack": "Changed back to {to}"
+    "fixedBack": "Changed back to {to}",
+    "report": "Report a problem",
+    "reportWhat": "What's wrong here?",
+    "reportSend": "Send",
+    "cancel": "Cancel",
+    "reported": "Reported"
   },
   "terms": {
     "intro": "Put the names, companies, products and jargon you use here: speech recognition listens for them, and summaries and answers fix words that sound like them.",

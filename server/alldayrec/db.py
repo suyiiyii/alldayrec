@@ -5,6 +5,7 @@ work runs in threads, shared by the tenants), WAL so reads never wait for a writ
 import datetime as dt
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -111,7 +112,12 @@ CREATE TABLE IF NOT EXISTS todo_auto (        -- what todo_auto.py found about a
 CREATE INDEX IF NOT EXISTS todo_auto_todo ON todo_auto(todo);
 CREATE TABLE IF NOT EXISTS todo_same (       -- duplicates (todo_auto.py): each todo of a group to its first one; by: the
     id TEXT PRIMARY KEY, head TEXT NOT NULL, model TEXT, at TEXT NOT NULL);  -- model that said so, at: when
-CREATE TABLE IF NOT EXISTS stars (id TEXT PRIMARY KEY, conv TEXT NOT NULL, at TEXT NOT NULL);  -- 收藏: a sentence (its id in conv's device's rows), when
+CREATE TABLE IF NOT EXISTS stars (id TEXT PRIMARY KEY, conv TEXT, at TEXT NOT NULL,  -- 收藏: a final sentence (id, device, start), when;
+    device TEXT, start TEXT);                       -- conv: stars from before 11-16 only (the rest: db.conv_at, as read)
+CREATE TABLE IF NOT EXISTS reports (              -- 上报问题 on one row, any state: the owner's note, the row as it read (row: JSON
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- text speaker start end state device engine), the page (live or
+    note TEXT NOT NULL, page TEXT NOT NULL,         -- conversation); its conversation: db.conv_at, as read
+    sentence TEXT NOT NULL, device TEXT, start TEXT NOT NULL, row TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);  -- per device: finalized_to:<d>, draft_to:<d>, open_conversation:<d>, end_at:<d>, live:<d>
 CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as its phone uploads it. src 'rec': the recorder's
     device TEXT NOT NULL, src TEXT NOT NULL,  -- own event log (firmware lr_log.h), seq that log's, data its record (boot t
@@ -153,6 +159,7 @@ CREATE TABLE IF NOT EXISTS perf_pieces (      -- a device's final pieces and dra
 CREATE INDEX IF NOT EXISTS perf_pieces_at ON perf_pieces(at);
 """
 
+log = logging.getLogger(__name__)
 _local = threading.local()  # .c: this thread's connection per file
 
 
@@ -170,6 +177,9 @@ def init():
     tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
     marks_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_marks'").fetchone() is None
     enrolled_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'enrolled'").fetchone() is None
+    old_stars = conn().execute("SELECT \"notnull\" FROM pragma_table_info('stars') WHERE name = 'conv'").fetchone()
+    if old_stars and old_stars[0]:  # 11-16: a star had to name a closed conversation; now its sentence's device and start
+        conn().execute("ALTER TABLE stars RENAME TO stars_old")
     conn().executescript(SCHEMA)
     # 11-16: a summary's done_hints (prompt v15-v17) become hint rows, the summaries keep theirs. Each start, only the
     # ones not there yet (undone ones are there): a start cut off halfway, or a store put back, is caught up the next time.
@@ -186,6 +196,12 @@ def init():
                 c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, ?, ?, ?, ?, NULL)",
                           (tid, tid.split(":", 1)[0], cid, r and r[0], h.get("at"), r and r[1], h.get("quote"),
                            s.get("model"), s.get("created_at") or dt.datetime.now().isoformat(timespec="seconds")))
+    if conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'stars_old'").fetchone():
+        with tx() as c:
+            c.execute("INSERT OR IGNORE INTO stars SELECT s.id, s.conv, s.at, x.source, x.start FROM stars_old s"
+                      " LEFT JOIN conversations k ON k.id = s.conv LEFT JOIN sentences x ON x.id = s.id"
+                      " AND x.start >= k.start AND x.start <= k.end AND (k.device IS NULL OR x.source = k.device)")
+            c.execute("DROP TABLE stars_old")
     if enrolled_new:  # 10-25: the people bank was a running mean; what it learnt before stays, as one row each
         conn().execute("INSERT INTO enrolled SELECT name, NULL, NULL, n, e FROM people")
     if marks_new:  # 10-24: marks were feedback lines (TODO_MARKS) keyed by the todo's text; the lines stay, the log for the prompt
@@ -276,6 +292,62 @@ def vec(b: bytes | None) -> np.ndarray | None:
 
 def blob(e) -> bytes:
     return np.asarray(e, np.float32).tobytes()
+
+
+# stars and reports
+
+def conv_at(table: str) -> str:
+    """SQL for the closed conversation of a star's or a report's device whose span holds its start, as it is read: a
+    split or a merge moves it with nothing to rewrite, a read writes nothing. Two parts that touch both hold the cut:
+    the later one has it (a split's later part starts on that row). NULL: no closed one of that device holds it (its
+    conversation goes on, or its words made none: a pause a split cut at, too few to keep, a stop and a start again).
+    One indexed lookup per row (conversations_start)."""
+    return (f"(SELECT c.id FROM conversations c WHERE c.start <= {table}.start AND c.end >= {table}.start"
+            f" AND c.device = {table}.device ORDER BY c.start DESC LIMIT 1)")
+
+
+SNAPSHOT = (("text", 2000), ("speaker", 40), ("start", 26), ("end", 26), ("state", 10), ("source", 80), ("engine", 40))  # the longest
+AT = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?")  # a row's start or end as a page sends it
+
+
+def at_ms(s) -> str | None:
+    """A row's start or end as conversations hold it (to the ms), None: not a time (no month 13, no 30 February)."""
+    try:
+        return dt.datetime.fromisoformat(s).isoformat(timespec="milliseconds") if isinstance(s, str) and AT.fullmatch(s) else None
+    except ValueError:
+        return None
+
+
+def snapshot(row) -> dict | None:
+    """A report's row (as the page sent it, or as it was kept) with its fields of SNAPSHOT, strings no longer than
+    those, start (required) and end to the ms; None: it is not one."""
+    if not (isinstance(row, dict) and all(row.get(k) is None or isinstance(row[k], str) and len(row[k]) <= n for k, n in SNAPSHOT)):
+        return None
+    snap = {k: row[k] for k, _ in SNAPSHOT if row.get(k)}
+    for k in ("start", "end"):
+        if k in snap:
+            snap[k] = at_ms(snap[k])
+    return snap if snap.get("start") and snap.get("end", "") is not None else None
+
+
+def reports() -> list[dict]:
+    """Every report, the newest first (上报问题: GET /api/reports, MCP's reports). going: in no conversation yet, its
+    device's open one started at or before it. A row that does not read (written by other code, a bad snapshot) is
+    left out, logged: the others still read."""
+    out = []
+    for r in conn().execute(f"SELECT id, at, note, page, sentence, device, start, {conv_at('reports')} AS conv, row FROM reports"
+                            " ORDER BY at DESC, id DESC"):
+        try:
+            row, start = snapshot(json.loads(r["row"])), at_ms(r["start"])
+            if not (row and start and isinstance(r["at"], str) and isinstance(r["note"], str)):
+                raise ValueError("not a report")
+            o = not r["conv"] and kv(f"open_conversation:{r['device']}")
+            going = bool(o) and dt.datetime.fromisoformat(o["start"]) <= dt.datetime.fromisoformat(start)
+        except (TypeError, ValueError, KeyError) as e:
+            log.warning("report %s left out: %r", r["id"], e)
+            continue
+        out.append({**dict(r), "row": row, "going": going})
+    return out
 
 
 # sentences

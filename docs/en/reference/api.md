@@ -464,14 +464,26 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start and title. ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list. | — |
+| `GET` | The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start and title (none while it goes on). ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list. | — |
 
 ### `/api/sentences/{sid}/star`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `PUT` | (no docstring) | `sid` (path, string)<br>body: JSON object |
+| `PUT` | A final row of `device`, its conversation closed or still going on. | `sid` (path, string)<br>body: JSON object |
 | `DELETE` | (no docstring) | `sid` (path, string) |
+
+### `/api/sentences/{sid}/report`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | 上报问题 on a row as the page showed it (a draft or the sentence being said too: the row is the client's), with the owner's note. | `sid` (path, string)<br>body: JSON object |
+
+### `/api/reports`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | Every 上报问题, the newest first: the note, the page, the row as it read then (row), the closed conversation that holds its start (none: it goes on, then going, or its words made none). | — |
 
 ### `/api/sentences/{sid}/speaker`
 
