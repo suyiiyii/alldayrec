@@ -172,14 +172,15 @@ def init():
     enrolled_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'enrolled'").fetchone() is None
     conn().executescript(SCHEMA)
     # 11-16: a summary's done_hints (prompt v15-v17) become hint rows, the summaries keep theirs. Each start, only the
-    # ones not there yet (undone ones are there): a start cut off halfway, or a store put back, is caught up the next time
+    # ones not there yet (undone ones are there): a start cut off halfway, or a store put back, is caught up the next time.
+    # There by the todo and the sentence's start, wherever it is now: a split moves the row's src, the summary's stays
     with tx() as c:
         for cid, device, body in c.execute("SELECT c.id, c.device, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
                                            " WHERE s.status = 'done' AND json_array_length(s.body, '$.done_hints') > 0").fetchall():
             s = json.loads(body)
             for h in s["done_hints"]:
                 tid = resolve_todo(h["id"])
-                if c.execute("SELECT 1 FROM todo_auto WHERE todo = ? AND kind = 'hint' AND src = ? AND at_said IS ?", (tid, cid, h.get("at"))).fetchone():
+                if c.execute("SELECT 1 FROM todo_auto WHERE todo = ? AND kind = 'hint' AND at_said IS ?", (tid, h.get("at"))).fetchone():
                     continue
                 r = c.execute("SELECT id, speaker FROM sentences WHERE start = ? AND (? IS NULL OR source = ?)", (h.get("at"), device, device)).fetchone()
                 c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, ?, ?, ?, ?, NULL)",

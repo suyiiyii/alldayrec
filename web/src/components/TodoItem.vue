@@ -38,7 +38,7 @@ const when = computed(() =>
 const to = computed(
   () => `/c/${t.conv}` + (t.at ? "?" + new URLSearchParams({ tab: "transcript", at: t.at }) : ""),
 );
-const hint = computed(() => (t.done_hint && !t.mark && !autoUndone(t.done_hint) ? t.done_hint : null));
+const hint = computed(() => (t.done_hint && !t.mark && !autoUndone(t.id, t.done_hint) ? t.done_hint : null));
 const { busy, run } = useMutation();
 const dismiss = () =>
   run(async () => {

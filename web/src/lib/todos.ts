@@ -19,14 +19,15 @@ export async function setMarks(ids: string[], mark: Mark | null) {
   for (const id of ids) marks[id] = mark;
 }
 
-// the undo of a todo's automatic marks (server db.undo_auto): it is open again. The marks undone here, by the
-// evidence (a later one, on a newer sentence, shows again), for the lists until they load again
-const markKey = (a: AutoMark) => [a.kind, a.conv, a.sentence ?? a.at, a.judged_at].join("|");
+// the undo of a todo's automatic marks (server db.undo_auto): it is open again. The marks undone here, by the todo
+// and the evidence (another todo on the same sentence stays; a later mark, on a newer sentence, shows again), for the
+// lists until they load again
+const markKey = (id: string, a: AutoMark) => [id, a.kind, a.conv, a.sentence ?? a.at, a.judged_at].join("|");
 const undone = reactive(new Set<string>());
-export const autoUndone = (a?: AutoMark | null) => !!a && undone.has(markKey(a));
+export const autoUndone = (id?: string, a?: AutoMark | null) => !!id && !!a && undone.has(markKey(id, a));
 export async function undoAuto(id: string, a: AutoMark) {
   await post(`/api/todos/${encodeURIComponent(id)}/auto`, undefined, "DELETE");
-  undone.add(markKey(a));
+  undone.add(markKey(id, a));
 }
 
 // marked, and a toast saying so with 撤销

@@ -272,11 +272,54 @@ def test_put_off_due_counts(store, monkeypatch):
     assert [(t["text"], t["due_date"], len(t["sources"])) for t in db.due_todos("2026-11-21")] == [("给老王发报告", "2026-11-20", 2)]
 
 
-@pytest.mark.parametrize("said,kind", [("报告应该已经发了吧，我也不确定", "hint"), ("报告发了吗？", "hint"), ("报告还没发", "hint"),
-                                       ("报告昨天发给老王了", "done")])
-def test_hedged_quote_only_hints(said, kind):
-    """A done the model gives on a sentence that hedges, asks, denies or plans is only a hint."""
+@pytest.mark.parametrize("said,kind,want", [("报告还没发", "hint", "hint"), ("I will send the report tomorrow", "seen", "seen"),
+                                            ("报告昨天发给老王了", "done", "done"), ("报告应该已经发了吧", "done", "done"),
+                                            ("报告并未发出", "done", "done"), ("快递到了", "done", "hint")])
+def test_tone_is_the_models(said, kind, want):
+    """The tone of a sentence is the model's call (no word list): its hint or seen stays, its done stays done, a denial
+    too (the prompt's counter-examples, measured on the test instance); only a sentence with nothing of the task hints."""
     rows = [dict(id="r0", start="2026-11-03T10:00:00.000", speaker="我", text=said)]
-    cands = [({"id": A}, "t1", {"owner": "我", "text": "发报告", "to": "老王"})]
-    found, _ = todo_auto.judged({"id": B}, rows, cands, [], {"todos": [{"n": 1, "kind": "done", "s": "s1", "reason": "r"}]}, "m")
-    assert [x["kind"] for x in found] == [kind]
+    cands = [({"id": A}, "t1", {"owner": "我", "text": "发报告 report", "to": "老王"})]
+    found, _ = todo_auto.judged({"id": B}, rows, cands, [], {"todos": [{"n": 1, "kind": kind, "s": "s1", "reason": "r"}]}, "m")
+    assert [x["kind"] for x in found] == [want]
+
+
+def test_overlapping_groups_checked_whole(store, monkeypatch):
+    """Two groups of one reply that share a todo: each merge checks the whole group it makes, so 买咖啡 and 看合同 never
+    end up one through 咖啡和合同; and a recipient alone is no word in common."""
+    with db.tx() as t:
+        s = db.summary(B)
+        s["todos"] = [todo("咖啡和合同", "10:00:30"), todo("买咖啡", "10:00:31", to="客户甲"), todo("审核合同", "10:00:32", to="客户甲")]
+        db.put_summary(s, t)
+    # numbers: 1-4 A's open todos (发报告 → 老王, 看合同, 改代码, 买咖啡), 5-7 B's
+    reply(monkeypatch, {"todos": [], "same": [[4, 5], [5, 2], [6, 7]]})
+    run(B)
+    same = db.same_todos()
+    assert same == {db.todo_ids(B, db.summary(B)["todos"])[0]: store["coffee"]}, "买咖啡 + 咖啡和合同 only"
+    assert not todo_auto.same_ok({store["coffee"], store["contract"]})
+
+
+def test_split_and_fallback_keep_undo(tmp_path, monkeypatch):
+    """An old done hint carried over and undone stays undone after a split moved its row (src) and the summary of the
+    split failed, the old one (its done_hints) put back: the next start does not carry it over again."""
+    from alldayrec import split
+    db.open_db(tmp_path / "t.db")
+    c = conv(A)
+    said = [dict(id=f"r{n}", source="mic", start=f"2026-11-01T{x}.000", end=f"2026-11-01T{x}.900", speaker="我", text="公开合成示例")
+            for n, x in enumerate(["10:00:00", "10:10:00"])]
+    ts = [todo("发报告", "10:00:00")]
+    tid = db.todo_ids(A, ts)[0]
+    with db.tx() as t:
+        db.insert_conversation(t, c)
+        db.insert_sentences(t, said)
+        db.put_summary({"conversation": A, "status": "done", "prompt_version": 17, "todos": ts,
+                        "done_hints": [{"id": tid, "quote": "报告发了", "at": said[1]["start"]}]}, t)
+    old = db.summary(A)
+    db.init()
+    db.undo_auto(tid)
+    split.apply(db.conversation(A), [said[1]["start"]], None)
+    assert db.conn().execute("SELECT src FROM todo_auto").fetchone()[0] != A, "the row moved with its sentence"
+    with db.tx() as t:
+        db.put_summary(old, t)  # what the worker's fallback does when the summary fails
+    db.init()
+    assert db.conn().execute("SELECT count(*) FROM todo_auto").fetchone()[0] == 1 and not db.done_hints()

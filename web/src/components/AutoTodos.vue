@@ -16,7 +16,7 @@ const props = defineProps<{ items: TodoView[] }>();
 const emit = defineEmits<{ changed: [] }>();
 const { busy, run } = useMutation();
 const KINDS = ["done", "dropped", "stale"] as const;
-const shown = computed(() => props.items.filter((x) => x.auto && !autoUndone(x.auto)));
+const shown = computed(() => props.items.filter((x) => x.auto && !autoUndone(x.id, x.auto)));
 const groups = computed(() =>
   KINDS.map((k) => ({ k, items: shown.value.filter((x) => x.auto!.kind === k) })).filter(
     (g) => g.items.length,
