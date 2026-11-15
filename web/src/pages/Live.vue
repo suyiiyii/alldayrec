@@ -30,7 +30,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { recordingNow } from "../lib/progress";
-import { convWeights, ownerOf } from "../lib/scrub";
+import { convWeights, ownerOf, runsOf } from "../lib/scrub";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -144,37 +144,26 @@ const timeline = computed(() => {
   flush();
   return res;
 });
-// the fast-scroll rail: one stop per conversation, in the list's order: each row by the closed conversation it is in
-// (convOf), the one going on (open: not among convs) from where its device's started; a run of rows in none of them
-// (the gap between two, some words never made a conversation) is a stop of its own, said so, not the next
-// conversation's start. Quiet time takes no rail
+// the fast-scroll rail: one stop per conversation (runsOf): each row by the closed conversation it is in (convOf), the
+// one going on (open: not among convs) from where its device's started; a run of rows in none of them (the gap between
+// two, some words never made a conversation) is a stop of its own, said so, not the next conversation's start. Quiet
+// time takes no rail
 const stops = computed<Stop[]>(() => {
   const going = new Map(
     (status.value?.devices ?? []).flatMap((d) =>
       live.value && d.recording && d.conversation ? [[d.device, d.conversation.start]] : [],
     ),
   );
-  const runs: { key: string; rows: Row[]; c?: Conversation }[] = [];
-  const add = (r: Row, rs: Row[]) => {
-    const c = convOf(r),
-      g = going.get(r.source ?? ""),
-      key = c ? c.id : g && r.start >= g ? "going" : "loose",
-      last = runs.at(-1);
-    if (last?.key === key) last.rows.push(...rs);
-    else runs.push({ key, rows: [...rs], c });
-  };
-  for (const it of timeline.value)
-    if (it.k === "row") add(it.r, [it.r]);
-    else if (it.k === "fold") add(it.rows[0], it.rows);
+  const runs = runsOf(timeline.value, convOf, (r) => going.get(r.source ?? ""));
   const ws = convWeights(runs.map((r) => r.rows.length)),
     list = t("common.list");
-  return runs.map(({ key, rows, c }, i) => ({
-    start: rows[0].start,
+  return runs.map(({ key, target, rows, c }, i) => ({
+    start: target,
     w: ws[i],
     group: i,
     time: c
       ? `${hhmm(c.start)}–${hhmm(c.end)}`
-      : key === "going"
+      : key[0] === "g"
         ? `${hhmm(rows[0].start)} · ${t("scrub.going")}`
         : `${hhmm(rows[0].start)}–${hhmm(rows.at(-1)!.end)} · ${t("scrub.loose")}`,
     title: c?.summary?.status === "done" ? c.summary.title : undefined,

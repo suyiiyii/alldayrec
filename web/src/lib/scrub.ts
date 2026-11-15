@@ -63,3 +63,34 @@ export function ownerOf<C extends { start: string; end: string; device?: string 
   return (r: { start: string; source?: string }) =>
     (r.source ? of(by.get(r.source), r.start) : undefined) ?? of(by.get(""), r.start);
 }
+
+// the live page's stops from its list (timeline): one per conversation wherever its rows are (between another device's,
+// or in one fold of media rows with them), at its first; the one going on per device (going: from when, none: not
+// going); a run of rows in no conversation, one each. target: the row to jump to, or the fold it is folded in (its
+// rows have no element until it opens)
+export function runsOf<R extends { start: string; source?: string }, C extends { id: string }>(
+  items: { k: string; r?: R; rows?: R[] }[],
+  convOf: (r: R) => C | undefined,
+  going: (r: R) => string | undefined,
+) {
+  const runs: { key: string; target: string; rows: R[]; c?: C }[] = [],
+    by = new Map<string, (typeof runs)[number]>();
+  let loose = 0; // a row in a conversation ends a run of rows in none
+  const add = (r: R, target: string) => {
+    const c = convOf(r),
+      g = going(r),
+      key = c ? "c" + c.id : g && r.start >= g ? "g" + r.source : "l" + loose;
+    if (key[0] !== "l") loose++;
+    let run = by.get(key);
+    if (!run) {
+      run = { key, target, rows: [], c };
+      runs.push(run);
+      by.set(key, run);
+    }
+    run.rows.push(r);
+  };
+  for (const it of items)
+    if (it.k === "row" && it.r) add(it.r, it.r.start);
+    else if (it.k === "fold" && it.rows) for (const r of it.rows) add(r, it.rows[0].start);
+  return runs;
+}

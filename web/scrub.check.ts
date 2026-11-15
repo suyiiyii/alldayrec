@@ -1,6 +1,6 @@
 // node --experimental-strip-types scrub.check.ts: the fast-scroll rail's layout and lookups (src/lib/scrub.ts)
 import assert from "node:assert/strict";
-import { convWeights, layout, ownerOf, stopAt, timeWeights } from "./src/lib/scrub.ts";
+import { convWeights, layout, ownerOf, runsOf, stopAt, timeWeights } from "./src/lib/scrub.ts";
 
 assert.deepEqual(layout([1, 1, 2]), [0, 0.25, 0.5, 1]);
 assert.deepEqual(layout([0, 0]), [0, 0, 1]); // no weight at all: nothing divides by zero
@@ -44,4 +44,39 @@ assert.equal(own({ start: T("10:05"), source: "D2" })?.id, "x"); // one with no 
 assert.equal(own({ start: T("10:05") })?.id, "x");
 assert.equal(own({ start: T("09:10") }), undefined);
 assert.equal(ownerOf([])({ start: T("09:00"), source: "D1" }), undefined);
+// the live page's stops (runsOf over its timeline, with ownerOf): devices A and B in two conversations at once, their
+// media rows interleaved in one fold. Each keeps its own stop with all its rows; B's first row is folded, so its stop
+// points at the fold. Words in no conversation in between: a stop of their own; the one going on: its own
+const R = (h: string, source: string) => ({ start: T(h), source });
+const ab = ownerOf([
+  { id: "A", start: T("10:00"), end: T("10:30"), device: "A" },
+  { id: "B", start: T("10:03"), end: T("10:40"), device: "B" },
+]);
+const fold = [R("10:05", "A"), R("10:06", "B"), R("10:07", "A"), R("10:08", "B")];
+const runs = runsOf(
+  [
+    { k: "row", r: R("10:01", "A") },
+    { k: "fold", rows: fold },
+    { k: "row", r: R("10:09", "B") },
+    { k: "conv" },
+    { k: "row", r: R("10:50", "A") }, // after A's end, A not going: in none
+    { k: "gap" },
+    { k: "row", r: R("11:00", "B") }, // B going since 10:55
+    { k: "row", r: R("11:01", "A") },
+  ],
+  ab,
+  (r) => (r.source === "B" ? T("10:55") : undefined),
+);
+assert.deepEqual(
+  runs.map((x) => [x.key[0] === "l" ? "loose" : x.key, x.target.slice(11), x.rows.length]),
+  [
+    ["cA", "10:01", 3],
+    ["cB", "10:05", 3], // B: not lost in A's fold, aimed at the fold (its 10:06 row has no element there)
+    ["loose", "10:50", 1],
+    ["gB", "11:00", 1],
+    ["loose", "11:01", 1],
+  ],
+);
+assert.equal(runs[1].c?.id, "B");
+assert.notEqual(runs[2].key, runs[4].key); // two runs in none, apart: two stops
 console.log("scrub ok");
