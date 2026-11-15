@@ -34,3 +34,32 @@ export function convWeights(sentences: number[]) {
 export function timeWeights(starts: number[], end: number) {
   return starts.map((s, i) => Math.max(1000, (starts[i + 1] ?? end) - s));
 }
+
+// the live page: the closed conversation a row is in, as its convOf says (its device's, or one with no device; start ≤
+// the row's start ≤ end), by a binary search per device: a day's thousands of rows against hundreds of conversations,
+// again at every new caption
+export function ownerOf<C extends { start: string; end: string; device?: string | null }>(
+  convs: C[],
+) {
+  const by = new Map<string, C[]>();
+  for (const c of convs) {
+    const l = by.get(c.device ?? "");
+    if (l) l.push(c);
+    else by.set(c.device ?? "", [c]);
+  }
+  for (const l of by.values())
+    l.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  const of = (l: C[] | undefined, at: string) => {
+    let lo = 0,
+      hi = l?.length ?? 0;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (l![mid].start <= at) lo = mid + 1;
+      else hi = mid;
+    }
+    const c = l?.[lo - 1];
+    return c && at <= c.end ? c : undefined;
+  };
+  return (r: { start: string; source?: string }) =>
+    (r.source ? of(by.get(r.source), r.start) : undefined) ?? of(by.get(""), r.start);
+}

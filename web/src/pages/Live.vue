@@ -30,7 +30,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { recordingNow } from "../lib/progress";
-import { convWeights } from "../lib/scrub";
+import { convWeights, ownerOf } from "../lib/scrub";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -144,29 +144,39 @@ const timeline = computed(() => {
   flush();
   return res;
 });
-// the fast-scroll rail: one stop per conversation as the list has it, its rows up to its divider; the rows after the
-// last divider are the one going on. Gaps take no rail
+// the fast-scroll rail: one stop per conversation, in the list's order: each row by the closed conversation it is in
+// (convOf), the one going on (open: not among convs) from where its device's started; a run of rows in none of them
+// (the gap between two, some words never made a conversation) is a stop of its own, said so, not the next
+// conversation's start. Quiet time takes no rail
 const stops = computed<Stop[]>(() => {
-  const runs: { first: Row; rows: Row[]; c?: Conversation }[] = [];
-  let run: Row[] = [];
-  const end = (c?: Conversation) => {
-    if (run.length) runs.push({ first: run[0], rows: run, c });
-    run = [];
+  const going = new Map(
+    (status.value?.devices ?? []).flatMap((d) =>
+      live.value && d.recording && d.conversation ? [[d.device, d.conversation.start]] : [],
+    ),
+  );
+  const runs: { key: string; rows: Row[]; c?: Conversation }[] = [];
+  const add = (r: Row, rs: Row[]) => {
+    const c = convOf(r),
+      g = going.get(r.source ?? ""),
+      key = c ? c.id : g && r.start >= g ? "going" : "loose",
+      last = runs.at(-1);
+    if (last?.key === key) last.rows.push(...rs);
+    else runs.push({ key, rows: [...rs], c });
   };
   for (const it of timeline.value)
-    if (it.k === "row") run.push(it.r);
-    else if (it.k === "fold") run.push(...it.rows);
-    else if (it.k === "conv") end(it.c);
-  end();
+    if (it.k === "row") add(it.r, [it.r]);
+    else if (it.k === "fold") add(it.rows[0], it.rows);
   const ws = convWeights(runs.map((r) => r.rows.length)),
     list = t("common.list");
-  return runs.map(({ first, rows, c }, i) => ({
-    start: first.start,
+  return runs.map(({ key, rows, c }, i) => ({
+    start: rows[0].start,
     w: ws[i],
     group: i,
     time: c
       ? `${hhmm(c.start)}–${hhmm(c.end)}`
-      : `${hhmm(first.start)} · ${t(live.value ? "scrub.going" : "scrub.open")}`,
+      : key === "going"
+        ? `${hhmm(rows[0].start)} · ${t("scrub.going")}`
+        : `${hhmm(rows[0].start)}–${hhmm(rows.at(-1)!.end)} · ${t("scrub.loose")}`,
     title: c?.summary?.status === "done" ? c.summary.title : undefined,
     sub:
       (c?.participants ?? [...new Set(rows.map((r) => r.speaker).filter((x) => x !== undefined))])
@@ -175,10 +185,8 @@ const stops = computed<Stop[]>(() => {
   }));
 });
 // the closed conversation a row is in (none while its conversation goes on)
-const convOf = (r: Row) =>
-  convs.value.find(
-    (c) => (!c.device || c.device === r.source) && c.start <= r.start && r.start <= c.end,
-  );
+const owner = computed(() => ownerOf(convs.value)); // its device's, or one with no device
+const convOf = (r: Row) => owner.value(r);
 const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
 // a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu). A tap
 // on its speaker, by the same rule: their sheet (SpeakerSheet), as on the conversation page

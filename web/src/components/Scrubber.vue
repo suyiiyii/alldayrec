@@ -148,6 +148,11 @@ function move(e: PointerEvent) {
   schedule();
 }
 function up() {
+  // a quick click: the frame it asked for has not come yet; jump now, or the jump is lost with the drag
+  if (dragging.value && raf) {
+    cancelAnimationFrame(raf);
+    frame();
+  }
   dragging.value = false;
   wake();
   scrolled();
@@ -298,12 +303,13 @@ onUnmounted(() => {
   box-shadow: 0 0 0 2px var(--accent);
   border-radius: 3px;
 }
-/* the handle: shown awake, over the captions' edge for a finger to take; its middle where the page is */
+/* the handle: shown awake, its middle where the page is; in the gutter (a phone's 12 px: a narrow one, at the screen's
+   edge where a thumb goes anyway), never over the captions */
 .thumb {
   position: absolute;
   right: 0;
   top: -20px;
-  width: 22px;
+  width: min(22px, 100%);
   height: 40px;
   border-radius: 11px;
   background: var(--surface);
@@ -317,8 +323,8 @@ onUnmounted(() => {
 .thumb::after {
   content: "";
   position: absolute;
-  left: 6px;
-  right: 6px;
+  left: 25%;
+  right: 25%;
   height: 2px;
   border-radius: 1px;
   background: var(--muted);

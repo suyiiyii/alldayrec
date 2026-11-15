@@ -397,7 +397,7 @@
     "live": "Jump through the day's conversations",
     "conv": "Jump through the conversation by time",
     "going": "going on",
-    "open": "not closed"
+    "loose": "outside any conversation"
   },
   "liveCard": {
     "going": "Conversation going on",
