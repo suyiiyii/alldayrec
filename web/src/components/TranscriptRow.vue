@@ -10,7 +10,7 @@ import Icon from "./Icon.vue";
 
 // media: played aloud, not said in the room. seek: the page has a player (the conversation page): ▶ and a tap on
 // the row play from this sentence on; without it ▶ plays the sentence alone. caption: the live page's large text under
-// the speaker, any day; now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
+// the speaker, any day (on a phone every row has it); now: the sentence being said (the server sends it with no speaker yet), with a breathing dot. menu: a
 // long press or a right click on the row opens the page's RowMenu there; on a touch screen the row's text is not
 // selectable (no callout, no loupe: its 复制 copies it), with a mouse it still is. who: a tap on the speaker (not 我,
 // not 未识别) opens the page's sheet for them (SpeakerSheet)
@@ -239,13 +239,29 @@ const press = useLongPress((x, y) => menu?.(row, x, y));
     user-select: none;
   }
 }
+/* a phone: every row as on the live page (.caption above), the conversation page's too */
 @media (max-width: 600px) {
   .row {
-    grid-template-columns: 72px minmax(76px, auto) 1fr;
-    gap: var(--space-2);
+    grid-template-columns: auto 1fr;
+    grid-template-areas: "spk t" "text text";
+    column-gap: var(--space-2);
+    row-gap: 0;
+    padding: var(--space-3) 0 var(--space-1);
+    border-bottom: 0;
   }
   .spk {
-    font-size: var(--fs-xs);
+    grid-area: spk;
+  }
+  .t {
+    grid-area: t;
+  }
+  .text {
+    grid-area: text;
+    font-size: var(--fs-lg);
+    line-height: 1.6;
+  }
+  .row.pending .text {
+    color: var(--fg-2);
   }
   .play {
     min-width: 28px;
