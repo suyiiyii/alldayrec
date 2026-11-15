@@ -18,7 +18,7 @@ const open = ref(false);
 </script>
 
 <template>
-  <button class="fold" @click="open = !open">
+  <button class="fold" :data-start="rows[0].start" @click="open = !open">
     <Icon :name="open ? 'chevron-down' : 'chevron-right'" :size="16" />
     {{
       t(

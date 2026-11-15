@@ -27,6 +27,7 @@ import MediaFold from "../components/MediaFold.vue";
 import PlayerBar from "../components/PlayerBar.vue";
 import QuoteAt from "../components/QuoteAt.vue";
 import RowMenu from "../components/RowMenu.vue";
+import Scrubber, { type Stop } from "../components/Scrubber.vue";
 import SpeakerSheet from "../components/SpeakerSheet.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
@@ -54,6 +55,7 @@ import { dayLabel } from "../lib/calendar";
 import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
+import { timeWeights } from "../lib/scrub";
 import { labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 import { toast } from "../lib/toast";
@@ -172,6 +174,31 @@ onUnmounted(() => {
   removeEventListener("touchmove", byHand);
   trackClose();
 });
+
+// the fast-scroll rail on 原文: a stop per sentence (a fold of media rows: one), each as long as the time to the next,
+// so the rail reads as the conversation's clock; drawn in 5-minute segments. Not by speaker turns: a monologue would be
+// one stop and a quick exchange hundreds, and one remembers "about twenty minutes in" more than "the 37th turn"
+const scrubStops = computed<Stop[]>(() => {
+  const from = Date.parse(c.value?.start ?? ""),
+    firsts = segs.value.map((g) => (g.k === "row" ? g.r : g.rows[0])),
+    at = firsts.map((r) => Date.parse(r.start)),
+    ws = timeWeights(at, Date.parse(c.value?.end ?? ""));
+  return firsts.map((r, i) => ({
+    start: r.start,
+    w: ws[i],
+    group: Math.floor((at[i] - from) / 300_000),
+    time: hhmmss(r.start),
+    title: r.text,
+    sub: r.speaker ? speakerLabel(r.speaker) : undefined,
+  }));
+});
+function scrubTo(s: Stop) {
+  track.follow = false; // the player no longer pulls the page back to its sentence
+  const el = rowEl(s.start),
+    head = document.querySelector("header")?.getBoundingClientRect().bottom ?? 0;
+  if (el)
+    scrollTo({ top: el.getBoundingClientRect().top + scrollY - Math.max(0, head) - 8, behavior: "instant" });
+}
 
 // who spoke how much (not counting media played aloud)
 const share = computed(() => talkShare((c.value?.rows ?? []).filter((r) => !media(r))));
@@ -627,6 +654,12 @@ function edit(label: string) {
             />
             <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" :who="edit" />
           </template>
+          <Scrubber
+            :stops="scrubStops"
+            :label="t('scrub.conv')"
+            avoid="header, .nav-tabs, .player"
+            :go="scrubTo"
+          />
         </div>
       </template>
       <SpeakerSheet ref="speaker" :conv="c" :sug="sug" :reload="reload" />

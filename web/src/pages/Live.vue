@@ -8,6 +8,7 @@ import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
 import RowMenu from "../components/RowMenu.vue";
+import Scrubber, { type Stop } from "../components/Scrubber.vue";
 import SpeakerSheet from "../components/SpeakerSheet.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
@@ -29,6 +30,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { recordingNow } from "../lib/progress";
+import { convWeights, ownerOf, runsOf } from "../lib/scrub";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -142,11 +144,38 @@ const timeline = computed(() => {
   flush();
   return res;
 });
-// the closed conversation a row is in (none while its conversation goes on)
-const convOf = (r: Row) =>
-  convs.value.find(
-    (c) => (!c.device || c.device === r.source) && c.start <= r.start && r.start <= c.end,
+// the fast-scroll rail: one stop per conversation (runsOf): each row by the closed conversation it is in (convOf), the
+// one going on (open: not among convs) from where its device's started; a run of rows in none of them (the gap between
+// two, some words never made a conversation) is a stop of its own, said so, not the next conversation's start. Quiet
+// time takes no rail
+const stops = computed<Stop[]>(() => {
+  const going = new Map(
+    (status.value?.devices ?? []).flatMap((d) =>
+      live.value && d.recording && d.conversation ? [[d.device, d.conversation.start]] : [],
+    ),
   );
+  const runs = runsOf(timeline.value, convOf, (r) => going.get(r.source ?? ""));
+  const ws = convWeights(runs.map((r) => r.rows.length)),
+    list = t("common.list");
+  return runs.map(({ key, target, rows, c }, i) => ({
+    start: target,
+    w: ws[i],
+    group: i,
+    time: c
+      ? `${hhmm(c.start)}–${hhmm(c.end)}`
+      : key[0] === "g"
+        ? `${hhmm(rows[0].start)} · ${t("scrub.going")}`
+        : `${hhmm(rows[0].start)}–${hhmm(rows.at(-1)!.end)} · ${t("scrub.loose")}`,
+    title: c?.summary?.status === "done" ? c.summary.title : undefined,
+    sub:
+      (c?.participants ?? [...new Set(rows.map((r) => r.speaker).filter((x) => x !== undefined))])
+        .map(speakerLabel)
+        .join(list) || undefined,
+  }));
+});
+// the closed conversation a row is in (none while its conversation goes on)
+const owner = computed(() => ownerOf(convs.value)); // its device's, or one with no device
+const convOf = (r: Row) => owner.value(r);
 const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
 // a long press on a row: copied; starred and its speaker fixed only once its conversation has closed (RowMenu). A tap
 // on its speaker, by the same rule: their sheet (SpeakerSheet), as on the conversation page
@@ -244,8 +273,9 @@ onUnmounted(() => {
   sizer?.disconnect();
 });
 
-function jump(start: string) {
-  hit.value = start;
+// scrub: from the rail, at once and nothing lit (lighting a row paints the whole day's list again, at every stop)
+function jump(start: string, scrub = false) {
+  if (!scrub) hit.value = start;
   follow.value = false; // the next words would pull the page back down before it gets there
   const el = document.querySelector(`[data-start="${CSS.escape(start)}"]`);
   if (!el) return;
@@ -253,7 +283,10 @@ function jump(start: string) {
   const r = el.getBoundingClientRect(),
     s = document.querySelector(".side")?.getBoundingClientRect();
   const cover = headH.value + (s && s.left < r.right && r.left < s.right ? s.height : 0);
-  window.scrollTo({ top: r.top + window.scrollY - cover - 8, behavior: "smooth" });
+  window.scrollTo({
+    top: r.top + window.scrollY - cover - 8,
+    behavior: scrub ? "instant" : "smooth",
+  });
 }
 </script>
 
@@ -388,6 +421,13 @@ function jump(start: string) {
       <div v-else-if="ready && !rows.length && !live" class="empty">
         <Icon name="calendar" :size="48" />{{ t("live.empty") }}
       </div>
+      <!-- in the captions' column: in its right gutter, left of the summary on a wide screen -->
+      <Scrubber
+        :stops="stops"
+        :label="t('scrub.live')"
+        avoid="header, .nav-tabs, .side"
+        :go="(s) => jump(s.start, true)"
+      />
     </div>
     <RowMenu ref="rowMenu" @changed="refresh" />
     <SpeakerSheet ref="speaker" :conv="sheetConv" :sug="sug" :reload="refresh" />
