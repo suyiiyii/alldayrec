@@ -1,7 +1,7 @@
 import { reactive } from "vue";
-import { t } from "../i18n";
-import { post, type Mark } from "./api";
-import { toast } from "./toast";
+import { t } from "../i18n.ts";
+import { post, type AutoMark, type Mark } from "./api.ts";
+import { toast } from "./toast.ts";
 
 // 完成 / 不对 on todos by id (server db.todo_id) and the undo. A mark set on this page wins over the one a todo came
 // with, so every list (they show open todos only) and the conversation page change at once, and an undo brings a
@@ -19,11 +19,14 @@ export async function setMarks(ids: string[], mark: Mark | null) {
   for (const id of ids) marks[id] = mark;
 }
 
-// the undo of a todo's automatic marks (server db.undo_auto): it is open again; the ids undone here, for the lists
-export const autoUndone = reactive(new Set<string>());
-export async function undoAuto(id: string) {
+// the undo of a todo's automatic marks (server db.undo_auto): it is open again. The marks undone here, by the
+// evidence (a later one, on a newer sentence, shows again), for the lists until they load again
+const markKey = (a: AutoMark) => [a.kind, a.conv, a.sentence ?? a.at, a.judged_at].join("|");
+const undone = reactive(new Set<string>());
+export const autoUndone = (a?: AutoMark | null) => !!a && undone.has(markKey(a));
+export async function undoAuto(id: string, a: AutoMark) {
   await post(`/api/todos/${encodeURIComponent(id)}/auto`, undefined, "DELETE");
-  autoUndone.add(id);
+  undone.add(markKey(a));
 }
 
 // marked, and a toast saying so with 撤销

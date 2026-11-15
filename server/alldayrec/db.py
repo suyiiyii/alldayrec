@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS conversations_start ON conversations(start);
 CREATE TABLE IF NOT EXISTS summaries (        -- body: the summary as the API returns it
     conversation TEXT PRIMARY KEY, status TEXT NOT NULL, prompt_version INTEGER, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- init reads these few (prompt v15-v17), not every body
+    WHERE status = 'done' AND json_array_length(body, '$.done_hints') > 0;
 CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; label and e NULL: no recording, not retried
     conv TEXT NOT NULL, label TEXT, device TEXT, n INTEGER, speech_s REAL, k INTEGER, e BLOB,
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
@@ -168,19 +170,21 @@ def init():
     tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
     marks_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_marks'").fetchone() is None
     enrolled_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'enrolled'").fetchone() is None
-    auto_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_auto'").fetchone() is None
     conn().executescript(SCHEMA)
-    if auto_new:  # 11-16: a summary's done_hints (prompt v15-v17) become hint rows; the summaries keep theirs
-        conn().execute("DROP INDEX IF EXISTS summaries_done_hints")
-        with tx() as c:
-            for cid, device, body in c.execute("SELECT c.id, c.device, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
-                                               " WHERE s.status = 'done' AND json_array_length(s.body, '$.done_hints') > 0").fetchall():
-                s = json.loads(body)
-                for h in s["done_hints"]:
-                    r = c.execute("SELECT id, speaker FROM sentences WHERE start = ? AND (? IS NULL OR source = ?)", (h.get("at"), device, device)).fetchone()
-                    c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, ?, ?, ?, ?, NULL)",
-                              (tid := resolve_todo(h["id"]), tid.split(":", 1)[0], cid, r and r[0], h.get("at"), r and r[1], h.get("quote"),
-                               s.get("model"), s.get("created_at") or dt.datetime.now().isoformat(timespec="seconds")))
+    # 11-16: a summary's done_hints (prompt v15-v17) become hint rows, the summaries keep theirs. Each start, only the
+    # ones not there yet (undone ones are there): a start cut off halfway, or a store put back, is caught up the next time
+    with tx() as c:
+        for cid, device, body in c.execute("SELECT c.id, c.device, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
+                                           " WHERE s.status = 'done' AND json_array_length(s.body, '$.done_hints') > 0").fetchall():
+            s = json.loads(body)
+            for h in s["done_hints"]:
+                tid = resolve_todo(h["id"])
+                if c.execute("SELECT 1 FROM todo_auto WHERE todo = ? AND kind = 'hint' AND src = ? AND at_said IS ?", (tid, cid, h.get("at"))).fetchone():
+                    continue
+                r = c.execute("SELECT id, speaker FROM sentences WHERE start = ? AND (? IS NULL OR source = ?)", (h.get("at"), device, device)).fetchone()
+                c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, ?, ?, ?, ?, NULL)",
+                          (tid, tid.split(":", 1)[0], cid, r and r[0], h.get("at"), r and r[1], h.get("quote"),
+                           s.get("model"), s.get("created_at") or dt.datetime.now().isoformat(timespec="seconds")))
     if enrolled_new:  # 10-25: the people bank was a running mean; what it learnt before stays, as one row each
         conn().execute("INSERT INTO enrolled SELECT name, NULL, NULL, n, e FROM people")
     if marks_new:  # 10-24: marks were feedback lines (TODO_MARKS) keyed by the todo's text; the lines stay, the log for the prompt
@@ -674,8 +678,11 @@ def mark_todos(ids: list[str], mark: str | None):
 def preserve_todos(conv: str, old: list[dict], new: list[dict], c: sqlite3.Connection) -> list[dict]:
     """Pin a uniquely matched action to its old ID; keep unmatched marked actions unchanged. Marks never move.
     Text, else quote, must match uniquely on both sides with the same owner/recipient. New actions get fresh IDs,
-    so a removed action's ID (including a cached recap's) cannot be reused by another action."""
-    marks = {r[0] for r in c.execute("SELECT id FROM todo_marks WHERE conv = ?", (conv,))}
+    so a removed action's ID (including a cached recap's) cannot be reused by another action. A mark here is one by
+    hand, an automatic one (todo_auto: its evidence and undo stay shown) or a group of the same (todo_same)."""
+    marks = {r[0] for r in c.execute("SELECT id FROM todo_marks WHERE conv = ? UNION SELECT todo FROM todo_auto WHERE conv = ? AND kind != 'seen'"
+                                     " UNION SELECT id FROM todo_same UNION SELECT head FROM todo_same", (conv, conv))
+             if r[0].split(":", 1)[0] == conv}
     before = list(zip(todo_ids(conv, old), old))
     after = [{k: v for k, v in t.items() if k not in ("id", "mark")} for t in new]
     used = set()
@@ -745,21 +752,24 @@ def due_todos(day: str) -> list[dict]:
     """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first, each with its age_days past due and
     stale: past due over 7 days, over 3 for a due said as the same or the next day (SAME_DAY). Only summaries from prompt
     v8 on date them. Not closed: no mark, none automatic that closes it (shut_todos). Todos merged as one (todo_same)
-    are one, the newest said, with sources: where each was said."""
-    closed, shut, al, auto, same, out = closed_todos(), shut_todos(), aliases(), auto_marks(), same_todos(), {}
+    are one, the newest said with a due (a due put off is the one that counts), with sources: where each was said."""
+    closed, shut, al, auto, same, newest = closed_todos(), shut_todos(), aliases(), auto_marks(), same_todos(), {}
     for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
-                            " WHERE s.prompt_version >= 8 AND s.status = 'done' ORDER BY c.start"):
+                            " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
         conv, s = _conversation(r), json.loads(r["body"])
         todos = s.get("todos") or []
         for i, t in zip(todo_ids(conv["id"], todos), todos):
-            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and i not in shut:
-                age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
-                out[same.get(i, i)] = {**todo_view(conv, s, i, t, closed, al, auto), "age_days": age,
-                                       "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)}
-    for h, v in out.items():
-        if h in same.values():
-            v["sources"] = sources(group_of(h, same))
-    return sorted(out.values(), key=lambda t: (t["due_date"], t["conv"]))
+            said = t.get("at") or conv["start"]
+            if t.get("owner") == "我" and t.get("due_date") and i not in shut and said > newest.get(h := same.get(i, i), ("",))[0]:
+                newest[h] = (said, conv, s, i, t)
+    out = []
+    for h, (_, conv, s, i, t) in newest.items():
+        if t["due_date"] <= day:
+            age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
+            out.append({**todo_view(conv, s, i, t, closed, al, auto), "age_days": age,
+                        "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7),
+                        **({"sources": sources(group_of(h, same))} if h in same.values() else {})})
+    return sorted(out, key=lambda t: (t["due_date"], t["conv"]))
 
 
 def auto_todos(since: str) -> list[dict]:

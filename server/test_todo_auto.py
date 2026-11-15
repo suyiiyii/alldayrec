@@ -191,8 +191,10 @@ def test_recap_counts(store, monkeypatch):
     assert anyio.run(recap_get, "2026-11-01")["auto"] == {"closed": 0, "due": 0}, "an older recap: no due count"
 
 
-def test_carries_over_old_done_hints(tmp_path):
-    """Summaries of prompt v15-v17 kept done_hints in their bodies: they become hint rows once, the index on them goes."""
+@pytest.mark.parametrize("cut_off", [False, True])
+def test_carries_over_old_done_hints(tmp_path, monkeypatch, cut_off):
+    """Summaries of prompt v15-v17 kept done_hints in their bodies: they become hint rows, once each, an undone one too.
+    cut_off: a start that stopped after the tables were made, before the rows were copied, copies them the next time."""
     db.open_db(tmp_path / "t.db")
     with db.tx() as t:
         db.insert_conversation(t, conv(A))
@@ -203,11 +205,78 @@ def test_carries_over_old_done_hints(tmp_path):
         db.put_summary({"conversation": B, "status": "done", "prompt_version": 17, "model": "old", "created_at": "2026-11-03T11:00:00",
                         "done_hints": [{"id": report, "quote": "发了。", "at": "2026-11-03T10:00:01.000"}]}, t)
     db.conn().execute("DROP TABLE todo_auto")
-    db.conn().execute("CREATE INDEX summaries_done_hints ON summaries(conversation) WHERE status = 'done'")
+    if cut_off:
+        with monkeypatch.context() as m:
+            m.setattr(db, "resolve_todo", lambda i: (_ for _ in ()).throw(KeyboardInterrupt))  # stopped inside the copy
+            with pytest.raises(KeyboardInterrupt):
+                db.init()
+        assert db.conn().execute("SELECT count(*) FROM todo_auto").fetchone()[0] == 0
     db.init()
     assert db.done_hints()[report] == {"kind": "hint", "reason": "", "conv": B, "at": "2026-11-03T10:00:01.000", "sentence": f"{B}-1",
                                            "speaker": "我", "quote": "发了。", "model": "old", "judged_at": "2026-11-03T11:00:00"}
-    assert db.conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'summaries_done_hints'").fetchone() is None
     assert db.summary(B)["done_hints"], "the summary keeps its own"
     db.init()
     assert db.conn().execute("SELECT count(*) FROM todo_auto").fetchone()[0] == 1, "once"
+    db.undo_auto(report)
+    db.init()
+    assert db.conn().execute("SELECT count(*) FROM todo_auto").fetchone()[0] == 1 and report not in db.done_hints(), "an undo holds"
+
+
+def test_redone_summary_keeps_auto_closed_todo(store, monkeypatch):
+    """A summary written again that leaves out (or rewords) a todo closed automatically keeps it: its evidence stays
+    shown and its undo works; the same for a todo of a group."""
+    db.add_auto([{"todo": store["report"], "kind": "done", "src": B, "sentence": f"{B}-1", "at_said": "2026-11-03T10:00:01.000"}])
+    db.merge_same([store["contract"], store["coffee"]])
+    with db.tx() as t:
+        s = db.summary(A)
+        s["todos"] = db.preserve_todos(A, s["todos"], [todo("改代码", "10:00:03")], t)
+        db.put_summary(s, t)
+    assert {store["report"], store["contract"], store["coffee"]} <= set(db.todo_ids(A, db.summary(A)["todos"]))
+    assert [t["text"] for t in anyio.run(todos_auto, 14)] == ["发报告"]
+    assert anyio.run(todo_auto_undo, store["report"])["undone"] == 1
+
+
+def test_same_needs_one_task(store, monkeypatch):
+    """Merged only when every two are one task: the same owner and recipient, a word shared by each pair (no chains),
+    and an anonymous label only within one conversation."""
+    with db.tx() as t:
+        s = db.summary(B)
+        s["todos"] = [todo("发报告", "10:00:30", to="客户乙", due_date="2026-11-20"), todo("咖啡买好", "10:00:31"), todo("合同审阅", "10:00:32"),
+                      {"owner": "S1", "text": "订会议室", "at": "2026-11-03T10:00:33.000"}]
+        db.put_summary(s, t)
+        s = db.summary(A)
+        s["todos"].append({"owner": "S1", "text": "订会议室", "at": "2026-11-01T10:00:05.000"})
+        db.put_summary(s, t)
+    # numbers: 1-5 A's open todos (发报告 → 老王, 看合同, 改代码, 买咖啡, S1 订会议室), 6-9 B's
+    reply(monkeypatch, {"todos": [], "same": [[1, 6], [2, 4, 7, 8], [5, 9]]})
+    run(B)
+    assert db.same_todos() == {}, "another recipient; coffee and contract chained; S1 of two conversations"
+    reply(monkeypatch, {"todos": [], "same": [[4, 7], [2, 8]]})
+    run(B)
+    assert len(db.same_todos()) == 2
+    reply(monkeypatch, {"todos": [], "same": [[2, 4]]})  # the two groups: 看合同 and 买咖啡 share nothing
+    run(B)
+    assert len(db.same_todos()) == 2
+
+
+def test_put_off_due_counts(store, monkeypatch):
+    """The same todo said again with a later due: the new due counts, in the due list and for stale."""
+    with db.tx() as t:
+        s = db.summary(B)
+        s["todos"][0] |= {"due": "20 号", "due_date": "2026-11-20"}
+        db.put_summary(s, t)
+    db.merge_same([store["report"], store["again"]])
+    assert [t["text"] for t in db.due_todos("2026-11-10")] == ["买咖啡"], "not due yet: put off to 11-20"
+    assert [r["todo"] for r in todo_auto.age_out("2026-11-11")] == [store["coffee"]]
+    assert store["report"] not in db.shut_todos()
+    assert [(t["text"], t["due_date"], len(t["sources"])) for t in db.due_todos("2026-11-21")] == [("给老王发报告", "2026-11-20", 2)]
+
+
+@pytest.mark.parametrize("said,kind", [("报告应该已经发了吧，我也不确定", "hint"), ("报告发了吗？", "hint"), ("报告还没发", "hint"),
+                                       ("报告昨天发给老王了", "done")])
+def test_hedged_quote_only_hints(said, kind):
+    """A done the model gives on a sentence that hedges, asks, denies or plans is only a hint."""
+    rows = [dict(id="r0", start="2026-11-03T10:00:00.000", speaker="我", text=said)]
+    cands = [({"id": A}, "t1", {"owner": "我", "text": "发报告", "to": "老王"})]
+    found, _ = todo_auto.judged({"id": B}, rows, cands, [], {"todos": [{"n": 1, "kind": "done", "s": "s1", "reason": "r"}]}, "m")
+    assert [x["kind"] for x in found] == [kind]
