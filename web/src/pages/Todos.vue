@@ -1,23 +1,29 @@
 <script setup lang="ts">
 // 待办: my todos due today or before in three groups: 今天, 本周 (past due, not stale), 更早 (stale: greyed, cleared
-// at once with 全部标为已处理). A marked one leaves at once; the toast's 撤销 brings it back
+// at once with 全部标为已处理). A marked one leaves at once; the toast's 撤销 brings it back. Below, folded, the todos
+// closed automatically (AutoTodos); an undo there loads both lists again
 import { computed, onMounted, ref } from "vue";
 import AppHeader from "../components/AppHeader.vue";
+import AutoTodos from "../components/AutoTodos.vue";
 import Icon from "../components/Icon.vue";
 import Skeleton from "../components/Skeleton.vue";
 import TodoItem from "../components/TodoItem.vue";
 import { t } from "../i18n";
-import { get, type Due } from "../lib/api";
+import { get, type Due, type TodoView } from "../lib/api";
 import { useMutation } from "../lib/mutation";
 import { markWithUndo, open } from "../lib/todos";
 
 const due = ref<Due[] | null>(null);
+const auto = ref<TodoView[]>([]);
 const { busy, error, detail, run } = useMutation();
-onMounted(() =>
+const load = () =>
   run(async () => {
-    due.value = await get<Due[]>("/api/todos/due");
-  }),
-);
+    [due.value, auto.value] = await Promise.all([
+      get<Due[]>("/api/todos/due"),
+      get<TodoView[]>("/api/todos/auto"),
+    ]);
+  });
+onMounted(load);
 const latest = (ts: Due[]) => [...ts].sort((a, b) => b.due_date.localeCompare(a.due_date));
 const groups = computed(() => {
   const ts = open(due.value ?? []);
@@ -68,6 +74,7 @@ const clear = (ts: Due[]) =>
         <TodoItem v-for="x in g.items" :key="x.id" :t="x" />
       </ul>
     </section>
+    <AutoTodos :items="auto" @changed="load" />
   </main>
 </template>
 

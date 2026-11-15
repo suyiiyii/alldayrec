@@ -80,6 +80,8 @@ def long_conv(store, monkeypatch):
         db.put_timeline(A, {"conversation": A, "messages": []}, t)
     tids = db.todo_ids(A, db.summary(A)["todos"])
     db.mark_todos(tids, "done")
+    db.conn().executemany("INSERT INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, NULL, NULL, NULL, 'now', NULL)",
+                          [(tids[0], A, A, "r630", iso(630)), (tids[1], A, A, "r630", iso(630))])  # a quote in the later part
     db.put_profile({"name": "Named", "src": [{"conv": A, "at": iso(630)}, {"conv": A}]})
     db.put_kv("recap:2026-10-20", {"todos": [{"id": tids[1], "conv": A}], "highlights": [{"conv": A}]})
     calls = []
@@ -113,6 +115,7 @@ def test_split_moves_every_reference(long_conv):
     assert moved.startswith(P2 + ":split-")
     marks = {r["id"]: r["conv"] for r in db.conn().execute("SELECT id, conv FROM todo_marks")}
     assert marks == {tids[0]: A, moved: P2}
+    assert {(r["todo"], r["src"]) for r in db.conn().execute("SELECT todo, src FROM todo_auto")} == {(tids[0], P2), (moved, P2)}, "the quote's part"
     assert [x["name"] for x in db.name_hints(A)[A]["names"]] == ["a"] and [x["name"] for x in db.name_hints(P2)[P2]["names"]] == ["b"]
     voices = {(r["conv"], r["label"]): dict(r) for r in db.conn().execute("SELECT * FROM voices")}
     assert set(voices) == {(A, "S1"), (A, "我"), (P2, "S2"), (P2, "我")}

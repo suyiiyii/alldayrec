@@ -831,7 +831,9 @@
     "of": "Recap of {day}",
     "mine": "My to-dos",
     "people": "People I talked with",
-    "person": "{who}: {note}"
+    "person": "{who}: {note}",
+    "autoClosed": "Closed {n} to-do automatically | Closed {n} to-dos automatically",
+    "dueToday": "{n} due today"
   },
   "record": {
     "recording": "Recording",
@@ -1038,7 +1040,9 @@
     "overdue": "{n} day overdue | {n} days overdue",
     "tentative": "tentative",
     "maybeDone": "Maybe done: {q}",
-    "done": "Done"
+    "done": "Done",
+    "said": "Said once | Said {n} times",
+    "notDone": "Not done yet"
   },
   "todoMarks": {
     "doneToast": "Marked done",
@@ -1047,6 +1051,14 @@
     "markDone": "Mark as done",
     "more": "More",
     "notTodo": "Wrong: not a to-do"
+  },
+  "autoTodos": {
+    "title": "Sorted automatically",
+    "done": "Done",
+    "dropped": "Dropped",
+    "stale": "Probably not needed",
+    "hint": "Maybe done",
+    "why": "{kind}: {reason}"
   },
   "todos": {
     "week": "This week",

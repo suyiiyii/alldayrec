@@ -19,6 +19,13 @@ export async function setMarks(ids: string[], mark: Mark | null) {
   for (const id of ids) marks[id] = mark;
 }
 
+// the undo of a todo's automatic marks (server db.undo_auto): it is open again; the ids undone here, for the lists
+export const autoUndone = reactive(new Set<string>());
+export async function undoAuto(id: string) {
+  await post(`/api/todos/${encodeURIComponent(id)}/auto`, undefined, "DELETE");
+  autoUndone.add(id);
+}
+
 // marked, and a toast saying so with 撤销
 export async function markWithUndo(ids: string[], mark: Mark, msg: string) {
   await setMarks(ids, mark);

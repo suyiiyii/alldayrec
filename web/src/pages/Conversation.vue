@@ -547,6 +547,12 @@ function edit(label: string) {
                     :to="{ path: `/c/${td.done_hint.conv}`, query: { tab: 'transcript', at: td.done_hint.at } }"
                     >{{ t("todoItem.maybeDone", { q: t("conv.quote", { q: td.done_hint.quote ?? "" }) }) }}</RouterLink
                   >
+                  <RouterLink
+                    v-if="td.auto && !markOf(td)"
+                    class="hint"
+                    :to="{ path: `/c/${td.auto.conv}`, query: td.auto.at ? { tab: 'transcript', at: td.auto.at } : {} }"
+                    >{{ t("autoTodos.why", { kind: t(`autoTodos.${td.auto.kind}`), reason: td.auto.reason }) }}</RouterLink
+                  >
                 </div>
               </li>
             </ul>

@@ -1,12 +1,18 @@
 <script setup lang="ts">
 // One of my todos in two lines: what, then where it came from (the sentence, whom it is to, the conversation, the
-// time said); a tap opens the transcript at that sentence. On a phone a swipe left of 60 px marks it done
+// time said); a tap opens the transcript at that sentence. On a phone a swipe left of 60 px marks it done. Under it
+// a sentence that suggests it is done (a hint: it opens that sentence, × undoes the hint) and, for the same todo said
+// several times, each time (TodoSources)
 import { computed, ref } from "vue";
 import { t as tr } from "../i18n";
 import { hhmm, type TodoView } from "../lib/api";
+import { useMutation } from "../lib/mutation";
 import { speakerList } from "../lib/speakers";
+import { toast } from "../lib/toast";
+import { autoUndone, undoAuto } from "../lib/todos";
 import Icon from "./Icon.vue";
 import TodoMarks from "./TodoMarks.vue";
+import TodoSources from "./TodoSources.vue";
 
 const { t } = defineProps<{ t: TodoView }>();
 const cut = (s: string, n: number) => ([...s].length > n ? [...s].slice(0, n).join("") + "…" : s);
@@ -32,6 +38,13 @@ const when = computed(() =>
 const to = computed(
   () => `/c/${t.conv}` + (t.at ? "?" + new URLSearchParams({ tab: "transcript", at: t.at }) : ""),
 );
+const hint = computed(() => (t.done_hint && !t.mark && !autoUndone.has(t.id!) ? t.done_hint : null));
+const { busy, run } = useMutation();
+const dismiss = () =>
+  run(async () => {
+    await undoAuto(t.id!);
+    toast(tr("common.undone"));
+  });
 
 // the swipe: touch only (a mouse drags text), a mostly vertical move is the page's scroll
 const marks = ref<InstanceType<typeof TodoMarks>>();
@@ -75,15 +88,31 @@ function guard(e: MouseEvent) {
       @pointercancel="cancel"
     >
       <TodoMarks v-if="t.id" :id="t.id" ref="marks" :mark="t.mark" />
-      <RouterLink class="body" :to="to" @click.capture="guard">
-        <div class="what">
-          {{ t.short ?? t.text }}<span v-if="when" class="when"> · {{ when }}</span>
+      <div class="body">
+        <RouterLink class="main" :to="to" @click.capture="guard">
+          <div class="what">
+            {{ t.short ?? t.text }}<span v-if="when" class="when"> · {{ when }}</span>
+          </div>
+          <div v-if="context" class="ctx">{{ context }}</div>
+        </RouterLink>
+        <div v-if="hint" class="hint">
+          <RouterLink
+            :to="{ path: `/c/${hint.conv}`, query: hint.at ? { tab: 'transcript', at: hint.at } : {} }"
+            >{{
+              tr("todoItem.maybeDone", { q: tr("todoItem.quote", { q: cut(hint.quote ?? "", 40) }) })
+            }}</RouterLink
+          ><button
+            class="x"
+            :disabled="busy"
+            :title="tr('todoItem.notDone')"
+            :aria-label="tr('todoItem.notDone')"
+            @click="dismiss"
+          >
+            <Icon name="x" :size="14" />
+          </button>
         </div>
-        <div v-if="context" class="ctx">{{ context }}</div>
-        <div v-if="t.done_hint && !t.mark" class="hint">
-          {{ tr("todoItem.maybeDone", { q: tr("todoItem.quote", { q: cut(t.done_hint.quote ?? "", 40) }) }) }}
-        </div>
-      </RouterLink>
+        <TodoSources v-if="t.sources?.length" :sources="t.sources" />
+      </div>
     </div>
   </li>
 </template>
@@ -127,8 +156,11 @@ function guard(e: MouseEvent) {
 .body {
   flex: 1;
   min-width: 0;
-  color: var(--fg);
   font-size: var(--fs-sm);
+}
+.main {
+  display: block;
+  color: var(--fg);
 }
 .when {
   color: var(--muted);
@@ -136,8 +168,24 @@ function guard(e: MouseEvent) {
   white-space: nowrap; /* 「· 3 days overdue」 in one piece */
 }
 .hint {
+  display: flex;
+  align-items: center;
   font-size: var(--fs-xs);
+}
+.hint a {
   color: var(--ok);
+}
+/* the glyph is small, the button around it 32 px */
+.x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
 }
 .ctx {
   font-size: var(--fs-xs);

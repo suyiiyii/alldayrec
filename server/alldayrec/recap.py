@@ -1,6 +1,6 @@
 """A day's recap, for a card on the conversations page the morning after: one call over that day's summaries (ask.digest)
-and a numbered list of that day's todos of mine (only that day's: a todo is never repeated on the next days; none marked
-done or wrong). The model picks todos by number, so each is one a summary holds, owned by 我 (never 未知), with its
+and a numbered list of that day's todos of mine (only that day's: a todo is never repeated on the next days; none closed,
+by hand or automatically: db.shut_todos). The model picks todos by number, so each is one a summary holds, owned by 我 (never 未知), with its
 conversation and its due as said that day; its id and text stay the summary's (完成 / 不对 name a todo by its id), short
 is the model's wording. Kept in kv recap:<date> by summaries.py. The model is summary.py's; nothing is pushed anywhere.
 
@@ -36,7 +36,7 @@ async def make(day: str) -> dict | None:
     convs = [c for c in db.conversations(day, _next(day)) if (c["summary"] or {}).get("status") == "done" and c["summary"].get("title")]
     if not convs:
         return None
-    closed = db.closed_todos()
+    closed = db.shut_todos()
     todos = [{"id": i, "conv": c["id"], "text": t.get("text") or "", "to": t.get("to"), "due": t.get("due")}
              for c in convs for ts in [c["summary"].get("todos") or []] for i, t in zip(db.todo_ids(c["id"], ts), ts)
              if t.get("owner") == "我" and i not in closed]

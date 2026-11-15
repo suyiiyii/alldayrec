@@ -259,6 +259,7 @@ def test_bridge_moves_every_reference_and_alias_api(store):
             db.put_summary({"conversation": cid, "status": "done", "todos": [{"owner": "我", "to": "S1", "text": cid, "at": iso(10 if cid == A else 610)}]}, t)
         todo = db.todo_ids(B, db.summary(B)["todos"])[0]
         db.mark_todos([todo], "done")
+        t.execute("INSERT INTO todo_auto VALUES (?, ?, 'hint', '', ?, 'f600', 'x', NULL, NULL, NULL, 'now', NULL)", (todo, B, B))
         db.put_timeline(B, {"conversation": B, "speaker": "S1", "messages": []}, t)
         db.put_name_hints({"conv": B, "names": [{"who": "S1", "by": "S2", "name": "test"}]}, t)
         t.execute("INSERT INTO feedback VALUES (?,?,?)", (B, "now", "keep feedback"))
@@ -284,6 +285,7 @@ def test_bridge_moves_every_reference_and_alias_api(store):
         assert db.conn().execute(f"SELECT conv FROM {table}").fetchone()[0] == A
     nid = db.resolve_todo(todo)
     assert db.closed_todos()[nid] == "done" and db.todo(todo)["id"] == nid
+    assert tuple(db.conn().execute("SELECT todo, conv, src FROM todo_auto").fetchone()) == (nid, A, A)
     assert db.name_hints(A)[A]["names"][0]["who"] == "S2"
     assert db.timeline(A)["conversation"] == A
     assert db.apart() == {(A+"|S2", A+"|S1")}
