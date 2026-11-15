@@ -8,6 +8,7 @@ import Icon from "../components/Icon.vue";
 import LivePanel from "../components/LivePanel.vue";
 import MediaFold from "../components/MediaFold.vue";
 import RowMenu from "../components/RowMenu.vue";
+import Scrubber, { type Stop } from "../components/Scrubber.vue";
 import SpeakerSheet from "../components/SpeakerSheet.vue";
 import TranscriptRow from "../components/TranscriptRow.vue";
 import {
@@ -29,6 +30,7 @@ import { loadCalendar, today as todayOf } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useLive } from "../lib/live";
 import { recordingNow } from "../lib/progress";
+import { convWeights } from "../lib/scrub";
 import { speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 
@@ -142,6 +144,36 @@ const timeline = computed(() => {
   flush();
   return res;
 });
+// the fast-scroll rail: one stop per conversation as the list has it, its rows up to its divider; the rows after the
+// last divider are the one going on. Gaps take no rail
+const stops = computed<Stop[]>(() => {
+  const runs: { first: Row; rows: Row[]; c?: Conversation }[] = [];
+  let run: Row[] = [];
+  const end = (c?: Conversation) => {
+    if (run.length) runs.push({ first: run[0], rows: run, c });
+    run = [];
+  };
+  for (const it of timeline.value)
+    if (it.k === "row") run.push(it.r);
+    else if (it.k === "fold") run.push(...it.rows);
+    else if (it.k === "conv") end(it.c);
+  end();
+  const ws = convWeights(runs.map((r) => r.rows.length)),
+    list = t("common.list");
+  return runs.map(({ first, rows, c }, i) => ({
+    start: first.start,
+    w: ws[i],
+    group: i,
+    time: c
+      ? `${hhmm(c.start)}–${hhmm(c.end)}`
+      : `${hhmm(first.start)} · ${t(live.value ? "scrub.going" : "scrub.open")}`,
+    title: c?.summary?.status === "done" ? c.summary.title : undefined,
+    sub:
+      (c?.participants ?? [...new Set(rows.map((r) => r.speaker).filter((x) => x !== undefined))])
+        .map(speakerLabel)
+        .join(list) || undefined,
+  }));
+});
 // the closed conversation a row is in (none while its conversation goes on)
 const convOf = (r: Row) =>
   convs.value.find(
@@ -244,8 +276,9 @@ onUnmounted(() => {
   sizer?.disconnect();
 });
 
-function jump(start: string) {
-  hit.value = start;
+// scrub: from the rail, at once and nothing lit (lighting a row paints the whole day's list again, at every stop)
+function jump(start: string, scrub = false) {
+  if (!scrub) hit.value = start;
   follow.value = false; // the next words would pull the page back down before it gets there
   const el = document.querySelector(`[data-start="${CSS.escape(start)}"]`);
   if (!el) return;
@@ -253,7 +286,10 @@ function jump(start: string) {
   const r = el.getBoundingClientRect(),
     s = document.querySelector(".side")?.getBoundingClientRect();
   const cover = headH.value + (s && s.left < r.right && r.left < s.right ? s.height : 0);
-  window.scrollTo({ top: r.top + window.scrollY - cover - 8, behavior: "smooth" });
+  window.scrollTo({
+    top: r.top + window.scrollY - cover - 8,
+    behavior: scrub ? "instant" : "smooth",
+  });
 }
 </script>
 
@@ -388,6 +424,13 @@ function jump(start: string) {
       <div v-else-if="ready && !rows.length && !live" class="empty">
         <Icon name="calendar" :size="48" />{{ t("live.empty") }}
       </div>
+      <!-- in the captions' column: in its right gutter, left of the summary on a wide screen -->
+      <Scrubber
+        :stops="stops"
+        :label="t('scrub.live')"
+        avoid="header, .nav-tabs, .side"
+        :go="(s) => jump(s.start, true)"
+      />
     </div>
     <RowMenu ref="rowMenu" @changed="refresh" />
     <SpeakerSheet ref="speaker" :conv="sheetConv" :sug="sug" :reload="refresh" />

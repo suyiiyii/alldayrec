@@ -393,6 +393,12 @@
     "empty": "No transcript this day",
     "toLatest": "Jump to latest"
   },
+  "scrub": {
+    "live": "Jump through the day's conversations",
+    "conv": "Jump through the conversation by time",
+    "going": "going on",
+    "open": "not closed"
+  },
   "liveCard": {
     "going": "Conversation going on",
     "full": "Full screen",
