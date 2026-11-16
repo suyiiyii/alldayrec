@@ -295,9 +295,9 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x)))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env, samples) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x), len(x)))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -455,9 +455,9 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         with db.tx(durable=True) as t:
             seal.placed(t, path, start_ms, size, received, whole)
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                      (device, start_ms, round(count / SR, 3), path, pos, size, n, received, *h, env))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env, samples) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (device, start_ms, round(count / SR, 3), path, pos, size, n, received, *h, env, count))
         if report is not None:
             report["late"] = is_late
         with _holds:

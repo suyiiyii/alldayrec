@@ -13,10 +13,11 @@ together, in parts of at most CHUNK_MS (late.read_exact; a stretch still growing
 over what of it decoded (filled), and one row per stretch of that goes in, a gap with no piece of up to TOL_MS bridged
 (zeros to the model, kept as the row's gaps, no coverage): per frame its level and top K classes, per wall-clock
 minute the mean of every class and the frames at HIT or more. A piece that will not decode, or decodes short of its
-seconds, or a part that fails (the store, the service), writes nothing over it: it stays a hole, tried again after a
+samples at upload (pieces.samples, by one sample; before it, its seconds, to 1 ms), or a part that fails (the store, the service), writes nothing over it: it stays a hole, tried again after a
 backoff (lr_scene_failed_total). A piece that comes later into a row's gap gets a row of its own (the first kept).
 Holes are looked for in the last RECENT_S each pass, in all since SOUND_SINCE every FULL_S (late pieces behind), a
-device's pieces BATCH_MS at a time. trim.py's gate: unscened.
+device's pieces BATCH_MS at a time; lr_scene_backlog_seconds: what a full pass left, waiting out a backoff or not.
+trim.py's gate: unscened.
 """
 import argparse
 import datetime as dt
@@ -158,25 +159,26 @@ def devices(after: int | None = None) -> list:
                                   c.execute("SELECT device FROM pieces WHERE start_ms > ?", (after,)))})  # the primary key's range
 
 
-def todo(models: list, device: str, lo: int, hi: int, now_ms: int) -> tuple[list, int | None]:
+def todo(models: list, device: str, lo: int, hi: int, now_ms: int, waits: bool = True) -> tuple[list, int | None]:
     """(a, b), oldest first, the parts of device's settled pieces before hi to read now, of the pieces starting in
-    BATCH_MS from its first at lo or after (and, from lo itself, the one going on into it): the models' holes together
-    (one read for all), at most TOL_MS apart as one, a stretch still growing (a fresh piece at its end) only in whole
-    CHUNK_MS; and the next batch's lo (None: none before hi)."""
+    BATCH_MS from its first at lo or after (and, from lo itself, the one going on into it, with or without any after
+    it): the models' holes together (one read for all), at most TOL_MS apart as one, a stretch still growing (a fresh
+    piece at its end) only in whole CHUNK_MS; and the next batch's lo (None: none before hi). waits=False: holes
+    waiting out a failure's backoff too (the backlog)."""
     c = db.conn()
     first = c.execute("SELECT start_ms FROM pieces WHERE device = ? AND start_ms >= ? ORDER BY start_ms LIMIT 1", (device, lo)).fetchone()
-    if first is None or first[0] >= hi:
-        return [], None
-    end = first[0] + BATCH_MS
+    end = first[0] + BATCH_MS if first and first[0] < hi else hi
     got = c.execute("SELECT start_ms, seconds, received_ms FROM pieces WHERE device = ? AND start_ms >= ? AND start_ms < ?",
                     (device, lo, min(end, hi))).fetchall()
+    # shortcut: only the last piece starting before lo, not an older, longer one under it too (overlapping imports):
+    # the gate still holds for what that leaves; a scan of every piece before lo, if they ever turn up.
     got += c.execute("SELECT start_ms, seconds, received_ms FROM pieces WHERE device = ? AND start_ms < ? ORDER BY start_ms DESC LIMIT 1",
                      (device, lo)).fetchall()  # it may go on into lo (else, ending before, it adds nothing)
     ok = lambda s, sec, rec: (rec or s + sec * 1000) <= now_ms - SOUND_SETTLE_S * 1000
     fresh = [s for s, sec, rec in got if not ok(s, sec, rec)]
     spans = union([[max(a, lo), min(b, hi)] for s, sec, rec in got if ok(s, sec, rec) for a, b in [span(s, sec)]])
     out = []
-    for a, b in stretches([h for name in models for h in need(spans, device, name, now_ms)]):
+    for a, b in stretches([h for name in models for h in need(spans, device, name, now_ms if waits else math.inf)]):  # inf: no wait still on
         growing = any(b - TOL_MS <= s <= b + TOL_MS for s in fresh)
         while b - a >= CHUNK_MS or (b > a and not growing):
             out.append((a, min(b, a + CHUNK_MS)))
@@ -272,10 +274,13 @@ async def loop():
         for device in await anyio.to_thread.run_sync(devices, None if full else lo, limiter=threads.DB):
             at = lo
             while at is not None:  # a batch at a time (pending(), but each step on a thread of its own)
-                parts, at = await anyio.to_thread.run_sync(todo, names(), device, at, now_ms, now_ms, limiter=threads.DB)
-                backlog += sum(b - a for a, b in parts) / 1000
+                parts, after = await anyio.to_thread.run_sync(todo, names(), device, at, now_ms, now_ms, limiter=threads.DB)
                 for a, b in parts:
                     await anyio.to_thread.run_sync(one, device, names(), a, b, limiter=threads.SOUND)
+                if full:  # what this pass left, done or waiting out a backoff alike
+                    left, _ = await anyio.to_thread.run_sync(todo, names(), device, at, now_ms, now_ms, False, limiter=threads.DB)
+                    backlog += sum(b - a for a, b in left) / 1000
+                at = after
         if full:
             T().scene_stats["backlog", ""] = backlog
         await anyio.sleep(SOUND_EVERY_S)

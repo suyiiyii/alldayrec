@@ -122,7 +122,7 @@ type: reference
 
 - 每个租户还要在 `tenants.json` 里写 `"sound": true` 才自动算。没写的租户不算，但修剪闸门照样拦它（见下）：要修剪，先回填，或者加 `--allow-unscened`。
 - 算的范围以上传的音频块为准，不管有没有转写、转写成没成功。解不开的块、解出来比记录的时长短的块不写结果，之后退避重试。在服务器进程里用一个线程算（全进程同时只算一段，所有租户轮流）；设了 `INFER_URL` 时在推理服务的 `POST /scene/<模型>` 上算，推理服务也要设同样的 `SOUND_MODEL`。第一次采用推理服务的结果之前，先核对它 `/health` 里场景模型的 sha256，对不上就不采用，日志里报错，之后退避重试。推理服务没有这个模型或模型不对时，只有环境声音推迟，声纹照常。
-- 监控指标：`lr_scene_audio_seconds_total`（算了多少秒音频）、`lr_scene_compute_seconds_total`（模型用的时间）、`lr_scene_failed_total`（失败、等重试的段数），按 `model` 分；`lr_scene_decode_seconds_total`（解码用的时间，所有模型共用一次解码）、`lr_scene_backlog_seconds`（还有模型没算的秒数，每小时更新）。
+- 监控指标：`lr_scene_audio_seconds_total`（算了多少秒音频）、`lr_scene_compute_seconds_total`（模型用的时间）、`lr_scene_failed_total`（失败、等重试的段数），按 `model` 分；`lr_scene_decode_seconds_total`（解码用的时间，所有模型共用一次解码）、`lr_scene_backlog_seconds`（每小时一次全量扫描做完后，还有模型没算的秒数，失败后等重试的也算；都算完是 0）。
 - 修剪闸门：设了 `SOUND_MODEL` 时，所有租户（不管 `"sound"` 写没写，`--db` 指定的库也一样）的 `trim.py` 要丢掉的块里，只要有 1 毫秒没有主模型的结果，这个小时就整个留着（原因 `no sound`），`SOUND_SINCE` 之前的历史也一样。没有任何容差：块尾没算到的一小段、解不开或解短的块，都算没覆盖。先回填再修剪；确实不要这些结果时加 `--allow-unscened`，日志里写明丢掉了多少秒没算过的音频。`SOUND_MODEL` 为空时，修剪和以前完全一样。
 - 回填历史（很重，按 1 个核算，每小时录音：解码 45–120 秒（所有模型共用一次），EfficientAT 约 30 秒，YAMNet 约 35–40 秒；在一台忙的老 CPU 上测的墙钟时间）：
 

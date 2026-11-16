@@ -61,10 +61,12 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, seconds REAL NOT NULL, path TEXT NOT NULL,  -- hour file, relative
     pos INTEGER, size INTEGER, n INTEGER,                                                       -- to the recordings dir;
     received_ms INTEGER, rms REAL, hum REAL, zero_ms INTEGER, full INTEGER,                     -- n: samples the client wrote;
-    env BLOB,                                                                                   -- received_ms: when it came
+    env BLOB, samples INTEGER,                                                                  -- received_ms: when it came
     PRIMARY KEY (start_ms, device));                                                            -- (NULL before 10-07);
                                                                                                 -- rms..full: audio.health();
-                                                                                                -- env: audio.envelope() (colocate.py)
+                                                                                                -- env: audio.envelope() (colocate.py);
+                                                                                                -- samples: what it decoded to
+                                                                                                -- (NULL before 11-16)
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE INDEX IF NOT EXISTS pieces_end ON pieces(device, start_ms + seconds * 1000);  -- where its audio ends: backlog, a stream's start, pending
 CREATE TABLE IF NOT EXISTS store_objects (    -- STORAGE=s3 (seal.py): each hour file (and import) on its way to an object;
@@ -240,6 +242,8 @@ def init():
         bank.fill(name)
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
+    if "samples" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-16: sounds.py's exact coverage; older pieces have none
+        conn().execute("ALTER TABLE pieces ADD COLUMN samples INTEGER")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")

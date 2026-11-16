@@ -10,6 +10,7 @@ import threading
 import time
 import types
 
+import anyio
 import numpy as np
 import pytest
 
@@ -444,3 +445,113 @@ def test_scan_in_batches(on, monkeypatch):
     catch_up(["mn10_as"])
     assert len(seen) <= 8 and all(b - a <= 60_000 for parts, _ in seen for a, b in parts), seen
     assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0
+
+
+def uploaded(t0, decoded: int, n: int):
+    """A piece at t0 that decodes `decoded` samples now and decoded n at its upload (its seconds and samples those)."""
+    save(t0, flac(tone(1, 2)[:decoded]))
+    db.conn().execute("UPDATE pieces SET seconds = ?, samples = ? WHERE start_ms = ?", (round(n / SR, 3), n, ms(t0)))
+
+
+@pytest.mark.parametrize("decoded, n", [(15988, 16000), (15992, 16008), (16000, 16008)])
+def test_short_tail_is_a_hole(on, decoded, n):
+    """A piece that decodes short of its samples at upload: by 0.75 ms, by 1 ms its seconds (to 1 ms) cannot tell, by
+    0.5 ms past them: a hole of its last ms all the same, it gates and waits out a backoff; no tolerance."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    uploaded(t0, decoded, n)
+    assert catch_up(["mn10_as"]) == 1 and T().scene_stats["failed", "mn10_as"] == 1
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0.001
+    assert catch_up(["mn10_as"]) == 0
+
+
+def test_read_exact_as_before_without_filled(on):
+    """Without filled (sound off, and every late reader), read_exact gives what it gave before scene coverage: the same
+    audio and the same bad, field for field, for a piece that decodes 0.75 ms short with one that will not decode
+    starting inside its last ms (main's: bad from 999 ms; filled given, the same)."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    uploaded(t0, 15988, 16000)
+    assert audio.save(DEVICE, ms(t0) + 999, flac(tone(2, 1)), "audio/flac")
+    db.conn().execute("UPDATE pieces SET size = 20 WHERE start_ms = ?", (ms(t0) + 999,))
+    bad, bad2, filled = [], [], []
+    x = late.read_exact(DEVICE, ms(t0), ms(t0) + 2000, bad)
+    assert bad == [[ms(t0) + 999, ms(t0) + 1999]]
+    assert x.dtype == np.int16 and len(x) == 32000 and np.array_equal(x[:15988], tone(1, 2)[:15988]) and not x[15988:].any()
+    assert np.array_equal(late.read_exact(DEVICE, ms(t0), ms(t0) + 2000, bad2, filled), x) and bad2 == bad
+    assert filled == [[ms(t0), ms(t0) + 999]]
+
+
+def test_samples_column_on_an_old_store(tmp_path):
+    """A store from before pieces.samples: init adds it (NULL, every other field as it was), again and again; new
+    pieces get theirs."""
+    db.open_db(tmp_path / "live.db", tmp_path / "rec")
+    save(dt.datetime(2026, 1, 2), flac(tone(1, 1)))
+    db.conn().execute("ALTER TABLE pieces DROP COLUMN samples")
+    before = [tuple(r) for r in db.conn().execute("SELECT * FROM pieces")]
+    db.init()
+    db.init()
+    after = db.conn().execute("SELECT * FROM pieces").fetchall()
+    assert [tuple(r)[:-1] for r in after] == before and after[0].keys()[-1] == "samples" and after[0]["samples"] is None
+    save(dt.datetime(2026, 1, 2, 0, 0, 1), flac(tone(1, 2)[:16003]))
+    assert [tuple(r) for r in db.conn().execute("SELECT samples FROM pieces WHERE samples IS NOT NULL")] == [(16003,)]
+
+
+class Passes(Exception):
+    pass
+
+
+def passes(monkeypatch, n: int):
+    """n passes of sounds.loop(), every one a full one."""
+    monkeypatch.setattr(sounds, "FULL_S", 0)
+    left = [n]
+
+    async def sleep(_):
+        left[0] -= 1
+        if not left[0]:
+            raise Passes
+
+    monkeypatch.setattr(sounds.anyio, "sleep", sleep)
+    with pytest.raises(Passes):
+        anyio.run(sounds.loop)
+
+
+def test_backfill_from_inside_a_piece(on, monkeypatch, tmp_path):
+    """--since inside a piece, none starting after it: backfill scores the piece from --since on."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 60))
+    monkeypatch.setattr(infer, "fetch", lambda *a: None)
+    monkeypatch.setattr(infer, "check", lambda *a: None)
+    monkeypatch.delenv("INFER_URL", raising=False)
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    backfill_cli(monkeypatch, tmp_path / "live.db", "--recordings", str(tmp_path / "rec"),
+                 "--since", (t0 + dt.timedelta(seconds=30)).isoformat(), "--model", "mn10_as")
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[30000, 60000]]
+
+
+def test_loop_from_inside_a_piece(on, monkeypatch):
+    """SOUND_SINCE inside a piece, none starting after it: the loop scores the piece from SOUND_SINCE on."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 60))
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    monkeypatch.setenv("SOUND_SINCE", (t0 + dt.timedelta(seconds=30)).isoformat())
+    passes(monkeypatch, 1)
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[30000, 60000]]
+
+
+def test_backlog_after_each_pass(on, monkeypatch):
+    """lr_scene_backlog_seconds: what a pass left, failed or waiting out a backoff alike; 0 once it is done."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 60))
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+
+    def broken(name, x):
+        raise RuntimeError("the model failed")
+
+    monkeypatch.setattr(sound, "scene", broken)
+    passes(monkeypatch, 1)
+    assert T().scene_stats["backlog", ""] == 60, "failed"
+    passes(monkeypatch, 1)
+    assert T().scene_stats["backlog", ""] == 60 and T().scene_stats["failed", "mn10_as"] == 1, "waiting, not tried"
+    monkeypatch.setattr(sound, "scene", fake)
+    T().scene_retry.clear()
+    passes(monkeypatch, 1)
+    assert rows("mn10_as") and T().scene_stats["backlog", ""] == 0, "done"
