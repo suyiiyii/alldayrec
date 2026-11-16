@@ -419,7 +419,7 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                 val held = hold(deviceOf(b[0]))
                 var got: ByteArray? = null
                 val code = post("$server/api/chunks?device=${enc(deviceOf(b[0]).ifEmpty { device })}&start=${startMs(b[0])}" +
-                                (held?.let { "&hold=$it" } ?: ""),
+                                (held?.let { "&hold=$it" } ?: "") + (if (deviceOf(b[0]).isEmpty()) "&capture_gain_db=${Slicer.CAPTURE_GAIN_DB}" else ""),
                                 b.fold(ByteArray(0)) { acc, f -> acc + f.readBytes() }, "audio/ogg") { got = it }
                 val a = answer(code, got)
                 if (a == Answer.OK) got?.let(::slices)

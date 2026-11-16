@@ -652,6 +652,29 @@ do {
   check(Store.ack(0xFFFF_FFFF, 0xFFFF_FFFF), [8] + [UInt8](repeating: 0xFF, count: 8), "ack at the top")
 }
 
+// the board's mic gain in TIME (firmware #358 byte 53): none in 53 bytes, int8 half dB in 54
+do {
+  let old = [UInt8](repeating: 0, count: 53)
+  check(Store.micGainDb(old), nil, "53 bytes: older firmware")
+  check([0, 12, 0xF4, 40, 0xD8].map { Store.micGainDb(old + [$0]) }, [0, 6, -6, 20, -20], "54 bytes")
+}
+
+// the phone's capture gain (Capture.louder): x times the gain under the knee, never past full scale
+do {
+  let g = Float(pow(10, Capture.gainDb / 20))
+  var x = (0..<2001).map { Float($0 - 1000) / 1000 * 3 }  // -3 .. 3 full scale
+  let before = x
+  x.withUnsafeMutableBufferPointer { Capture.louder($0) }
+  for (a, y) in zip(before, x) where abs(a * g) <= Capture.knee { check(y, a * g, "under the knee: \(a)") }
+  check(x.allSatisfy { abs($0) <= 1 }, true, "at most full scale")
+  check(zip(before, x).allSatisfy { a, y in (y > 0) == (a > 0) || a == 0 }, true, "sign kept")
+  check(zip(x, x.dropFirst()).allSatisfy { $0 <= $1 }, true, "monotonic")
+  check(abs(20 * log10(Double(x[1000 + 100] / before[1000 + 100])) - 6) < 0.001, true, "+6 dB")  // 0.3 in, 0.6 out
+  var loud: [Float] = [1e6, -1e6, .greatestFiniteMagnitude]
+  loud.withUnsafeMutableBufferPointer { Capture.louder($0) }
+  check(loud.map(abs).allSatisfy { $0 <= 1 }, true, "far past full scale")
+}
+
 // an upload's answer (UploadAnswer, live-record#328): only the server's own "not audio" drops the pieces
 do {
   let a = { (code: Int, body: String?) in UploadAnswer.of(code, body.map { Data($0.utf8) }) }

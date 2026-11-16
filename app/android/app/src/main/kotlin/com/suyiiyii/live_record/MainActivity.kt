@@ -394,8 +394,13 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         }
     }
 
-    private companion object {
-        val QUIET = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+    companion object {
+        /** The app adds no gain of its own (the phone is louder than the standard already), and each microphone piece
+         *  goes up with it (capture_gain_db); MIC until the 11-19 AGC test picks a source. A change needs a new
+         *  calibration. */
+        const val CAPTURE_GAIN_DB = 0
+        const val SOURCE = MediaRecorder.AudioSource.MIC
+        private val QUIET = setOf(AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
             AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_HEARING_AID)
     }
@@ -403,7 +408,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
     private fun micLoop() {
         val startWall = System.currentTimeMillis()
         val minBuf = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-        val rec = AudioRecord(MediaRecorder.AudioSource.MIC, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4)
+        val rec = AudioRecord(SOURCE, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4)
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         codec.configure(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, sr, 1).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, 24000)
@@ -411,6 +416,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         codec.start()
         rec.startRecording()
+        DeviceLog.app(device, "capture", "采集：App 增益 $CAPTURE_GAIN_DB dB · 音源 MIC", fields = mapOf("capture_gain_db" to CAPTURE_GAIN_DB, "audio_source" to "MIC"))
         // The encoder's own header says pre-skip 104: its 6.5 ms lookahead counted at 16 kHz, in a 48 kHz field
         // (AOSP C2SoftOpusEnc), and every piece repeated it, cutting 2.2 ms of real audio at each seam. The
         // encoder runs on across pieces, so only the run's first piece has the delay to skip: 6.5 ms = 312 at 48 kHz.

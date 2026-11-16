@@ -616,7 +616,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
                             "rssi": dbm ?? NSNull(),
                             "charge": Ble.charge(t) ?? NSNull(), "card": Ble.card(t) ?? NSNull(),
                             // the card's size as it answered, file system or not: formatCard's code
-                            "card_kb": t.count > 52 ? Ble.u32(t, 49) : NSNull()]
+                            "card_kb": t.count > 52 ? Ble.u32(t, 49) : NSNull(), "mic_gain_db": Store.micGainDb(t) ?? NSNull()]
     if t.count >= 47 {
       let left = Int64(Int32(truncatingIfNeeded: Store.le(t, 43, 4)))
       pausedUntil = left > 0 ? Recorder.now() + left * 1000 : 0

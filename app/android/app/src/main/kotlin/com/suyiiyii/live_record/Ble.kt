@@ -105,6 +105,10 @@ object Ble {
      *  Older firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it. */
     fun acks(status: ByteArray): Boolean = (status.getOrNull(48)?.toInt() ?: 0) and 1 != 0
 
+    /** The board's PDM gain in force (status byte 53, int8 in 0.5 dB steps, 0 = 0x28: firmware lr_store.h), dB: sent as
+     *  hw mic_gain_db; null: an older firmware (53 bytes). */
+    fun micGainDb(status: ByteArray): Double? = status.getOrNull(53)?.let { it / 2.0 }
+
     /** CTRL 0x08 ACK: the mirror has [f] up to [have], all of it (of other files it says nothing). */
     fun ack(f: Long, have: Long): ByteArray =
         ByteBuffer.allocate(9).order(ByteOrder.LITTLE_ENDIAN).put(8).putInt(f.toInt()).putInt(have.toInt()).array()
@@ -575,6 +579,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             "charge" to Ble.charge(raw), "card" to Ble.card(raw),
             // the card's size as it answered, file system or not: formatCard's code
             "card_kb" to if (raw.size > 52) t.getInt(49).toLong() and 0xffffffffL else null,
+            "mic_gain_db" to Ble.micGainDb(raw),
             // a backlog read in the background: what is left, and when it is done at this pace
             "backlog_kb" to left, "backlog_eta_s" to if (rate > 0 && left > 0) (left * 1024 / rate).toLong() else null,
             "live_gaps" to liveGaps,  // holes in LIVE the card could not fill this session (follow())

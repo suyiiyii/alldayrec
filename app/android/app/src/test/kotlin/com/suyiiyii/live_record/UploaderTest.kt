@@ -103,7 +103,7 @@ class UploaderTest {
             while (kv.isNotEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
             Thread.sleep(500)
             val all = got.toList()
-            val (up1, upMic, upNew) = listOf("200 /api/chunks?device=D3200-0A0B&start=1000", "200 /api/chunks?device=phone&start=2000",
+            val (up1, upMic, upNew) = listOf("200 /api/chunks?device=D3200-0A0B&start=1000", "200 /api/chunks?device=phone&start=2000&capture_gain_db=0",
                                              "200 /api/chunks?device=D3200-0C0D&start=9500")
             val (lost, end1, endMic) = listOf("500 /api/chunks/end?device=D3200-0A0B&t=5000", "200 /api/chunks/end?device=D3200-0A0B&t=5000",
                                               "200 /api/chunks/end?device=phone&t=3000")
@@ -213,22 +213,22 @@ class UploaderTest {
         }.start()
         val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
         try {
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped: no second try", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > 0 && kept.exists())
             assertEquals("kept for MainActivity's upload gate", up.haltedAt, saved["haltedAt"])
             assertEquals("uploadRefused", up.note?.get("code"))
             up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on: it tries once more on its own
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped again", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > System.currentTimeMillis() - 10_000 && kept.exists())
             down.set(true); up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on, the network down
-            assertEquals("503 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("503 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("the refusal is over: a stop's drain must not report it", 0L, up.haltedAt)
             File(dir, "5000.ogg").writeBytes(ByteArray(64))  // not batched with it: over BATCH_GAP_MS apart
             down.set(false); proxy.set(false)  // the network back, the proxy fixed: the next try (5 s on) goes through
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(10, TimeUnit.SECONDS))
-            assertEquals("200 /api/chunks?device=phone&start=5000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(10, TimeUnit.SECONDS))
+            assertEquals("200 /api/chunks?device=phone&start=5000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             Thread.sleep(200)
             assertEquals(emptyList<File>(), Uploader.queue(dir))
             assertEquals(0L, up.haltedAt)

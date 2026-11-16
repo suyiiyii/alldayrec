@@ -550,9 +550,24 @@ final class Slicer {
       return r
     }
     input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buf, _ in self?.convert(buf, resampler, run) }
+    logCapture()
     engine.prepare()
     try engine.start()
   }
+
+  /// How this run captures, in the device log when it changed: the app's gain, the session mode and the system's own
+  /// input gain (whether iOS lets it be set: level calibration, 11-19 E5). Records only; on the main thread.
+  private func logCapture() {
+    let s = AVAudioSession.sharedInstance()
+    let f: [String: Any] = ["capture_gain_db": Capture.gainDb, "session_mode": s.mode.rawValue, "input_gain": s.inputGain,
+                            "input_gain_settable": s.isInputGainSettable]
+    let line = String(format: "采集：App 增益 %+g dB · %@ · 系统输入增益 %.2f（%@）", Capture.gainDb, s.mode.rawValue, s.inputGain,
+                      s.isInputGainSettable ? "可调" : "不可调")
+    guard line != captureLine else { return }
+    captureLine = line
+    DeviceLog.app(device, "capture", line, fields: f)
+  }
+  private var captureLine: String?  // main: the last one logged
 
   private func convert(_ buf: AVAudioPCMBuffer, _ resampler: AVAudioConverter, _ run: OpusPieces) {
     guard let o = AVAudioPCMBuffer(pcmFormat: out, frameCapacity: AVAudioFrameCount(Double(buf.frameLength) * out.sampleRate / buf.format.sampleRate) + 16)
@@ -563,7 +578,9 @@ final class Slicer {
       fed = true; status.pointee = .haveData; return buf
     }
     if let err { error = "\(err)"; return }
-    if o.frameLength > 0 { q.async { do { try run.write(o) } catch { self.error = "\(error)" } } }
+    guard o.frameLength > 0 else { return }
+    Capture.louder(UnsafeMutableBufferPointer(start: o.floatChannelData![0], count: Int(o.frameLength)))
+    q.async { do { try run.write(o) } catch { self.error = "\(error)" } }
   }
 
   private func finishRun() {  // on q
@@ -646,7 +663,9 @@ final class Uploader: Thread {
     let hold = p.device.flatMap(Recorder.hold).map { "&hold=\($0)" } ?? ""
     do {
       var got: Data?
-      let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold,
+      let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold
+                          // shortcut: pieces queued before an update that changed the gain go with the new one; record only
+                          + (p.device == nil ? String(format: "&capture_gain_db=%g", Capture.gainDb) : ""),
                           try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac",
                           reply: { got = $0 })
       let answer = UploadAnswer.of(code, got)
