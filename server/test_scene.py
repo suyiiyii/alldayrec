@@ -352,6 +352,30 @@ def test_odd_lengths_leave_nothing(on, n):
     assert catch_up(["mn10_as"]) == 0
 
 
+@pytest.mark.parametrize("odd", [0, 1])
+def test_seams_at_odd_ms_leave_nothing(on, odd):
+    """Pieces of 16008 samples (1000.5 ms) every 1000 ms from an even or an odd ms, each starting inside the one
+    before: nothing left over, no crumb at the seams."""
+    at = ms(dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)) + odd
+    for k in range(3):
+        assert audio.save(DEVICE, at + 1000 * k, flac(tone(k, 2)[:16008]), "audio/flac")
+    catch_up(["mn10_as"])
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0
+    assert catch_up(["mn10_as"]) == 0
+
+
+def test_long_aac_leaves_nothing(on, monkeypatch):
+    """A long AAC (piece_window reads it to its seconds only) of n samples, not whole ms: nothing left over."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "aac",
+                           "-f", "adts", "pipe:1"], input=tone(1, 5.2).tobytes(), capture_output=True, check=True).stdout
+    assert audio.save(DEVICE, ms(t0), body, "audio/aac", n=5 * SR + 8)
+    monkeypatch.setattr(audio, "WHOLE_S", 1)  # read as a long import is
+    catch_up(["mn10_as"])
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0 and not T().scene_stats["failed", "mn10_as"]
+    assert catch_up(["mn10_as"]) == 0
+
+
 @pytest.mark.parametrize("codec", ["opus", "aac"])
 def test_recorder_codecs_leave_nothing(on, codec):
     """A recorder's Opus pieces (slices of one encoder, primed by the piece before) and a phone's AAC ones (n samples,

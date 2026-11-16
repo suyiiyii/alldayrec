@@ -68,7 +68,7 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
                     # all: its seconds (to 1 ms) and its samples at upload, exactly (pieces before 11-16 have none)
                     whole = round(total / SR, 3) >= p["seconds"] and (want is None or total >= want)
                     to = min(b, last) if whole else min(to, last - 1)
-                filled.append([round(start), to])
+                filled.append([p["start_ms"] + offset * 1000 // SR, to])  # its first ms: the piece before has the rest
     if missed:
         bad += late_store.subtract(missed, got)
     return x
