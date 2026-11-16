@@ -1,8 +1,9 @@
 """Level-cal E1: is the nRF PDM's GAIN applied before or after its 16-bit rounding? Reads the mic's raw PCM that an
 LR_RAW_PCM=1 build (src/raw_pcm.c) sends on the USB serial port, and tells from the sample values. Gain applied after
-the rounding: at +20 dB (0x50, x10) the samples sit on a grid ~10 apart, no two used values next to each other;
-before: the values are dense, as at 0 dB. Holes that are not on the gain's grid (a narrowband sound), or a level that
-did not change by the gains' difference, are no answer. Standard library only.
+the rounding: at +20 dB (0x50, x10) the bulk of the values sits on a grid ~10 apart, every grid point used and
+nothing between; before: the values are dense, as at 0 dB. Holes that are not on the gain's grid (a narrowband sound),
+a grid with holes (a tone), or a level that did not change by the gains' difference, are no answer. A sound already
+integer before the rounding gives the same samples either way: no script can tell those. Standard library only.
     python3 lr_pcm.py capture OUT.raw [--seconds 12] [--port /dev/cu.usbmodemXXXX]   the frames as they come
     python3 lr_pcm.py stats A.raw [B.raw]   each capture's numbers; two at different gains: the verdict
     python3 lr_pcm.py --selftest
@@ -91,11 +92,15 @@ def stats(fr, bad=0) -> dict:
     r["gcd"] = d
     r["low_bits"] = [round(sum(v >> k & 1 for v in x) / len(x), 3) for k in range(4)]  # ~0.5 each when all used
     # the distinct values used, and the steps between neighbours among them: gain g >= 2 after the rounding never uses
-    # two adjacent values (round(k*g) and round((k+1)*g) are >= g-1 apart), and its median step is ~g
+    # two adjacent values (round(k*g) and round((k+1)*g) are >= g-1 apart), and its median step is ~g. Shown only:
+    # verdict() checks the grid on the bulk
     u = sorted(set(x))
     d = sorted(b - a for a, b in zip(u, u[1:]))
     r["adjacent"] = d.count(1) / len(d)
     r["spacing"] = d[len(d) // 2]
+    xs = sorted(x)
+    lo, hi = xs[len(xs) // 50], xs[-len(xs) // 50]
+    r["bulk"] = [v for v in u if lo <= v <= hi]  # the values used between the 2nd and 98th percentile, for verdict()
     # occupancy: of the steps between adjacent samples (integers on the same grid as the samples, without the DC and
     # the slow 2-20 Hz wander the raw path carries), the values used / all values between their 2nd and 98th
     # percentile, where each value is expected often
@@ -129,10 +134,22 @@ def verdict(a: dict, b: dict) -> tuple[str, str]:
     want, got = gain_db(b["gain"]) - gain_db(a["gain"]), 20 * math.log10(b["rms"] / a["rms"])
     if abs(got - want) > 3:
         return "inconclusive", f"rms {got:+.1f} dB apart, the gains say {want:+.1f}: the gain did not take, or the sound changed"
-    seen = f"occupancy {b['occupancy']:.2f}, adjacent {b['adjacent']:.2f}, spacing {b['spacing']}"
-    grid = b["adjacent"] < 0.02 and 0.7 * step <= b["spacing"] <= 1.5 * step
+    # the gain after the rounding uses round(k*step) for every k in the bulk: neighbouring values are 1-3 grid steps
+    # apart (+-1 for the rounding, 3% a step for a gain not exactly the code's), and the grid is filled. Only the
+    # bulk counts: sparse tails have wide gaps that fit any grid. Holes off the grid (a tone) are no answer. An
+    # input that is already integer before the rounding gives the same samples either way: no script can tell it
+    u = b["bulk"]
+    off = 0
+    for p, q in zip(u, u[1:]):
+        j = round((q - p) / step)
+        off += not (1 <= j <= 3 and abs(q - p - j * step) <= 1 + 0.03 * j * step)
+    off_grid = off / max(len(u) - 1, 1)
+    fill = len(u) / ((u[-1] - u[0]) / step + 1)
+    seen = (f"off-grid {off_grid:.2f}, grid fill {fill:.2f}, occupancy {b['occupancy']:.2f}, "
+            f"adjacent {b['adjacent']:.2f}, spacing {b['spacing']}")
+    grid = off_grid <= 0.01 and fill >= 0.9
     if grid and b["occupancy"] < 0.9:
-        return "after", f"{b['gain']:#04x}'s values {b['spacing']} apart, none adjacent (expected {step:.1f} after rounding; {seen})"
+        return "after", f"{b['gain']:#04x}'s values on the x{step:.2f} grid, every grid point used ({seen})"
     if not grid and b["occupancy"] >= 0.9 and b["adjacent"] > 0.5:
         return "before", f"{b['gain']:#04x} uses {b['occupancy']:.0%} of values, as {a['gain']:#04x} ({a['occupancy']:.0%}; {seen})"
     return "inconclusive", f"{b['gain']:#04x} {seen}: neither the x{step:.1f} grid nor dense values"
@@ -143,7 +160,7 @@ def report(path: str) -> dict:
     r = stats(fr, bad)
     print(f"{path}: gain {r['gain']:#04x} ({gain_db(r['gain']):+.1f} dB)" if r["gain"] is not None else f"{path}: no frames")
     for k, v in r.items():
-        if k != "gain":
+        if k not in ("gain", "bulk"):
             print(f"  {k}: {round(v, 3) if isinstance(v, float) else v}")
     return r
 
@@ -217,17 +234,70 @@ def selftest():
     assert rs[1]["gcd"] == 10 and rs[1]["low_bits"][0] == 0 and 10 in rs[1]["frame_gcd"], rs[1]
     assert rs[0]["frame_gcd"].get(1, 0) > 350 and 0.4 < rs[0]["low_bits"][0] < 0.6, rs[0]
 
-    # review of #363: a 1 kHz tone with weak noise, the gain before the rounding, leaves holes in the steps that are
-    # not the x10 grid: never 'after'; the same tone after the rounding is
-    def tone(gain, scale, sigma, before):
-        r = random.Random(42)
-        x = [30 * math.sin(2 * math.pi * 1000 * i / 16000) + r.gauss(0, sigma) for i in range(600 * N)]
-        x = [round(v * scale) if before else round(round(v) * scale) for v in x]
-        return b"".join(frame(i, gain, x[i * N:(i + 1) * N]) for i in range(600))
-    for sigma in (0, 0.01, 0.1, 0.2, 0.3):
-        v, rs = judge(tone(0x28, 1, sigma, True), tone(0x50, 10, sigma, True))
-        assert v != "after", (sigma, verdict(*rs))
-    assert judge(tone(0x28, 1, 0.2, False), tone(0x50, 10, 0.2, False))[0] == "after"
+    # reviews of #363: synthetic sources at 16 kHz, x in LSB at 0x28, each capture with its own noise; the higher gain
+    # g before the rounding, round(g*x), or after it, round(g*round(x)). The verdict may be inconclusive, never the
+    # other order
+    def source(kind, amp, sigma=0.0, dc=0.0, seed=42, n=1500, pops=False, sparks=0.0):
+        r, x, lp1, lp2, slow = random.Random(seed), [], 0.0, 0.0, 0.0
+        for i in range(n * N):
+            if kind == "tone":  # 1 kHz
+                x.append(amp * math.sin(2 * math.pi * 1000 * i / 16000) + r.gauss(0, sigma))
+            else:  # speech-shaped: two low-pass poles, DC reject, a 3 Hz syllable envelope, a weak floor
+                lp1 += 0.45 * (r.gauss(0, 1) - lp1)
+                lp2 += 0.45 * (lp1 - lp2)
+                slow += 0.02 * (lp2 - slow)
+                x.append((lp2 - slow) * (0.625 + 0.375 * math.sin(2 * math.pi * 3 * i / 16000)) + r.gauss(0, 0.01))
+        if kind != "tone":
+            k = amp / math.sqrt(sum(v * v for v in x) / len(x))
+            x = [v * k for v in x]
+        x = [v + dc for v in x]
+        for s in range(0, len(x), 16000) if pops else ():  # 0.3% of samples in strong pulses: clip at the high gain
+            for j in range(48):
+                x[s + j] += 12000 if j < 24 else -12000
+        for _ in range(int(len(x) * sparks)):  # sparse clicks over the whole range, none clipped at the high gain
+            x[r.randrange(len(x))] += r.uniform(-30000, 30000) / 10
+        return x
+
+    def cap(x, gain, g=1.0, before=True):
+        pcm = [max(-32768, min(32767, round(v * g) if before else round(round(v) * g))) for v in x]
+        return b"".join(frame(i, gain, pcm[i * N:(i + 1) * N]) for i in range(len(pcm) // N))
+
+    def order(name, lo, hi, want="", gains=((0x50, 10), (0x3c, 3.16))):
+        """want: per gain, the verdict for the gain before then after the rounding (b, a, i, . any); '' all ." """
+        low = cap(lo, 0x28)
+        for k, (gain, g) in enumerate(gains):
+            for before in (True, False):
+                v, rs = judge(low, cap(hi, gain, g, before))
+                assert v in ("before" if before else "after", "inconclusive"), (name, g, before, verdict(*rs))
+                w = want[2 * k + (not before)] if want else "."
+                assert w in (".", v[0]), (name, g, before, w, verdict(*rs))
+
+    # round 2: the gain before the rounding of a 4 LSB tone with weak noise left values 15, 28, 37, 40 (holes off the
+    # grid) and read as 'after'; with sparse clicks the holes are a small share of all gaps, so only the bulk counts
+    for sigma in (0, 0.001, 0.003, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2):
+        lo, hi = source("tone", 4, sigma, seed=42), source("tone", 4, sigma, seed=43)
+        order(f"tone 4 sigma {sigma}", lo, hi, "b.b." if sigma >= 0.05 else "")
+    order("tone 4 clicks", source("tone", 4, 0.003, seed=42, sparks=0.004),
+          source("tone", 4, 0.003, seed=43, sparks=0.004))
+    # round 2's matrix, 15 s each: tones (their grid has holes: no 'after'), speech-shaped noise by RMS, DC, clipping
+    for name, kind, amp, sigma, dc, pops, n, want in (
+            ("tone 30", "tone", 30, 0, 0, False, 1500, "iiii"),
+            ("tone 30 sigma 0.2", "tone", 30, 0.2, 0, False, 1500, "iiii"),
+            ("tone 30 sigma 0.5", "tone", 30, 0.5, 0, False, 1500, ""),
+            ("tone 30 sigma 1", "tone", 30, 1, 0, False, 1500, ""),
+            ("tone 30 sigma 1 dc", "tone", 30, 1, 1000, False, 1500, ""),
+            ("speech 0.3", "speech", 0.3, 0, 0, False, 1500, "iiii"),  # too quiet
+            ("speech 3", "speech", 3, 0, 0, False, 1500, "baba"),
+            ("speech 30", "speech", 30, 0, 0, False, 1500, "baba"),
+            ("speech 300", "speech", 300, 0, 0, False, 1500, "baba"),
+            ("speech 1000", "speech", 1000, 0, 0, False, 1500, "iiba"),  # x10: too few samples a value
+            ("speech 1000 60 s", "speech", 1000, 0, 0, False, 6000, "baba"),
+            ("speech 30 dc", "speech", 30, 0, 1000, False, 1500, "baba"),
+            ("speech 300 dc, x10 clips 0.08%", "speech", 300, 0, 2100, False, 1500, "baba"),
+            ("speech 30 pulses, clipped", "speech", 30, 0, 0, True, 1500, "iiii")):  # rms off once clipped
+        order(name, source(kind, amp, sigma, dc, 42, n, pops), source(kind, amp, sigma, dc, 43, n, pops), want)
+    order("speech 100 dc 10000, x3.16 clips 0.14%", source("speech", 100, dc=10000, seed=42),
+          source("speech", 100, dc=10000, seed=43), "ba", gains=((0x3c, 3.16),))
     same = stream(0x28, 10)  # the gain byte changed, the level did not: no answer
     v, rs = judge(same, b"".join(frame(i, 0x50, pcm) for i, _, pcm in frames(same)[0]))
     assert v == "inconclusive" and rs[1]["gain"] == 0x50, verdict(*rs)
@@ -244,6 +314,12 @@ def selftest():
                                capture_output=True, text=True)
             assert p.returncode == 1 and not p.stderr and "verdict: inconclusive: " in p.stdout, (pair, p)
         assert "dead mic" in p.stdout, p.stdout
+        # round 2's counterexample as it was run: the tone of 4 LSB, the gain before the rounding, through the CLI
+        for k, (seed, gain, g) in {"tone28": (42, 0x28, 1), "tone50": (43, 0x50, 10)}.items():
+            open(os.path.join(d, k), "wb").write(cap(source("tone", 4, 0.003, seed=seed), gain, g))
+        p = subprocess.run([sys.executable, __file__, "stats", os.path.join(d, "tone28"), os.path.join(d, "tone50")],
+                           capture_output=True, text=True)
+        assert p.returncode == 0 and not p.stderr and "verdict: inconclusive: " in p.stdout, p
 
     # framing: garbage first, a frame cut short, a bad sum, lost frames, and the gain changed mid-capture
     a, b = stream(0x28, 3, n=300), stream(0x50, 3, 10, n=500)
