@@ -53,14 +53,17 @@ FINAL_EMBED_CONCURRENCY = int(os.environ.get("FINAL_EMBED_CONCURRENCY", "2"))
 
 
 def seg_embs(device: str, segs: list[dict], vs: list, at) -> list[tuple]:
-    """seg_emb's rows of a final piece: the voiceprint voices() took of each engine segment (segs, as the engine gave
-    them: label() joins parts again) or of each of its parts, with its own span, as float16. No new inference; the
-    rows a pass keeps: db.put_seg_embs."""
+    """seg_emb's rows of a final piece: the voiceprint voices() took of each engine segment or of each of its parts
+    (vs), with its own span, as float16, and the row it went in (segs: as label() and final_rows left them); none for
+    a part in no row. No new inference; the rows a pass keeps: db.put_seg_embs."""
     model = f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"
     ts = lambda s: db.ms(iso(at(s / 1000)))  # as its row's start: db.ms of the same iso
+    rows = {id(o): g["row"] for g in segs for o in (g, *(g.get("words") or []))}
+    # a part is in segs, or label() joined it again into one holding its first word (by identity: segments overlap)
+    row = lambda p: rows.get(id(p if id(p) in rows or not p.get("words") else p["words"][0]))
     return [(device, ts(p["start_ms"]), ts(p["end_ms"]), k if len(v) > 1 else 0, p.get("engine_speaker"), model,
-             np.asarray(e, np.float16).tobytes(), 0.0)  # gain_db: voices() embeds x as decoded (lift: the engine's)
-            for v in vs if v for k, (p, e) in enumerate(v, 1)]
+             np.asarray(e, np.float16).tobytes(), 0.0, r)  # gain_db: voices() embeds x as decoded (lift: the engine's)
+            for v in vs if v for k, (p, e) in enumerate(v, 1) if (r := row(p))]
 
 
 async def pipeline(device: str):
@@ -474,7 +477,7 @@ async def pipeline(device: str):
         embs = []
         if T().seg_emb:
             try:
-                embs = seg_embs(device, j["segs"], j["vs"], at)
+                embs = seg_embs(device, segs, j["vs"], at)
             except Exception as e:  # only beside the rows: never holds them up
                 log.warning("%s: segment voiceprints not kept: %r", device, e)
                 st.seg_emb_failed += 1

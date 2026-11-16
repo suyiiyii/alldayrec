@@ -1,7 +1,7 @@
 """db seg_emb, each final segment's voiceprint (tenant "seg_emb"): made by init on any store, again and again, its rows
-kept; gone with its sentences (a pass's replace_sentences, a joined row's later segments too) and with its audio (a
-trim's dropped pieces), another device's left; kept only beside a row that went in, never holding the rows up; each
-part its own span and vector. Writing it, and the switch, in test_isolation.test_pipelines_side_by_side."""
+kept; gone with its own sentence (a pass's replace_sentences, a joined row's later segments too, an overlapping row's
+left) and with its audio (a trim's dropped pieces), another device's left; kept only beside its own row when that went
+in, never holding the rows up; each part its own span and vector. Writing it, and the switch, in test_isolation.test_pipelines_side_by_side."""
 import datetime as dt
 import time
 
@@ -22,9 +22,9 @@ def ms(t: dt.datetime) -> int:
     return int(t.timestamp() * 1000)
 
 
-def put(device: str, a: int, b: int, part: int = 0):
-    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0)",
-                      (device, a, b, part, np.ones(4, np.float16).tobytes()))
+def put(device: str, a: int, b: int, part: int = 0, sentence: str = "f"):
+    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0, ?)",
+                      (device, a, b, part, np.ones(4, np.float16).tobytes(), sentence))
 
 
 def left() -> list:
@@ -40,16 +40,21 @@ def test_init_twice_keeps_rows(tmp_path):
 
 
 def test_replace_sentences_drops_the_range(tmp_path):
+    """The voiceprints of the rows a pass replaces go: of its device's rows starting in [from, to), late ones kept."""
     db.open_db(tmp_path / "live.db")
     t0 = dt.datetime(2026, 10, 1, 10)
     at = lambda s: t0 + dt.timedelta(seconds=s)
+    for s, dev in ((5, "mic"), (10, "mic"), (15, "mic"), (20, "mic"), (12, "phone"), (16, "mic")):
+        db.insert_sentences(db.conn(), [{"id": f"f{s}", "start": core.iso(at(s)), "end": core.iso(at(s + 2)), "text": "a", "source": dev}])
+    db.conn().execute("UPDATE sentences SET late = 1 WHERE id = 'f16'")
     for s in (5, 10, 15, 20):
-        put("mic", ms(at(s)), ms(at(s + 2)))
-    put("mic", ms(at(10)), ms(at(11)), part=1)
-    put("phone", ms(at(12)), ms(at(13)))  # another device, the same minutes
+        put("mic", ms(at(s)), ms(at(s + 2)), sentence=f"f{s}")
+    put("mic", ms(at(10)), ms(at(11)), part=1, sentence="f10")
+    put("mic", ms(at(16)), ms(at(17)), sentence="f16")  # a late row's (never written so: kept all the same)
+    put("phone", ms(at(12)), ms(at(13)), sentence="f12")  # another device, the same minutes
     with db.tx() as t:
         db.replace_sentences(t, at(10).isoformat(timespec="milliseconds"), at(20).isoformat(timespec="milliseconds"), [], "mic")
-    assert left() == [("mic", ms(at(5)), 0), ("mic", ms(at(20)), 0), ("phone", ms(at(12)), 0)]
+    assert left() == [("mic", ms(at(5)), 0), ("mic", ms(at(16)), 0), ("mic", ms(at(20)), 0), ("phone", ms(at(12)), 0)]
 
 
 def test_trim_drops_with_the_audio(tmp_path, monkeypatch):
@@ -74,8 +79,8 @@ def test_replace_sentences_drops_a_joined_rows_later_segments(tmp_path):
     at = lambda s: core.iso(t0 + dt.timedelta(seconds=s))
     db.insert_sentences(db.conn(), [{"id": "f0", "start": at(0), "end": at(20), "speaker": "S1", "text": "a", "source": "mic"},
                                     {"id": "f25", "start": at(25), "end": at(27), "speaker": "S1", "text": "b", "source": "mic"}])
-    for a, b in ((0, 5), (15, 20), (25, 27)):
-        put("mic", ms(t0 + dt.timedelta(seconds=a)), ms(t0 + dt.timedelta(seconds=b)))
+    for a, b, r in ((0, 5, "f0"), (15, 20, "f0"), (25, 27, "f25")):
+        put("mic", ms(t0 + dt.timedelta(seconds=a)), ms(t0 + dt.timedelta(seconds=b)), sentence=r)
     with db.tx() as t:
         db.replace_sentences(t, at(0), at(10), [], "mic")
     assert left() == [("mic", ms(t0 + dt.timedelta(seconds=25)), 0)]
@@ -83,7 +88,7 @@ def test_replace_sentences_drops_a_joined_rows_later_segments(tmp_path):
 
 def test_rows_of_a_piece():
     """Each part of an engine segment its own span and vector, also when label() joins the parts again (the diarist
-    hears one voice); none for a segment too short to embed."""
+    hears one voice), with the row it went in; none for a segment too short to embed."""
     from alldayrec import infer, transcript
     from test_split_speakers import A, B, Dia, audio, embed
     x, g = audio((A, 3), (B, 3))
@@ -94,13 +99,15 @@ def test_rows_of_a_piece():
     transcript.label(Dia(same=True), labelled, vs)
     assert len(labelled) == 2 and "split" not in labelled[0], "joined again"
     t0 = dt.datetime(2026, 10, 1, 10)
-    rows = device_pipeline.seg_embs("mic", segs, vs, lambda s: t0 + dt.timedelta(seconds=s))
+    row = transcript.final_rows(labelled, {g["speaker"]: g["speaker"] for g in labelled}, t0, 10, since=0, edge=0)[2][0]
+    rows = device_pipeline.seg_embs("mic", labelled, vs, lambda s: t0 + dt.timedelta(seconds=s))
     (p1, e1), (p2, e2) = vs[0]
     assert [r[:5] for r in rows] == [("mic", ms(t0) + p1["start_ms"], ms(t0) + p1["end_ms"], 1, "SPEAKER_0"),
                                      ("mic", ms(t0) + p2["start_ms"], ms(t0) + p2["end_ms"], 2, "SPEAKER_0")]
     assert p1["end_ms"] <= 3000 <= p2["start_ms"]
     assert [np.frombuffer(r[6], np.float16).tolist() for r in rows] == [np.float16(e1).tolist(), np.float16(e2).tolist()]
     assert {r[5] for r in rows} == {f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"} and {r[7] for r in rows} == {0.0}
+    assert {r[8] for r in rows} == {row["id"]} and row["start"] == core.iso(t0 + dt.timedelta(milliseconds=p1["start_ms"]))
 
 
 def finalize(tmp_path, monkeypatch, before=lambda t0: None, want=("1", "2")):
@@ -133,7 +140,9 @@ def test_a_failure_keeps_the_final(tmp_path, monkeypatch, how):
     """The voiceprints' write (here the table refuses it) or their making fails: the rows go in all the same, the
     finalized time moves on, the pass's old voiceprints are gone all the same, the failure counted."""
     def before(t0):
-        put(MIC, ms(t0 + dt.timedelta(seconds=10.2)), ms(t0 + dt.timedelta(seconds=11)))  # an earlier pass's
+        at = lambda s: core.iso(t0 + dt.timedelta(seconds=s))
+        db.insert_sentences(db.conn(), [{"id": "f-old", "start": at(10.2), "end": at(11), "text": "old", "source": MIC}])
+        put(MIC, ms(t0 + dt.timedelta(seconds=10.2)), ms(t0 + dt.timedelta(seconds=11)), sentence="f-old")  # an earlier pass's
         if how == "write":
             db.conn().execute("CREATE TRIGGER no_emb BEFORE INSERT ON seg_emb BEGIN SELECT RAISE(ABORT, 'synthetic'); END")
         else:
@@ -152,3 +161,55 @@ def test_none_for_a_row_the_late_layer_protected(tmp_path, monkeypatch):
         db.conn().execute("UPDATE sentences SET late = 1 WHERE id = 'l1'")
     _, rows = finalize(tmp_path, monkeypatch, before, want=("2",))
     assert [(r[1], r[2]) for r in db.conn().execute("SELECT * FROM seg_emb")] == [tuple(ms(dt.datetime.fromisoformat(r[k])) for k in ("start", "end")) for r in rows]
+
+
+def passes(segs: list[dict], vs: list, lo: float, hi: float, late=()):
+    """One final pass over [lo, hi) s of segs (each its own voice, vs as voices() gives) as device_pipeline commits
+    it: final_rows, replace_sentences, put_seg_embs; late: (start, end) s of late rows there before."""
+    t0 = dt.datetime(2026, 10, 1, 10)
+    at = lambda s: t0 + dt.timedelta(seconds=s)
+    for a, b in late:
+        db.insert_sentences(db.conn(), [{"id": f"l{a}", "start": core.iso(at(a)), "end": core.iso(at(b)), "speaker": "S9", "text": "late", "source": "mic"}])
+        db.conn().execute("UPDATE sentences SET late = 1 WHERE id = ?", (f"l{a}",))
+    rows = transcript_rows(segs, t0, hi)
+    embs = device_pipeline.seg_embs("mic", segs, vs, at)
+    with db.tx() as t:
+        db.replace_sentences(t, core.iso(at(lo)), core.iso(at(hi)), rows, "mic")
+        assert db.put_seg_embs(t, "mic", core.iso(at(lo)), core.iso(at(hi)), embs)
+    return lambda s: ms(at(s))
+
+
+def transcript_rows(segs, t0, hi):
+    from alldayrec import transcript
+    rows = transcript.final_rows(segs, {g["speaker"]: g["speaker"] for g in segs}, t0, hi, since=0, edge=0)[2]
+    for r in rows:
+        r["source"] = "mic"
+    return rows
+
+
+def overlapping(*spans):
+    """Engine segments of different speakers (S1, S2, ...) that overlap, each unsplit with its voiceprint."""
+    segs = [{"start_ms": a * 1000, "end_ms": b * 1000, "speaker": f"S{k}", "confidence": 1.0, "text": f"t{k}"} for k, (a, b) in enumerate(spans, 1)]
+    return segs, [[(g, np.ones(4))] for g in segs]
+
+
+def test_a_shorter_pass_keeps_an_overlapping_rows_voiceprint(tmp_path):
+    """A [0, 20) and another speaker's B [15, 17) in; a pass over [0, 10) takes A back: A's voiceprint goes, B's (its row
+    stays, its start outside the pass) stays."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = overlapping((0, 20), (15, 17))
+    s = passes(segs, vs, 0, 40)
+    assert left() == [("mic", s(0), 0), ("mic", s(15), 0)]
+    passes([], [], 0, 10)
+    assert [r["start"][-12:] for r in db.sentences("2026", "~", source="mic")] == ["10:00:15.000"]
+    assert left() == [("mic", s(15), 0)]
+
+
+def test_none_for_a_protected_row_that_starts_in_another(tmp_path):
+    """A [0, 20) goes in, another speaker's B [10, 30) does not (a late row [25, 26) in it): B's voiceprint is not kept,
+    though it starts in A."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = overlapping((0, 20), (10, 30))
+    s = passes(segs, vs, 0, 40, late=[(25, 26)])
+    assert [r["text"] for r in db.sentences("2026", "~", source="mic")] == ["t1", "late"]
+    assert left() == [("mic", s(0), 0)]

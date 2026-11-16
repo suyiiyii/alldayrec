@@ -117,7 +117,9 @@ CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voic
                                                     -- each its own even when label() joins them again), 0 whole
     model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
     gain_db REAL NOT NULL DEFAULT 0,                -- the gain its audio was given before the model (dB; 0: as decoded)
-    PRIMARY KEY (device, start_ms, part));          -- goes with its sentences (replace_sentences) and its audio (trim.py)
+    sentence TEXT NOT NULL,                         -- the id of its row: segments overlap, a span does not tell
+    PRIMARY KEY (device, start_ms, part));          -- goes with its sentence (replace_sentences) and its audio (trim.py)
+CREATE INDEX IF NOT EXISTS seg_emb_sentence ON seg_emb(device, sentence);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
@@ -392,11 +394,11 @@ def sentences(lo: str, hi: str, inclusive: bool = False, source: str | None = No
 def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str):
     """A device's pass replaces only that device's rows: another device may have recorded the same minutes."""
     q = "FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0"
-    gone = c.execute(f"SELECT start, end {q}", (lo, hi, source)).fetchall()
+    gone = c.execute(f"SELECT id {q}", (lo, hi, source)).fetchall()
     c.execute(f"DELETE {q}", (lo, hi, source))
-    # their voiceprints: a joined row's later segments can start at hi or after (a shorter pass now)
-    c.executemany("DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ?",
-                  [(source, ms(a), ms(b)) for a, b in [(lo, hi), *gone]])
+    # their voiceprints, by row: a joined row's later segments can start at hi or after (a shorter pass now), another
+    # row's can start in this one's span
+    c.executemany("DELETE FROM seg_emb WHERE device = ? AND sentence = ?", [(source, r["id"]) for r in gone])
     protected = c.execute("SELECT id, start, end FROM sentences WHERE source = ? AND late = 1 AND start < ? AND end > ?", (source, hi, lo)).fetchall()
     insert_sentences(c, [r for r in rows if not any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)])
 
@@ -408,14 +410,13 @@ def ms(s: str) -> int:
 
 def put_seg_embs(c: sqlite3.Connection, source: str, lo: str, hi: str, embs: list[tuple]) -> bool:
     """A pass's voiceprints (device_pipeline.seg_embs) after replace_sentences put its rows in [lo, hi): each one kept
-    only with the row it starts in (none for a row the late layer's protected). False: none written (logged); the
+    only when its own row went in (none for a row the late layer's protected). False: none written (logged); the
     rows stay, for the voiceprints are only beside them."""
-    spans = [(ms(a), ms(b)) for a, b in c.execute(
-        "SELECT start, end FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))]
+    # shortcut: a row's id is its start to the ms, two rows starting in one ms share it; key them apart if that shows up
+    went = {r[0] for r in c.execute("SELECT id FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))}
     c.execute("SAVEPOINT seg_emb")
     try:
-        c.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                      [e for e in embs if any(a <= e[1] < b for a, b in spans)])
+        c.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", [e for e in embs if e[8] in went])
     except Exception as e:
         if not c.in_transaction:  # SQLite dropped the whole transaction (disk full, I/O): the rows are gone too
             raise

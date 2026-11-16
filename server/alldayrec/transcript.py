@@ -242,17 +242,25 @@ def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, con
         a, b, who = g["start_ms"] / 1000, g["end_ms"] / 1000, names[g["speaker"]]
         if rows and rows[-1]["speaker"] == who and rows[-1]["music"] == g.get("music") and a - rows[-1]["b"] < TURN_GAP_S:
             rows[-1]["b"], rows[-1]["text"] = b, rows[-1]["text"] + g["text"]
+            rows[-1]["segs"].append(g)
         else:
-            rows.append(dict(a=a, b=b, speaker=who, text=g["text"], music=g.get("music")))
+            rows.append(dict(a=a, b=b, speaker=who, text=g["text"], music=g.get("music"), segs=[g]))
     lo, hi = since, win_s - edge
     keep = [r for r in rows if r["a"] >= lo - 0.05]  # turns are clipped to `since` by the caller
     cut = next((i for i, r in enumerate(keep) if r["b"] > hi), len(keep))
     to = keep[cut]["a"] if cut < len(keep) else hi
     at = at or (lambda s: t0 + dt.timedelta(seconds=s))
+    went = [r for r in keep[:cut] if r["text"].strip()]
     out = [dict(id="f" + at(r["a"]).strftime("%Y%m%d%H%M%S%f")[:17], start=at(r["a"]).isoformat(timespec="milliseconds"),
                 end=at(r["b"]).isoformat(timespec="milliseconds"), speaker=r["speaker"], text=r["text"].strip(),
                 speaker_confidence=(conf or {}).get(r["speaker"]), state="final") | ({"music": 1} if r["music"] else {})
-           for r in keep[:cut] if r["text"].strip()]
+           for r in went]
+    for r in rows:
+        for g in r["segs"]:  # the id of the row it went in (db seg_emb's sentence: device_pipeline.seg_embs); None: none
+            g["row"] = None
+    for r, o in zip(went, out):
+        for g in r["segs"]:
+            g["row"] = o["id"]
     return at(lo), at(to), out
 
 
