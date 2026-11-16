@@ -3,6 +3,7 @@ kept; gone with its own sentence (a pass's replace_sentences, a joined row's lat
 left) and with its audio (a trim's dropped pieces), another device's left; kept only beside its own row when that went
 in, never holding the rows up; each part its own span and vector. Writing it, and the switch, in test_isolation.test_pipelines_side_by_side."""
 import datetime as dt
+import itertools
 import time
 
 import anyio
@@ -22,9 +23,14 @@ def ms(t: dt.datetime) -> int:
     return int(t.timestamp() * 1000)
 
 
-def put(device: str, a: int, b: int, part: int = 0, sentence: str = "f"):
-    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0, ?)",
-                      (device, a, b, part, np.ones(4, np.float16).tobytes(), sentence))
+SEG = itertools.count()
+
+
+def put(device: str, a: int, b: int, part: int = 0, sentence: str | None = None):
+    """A voiceprint beside the row with this id (none there: rowid 0), each its own segment."""
+    r = db.conn().execute("SELECT rowid FROM sentences WHERE id = ?", (sentence,)).fetchone()
+    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0, ?, ?)",
+                      (device, a, b, part, np.ones(4, np.float16).tobytes(), r[0] if r else 0, next(SEG)))
 
 
 def left() -> list:
@@ -107,7 +113,7 @@ def test_rows_of_a_piece():
     assert p1["end_ms"] <= 3000 <= p2["start_ms"]
     assert [np.frombuffer(r[6], np.float16).tolist() for r in rows] == [np.float16(e1).tolist(), np.float16(e2).tolist()]
     assert {r[5] for r in rows} == {f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"} and {r[7] for r in rows} == {0.0}
-    assert {r[8] for r in rows} == {row["id"]} and row["start"] == core.iso(t0 + dt.timedelta(milliseconds=p1["start_ms"]))
+    assert {r[8:] for r in rows} == {(0, 0)} and row["start"] == core.iso(t0 + dt.timedelta(milliseconds=p1["start_ms"]))
 
 
 def finalize(tmp_path, monkeypatch, before=lambda t0: None, want=("1", "2")):
@@ -174,8 +180,8 @@ def passes(segs: list[dict], vs: list, lo: float, hi: float, late=()):
     rows = transcript_rows(segs, t0, hi)
     embs = device_pipeline.seg_embs("mic", segs, vs, at)
     with db.tx() as t:
-        db.replace_sentences(t, core.iso(at(lo)), core.iso(at(hi)), rows, "mic")
-        assert db.put_seg_embs(t, "mic", core.iso(at(lo)), core.iso(at(hi)), embs)
+        ids = db.replace_sentences(t, core.iso(at(lo)), core.iso(at(hi)), rows, "mic")
+        assert db.put_seg_embs(t, "mic", ids, embs)
     return lambda s: ms(at(s))
 
 
@@ -213,3 +219,45 @@ def test_none_for_a_protected_row_that_starts_in_another(tmp_path):
     s = passes(segs, vs, 0, 40, late=[(25, 26)])
     assert [r["text"] for r in db.sentences("2026", "~", source="mic")] == ["t1", "late"]
     assert left() == [("mic", s(0), 0)]
+
+
+def kept() -> list:
+    """Each voiceprint kept: (end_ms, vector)."""
+    return sorted((r[0], np.frombuffer(r[1], np.float16).tolist()) for r in db.conn().execute("SELECT end_ms, e FROM seg_emb"))
+
+
+def apart(*spans):
+    """overlapping(), each segment its own vector (A [1, 0, 0, 0], B [0, 1, 0, 0], ...)."""
+    segs, _ = overlapping(*spans)
+    return segs, [[(g, np.eye(4)[k])] for k, g in enumerate(segs)]
+
+
+def test_none_for_a_protected_row_that_starts_in_the_same_ms(tmp_path):
+    """A [0, 20) goes in, another speaker's B [0, 30) does not (a late row [25, 26) in it): their ids are the same (one
+    start), yet only A's voiceprint is kept, A's own."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = apart((0, 20), (0, 30))
+    s = passes(segs, vs, 0, 40, late=[(25, 26)])
+    assert [r["text"] for r in db.sentences("2026", "~", source="mic")] == ["t1", "late"]
+    assert kept() == [(s(20), [1, 0, 0, 0])]
+
+
+def test_two_rows_that_start_in_the_same_ms(tmp_path):
+    """A [0, 20) and another speaker's B [0, 30) both go in: each its own voiceprint, beside its own row."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = apart((0, 20), (0, 30))
+    s = passes(segs, vs, 0, 40)
+    assert kept() == [(s(20), [1, 0, 0, 0]), (s(30), [0, 1, 0, 0])]
+    assert sorted(tuple(r) for r in db.conn().execute(
+        "SELECT s.text, e.end_ms FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence")) == [("t1", s(20)), ("t2", s(30))]
+
+
+def test_one_rows_two_segments_that_start_in_the_same_ms(tmp_path):
+    """Two segments of one speaker starting in the same ms join into one row: both voiceprints kept beside it."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = apart((0, 20), (0, 30))
+    for g in segs:
+        g["speaker"] = "S1"
+    s = passes(segs, vs, 0, 40)
+    assert [r["text"] for r in db.sentences("2026", "~", source="mic")] == ["t1t2"]
+    assert kept() == [(s(20), [1, 0, 0, 0]), (s(30), [0, 1, 0, 0])]

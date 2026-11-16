@@ -384,7 +384,8 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     embs = {t.id: tenant.call(t, lambda: db.conn().execute("SELECT * FROM seg_emb ORDER BY start_ms").fetchall()) for t in (a, b)}
     rows = tenant.call(a, db.sentences, core.iso(t0), "~", False, DEV)
     assert [(r["device"], r["part"], r["engine_speaker"], r["model"], r["gain_db"]) for r in embs["a"]] == [(DEV, 0, "SPEAKER_0", f"redimnet2-b6.onnx@{infer.MODELS[infer.EMB][:12]}", 0.0)] * 2
-    assert [r["sentence"] for r in embs["a"]] == [r["id"] for r in rows], "each with its own row"
+    owners = tenant.call(a, lambda: [r[0] for r in db.conn().execute("SELECT s.id FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence ORDER BY e.start_ms")])
+    assert owners == [r["id"] for r in rows], "each with its own row"
     assert [(r["start_ms"], r["end_ms"]) for r in embs["a"]] == [tuple(int(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end")) for r in rows]
     assert all(np.allclose(np.frombuffer(r["e"], np.float16), [0, 1, 0, 0]) for r in embs["a"]), "the voiceprint the diarist took, as float16"
     assert embs["b"] == [], "off: nothing kept"

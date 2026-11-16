@@ -36,7 +36,7 @@ def test_side_by_side_committed_in_order(tmp_path, monkeypatch):
     rig(tmp_path, monkeypatch, engine)
     los = []
     replace = db.replace_sentences
-    monkeypatch.setattr(db, "replace_sentences", lambda t, lo, hi, rows, device: (los.append(lo), replace(t, lo, hi, rows, device)))
+    monkeypatch.setattr(db, "replace_sentences", lambda t, lo, hi, rows, device: (los.append(lo), replace(t, lo, hi, rows, device))[1])
     t0 = dt.datetime.fromtimestamp(round(time.time()) - 2 * N * PIECE_S)
     silence = np.zeros(PIECE_S * SR, np.int16)
     for i in range(N):

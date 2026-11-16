@@ -256,11 +256,11 @@ def final_rows(segs: list[dict], names: dict, t0: dt.datetime, win_s: float, con
                 speaker_confidence=(conf or {}).get(r["speaker"]), state="final") | ({"music": 1} if r["music"] else {})
            for r in went]
     for r in rows:
-        for g in r["segs"]:  # the id of the row it went in (db seg_emb's sentence: device_pipeline.seg_embs); None: none
+        for g in r["segs"]:  # the row it went in, its place in out (db seg_emb's sentence: device_pipeline.seg_embs); None: none
             g["row"] = None
-    for r, o in zip(went, out):
+    for k, r in enumerate(went):
         for g in r["segs"]:
-            g["row"] = o["id"]
+            g["row"] = k
     return at(lo), at(to), out
 
 
