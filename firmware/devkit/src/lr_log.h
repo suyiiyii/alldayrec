@@ -98,10 +98,12 @@
  *                   all the same (that erase cut short would leave the block kept, the uploaded pointer held); the first
  *                   of a boot only, a erases so
  *    38 GAIN        the mic's PDM gain (mic_gain.c), register codes (0x28 0 dB, 0.5 dB a step, 0x00 -20 .. 0x50 +20 dB):
- *                   x 0 CTRL GAIN changed it, a the old code, b the new, at the frame the registers took it (the
- *                   codec's frame then: the sound it is in is ~0-10 ms older); x 1 NVS did not take it, a the error, b
- *                   the code in force not kept (the next boot takes NVS's); x 2 at boot NVS's record failed its check,
- *                   the default in force: a its length, b its first 4 bytes (one each boot until a GAIN writes it again)
+ *                   x 0 CTRL GAIN changed it, a the old code, b the new; t is the codec's frame when the registers
+ *                   were written, not the first sample at the new gain: the mic ring may hold up to 1 s of frames
+ *                   taken before (mic_ring.h), and when the registers take it is not measured; x 1 NVS did not take
+ *                   it, a the error, b the code in force not kept (the next boot takes NVS's); x 2 at boot NVS's
+ *                   record failed its check, the default in force: a its length, b its first 4 bytes (one each boot
+ *                   until a GAIN writes it again)
  *
  * Each record has a sequence number, one more than the last, across boots: a reader asks for those from the last
  * it has. Records gather in RAM (__noinit: a crash or watchdog reset keeps them for the next boot) and go to flash

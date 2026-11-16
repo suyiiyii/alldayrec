@@ -1,8 +1,10 @@
 // Host check of the mic's gain in src/mic_gain.c: CTRL GAIN puts it in force and in the event log at once, NVS takes it
 // later off the BT RX thread (a failed save logged and shown, a same-value GAIN saves it again), and a record NVS keeps
-// that fails its check (a flipped bit, the 1-byte draft) puts the default in force with an event.
-//   d=$(mktemp -d) && mkdir -p $d/zephyr/settings $d/zephyr/logging $d/hal $d/haly && touch $d/zephyr/{kernel,logging/log,devicetree}.h \
-//   $d/zephyr/settings/settings.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h && cc -w -I$d -o $d/gain_check \
+// that fails its check (a flipped bit, the 1-byte draft) puts the default in force with an event. And src/mic.c's PDM
+// init at boot: a GAIN on the BT RX thread while it runs is not undone by the gain it read.
+//   d=$(mktemp -d) && mkdir -p $d/zephyr/settings $d/zephyr/logging $d/zephyr/drivers/clock_control $d/hal $d/haly && \
+//   touch $d/zephyr/{kernel,logging/log,devicetree,device,drivers/gpio,drivers/clock_control/nrf_clock_control}.h \
+//   $d/zephyr/settings/settings.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h $d/nrfx_pdm.h && cc -w -I$d -o $d/gain_check \
 //   test/gain_check.c && $d/gain_check
 #include <assert.h>
 #include <errno.h>
@@ -75,7 +77,97 @@ void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
 void lr_log_sync(void) { syncs++; }
 #define LAST logged[(n_logged - 1) % 16]
 
+// The BT RX thread run where it may preempt the main thread; a lock held then makes it wait until let go
+struct k_mutex {
+    bool held;
+};
+#define K_MUTEX_DEFINE(name) struct k_mutex name
+#define K_FOREVER 0
+static void (*rx_waiting)(void);
+static void rx(void (*f)(void), struct k_mutex *m)
+{
+    if (m->held) {
+        rx_waiting = f;
+    } else {
+        f();
+    }
+}
+static void (*at_lock)(void);  // the BT RX thread's turn just before a lock is taken
+static int k_mutex_lock(struct k_mutex *m, int t)
+{
+    void (*f)(void) = at_lock;
+    at_lock = NULL;
+    if (f) {
+        f();
+    }
+    assert(!m->held);
+    m->held = true;
+    return 0;
+}
+static int k_mutex_unlock(struct k_mutex *m)
+{
+    m->held = false;
+    void (*f)(void) = rx_waiting;
+    rx_waiting = NULL;
+    if (f) {
+        f();
+    }
+    return 0;
+}
+
 #include "../src/mic_gain.c"
+
+// --- what mic.c uses: nrfx_pdm_init() writes GAINL/GAINR from the config it was given
+#define LED_H
+#define UTILS_H
+#define NRF_GPIO_PIN_MAP(p, n) ((p) * 32 + (n))
+#define LOG_ERR(...)
+#define LOG_DBG(...)
+#define ISR_DIRECT_DECLARE(f) static int f(void)
+#define ISR_DIRECT_PM()
+#define IRQ_DIRECT_CONNECT(...)
+struct onoff_client {
+    int notify;
+};
+#define sys_notify_init_spinwait(n)
+#define onoff_request(m, c) 0
+#define sys_notify_fetch_result(n, r) 0
+#define z_nrf_clock_control_get_onoff(s) 0
+#define k_msleep(ms)
+#define NRF_PDM_FREQ_1280K 0
+#define NRF_PDM_MODE_MONO 0
+#define NRF_PDM_EDGE_LEFTFALLING 0
+#define NRF_PDM_RATIO_80X 0
+#define NRFX_SUCCESS 0
+typedef int nrfx_err_t;
+typedef struct {
+    int16_t *buffer_released;
+    bool buffer_requested;
+    int error;
+} nrfx_pdm_evt_t;
+typedef struct {
+    int gain_l, gain_r, interrupt_priority, clock_freq, mode, edge, ratio;
+} nrfx_pdm_config_t;
+#define NRFX_PDM_DEFAULT_CONFIG(clk, din) (nrfx_pdm_config_t){0}
+static void nrfy_gpio_cfg_output(int pin) {}
+static void nrfy_gpio_pin_set(int pin) {}
+static void nrfy_gpio_pin_clear(int pin) {}
+static void nrfx_pdm_buffer_set(int16_t *b, int n) {}
+static void nrfx_pdm_irq_handler(void) {}
+static nrfx_err_t nrfx_pdm_start(void) { return 0; }
+static void (*in_init)(void);  // the BT RX thread's turn inside nrfx_pdm_init(), after mic_start() read the gain
+static nrfx_err_t nrfx_pdm_init(nrfx_pdm_config_t const *c, void (*handler)(nrfx_pdm_evt_t const *))
+{
+    if (in_init) {
+        rx(in_init, &mic_gain_mtx);
+    }
+    nrf_pdm_gain_set(NRF_PDM0, c->gain_l, c->gain_r);
+    return 0;
+}
+
+#include "../src/mic.c"
+
+static void gain_34(void) { assert(mic_set_gain(0x34) == 0); }
 
 static void boot_with(const uint8_t *r, size_t len)  // a boot's settings_load() with NVS holding r
 {
@@ -140,6 +232,23 @@ int main(void)
     assert(mic_set_gain(0x28) == 0 && submitted);
     run_work();
     assert(nvs_len == 2 && nvs[0] == 0x28 && nvs[1] == 0xD7 && mic_gain_kept());
+
+    // boot's PDM init with NVS's 0x30, a GAIN 0x34 taken (logged, saved) while it runs: the registers end at 0x34
+    boot_with((uint8_t[]){0x30, 0xCF}, 2);
+    gainl = gainr = 0;
+    in_init = gain_34;
+    assert(mic_start() == 0);
+    in_init = NULL;
+    assert(!rx_waiting && !mic_gain_mtx.held && LAST.code == 38 && LAST.x == 0 && LAST.a == 0x30 && LAST.b == 0x34);
+    run_work();
+    assert(mic_gain() == 0x34 && gainl == 0x34 && gainr == 0x34 && nvs[0] == 0x34 && mic_gain_kept());
+    // a GAIN just before the init takes the lock, and one before mic_start(): the init takes that one
+    boot_with((uint8_t[]){0x30, 0xCF}, 2);
+    at_lock = gain_34;
+    assert(mic_start() == 0 && gainl == 0x34 && gainr == 0x34);
+    boot_with((uint8_t[]){0x30, 0xCF}, 2);
+    gain_34();
+    assert(mic_start() == 0 && gainl == 0x34 && gainr == 0x34);
     printf("gain_check ok\n");
     return 0;
 }

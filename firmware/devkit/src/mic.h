@@ -17,11 +17,15 @@ int mic_start();
 void set_mic_callback(mix_handler _callback);
 
 /* The PDM gain (GAINL = GAINR, mic_gain.c): 0x28 = 0 dB, 0.5 dB a step, 0x00 = -20 dB .. 0x50 = +20 dB (config.h
- * MIC_GAIN the default). Set: into the running PDM and the event log at once, never waits; into NVS on the system
- * workqueue after, mic_gain_kept() false until it took. -EINVAL past 0x50. */
+ * MIC_GAIN the default). Set: into the running PDM and the event log at once, never waits on flash (only on
+ * mic_start()'s PDM init, register writes, if it runs then); into NVS on the system workqueue after, mic_gain_kept()
+ * false until it took. -EINVAL past 0x50. */
 uint8_t mic_gain(void);
 bool mic_gain_kept(void);
 int mic_set_gain(uint8_t gain);
+/* Held from reading mic_gain() to the registers taking it (mic_start()'s PDM init, mic_set_gain()): a GAIN on the BT RX
+ * thread in between would be undone by the init's copy */
+extern struct k_mutex mic_gain_mtx;
 void mic_off();
 void mic_on();
 /* CONFIG_LR_POWER_DEBUG: the mic (and the crystal it holds) on and off */

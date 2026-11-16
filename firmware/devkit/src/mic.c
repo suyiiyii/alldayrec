@@ -85,15 +85,18 @@ int mic_start()
 
     // Configure PDM
     nrfx_pdm_config_t pdm_config = NRFX_PDM_DEFAULT_CONFIG(PDM_CLK_PIN, PDM_DIN_PIN);
-    pdm_config.gain_l = mic_gain();  // NVS's, or MIC_GAIN (mic_gain.c)
-    pdm_config.gain_r = mic_gain();
     pdm_config.interrupt_priority = MIC_IRC_PRIORITY;
     pdm_config.clock_freq = NRF_PDM_FREQ_1280K;
     pdm_config.mode = NRF_PDM_MODE_MONO;
     pdm_config.edge = NRF_PDM_EDGE_LEFTFALLING;
     pdm_config.ratio = NRF_PDM_RATIO_80X;
     IRQ_DIRECT_CONNECT(PDM_IRQn, 5, pdm_isr, 0); // IMPORTANT!
-    if (nrfx_pdm_init(&pdm_config, pdm_irq_handler) != NRFX_SUCCESS) {
+    k_mutex_lock(&mic_gain_mtx, K_FOREVER);
+    pdm_config.gain_l = mic_gain();  // NVS's, MIC_GAIN, or a GAIN's since (mic_gain.c)
+    pdm_config.gain_r = mic_gain();
+    nrfx_err_t err = nrfx_pdm_init(&pdm_config, pdm_irq_handler);
+    k_mutex_unlock(&mic_gain_mtx);
+    if (err != NRFX_SUCCESS) {
         LOG_ERR("Audio unable to initialize PDM");
         return -1;
     }

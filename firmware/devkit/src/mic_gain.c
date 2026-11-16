@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(mic_gain, CONFIG_LOG_DEFAULT_LEVEL);
 #define GAIN_KEY "lr/mic_gain"
 static uint8_t gain = MIC_GAIN;
 static bool unkept;  // the gain in force is not the one NVS keeps: its save still to come or failed, or NVS's was bad
+K_MUTEX_DEFINE(mic_gain_mtx);
 
 /* At boot, by transport.c's settings_load(): before the radio is up, so a GAIN written then is not undone here */
 static int gain_loaded(const char *key, size_t len, settings_read_cb read, void *arg)
@@ -65,10 +66,12 @@ int mic_set_gain(uint8_t g)
     }
     if (g != gain) {
         uint8_t old = gain;
+        k_mutex_lock(&mic_gain_mtx, K_FOREVER);  // not while mic_start()'s PDM init writes the registers from gain
         gain = g;
         // into the running PDM, not stopped and started: that would break the frame clock the stream's times hang
         // on. Its interrupt never writes GAINL/GAINR (nrfx_pdm.c)
         nrf_pdm_gain_set(NRF_PDM0, g, g);
+        k_mutex_unlock(&mic_gain_mtx);
         lr_log(LR_GAIN, 0, old, g);
         LOG_INF("mic gain 0x%02x", g);
     } else if (!unkept) {
