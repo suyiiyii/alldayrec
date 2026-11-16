@@ -24,10 +24,23 @@ fi
 
 # on the deploy host: remote <dir:unit ...> <gain.py's arguments>
 instances=$2; shift 2
-ok=
+ok= failed=
 for i in $instances; do
   d=${i%%:*}
-  # a tenant another instance has: gain.py says so (exit 1); list without a tenant: every instance's
-  if DATA_DIR=$d "$d/server/.venv/bin/python" -m alldayrec.gain "$@" 2> >(grep -v '^no tenant ' >&2); then ok=1; fi
+  # as its unit runs it: in <dir>/server, with <dir>/.env's variables (EnvironmentFile, the last one wins), read in
+  # Python before the package is imported (never sourced, never printed, never in process args)
+  # a tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's
+  if (cd "$d/server" && .venv/bin/python -c 'import os, runpy
+for line in open("../.env"):
+    k, eq, v = line.strip().partition("=")
+    if eq and k and not k.startswith(("#", ";")):
+        os.environ[k] = v
+runpy.run_module("alldayrec.gain", run_name="__main__")' "$@") 2> >(grep -v '^no tenant ' >&2); then
+    ok=1
+  else
+    rc=$?
+    [ "$rc" = 3 ] || { echo "  stop: $d: gain.py failed (exit $rc), above" >&2; failed=1; }
+  fi
 done
+[ -z "$failed" ] || exit 1
 [ -n "$ok" ] || { echo "  stop: no instance has that tenant" >&2; exit 1; }

@@ -169,8 +169,9 @@ def main(argv=None):
     st.add_argument("--note")
     a = ap.parse_args(argv)
     ts = [t for t in tenant.load(tenant.FILE) if a.tenant in (None, t.id)]
-    if not ts:
-        sys.exit(f"no tenant {a.tenant} here")
+    if not ts:  # exit 3: gain.sh tells it from a failure (1)
+        print(f"no tenant {a.tenant} here", file=sys.stderr)
+        sys.exit(3)
     if a.cmd == "set":
         if len(ts) > 1:
             sys.exit("set: which tenant (--tenant)")
