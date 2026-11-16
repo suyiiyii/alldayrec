@@ -4,6 +4,7 @@ stretch was cut; trim.py's gate; tenants apart; the service's /scene and its bac
 A stand-in model (CI has no model files): its scores of a frame are of that frame's samples only."""
 import datetime as dt
 import logging
+import subprocess
 import sys
 import threading
 import time
@@ -25,6 +26,7 @@ from alldayrec import trim
 from alldayrec.tenant import T
 from test_backlog import DEVICE, SR, flac, save, tone
 from test_compute import TOKEN, background, bound, serve
+from test_dehum import opus
 from test_trim import hour, vad
 
 SINCE = "2026-01-01"
@@ -345,6 +347,27 @@ def test_odd_lengths_leave_nothing(on, n):
         at += round(n / 16)
     catch_up(["mn10_as"])
     assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0
+    assert catch_up(["mn10_as"]) == 0
+
+
+@pytest.mark.parametrize("codec", ["opus", "aac"])
+def test_recorder_codecs_leave_nothing(on, codec):
+    """A recorder's Opus pieces (slices of one encoder, primed by the piece before) and a phone's AAC ones (n samples,
+    not whole ms), back to back: one row, nothing left over, a second pass reads nothing."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    if codec == "opus":
+        rec = opus(tone(1, 6), "-application", "lowdelay", "-frame_duration", "10", "-b:a", "32k")
+        for i in range(6):
+            assert audio.save(DEVICE, ms(t0) + i * 1000, audio.ogg(rec[i * 100:(i + 1) * 100]), "audio/ogg")
+    else:
+        at = ms(t0)
+        for i in range(3):
+            body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "aac",
+                                   "-f", "adts", "pipe:1"], input=tone(i, 5.2).tobytes(), capture_output=True, check=True).stdout
+            at += round(1000 * audio.save(DEVICE, at, body, "audio/aac", n=5 * SR + 8))
+    catch_up(["mn10_as"])
+    every = db.conn().execute("SELECT * FROM pieces").fetchall()
+    assert sounds.unscened(DEVICE, every) == 0 and len(rows("mn10_as")) == 1 and not T().scene_stats["failed", "mn10_as"]
     assert catch_up(["mn10_as"]) == 0
 
 

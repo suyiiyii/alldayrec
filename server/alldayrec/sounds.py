@@ -2,7 +2,8 @@
 can drop the stretches no one spoke in (docs: reference/data, sounds; explanation/privacy, 环境声音). The models:
 sound.py.
 
-A tenant takes part with "sound": true in tenants.json and SOUND_MODEL set (on()). SOUND_SINCE (ISO, the instance's
+A tenant is scored with "sound": true in tenants.json and SOUND_MODEL set (on()); trim.py's gate holds for every
+tenant once SOUND_MODEL is set. SOUND_SINCE (ISO, the instance's
 wall clock; required with SOUND_MODEL) is where its loop starts: the loop never goes over the audio before it, nor
 does a new model file (another model id), by itself; history is `python -m alldayrec.sounds backfill`.
 

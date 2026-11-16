@@ -154,7 +154,7 @@ uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <�
 | `LIVE_DATA` | `replay_case.py` | 一个租户的数据目录 |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
 | `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这几个脚本 |
-| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里)。开着环境声音时还有闸门，见[环境声音](#可选-环境声音) |
+| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里)。设了 `SOUND_MODEL` 时所有租户还有闸门，见[环境声音](#可选-环境声音) |
 
 ## 其他环境变量
 

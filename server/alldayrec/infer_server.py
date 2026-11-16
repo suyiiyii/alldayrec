@@ -7,7 +7,8 @@ MAX_S s, /segment SEG_S, else 413), with "Authorization: Bearer $INFER_TOKEN"; t
 {"music": bool}, {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment) or {"shape": [frames,
 classes], "scores": base64 float16} (sound.encode; one call at a time, threads.SOUND).
 GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM, and in "scene" its scene
-models' files (the server checks them at start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
+models' files (the server checks them: the voiceprints' at start, the scene ones before a first scene score; a wrong
+token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
 no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
 alldayrec.tenant for MODELS_DIR's default (DATA_DIR/models), only that path. INFER_HOST (127.0.0.1) and INFER_PORT
 (8771): its own, so it never takes the server's HOST and PORT from a shared .env. INFER_CALLS and INFER_THREADS as for
