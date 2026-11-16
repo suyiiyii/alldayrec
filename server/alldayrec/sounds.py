@@ -17,7 +17,8 @@ samples at upload (pieces.samples, by one sample; before it, its seconds, to 1 m
 backoff (lr_scene_failed_total). A piece that comes later into a row's gap gets a row of its own (the first kept).
 Holes are looked for in the last RECENT_S each pass, in all since SOUND_SINCE every FULL_S (late pieces behind), a
 device's pieces BATCH_MS at a time; lr_scene_backlog_seconds: what a full pass left, waiting out a backoff or not.
-trim.py's gate: unscened.
+trim.py's gate: unscened. The audio has the device's calibration offset (gain.py: float32 into the model); a stretch
+over a since_ms of it is a row each side, gain_db the offset each one's audio had.
 """
 import argparse
 import datetime as dt
@@ -32,7 +33,7 @@ import zlib
 import anyio
 import numpy as np
 
-from alldayrec import db, infer, late, sound, tenant, threads
+from alldayrec import db, gain, infer, late, sound, tenant, threads
 from alldayrec.late_store import subtract, union
 from alldayrec.sound import MODELS, SR, model_id, names, windows
 from alldayrec.tenant import T
@@ -95,10 +96,12 @@ def row(name: str, start_ms: int, x: np.ndarray, v: np.ndarray) -> tuple:
             np.clip(np.round(lv), -127, 0).astype(np.int8).tobytes(), zlib.compress(top.tobytes()), zlib.compress(out.tobytes()))
 
 
-def write(c, device: str, name: str, r: tuple, gaps=()):
-    """gaps: what of the row's [start_ms, end_ms) had no decoded audio (zeros to the model): not covered."""
-    c.execute("INSERT OR REPLACE INTO sounds (device, model, start_ms, end_ms, hop_ms, window_ms, n, db, top, minutes, gaps, at) "
-              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (device, model_id(name), *r, json.dumps(list(gaps)), int(time.time() * 1000)))
+def write(c, device: str, name: str, r: tuple, gaps=(), gain_db: float = 0.0):
+    """gaps: what of the row's [start_ms, end_ms) had no decoded audio (zeros to the model): not covered. gain_db: the
+    device's calibration offset its audio had (gain.py; none: 0)."""
+    c.execute("INSERT OR REPLACE INTO sounds (device, model, start_ms, end_ms, hop_ms, window_ms, n, db, top, minutes, gaps, gain_db, at) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              (device, model_id(name), *r, json.dumps(list(gaps)), gain_db, int(time.time() * 1000)))
 
 
 def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
@@ -228,25 +231,29 @@ def one(device: str, models: list, a: int, b: int) -> float:
     for name, n in todo_.items():
         rows = []
         # this model's audio, at most TOL_MS apart as one where only time with no piece is between
-        for s, e in subtract(stretches(both(filled, n)), unfilled + subtract(spans, n)):
-            y = x[round((s - a) * SR / 1000):round((e - a) * SR / 1000)]
-            if not len(y):
-                continue
-            t = time.perf_counter()
-            try:
-                v = sound.scene(name, y)
-            except Exception as e_:  # a 413, a model that failed: this stretch again later
-                log.warning("scene %s of %s at %s: %r", name, device, s, e_)
-                failed(device, name, [[s, e]], now_ms)
-                continue
-            T().scene_stats["compute", name] += time.perf_counter() - t
-            rows.append((row(name, s, y, v), subtract([[s, e]], filled)))
+        for s0, e0 in subtract(stretches(both(filled, n)), unfilled + subtract(spans, n)):
+            # a row per offset (gain.py): a stretch over a since_ms is two, each with the gain its audio had
+            parts = gain.segments(device, s0, round((e0 - s0) * SR / 1000))
+            for s, e, g in [(s0 + round(i * 1000 / SR), s0 + round(j * 1000 / SR), g) for i, j, g in parts]:
+                e = e0 if e > e0 else e
+                y = x[round((s - a) * SR / 1000):round((e - a) * SR / 1000)]
+                if not len(y):
+                    continue
+                t = time.perf_counter()
+                try:
+                    v = sound.scene(name, y)
+                except Exception as e_:  # a 413, a model that failed: this stretch again later
+                    log.warning("scene %s of %s at %s: %r", name, device, s, e_)
+                    failed(device, name, [[s, e]], now_ms)
+                    continue
+                T().scene_stats["compute", name] += time.perf_counter() - t
+                rows.append((row(name, s, y, v), subtract([[s, e]], filled), g or 0.0))
         with db.tx() as c:
-            for r, gaps in rows:
-                write(c, device, name, r, gaps)
+            for r, gaps, g in rows:
+                write(c, device, name, r, gaps, g)
         if wrong := both(unfilled, n):
             failed(device, name, wrong, now_ms)
-        scored = sum(r[1] - r[0] for r, _ in rows) / 1000
+        scored = sum(r[1] - r[0] for r, *_ in rows) / 1000
         T().scene_stats["audio", name] += scored
         done += scored
     return done

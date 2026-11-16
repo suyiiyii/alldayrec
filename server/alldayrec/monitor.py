@@ -188,7 +188,7 @@ def metrics() -> str:
             m(f"lr_{name}", v, device=dev)
         if hw.get("fw"):
             m("lr_device_info", 1, device=dev, firmware=hw["fw"])
-    for d, n in list(T().gain_limited.items()):  # gain.apply: samples a calibration offset took past full scale, soft-limited
+    for d, n in list(T().gain_limited.items()):  # gain.to16: samples that went into its soft limiter (past 0.9 of full scale) on the way to int16
         m("lr_gain_limited_samples_total", n, device=label(d))
     for c in db.calls(STARTED):
         for result, n in {"ok": c["n"] - sum(c["failed"].values()), **c["failed"]}.items():  # failed: by HTTP code or class

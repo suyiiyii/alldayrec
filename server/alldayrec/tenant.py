@@ -67,7 +67,7 @@ class Tenant:
     owner: dict | None = None                       # 我's voiceprint picked on its card (selfvoice), for the next conversations
     read_to: dict = field(default_factory=dict)     # audio.stream: per device, the last piece its reader has finished with
     gone: set = field(default_factory=set)          # audio.gone: its recordings found missing, each warned of once
-    gain_limited: dict = field(default_factory=dict)  # gain.apply: per device, samples its offset took past full scale
+    gain_limited: dict = field(default_factory=dict)  # gain.to16: per device, samples into its soft limiter on the way to int16
     store_calls: dict = field(default_factory=dict)  # store.timed: op -> [calls, {failure kind: n}, seconds] (lr_store_* metrics)
     store_locks: dict = field(default_factory=dict)  # seal.lock: path -> the lock of its one seal or merge at a time
     store_retry: dict = field(default_factory=dict)  # seal.step: path -> (failures, when to try again) of a failed one

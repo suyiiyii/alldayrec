@@ -2,12 +2,15 @@
 
     INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
-POST /embed, /music, /segment and /scene/<model> (one of SOUND_MODEL's, sound.py): the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
-MAX_S s, /segment SEG_S, else 413), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
-{"music": bool}, {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment) or {"shape": [frames,
-classes], "scores": base64 float16} (sound.encode; one call at a time, threads.SOUND).
-GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM, and in "scene" its scene
-models' files (the server checks them: the voiceprints' at start, the scene ones before a first scene score; a wrong
+POST /embed, /music, /segment and /scene/<model> (one of SOUND_MODEL's, sound.py): the body is int16 little-endian 16 kHz
+samples (application/octet-stream), or float32 ones at int16's scale (F32, application/x-f32le: a device's calibrated
+audio, gain.py; finite, else 400), at most MAX_S s, /segment SEG_S, else 413, with "Authorization: Bearer
+$INFER_TOKEN"; the answer {"embedding": [192 floats]}, {"music": bool}, {"frames": [589 x 7 floats]} (pyannote's
+log-probabilities, transcript.segment) or {"shape": [frames, classes], "scores": base64 float16} (sound.encode; one
+call at a time, threads.SOUND).
+GET /health: {"ok": true}, with the token also its model files' sha256, compute.DIM, formats (the bodies it takes: the
+server sends F32 only to a service that says it does, an older one gets int16), and in "scene" its scene models' files
+(the server checks them: the voiceprints' at start, the scene ones before a first scene score; a wrong
 token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
 no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
 alldayrec.tenant for MODELS_DIR's default (DATA_DIR/models), only that path. INFER_HOST (127.0.0.1) and INFER_PORT
@@ -36,6 +39,7 @@ from alldayrec import threads
 MAX_S = 600  # a voiceprint takes at most 15 s of a sentence and a few enrollment samples; this bounds a request's memory
 SEG_S = 10  # pyannote's chunk (transcript.SEG_N): a longer one would fail in transcript.segment
 SR = 16000
+F32 = "application/x-f32le"
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 state = {"compute": None, "token": ""}  # main() sets them; tests put their own
 CALLS, SECONDS, AUDIO_S = Counter(), Counter(), Counter()  # (op, result) -> calls; op -> compute seconds, audio seconds
@@ -51,19 +55,21 @@ async def run(op: str, request: Request, f, most: int = MAX_S, limiter=threads.I
         CALLS[op, "401"] += 1
         return JSONResponse({"error": "unauthorized"}, 401)
     over = JSONResponse({"error": f"over {most} s"}, 413)
-    if int(request.headers.get("content-length") or 0) > most * SR * 2:
+    f32 = request.headers.get("content-type", "").split(";")[0].strip() == F32
+    width = 4 if f32 else 2
+    if int(request.headers.get("content-length") or 0) > most * SR * width:
         CALLS[op, "413"] += 1
         return over
     body = bytearray()
     async for chunk in request.stream():  # counted as it comes: a chunked body without a length stops at the limit too
         body += chunk
-        if len(body) > most * SR * 2:
+        if len(body) > most * SR * width:
             CALLS[op, "413"] += 1
             return over
-    if not body or len(body) % 2:
+    x = np.frombuffer(body, "<f4" if f32 else "<i2", len(body) // width)
+    if not body or len(body) % width or f32 and not np.isfinite(x).all():
         CALLS[op, "400"] += 1
-        return JSONResponse({"error": "the body is int16 samples"}, 400)
-    x = np.frombuffer(body, "<i2")
+        return JSONResponse({"error": f"the body is {'finite float32' if f32 else 'int16'} samples"}, 400)
     t = time.perf_counter()
     try:
         out = await anyio.to_thread.run_sync(f, x, limiter=limiter)
@@ -104,7 +110,8 @@ async def health(request: Request):
         return {"ok": True}
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, 401)
-    return {"ok": True, "models": compute.models(), "dim": compute.DIM, **({"scene": f} if (f := sound.files()) else {})}
+    return {"ok": True, "models": compute.models(), "dim": compute.DIM, "formats": ["s16le", "f32le"],
+            **({"scene": f} if (f := sound.files()) else {})}
 
 
 @app.get("/metrics")

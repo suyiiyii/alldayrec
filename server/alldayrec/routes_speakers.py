@@ -12,11 +12,13 @@ import time
 import anyio.to_thread
 import numpy as np
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
+from alldayrec import audio
 from alldayrec import bank
 from alldayrec import db
 from alldayrec import diarist
+from alldayrec import gain
 from alldayrec import hints
 from alldayrec import profiles
 from alldayrec import routes_audio
@@ -311,7 +313,7 @@ async def enroll(to: str, rows: list[dict]):
             if r.get("music"):
                 continue
             try:
-                x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
+                x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
             except HTTPException:  # history conversations have no recording here
                 continue
             labels.setdefault(r.get("conv"), []).append((r, await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)))
@@ -758,7 +760,18 @@ async def person_profile(name: str):
 
 @router.get("/api/voice-clip/{name}")
 async def voice_clip(name: str):
+    """A history voice's sample: as stored, or, when its device has an offset at the clip's start (gain.py), decoded
+    with it as WAV (X-Gain-Db). Revalidated each time (no-cache): an offset set later must not meet a cached copy."""
     p = T().data / "voices" / "clips" / name  # the history voices' samples
     if not re.fullmatch(r"[\w.-]+\.ogg", name) or not p.is_file():
         raise HTTPException(404, "no such clip")
-    return FileResponse(p, media_type="audio/ogg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    r = await anyio.to_thread.run_sync(lambda: db.conn().execute(
+        "SELECT device, clip_start FROM voices WHERE clip = ? AND device IS NOT NULL AND clip_start IS NOT NULL LIMIT 1", (name,)).fetchone(),
+        limiter=threads.DB)
+    at = r and dt.datetime.fromisoformat(r["clip_start"]).timestamp() * 1000
+    if r and (g := await anyio.to_thread.run_sync(gain.offset_db, r["device"], at, limiter=threads.DB)):
+        x = await anyio.to_thread.run_sync(audio.decode, p.read_bytes(), limiter=threads.MEDIA)
+        if x is not None:
+            y = await anyio.to_thread.run_sync(lambda: gain.to16(gain.apply(x, r["device"], at), r["device"]), limiter=threads.DB)
+            return Response(audio.wav(y), media_type="audio/wav", headers={"Cache-Control": "no-cache", "X-Gain-Db": f"{g:g}"})
+    return FileResponse(p, media_type="audio/ogg", headers={"Cache-Control": "no-cache"})

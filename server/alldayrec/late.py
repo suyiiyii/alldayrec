@@ -27,7 +27,8 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
     that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone).
     filled: given, gets what of [a,b) has decoded audio (whole ms; a piece decoded short of its samples at upload not
     its last ms); the rest is zeros (no piece there, or one that would not decode), which sounds.py must not take for
-    silence. The audio and bad are the same with or without it."""
+    silence. The audio and bad are the same with or without it. int16, float32 where a piece has an offset
+    (gain.apply)."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
     end, missed, got = a, [], []
     peek = 0 if filled is None else 16  # a ms past b: a piece that ends at b from one cut short there (filled only)
@@ -59,6 +60,8 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
             y = y[:max(0, round(p["seconds"] * SR) - offset)]  # the audio as without filled (exact may read past its seconds)
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
+            if y.dtype != x.dtype == np.int16:
+                x = x.astype(np.float32)  # a piece with an offset (gain.apply): float32 from here on
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
             got.append([round(start), round(end)])

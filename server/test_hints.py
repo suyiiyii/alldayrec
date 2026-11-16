@@ -127,7 +127,7 @@ def test_rename_answers_before_the_voice_is_learnt(tmp_path, monkeypatch):
     async def audio(start, end, fmt, device=None):
         await gate.wait()
         cut.append(start)
-        return np.zeros(1600, np.int16).tobytes()
+        return np.zeros(1600, np.int16)
     monkeypatch.setattr(routes_audio, "cut", audio)
     monkeypatch.setitem(core.state, "embed", lambda x: np.array([0.0, 1, 0, 0]))
 

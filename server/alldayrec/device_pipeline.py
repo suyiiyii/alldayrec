@@ -17,6 +17,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import colocate
 from alldayrec import db
+from alldayrec import gain
 from alldayrec import infer
 from alldayrec import live
 from alldayrec import perf
@@ -757,7 +758,7 @@ async def pipeline(device: str):
                         while drafting() and time.perf_counter() - new < STREAM_IDLE_S:
                             if dseg.samples > sent:
                                 lo, sent = max(sent, dseg.audio_base), dseg.samples
-                                await s.send(dseg.audio[lo - dseg.audio_base:sent - dseg.audio_base].tobytes())
+                                await s.send(gain.to16(dseg.audio[lo - dseg.audio_base:sent - dseg.audio_base], device).tobytes())
                                 new = time.perf_counter()
                             await anyio.sleep(0.2)
                         await s.finish()

@@ -88,3 +88,20 @@ def test_codec_exits_digest(tmp_path, capsys):
         h.update(anyio.run(streamed, d, 3 * SR)[:3 * SR].tobytes())
     with capsys.disabled():
         print(f"\ncodec exits sha256 {h.hexdigest()}")
+
+
+def test_asr_input_digest(tmp_path, capsys):
+    """What an ASR engine is sent of the late read (squeezed, faded at the splices, lifted): its bytes hashed, printed
+    to compare with the same test on main; int16 throughout."""
+    from alldayrec import asr
+    db.open_db(tmp_path / "t.db")
+    y = speech(20, 11, -45)  # quiet: lifted
+    assert audio.save("phone-asr", T0, audio.wav(y), "audio/wav") == 20
+    x = late.read_exact("phone-asr", T0, T0 + 20_000)
+    h = hashlib.sha256()
+    for speech_ in ([(1.0, 3.0), (9.5, 12.0), (18.0, 19.5)], [(0.0, 20.0)], []):
+        xs, spans = asr.sent_audio(x, speech_)
+        assert xs.dtype == np.int16
+        h.update(xs.tobytes() + repr(spans).encode())
+    with capsys.disabled():
+        print(f"\nasr input sha256 {h.hexdigest()}")

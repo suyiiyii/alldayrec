@@ -18,6 +18,8 @@ import uuid
 import anyio
 import numpy as np
 
+from alldayrec import gain
+
 URL = "wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_{mode}"
 RESOURCE = "volc.seedasr.sauc.duration"
 SR = 16000
@@ -80,6 +82,7 @@ async def _session(x: np.ndarray, mode: str, pace_s: float, options: dict, consu
            "request": {"model_name": "bigmodel", "enable_itn": True, "enable_punc": True,
                        "show_utterances": True, **options}}
     step = SR * PACKET_MS // 1000
+    x = gain.to16(x)  # int16 on the wire (an engine called without sent_audio: replay)
     packets = [x[i:i + step].tobytes() for i in range(0, len(x), step)]
     if empty_packet and not packets:
         packets = [b""]

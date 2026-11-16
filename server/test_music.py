@@ -115,7 +115,7 @@ def test_enroll_skips_music(tmp_path, monkeypatch):
 
     async def fake_cut(a, b, fmt, device=None):
         cut.append(a)
-        return np.zeros(SR, np.int16).tobytes()
+        return np.zeros(SR, np.int16)
     monkeypatch.setattr(routes_speakers.routes_audio, "cut", fake_cut)
     monkeypatch.setitem(core.state, "embed", lambda x: np.ones(4) / 2)
     row = lambda s, **k: dict(id=str(s), start=f"2026-10-25T10:00:0{s}", end=f"2026-10-25T10:00:0{s + 2}", speaker="甲", **k)

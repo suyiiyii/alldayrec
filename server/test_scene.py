@@ -604,3 +604,23 @@ def test_backlog_after_each_pass(on, monkeypatch):
     T().scene_retry.clear()
     passes(monkeypatch, 1)
     assert rows("mn10_as") and T().scene_stats["backlog", ""] == 0, "done"
+
+
+def test_offset_into_the_models_and_its_rows(on, monkeypatch):
+    """A device's calibration offset (gain.py) set inside its audio: the model gets float32, the product unrounded,
+    from since_ms on, the samples before as they were; a row each side of since_ms, gain_db what its audio had; a
+    second pass has nothing to do."""
+    from alldayrec import gain
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    x = tone(3, 4)
+    save(t0, flac(x))
+    gain.put(DEVICE, ms(t0) + 1500, -25.0)
+    got = []
+    monkeypatch.setattr(sound, "scene", lambda name, y: got.append(y) or fake(name, y))
+    catch_up(["mn10_as"])
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 1500], [1500, 4000]]
+    assert [r[0] for r in db.conn().execute("SELECT gain_db FROM sounds ORDER BY start_ms")] == [0.0, -25.0]
+    before, after = got
+    assert np.array_equal(before, x[:24000]) and after.dtype == np.float32
+    assert np.array_equal(after, x[24000:].astype(np.float32) * np.float32(10 ** (-25 / 20))), "not rounded to int16"
+    assert catch_up(["mn10_as"]) == 0 and len(got) == 2

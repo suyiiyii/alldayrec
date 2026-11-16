@@ -11,14 +11,20 @@ Two steps:
 
 Rows in device_gain (live.db, the tenant's own) hold from since_ms on: for (device, t) each column is its newest
 non-NULL value with since_ms <= t, so a reported capture gain never hides an offset set by hand. No row: offset 0.
+Each sample takes the offset of its own time: a piece (or a cut, a listening poll) over a since_ms is split there.
 
 apply() is called at audio.py's three per-piece exits (samples, piece_window, piece_blocks): every decoded piece the
 pipeline (VAD, ASR, voiceprints, music, sound scenes), the late layer, the trim's VAD, playback and listening read has
-it. Then come the adaptive gains (VAD_GAIN_MAX_DB, ASR_GAIN_MAX_DB: squeeze.lift), on audio already offset. Uploads'
-stored levels (pieces.rms, env) and the stored bytes stay those of the audio as it came.
+it. With an offset it hands out float32 (int16's scale, not rounded, not limited), which goes on as float32 to every
+model (VAD, voiceprints, music, segmentation, the infer service as f32le); it becomes int16 once, in to16() (soft
+limited past KNEE, counted), only where int16 is needed: a played WAV and what an ASR engine is sent (after
+squeeze.lift). Then come the adaptive gains (VAD_GAIN_MAX_DB, ASR_GAIN_MAX_DB: squeeze.lift), on audio already
+offset. Uploads' stored levels (pieces.rms, env) and the stored bytes stay those of the audio as it came. With no
+offset every exit is int16, as before this table.
 """
 import argparse
 import datetime as dt
+import logging
 import math
 import sys
 
@@ -27,52 +33,91 @@ import numpy as np
 from alldayrec import db
 from alldayrec.tenant import T
 
+log = logging.getLogger("live")
 TARGET_DBOV = -26.0  # the wearer's own speech, ITU-T P.56 active speech level, on every device
-KNEE = 0.9  # apply(): where the soft limiter starts, of full scale; a sample offset past +-1 comes out under 1
-REPORTED_MAX_DB = 60.0  # a reported capture gain further from 0 than this is not a gain
+KNEE = 0.9  # to16(): where the soft limiter starts, of full scale; under it every sample is only rounded
+MAX_DB = 60.0  # a gain (reported, set or written down) further from 0 than this is not a gain
+MAX_MS = int(dt.datetime(9999, 1, 1).timestamp() * 1000)  # a since_ms the list can still print
+SR = 16000  # audio.SR (audio imports this module)
 
 
-def offset_db(device: str, at_ms: int) -> float | None:
+def offset_db(device: str, at_ms: float) -> float | None:
     """The calibration offset of the device's audio at at_ms; None: none set (0 dB, and played() keeps PLAY_GAIN_DB)."""
     r = db.conn().execute("SELECT offset_db FROM device_gain WHERE device = ? AND since_ms <= ? AND offset_db IS NOT NULL "
-                          "ORDER BY since_ms DESC LIMIT 1", (device, at_ms)).fetchone()
+                          "ORDER BY since_ms DESC LIMIT 1", (device, math.floor(at_ms))).fetchone()
     return None if r is None else r[0]
 
 
 def capture_db(device: str, at_ms: int) -> float | None:
-    """The capture gain the device had at at_ms, as reported or written down; None: unknown."""
+    """The capture gain the device had at at_ms, as reported or written down (at the same since_ms: the manual one);
+    None: unknown."""
     r = db.conn().execute("SELECT capture_db FROM device_gain WHERE device = ? AND since_ms <= ? AND capture_db IS NOT NULL "
-                          "ORDER BY since_ms DESC LIMIT 1", (device, at_ms)).fetchone()
+                          "ORDER BY since_ms DESC, source = 'manual' DESC LIMIT 1", (device, at_ms)).fetchone()
     return None if r is None else r[0]
 
 
-def apply(x: np.ndarray, device: str, at_ms: int) -> np.ndarray:
-    """x (int16, a piece of the device starting at at_ms) with its offset: x itself when there is none or it is 0.
-    Multiplied in float64; past KNEE a tanh soft limiter keeps it under full scale (no hard clip), and the samples that
-    would have passed +-1 are counted per device (T().gain_limited: lr_gain_limited_samples_total). Back to int16, so a
-    negative offset rounds."""
-    g = offset_db(device, at_ms)
-    if not g:
+def segments(device: str, at_ms: float, n: int) -> list[tuple[int, int, float | None]]:
+    """n samples of the device from at_ms (unix ms, sample i at at_ms + i / 16 ms) split where its offset changes:
+    (from, to, offset or None), each sample at the offset of its own time (since_ms <= its time)."""
+    out, i, g = [], 0, offset_db(device, at_ms)
+    for since, h in db.conn().execute("SELECT since_ms, offset_db FROM device_gain WHERE device = ? AND since_ms > ? AND "
+                                      "since_ms < ? AND offset_db IS NOT NULL ORDER BY since_ms",
+                                      (device, math.floor(at_ms), at_ms + n * 1000 / SR)):
+        k = min(n, math.ceil((since - at_ms) * SR / 1000 - 1e-6))  # its first sample at or after since
+        if k > i:
+            out.append((i, k, g))
+        i, g = max(i, k), h
+    return out + [(i, n, g)] if n > i or not out else out
+
+
+def apply(x: np.ndarray, device: str, at_ms: float) -> np.ndarray:
+    """x (int16, the device's from at_ms) with its offset, each sample at its own time's (segments): x itself where
+    none is set or all are 0, else float32 at int16's scale (x * 10^(dB/20), not rounded, not limited: past full scale
+    too), which every model takes as it is; to16() makes it int16 where int16 is needed (a WAV, an ASR engine)."""
+    segs = [s for s in segments(device, at_ms, len(x)) if s[2]]
+    if not segs:
         return x
-    y = x * (10 ** (g / 20) / 32768)  # float64: x times the gain exactly (/32768 is exact)
-    a = np.abs(y)
+    y = x.astype(np.float32)
+    for a, b, g in segs:
+        y[a:b] *= np.float32(10 ** (g / 20))
+    return y
+
+
+def to16(y: np.ndarray, device: str | None = None) -> np.ndarray:
+    """y as int16: an int16 y itself; a float one (apply's) rounded, its samples past KNEE of full scale through a
+    tanh soft limiter that keeps them under full scale (no hard clip) and counted per device (T().gain_limited:
+    lr_gain_limited_samples_total, samples that went into the limiter on the way to int16). Under KNEE: only rounded."""
+    if y.dtype == np.int16:
+        return y
+    z = y.astype(np.float64) / 32768  # exact: /32768 and *32768 below do not move a sample
+    a = np.abs(z)
     if (over := a > KNEE).any():
-        if n := int(np.count_nonzero(a > 1)):
-            T().gain_limited[device] = T().gain_limited.get(device, 0) + n
-        y[over] = np.sign(y[over]) * (KNEE + (1 - KNEE) * np.tanh((a[over] - KNEE) / (1 - KNEE)))
-    return np.clip(np.round(y * 32768), -32767, 32767).astype(np.int16)  # far past full scale tanh reaches 1: full scale
+        if device is not None:
+            T().gain_limited[device] = T().gain_limited.get(device, 0) + int(np.count_nonzero(over))
+        z[over] = np.sign(z[over]) * (KNEE + (1 - KNEE) * np.tanh((a[over] - KNEE) / (1 - KNEE)))
+    return np.clip(np.round(z * 32768), -32767, 32767).astype(np.int16)  # far past full scale tanh reaches 1: full scale
+
+
+def db_value(value, what: str) -> float | None:
+    """value as dB when it is a finite number within +-MAX_DB, else None (logged): never a row of its."""
+    ok = not isinstance(value, bool) and isinstance(value, (int, float)) and (
+        abs(value) <= MAX_DB if isinstance(value, int) else math.isfinite(value) and abs(value) <= MAX_DB)  # a huge int: no float
+    if not ok:
+        log.warning("gain: %s %.40r is not a gain (a finite number within +-%g dB), not kept", what, value, MAX_DB)
+        return None
+    return float(value)
 
 
 def report(device: str, at_ms: int, value) -> bool:
     """A capture gain a client says the device has from at_ms on (a recorder's mic_gain_db, a phone's capture_gain_db):
-    a 'reported' row when it differs from the one known at at_ms (or none is). Not a finite number of dB, or past
-    REPORTED_MAX_DB: ignored. It never changes the audio: only offset_db does."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or abs(value) > REPORTED_MAX_DB:
+    a 'reported' row when it differs from the one known at at_ms (or none is); a second report at the same ms replaces
+    the first. Not a gain (db_value): ignored. It never changes the audio: only offset_db does."""
+    if value is None or (value := db_value(value, f"{device} reported capture gain")) is None:
         return False
     known = capture_db(device, at_ms)
     if known is not None and abs(known - value) < 1e-6:
         return False
-    db.conn().execute("INSERT OR IGNORE INTO device_gain VALUES (?, ?, ?, NULL, 'reported', NULL)", (device, at_ms, float(value)))
+    db.conn().execute("INSERT OR REPLACE INTO device_gain VALUES (?, ?, ?, NULL, 'reported', NULL)", (device, at_ms, value))
     return True
 
 
@@ -83,8 +128,15 @@ def rows(device: str | None = None) -> list[dict]:
 
 
 def put(device: str, since_ms: int, offset: float | None, capture: float | None = None, note: str | None = None):
-    """A 'manual' row: what someone measured (offset) or wrote down (capture); the same device and since_ms replaced."""
-    db.conn().execute("INSERT OR REPLACE INTO device_gain VALUES (?, ?, ?, ?, 'manual', ?)", (device, since_ms, capture, offset, note))
+    """A 'manual' row: what someone measured (offset) or wrote down (capture); the same device and since_ms replaced.
+    ValueError (nothing written) when a value is not a gain (db_value) or since_ms no time."""
+    for v, what in ((offset, "offset"), (capture, "capture gain")):
+        if v is not None and db_value(v, f"{device} {what}") is None:
+            raise ValueError(f"{what} {v!r}: a finite number of dB within +-{MAX_DB:g}")
+    if isinstance(since_ms, bool) or not isinstance(since_ms, int) or not 0 <= since_ms <= MAX_MS:
+        raise ValueError(f"since {since_ms!r}: unix ms from 0 to {MAX_MS}")
+    db.conn().execute("INSERT OR REPLACE INTO device_gain VALUES (?, ?, ?, ?, 'manual', ?)",
+                      (device, since_ms, None if capture is None else float(capture), None if offset is None else float(offset), note))
 
 
 def _ms(s: str) -> int:
@@ -114,15 +166,20 @@ def main(argv=None):
     if a.cmd == "set":
         if len(ts) > 1:
             sys.exit("set: which tenant (--tenant)")
-        if not math.isfinite(a.offset_db) or abs(a.offset_db) > REPORTED_MAX_DB:
-            sys.exit(f"offset_db: a finite number of dB within +-{REPORTED_MAX_DB:g}")
+        try:
+            since = _ms(a.since)
+        except (ValueError, OverflowError, OSError):
+            sys.exit(f"--since {a.since}: an ISO time or unix ms")
     now = int(dt.datetime.now().timestamp() * 1000)
     for t in ts:
         tenant.enter(t)
         if db.conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'device_gain'").fetchone() is None:
             sys.exit(f"{t.id}: no device_gain table; start the server on this version first")
         if a.cmd == "set":
-            put(a.device, _ms(a.since), a.offset_db, a.capture, a.note)
+            try:
+                put(a.device, since, a.offset_db, a.capture, a.note)
+            except ValueError as e:
+                sys.exit(f"set: {e}")
         for r in rows(a.device):
             print(t.id, r["device"], dt.datetime.fromtimestamp(r["since_ms"] / 1000).isoformat(timespec="seconds"),
                   f"offset={r['offset_db']}", f"capture={r['capture_db']}", r["source"], r["note"] or "", sep="\t")

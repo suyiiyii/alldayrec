@@ -432,7 +432,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | (no docstring) | `name` (path, string) |
+| `GET` | A history voice's sample: as stored, or, when its device has an offset at the clip's start (gain.py), decoded with it as WAV (X-Gain-Db). | `name` (path, string) |
 
 ### `/api/self`
 
@@ -452,13 +452,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it; X-Gain-Db (with a device): the gain it has over the stored audio (audio.play_db). | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
+| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it; X-Gain-Db (with a device): the gain its first sample of audio has over the stored audio (audio.play_db); a later since_ms of the device's offset inside the WAV changes it from there on, which this one number does not say. | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
 
 ### `/api/listen`
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start; 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
+| `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start (X-Gain-Db: its gain, as /api/audio's); 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
 
 ### `/api/device-gain`
 

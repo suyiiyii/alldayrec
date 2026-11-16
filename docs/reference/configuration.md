@@ -182,7 +182,7 @@ uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <�
 | `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；在设备的标定偏移之后算（[电平和增益](../explanation/architecture.md#电平和增益)）；0 关闭 | `infer.py` |
 | `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；在设备的标定偏移之后算；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
-| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭。登记了标定偏移（`device_gain`）的设备不再加它，回放只用偏移；等所有录音豆都登记了偏移，这一项就可以删掉 | `audio.py` |
+| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭。登记了标定偏移（`device_gain`）的那段音频（从它的 `since_ms` 起）不再加它，回放只用偏移；等所有录音豆都登记了偏移，这一项就可以删掉 | `audio.py` |
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `SPLIT_TURNS` | `1` | 引擎把两个人的话并成一句时（快速的一问一答），先用 pyannote segmentation-3.0 听出句子里换人的地方，在最近的字边界切开，切点前后各 ≤3 s 的声纹不像才保留，每段各自认人；只对带字级时间的句子（`qwen` 引擎）生效；0 关闭，只按 `SPLIT_COS` 切 | `transcript.py` |
 | `SPLIT_COS` | `0.35` | `SPLIT_TURNS=0` 时，在句子里每 0.5 s 取一个 1.5 s 窗的声纹，切点前、后各 3 s 内的窗口相似度低于这个值就在最近的字边界切开，每段各自认人；只对 3 s 以上、带字级时间的句子（`qwen` 引擎）生效；0 关闭 | `transcript.py` |
