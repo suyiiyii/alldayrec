@@ -123,6 +123,14 @@ uv run --no-project --with bleak --with sounddevice python lr_listen.py --name L
 uv run --no-project --with bleak python lr_listen.py --selftest
 ```
 
+只做测试的原始 PCM 固件（`LR_RAW_PCM=1 ./lr.sh build promicro-p3`，产物在 `build/lr-promicro-p3-rawpcm`，不发布）：每个 10 ms 的麦克风缓冲在高通和 Opus 之前原样送到 USB 串口，录音照常。`lr_pcm.py` 在 Mac 上接收，统计样本值（每帧差分的最大公约数、低位使用率、中段取值占用率），比较两档增益，判断 PDM 的 GAIN 是在 16 位取整之前还是之后生效：
+
+```bash
+python3 lr_pcm.py capture g28.raw --seconds 12
+python3 lr_pcm.py stats g28.raw g50.raw
+python3 lr_pcm.py --selftest
+```
+
 ## 已知问题
 
 - SD 卡的 SPI 协议用 `src/sdhc_spi.c`：NCS 2.7 驱动的副本，改了三处。数据命令的 R1 晚于第 2 个字节时，原来要睡 10 ms；每次多块读后 CMD12 的忙超出缓冲，原来要睡 30 ms；现在都改成先连续轮询。写卡后卡一直忙，原来会永远轮询，现在每次 10 s 超时报错。主机检查：`test/sdhc_check.c`
