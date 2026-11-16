@@ -34,7 +34,7 @@ docker compose exec alldayrec python -c "import sqlite3; sqlite3.connect('/data/
    docker compose stop
    ```
 
-2. 把备份的 `data` 目录（或其中某个租户的 `live.db`）放回原处。
+2. 把备份的 `data` 目录（或其中某个租户的 `live.db`）放回原处。只放回整个库文件（停机打包的，或上面用 SQLite 备份接口复制的）；不要用 SQL dump（`.dump`、`iterdump()`）或 `INSERT … SELECT` 重建数据库：逐段声纹（`seg_emb`）和声纹学过的句子（`enrolled`）都按句子的 `rowid` 记，重建会重新编号，它们就对不上自己的句子了。
 3. 启动：
 
    ```bash

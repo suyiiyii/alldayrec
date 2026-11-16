@@ -4,6 +4,7 @@ left) and with its audio (a trim's dropped pieces), another device's left; kept 
 in, never holding the rows up; each part its own span and vector. Writing it, and the switch, in test_isolation.test_pipelines_side_by_side."""
 import datetime as dt
 import itertools
+import sqlite3
 import time
 
 import anyio
@@ -28,9 +29,9 @@ SEG = itertools.count()
 
 def put(device: str, a: int, b: int, part: int = 0, sentence: str | None = None):
     """A voiceprint beside the row with this id (none there: rowid 0), each its own segment."""
-    r = db.conn().execute("SELECT rowid FROM sentences WHERE id = ?", (sentence,)).fetchone()
-    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0, ?, ?)",
-                      (device, a, b, part, np.ones(4, np.float16).tobytes(), r[0] if r else 0, next(SEG)))
+    r = db.conn().execute("SELECT rowid, start FROM sentences WHERE id = ?", (sentence,)).fetchone()
+    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0, ?, ?, ?)",
+                      (device, a, b, part, np.ones(4, np.float16).tobytes(), r[0] if r else 0, next(SEG), r[1] if r else ""))
 
 
 def left() -> list:
@@ -183,7 +184,7 @@ def passes(segs: list[dict], vs: list, lo: float, hi: float, late=()):
     embs = device_pipeline.seg_embs("mic", segs, vs, at)
     with db.tx() as t:
         ids = db.replace_sentences(t, core.iso(at(lo)), core.iso(at(hi)), rows, "mic")
-        assert db.put_seg_embs(t, "mic", ids, embs)
+        assert db.put_seg_embs(t, "mic", rows, ids, embs)
     return lambda s: ms(at(s))
 
 
@@ -250,8 +251,7 @@ def test_two_rows_that_start_in_the_same_ms(tmp_path):
     segs, vs = apart((0, 20), (0, 30))
     s = passes(segs, vs, 0, 40)
     assert kept() == [(s(20), [1, 0, 0, 0]), (s(30), [0, 1, 0, 0])]
-    assert sorted(tuple(r) for r in db.conn().execute(
-        "SELECT s.text, e.end_ms FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence")) == [("t1", s(20)), ("t2", s(30))]
+    assert sorted(owners(db.conn())) == [("mic", "t1"), ("mic", "t2")]
 
 
 def test_one_rows_two_segments_that_start_in_the_same_ms(tmp_path):
@@ -270,8 +270,66 @@ def test_a_second_write_is_refused(tmp_path):
     db.open_db(tmp_path / "live.db")
     segs, vs = apart((0, 20))
     s = passes(segs, vs, 0, 40)
-    ids = [db.conn().execute("SELECT rowid FROM sentences").fetchone()[0]]
+    rows = [dict(r) for r in db.conn().execute("SELECT rowid, start FROM sentences")]
+    ids = [rows[0]["rowid"]]
     again = [(*e[:6], np.zeros(4, np.float16).tobytes(), *e[7:]) for e in device_pipeline.seg_embs("mic", segs, vs, lambda x: dt.datetime(2026, 10, 1, 10) + dt.timedelta(seconds=x))]
     with db.tx() as t:
-        assert not db.put_seg_embs(t, "mic", ids, again)
+        assert not db.put_seg_embs(t, "mic", rows, ids, again)
     assert kept() == [(s(20), [1, 0, 0, 0])]
+
+
+OWN = "JOIN sentences s ON s.rowid = e.sentence AND s.source = e.device AND s.start = e.sentence_start"  # db seg_emb's rule
+
+
+def owners(c) -> list:
+    """Each voiceprint's device and its sentence's text by db seg_emb's rule (None: no one's)."""
+    return [tuple(r) for r in c.execute(f"SELECT e.device, s.text FROM seg_emb e LEFT {OWN} ORDER BY e.rowid")]
+
+
+def test_a_dump_restore_renumbers_rows_and_never_mixes_them_up(tmp_path):
+    """A SQL dump (no rowids) restored: mic's A goes from rowid 2 to 1, other's B takes 2, A's voiceprint still says 2.
+    It is no one's then (not B's), and replacing B leaves it, for trim to drop with its audio."""
+    t0 = dt.datetime(2026, 10, 1, 10)
+    iso = lambda s: core.iso(t0 + dt.timedelta(seconds=s))
+    row = lambda i, a, dev: dict(id=i, start=iso(a), end=iso(a + 1), source=dev, text=i, speaker="S1")
+    db.open_db(tmp_path / "live.db")
+    c = db.conn()
+    rows = [row("gone", 0, "mic"), row("A", 10, "mic"), row("B", 20, "other")]
+    with db.tx():
+        ids = db.insert_sentences(c, rows)
+        assert db.put_seg_embs(c, "mic", rows, ids, [("mic", db.ms(iso(10)), db.ms(iso(11)), 0, "S1", "m@0",
+                                                     np.ones(4, np.float16).tobytes(), 0.0, 1, 0)])
+        db.replace_sentences(c, iso(0), iso(5), [], "mic")
+    assert owners(c) == [("mic", "A")]
+    with sqlite3.connect(tmp_path / "restored.db") as d:
+        d.executescript("\n".join(c.iterdump()))
+    db.open_db(tmp_path / "restored.db")
+    d = db.conn()
+    assert d.execute("SELECT s.id FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence").fetchall()[0][0] == "B"
+    assert owners(d) == [("mic", None)]
+    with db.tx():
+        db.replace_sentences(d, iso(20), iso(22), [], "other")
+    assert [r[0] for r in d.execute("SELECT id FROM sentences")] == ["A"]
+    assert [tuple(r) for r in d.execute("SELECT device, start_ms FROM seg_emb")] == [("mic", db.ms(iso(10)))]
+
+
+def test_a_rejoined_part_past_its_rows_end(tmp_path):
+    """One speaker's [2, 12) s, cut in two ([2, 6), [7, 12)) and joined again, holds their [3, 5): the row ends at 5 s
+    (final_rows: its last segment's end), the second part starts at 7. Still that row's, and gone with it."""
+    from alldayrec.transcript import _part
+    db.open_db(tmp_path / "live.db")
+    w = lambda a, b, t: dict(start_ms=a * 1000, end_ms=b * 1000, text=t)
+    ws = [w(2, 4, "a"), w(4, 6, "b"), w(7, 9, "c"), w(9, 12, "d")]
+    g = dict(start_ms=2000, end_ms=12000, text="abcd", words=ws, speaker="S1")
+    q, p = _part(g, ws[:2]), _part(g, ws[2:])
+    joined = {**_part(q, q["words"] + p["words"]), "speaker": "S1"}
+    inside = dict(start_ms=3000, end_ms=5000, text="x", speaker="S1", words=[w(3, 5, "x")])
+    e = np.eye(4)
+    s = passes([joined, inside], [[(q, e[0]), (p, e[1])], [(inside, e[2])]], 0, 30)
+    r, = db.sentences("2026", "~", source="mic")
+    assert ms(dt.datetime.fromisoformat(r["end"])) == s(5)
+    assert [tuple(x) for x in db.conn().execute(f"SELECT e.start_ms, s.text FROM seg_emb e {OWN} ORDER BY e.start_ms")] == [
+        (s(2), "abcdx"), (s(3), "abcdx"), (s(7), "abcdx")]
+    with db.tx() as t:
+        db.replace_sentences(t, r["start"], r["end"], [], "mic")
+    assert left() == []

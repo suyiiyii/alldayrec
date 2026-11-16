@@ -56,7 +56,7 @@ def seg_embs(device: str, segs: list[dict], vs: list, at) -> list[tuple]:
     """seg_emb's rows of a final piece: the voiceprint voices() took of each engine segment or of each of its parts
     (vs), with its own span, as float16, the row it went in (its place in final_rows' rows; segs: as label() and
     final_rows left them) and the segment's place in vs; none for a part in no row. No new inference; db.put_seg_embs
-    puts the rowid for the row."""
+    puts the rowid and the start for the row."""
     model = f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"
     ts = lambda s: db.ms(iso(at(s / 1000)))  # as its row's start: db.ms of the same iso
     rows = {id(o): g["row"] for g in segs for o in (g, *(g.get("words") or []))}
@@ -209,7 +209,7 @@ async def pipeline(device: str):
         with db.tx() as t:
             if rows is not None:
                 ids = db.replace_sentences(t, lo, iso(hi), rows, device)
-                if embs and not db.put_seg_embs(t, device, ids, embs):
+                if embs and not db.put_seg_embs(t, device, rows, ids, embs):
                     st.seg_emb_failed += 1
                 db.record_processed(t, device, coverage or [], layer)
             attached, relabelled = False, []
