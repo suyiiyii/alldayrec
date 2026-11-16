@@ -17,6 +17,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import colocate
 from alldayrec import db
+from alldayrec import infer
 from alldayrec import live
 from alldayrec import perf
 from alldayrec import qwen_stream
@@ -49,6 +50,16 @@ STREAM_IDLE_S = 12
 # calls, and of them taking voiceprints (each a threads.INFER call, INFER_THREADS threads). Realtime has one piece
 FINAL_ASR_CONCURRENCY = int(os.environ.get("FINAL_ASR_CONCURRENCY", "4"))
 FINAL_EMBED_CONCURRENCY = int(os.environ.get("FINAL_EMBED_CONCURRENCY", "2"))
+
+
+def seg_embs(device: str, segs: list[dict], marks: list, E: list, at, lo: dt.datetime, hi: dt.datetime) -> list[tuple]:
+    """seg_emb's rows of a final piece: each labelled segment starting in [lo, hi) (the rest comes again in the next
+    piece) with the voiceprint the diarist took of it (E: its added ones, marks: label's), as float16. No new inference."""
+    model = f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"
+    ts = lambda s: int(at(s / 1000).timestamp() * 1000)
+    return [(device, ts(g["start_ms"]), ts(g["end_ms"]), g.get("split", 0), g.get("engine_speaker"), model,
+             np.asarray(E[m[0] - 1], np.float16).tobytes())
+            for g, m in zip(segs, marks) if m and lo <= at(g["start_ms"] / 1000) < hi]
 
 
 async def pipeline(device: str):
@@ -184,14 +195,16 @@ async def pipeline(device: str):
         return (rows, changed) if missing <= len(rows) // 10 else None
 
     async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None, coverage=None,
-                     layer: str = "final"):
-        """One transaction: the piece's rows replace [lo, hi), closed conversations (with the live analysis that
-        overlaps one), the finalized time, the open conversation. layer standby: the piece was left to another device."""
+                     layer: str = "final", embs: list[tuple] = ()):
+        """One transaction: the piece's rows (and its segments' voiceprints, embs: seg_embs) replace [lo, hi), closed
+        conversations (with the live analysis that overlaps one), the finalized time, the open conversation. layer
+        standby: the piece was left to another device."""
         recs = [record(c) for c in closed]
         lv = st.live
         with db.tx() as t:
             if rows is not None:
                 db.replace_sentences(t, lo, iso(hi), rows, device)
+                t.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?)", embs)
                 db.record_processed(t, device, coverage or [], layer)
             attached, relabelled = False, []
             for rec in recs:
@@ -456,8 +469,9 @@ async def pipeline(device: str):
         del st.final_latency[:-10]
         closed = [c for r in rows for c in grouper.sentence(r)]
         closed += grouper.advance(hi)
+        embs = seg_embs(device, segs, marks, dia.E, at, lo, hi) if T().seg_emb else []
         with perf.timed(fcost, "commit_ms"):
-            await commit(closed, rows, iso(lo), hi, heard)
+            await commit(closed, rows, iso(lo), hi, heard, embs=embs)
         final_row(len(x) / SR, len(rows))
         st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((j["took"] + time.perf_counter() - t) * 1000),
                         "engine": engine, "speakers": by_label, "changed": len(rows), "piece_s": round(len(x) / SR),

@@ -13,6 +13,8 @@ won't start. "lang" (optional): the language the models write that tenant's summ
 en; without it UI_LANG, else zh. One set by PUT /api/lang (the 我的 page's switch) is kept in the store and wins.
 "sound" (optional, false): true gives its audio scene scores when SOUND_MODEL is set (sounds.py). Its trims wait for
 them with SOUND_MODEL set either way (trim.py).
+"seg_emb" (optional, false): true keeps the voiceprint the final layer takes of each segment (db seg_emb): of everyone
+near the recorder, so off unless the tenant asks for it.
 """
 import contextvars
 import hmac
@@ -51,6 +53,7 @@ class Tenant:
     lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang's, kept in the store, wins (db.init)
     db: Path = None  # data / live.db unless given (a test's own file)
     sound: bool = False  # tenants.json's "sound": scene scores (sounds.on)
+    seg_emb: bool = False  # tenants.json's "seg_emb": each final segment's voiceprint kept (device_pipeline.seg_embs)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
     events: list = field(default_factory=list)      # its system log, the last 300
@@ -118,7 +121,7 @@ def load(path: Path = FILE) -> list[Tenant]:
         raise SystemExit(f"{path}: no tenants file (DATA_DIR; see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
-    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en) and sound (true or false)'
+    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en), sound and seg_emb (true or false)'
 
     def invalid(reason):
         # Never include configuration values or decoder excerpts: they may contain tokens.
@@ -148,8 +151,10 @@ def load(path: Path = FILE) -> list[Tenant]:
             invalid(f"entry {i}: lang (or UI_LANG) must be one of {', '.join(LANGS)}")
         if not isinstance(x.get("sound", False), bool):
             invalid(f"entry {i}: sound must be true or false")
+        if not isinstance(x.get("seg_emb", False), bool):
+            invalid(f"entry {i}: seg_emb must be true or false")
     ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh",
-                 sound=x.get("sound", False)) for x in config]
+                 sound=x.get("sound", False), seg_emb=x.get("seg_emb", False)) for x in config]
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")

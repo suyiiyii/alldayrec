@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
     at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
     PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
+CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
+    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s), unix ms; part: of one split_speakers cut (1 on), 0 whole
+    model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
+    PRIMARY KEY (device, start_ms, part));          -- goes with its sentences (replace_sentences) and its audio (trim.py)
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
@@ -385,6 +390,8 @@ def sentences(lo: str, hi: str, inclusive: bool = False, source: str | None = No
 def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str):
     """A device's pass replaces only that device's rows: another device may have recorded the same minutes."""
     c.execute("DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))
+    c.execute("DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ?",  # the pass's own go in again
+              (source, *(int(dt.datetime.fromisoformat(x).timestamp() * 1000) for x in (lo, hi))))
     protected = c.execute("SELECT id, start, end FROM sentences WHERE source = ? AND late = 1 AND start < ? AND end > ?", (source, hi, lo)).fetchall()
     insert_sentences(c, [r for r in rows if not any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)])
 

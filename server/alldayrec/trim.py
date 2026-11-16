@@ -298,6 +298,10 @@ def apply_one(h: dict) -> bool:
         dropped = [r for r in rows if (r["device"], r["start_ms"]) not in kept]
         t.executemany("DELETE FROM pieces WHERE device = ? AND start_ms = ? AND path = ? AND pos = ?",
                       [(r["device"], r["start_ms"], path, r["pos"]) for r in dropped])
+        # a segment's voiceprint (db seg_emb) goes with any of its audio; a segment lies in one final piece (<= CHUNK_S)
+        from alldayrec.segmenter import CHUNK_S
+        t.executemany("DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ? AND end_ms > ?",
+                      [(r["device"], r["start_ms"] - CHUNK_S * 1000, r["start_ms"] + r["seconds"] * 1000, r["start_ms"]) for r in dropped])
         for r in dropped:  # the piece that went on from it (audio.before), here or in the next hour, now starts cold
             n = t.execute("SELECT start_ms, path FROM pieces WHERE device = ? AND start_ms > ? ORDER BY start_ms LIMIT 1",
                           (r["device"], r["start_ms"])).fetchone()
