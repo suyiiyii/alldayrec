@@ -23,6 +23,14 @@ sha256 infer.MODELS pins. Needs torch, only here: the export dependency group.
   k2-fsa/sherpa-onnx exported it to ONNX (model.onnx of sherpa-onnx-pyannote-segmentation-3-0.tar.bz2 in its
   speaker-segmentation-models release; input "x": 10 s of samples, float32 in [-1, 1], 16 kHz; output: per ~17 ms frame
   the log-probabilities of the 7 powerset classes of 3 local speakers). main() downloads the models-v1 release's copy.
+- mn10_as.onnx: EfficientAT mn10_as (sound.py, only with mn10_as in SOUND_MODEL), MIT, Copyright (c) 2022 Florian
+  Schmid: github.com/fschmid56/EfficientAT at a425fdc with its release weights mn10_as_mAP_471.pt (sha256
+  0bd7dc2443af498c289a2e739f02ebb515d6aa3fd3ab9db539c86123ae368a4e). One graph: torchaudio.functional.resample 16 -> 32
+  kHz, AugmentMelSTFT(n_mels=128, sr=32000, win_length=800, hopsize=320) in eval mode, get_model(width_mult=1.0,
+  pretrained_name="mn10_as", strides=[2, 2, 2, 2], head_type="mlp"), sigmoid; input "wav": [1, samples] float32 in
+  [-1, 1], 16 kHz, any length; output "p": the 527 AudioSet class scores. The TorchScript exporter (dynamo=False),
+  opset 17, torch 2.14.1 + torchaudio 2.11.0 (CPU); onnxruntime is torch's within 5e-6 from 0.5 to 300 s. main()
+  downloads the models-v1 release's file.
 """
 import hashlib
 import os
@@ -70,7 +78,7 @@ def redimnet(out: Path):
 def main():
     d = Path(sys.argv[1]) if sys.argv[1:] else infer.DIR
     d.mkdir(parents=True, exist_ok=True)
-    for name in (infer.VAD, infer.CMVN, infer.YAMNET, infer.SEG):
+    for name in (infer.VAD, infer.CMVN, infer.YAMNET, infer.SEG, infer.MN10):
         urllib.request.urlretrieve(infer.SOURCES[name], d / name)
     redimnet(d / infer.EMB)
     for name, want in infer.MODELS.items():

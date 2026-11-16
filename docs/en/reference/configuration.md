@@ -21,6 +21,7 @@ A JSON array with one entry per person (tenant). Its permissions must be 600.
 | `data` | The data directory: `live.db` and more, see [Data layout](./data.md) |
 | `recordings` | The recordings directory |
 | `lang` | Optional. The language the LLM writes this person's content in (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. Without it, `UI_LANG` applies, and without `UI_LANG`, `zh`. Once the language is switched on the web page 「我的」 (Me) (`PUT /api/lang`), that choice wins: it is kept in this person's database and survives a restart |
+| `sound` | Optional, default `false`. `true`: with `SOUND_MODEL` set, this person's recordings get environmental sound scores (see [Environmental sound](#optional-environmental-sound) below), and trims wait for them |
 
 - Location: `DATA_DIR/tenants.json` (see `DATA_DIR` below). In the Docker image `DATA_DIR` is `/data`, which makes it `data/tenants.json` on the host.
 - When the file is missing, the server's first start makes one: one tenant `main` with a random token and the directories `DATA_DIR/main` and `DATA_DIR/main/recordings`, and logs the link that signs you in, `http://127.0.0.1:<PORT>/connect?token=<token>`.
@@ -109,6 +110,29 @@ Unset, every recording stays in the `recordings` directory (`STORAGE=local`), as
 - The server never overwrites another's object: a new object is written only if its key does not exist yet (`If-None-Match: *`), and a merge replaces only the version that was sealed (`If-Match`). Two instances given the same prefix by mistake: the later seal is refused with an error in the log, and that hour stays on local disk.
 - `s3` switched back to `local` for a while, then to `s3` again: pieces that came meanwhile for hours already sealed are in new local hour files; after the switch back these files and their pieces stay on local disk and read as usual, with an error in the log, and are not deleted.
 
+### Optional: environmental sound
+
+Scores every recording (with speech or without) on AudioSet's classes and keeps the scores as they came in the `sounds` table of `live.db` (format: [Data directory](./data.md#environmental-sound-sounds); privacy: [Privacy](../explanation/privacy.md#environmental-sound)). For now it only lays the data down for summaries later; nothing shows it on the web pages yet. Off by default.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SOUND_MODEL` | empty (off) | The models to run, comma-separated: `mn10_as` (EfficientAT, one result per 10 s) and `yamnet` (a frame every 0.48 s). The first is the main model the trim gate looks at. Both can run at once, each stored on its own. Only the models named here have their files downloaded and checked |
+| `SOUND_SINCE` | none | Required with `SOUND_MODEL` (the server refuses to start without it): the server scores the recordings from this time on (ISO, the instance's time zone, e.g. `2026-11-17`) by itself; the history before it only through the backfill command below, never by itself. A new model file (another sha256: a new model) also starts from this time |
+| `SOUND_EVERY_S`, `SOUND_SETTLE_S` | `60`, `120` | How often to look for recordings not scored yet; how many seconds after a piece arrived it is scored |
+
+- A tenant also needs `"sound": true` in `tenants.json`; one without it behaves exactly as with the feature off.
+- What gets scored is every uploaded audio piece, transcribed or not, whether its transcription worked or not. A piece that will not decode gets no result and is tried again after a backoff. The models run on one thread in the server process (one stretch at a time in the whole process, the tenants taking turns); with `INFER_URL` set, on the inference service's `POST /scene/<model>`, which needs the same `SOUND_MODEL`. An inference service without the model delays only the sound scores, never the voiceprints.
+- Metrics: `lr_scene_audio_seconds_total` (seconds of audio scored), `lr_scene_compute_seconds_total` (time in the model), `lr_scene_failed_total` (stretches that failed, waiting to be tried again), each by `model`; `lr_scene_decode_seconds_total` (time decoding: once for all the models) and `lr_scene_backlog_seconds` (seconds some model has not scored yet, updated hourly).
+- The trim gate: for a tenant with sound scores on, `trim.py` leaves an hour whole (reason `no sound`) while any piece it would drop has no result of the main model, the history before `SOUND_SINCE` too. Backfill first, then trim; when those results are really not wanted, `--allow-unscened` trims anyway and logs how many seconds of unscored audio it dropped.
+- Backfilling history (heavy, on one core, per recorded hour: 45–120 s decoding (once for all the models), about 30 s for EfficientAT, 35–40 s for YAMNet; wall-clock time measured on a busy older CPU):
+
+```sh
+uv run python -m alldayrec.sounds backfill --tenant main --since 2026-10-01 --until 2026-11-17   # SOUND_MODEL's models
+uv run python -m alldayrec.sounds backfill --db <copy>/live.db --recordings <copy>/recordings --since 2026-10-01 --until 2026-11-17 --model mn10_as
+```
+
+Scored on a copy, only the results can be copied back: `sqlite3 live.db "ATTACH '<copy>/live.db' AS c; INSERT OR IGNORE INTO sounds SELECT * FROM c.sounds"`. Keep `--until` no later than `SOUND_SINCE`, so it does not overlap what the server scores itself.
+
 ### Advanced: only for `stepfun` and `stepfun-file`
 
 When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_FALLBACK`, all four `ASR_*` variables below are required.
@@ -128,7 +152,7 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 | `LIVE_DATA` | `replay_case.py` | A tenant's data directory |
 | `CASES_DIR` | `eval_all.sh` | The directory of labeled evaluation cases |
 | `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` | See those scripts |
-| `TRIM_AFTER_DAYS` (default `2`), `TRIM_PAD_S` (`10`), `TRIM_VAD` (`0.1`), `TRIM_PURGE_AFTER_H` (`24`) | `trim.py` | Trimming: how many days after its newest piece an hour file may be trimmed; the seconds kept on each side of speech and of sentences; the VAD threshold for speech (a VAD file made at another threshold is not used); how many hours after a trim `purge` may delete the original (at least 24: less and `purge` refuses to run). See [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept) |
+| `TRIM_AFTER_DAYS` (default `2`), `TRIM_PAD_S` (`10`), `TRIM_VAD` (`0.1`), `TRIM_PURGE_AFTER_H` (`24`) | `trim.py` | Trimming: how many days after its newest piece an hour file may be trimmed; the seconds kept on each side of speech and of sentences; the VAD threshold for speech (a VAD file made at another threshold is not used); how many hours after a trim `purge` may delete the original (at least 24: less and `purge` refuses to run). See [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept). With environmental sound on there is also a gate: see [Environmental sound](#optional-environmental-sound) |
 
 ## Other environment variables
 

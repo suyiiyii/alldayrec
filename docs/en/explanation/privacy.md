@@ -31,6 +31,14 @@ Every ASR and LLM call is logged in the `calls` table with only its duration, re
 
 An AI connection secret is returned only at creation; the database keeps its hash and a short prefix. Server access logging is disabled, and performance records use `/mcp`. Reverse-proxy access logs contain the full URL: disable or redact those logs. With Cloudflare Tunnel, public TLS terminates at Cloudflare and traffic crosses its network.
 
+## Environmental sound
+
+Off by default. Once on ([configuration](../reference/configuration.md#optional-environmental-sound): `SOUND_MODEL`, plus the tenant's `"sound": true`), the server scores all of the audio for environmental sound: one frame every 10 s (or every 0.48 s), how much it sounds like each class (a car, music, cooking, a TV, running water…), and its level, kept in the `sounds` table of `live.db`. It scores all of the audio, the stretches where no one speaks too, so it tells where you were and what you were doing more fully than the transcript does.
+
+- It runs on this machine's CPU, or with `INFER_URL` set on your own inference service, which is the only place the audio goes. The scores go to no third party and not into the metrics (those are seconds and counts only).
+- When trimming (`trim.py`) drops the audio no one spoke in, these scores stay: the audio is gone, the record of what sounded then is not. `mn10_as`'s per-frame scores and both models' per-minute summaries are kept, `yamnet`'s per-frame scores for 30 days.
+- To get rid of them: turn `SOUND_MODEL` or the tenant's `"sound"` off, then delete the rows, for example `sqlite3 live.db "DELETE FROM sounds"` (one device: add `WHERE device = '<device>'`). What you delete can only be scored again from the recordings with the backfill command; what trimming has already dropped cannot.
+
 ## Why keep the original audio
 
 Some similar products delete the audio once it is transcribed. AllDayRec does the opposite: every line plays back, so a wrong transcript has the original to be checked against, and old days can be transcribed again when a better model comes along. The cost is disk space, and you have to keep these recordings safe yourself.

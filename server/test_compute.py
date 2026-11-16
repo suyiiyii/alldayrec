@@ -292,7 +292,7 @@ def test_service_holds_nothing_of_a_tenant(tmp_path):
                           "sys.argv = ['alldayrec', '--infer', '--port', '9']; import alldayrec.__main__ as m; m.main()"],
                          capture_output=True, text=True, check=True, env=env).stdout
     mods, argv, routes = out.splitlines()
-    assert eval(routes) == ["/embed", "/health", "/metrics", "/music", "/segment"] and eval(argv) == ["--port", "9"]
+    assert eval(routes) == ["/embed", "/health", "/metrics", "/music", "/scene/{name}", "/segment"] and eval(argv) == ["--port", "9"]
     usage = subprocess.run([sys.executable, "-m", "alldayrec", "--infer", "--help"], capture_output=True, text=True,
                            check=True, env=env).stdout
     assert usage.startswith("usage: alldayrec --infer [-h] [--port PORT]"), usage

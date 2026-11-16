@@ -22,11 +22,13 @@ log = logging.getLogger("live")
 LATE_PROCESS_TIMEOUT_S = float(os.environ.get("LATE_PROCESS_TIMEOUT_S", "1800"))
 
 
-def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarray:
+def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: list | None = None) -> np.ndarray:
     """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want). A piece
-    that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone)."""
+    that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone).
+    filled: given, gets what of [a,b) has decoded audio (ms); the rest is zeros (no piece there, or one that would not
+    decode), which sounds.py must not take for silence."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
-    end, missed, filled = a, [], []
+    end, missed, filled = a, [], [] if filled is None else filled
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",
                                (device, b, a)).fetchall():
         if p["start_ms"] + p["seconds"] * 1000 <= end:

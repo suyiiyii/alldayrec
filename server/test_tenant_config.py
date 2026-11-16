@@ -48,7 +48,7 @@ def check_invalid_config(tmp_path, content, setup=""):
     assert "Traceback" not in output and SECRET not in output
     if setup:
         assert result.stderr == (f"{path}: JSON exceeds parser limits; expected a JSON array of objects "
-                                 "with string fields id, token, data, recordings and optional lang (zh or en)\n")
+                                 "with string fields id, token, data, recordings, optional lang (zh or en) and sound (true or false)\n")
     assert result.stdout == ""
     assert path.read_bytes() == original and path.stat().st_mode & 0o777 == 0o600
 
@@ -80,7 +80,7 @@ def test_tenant_construction_errors_propagate(tmp_path, monkeypatch, error):
     path.write_text(json.dumps([ONE]))
     path.chmod(0o600)
 
-    def broken_tenant(*args):
+    def broken_tenant(*args, **kwargs):
         raise error("construction error")
 
     monkeypatch.setattr(tenant, "Tenant", broken_tenant)

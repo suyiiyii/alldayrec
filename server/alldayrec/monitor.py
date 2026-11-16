@@ -201,6 +201,9 @@ def metrics() -> str:
                 m("lr_store_errors_total", k, op=op, kind=kind)
             m("lr_store_seconds_count", n, op=op)
             m("lr_store_seconds_sum", round(sec, 3), op=op)
+    for (k, model), v in list(T().scene_stats.items()):  # sounds.py: audio s scored, decode / compute s (wall), failed parts, backlog s (decode, backlog: all models)
+        m({"audio": "lr_scene_audio_seconds_total", "decode": "lr_scene_decode_seconds_total", "compute": "lr_scene_compute_seconds_total",
+           "failed": "lr_scene_failed_total", "backlog": "lr_scene_backlog_seconds"}[k], round(v, 3), **({"model": model} if model else {}))
     b = s["balance"] or {}
     m("lr_stepfun_balance_cny", b.get("cny"))
     m("lr_stepfun_days_left", b.get("days_left"))

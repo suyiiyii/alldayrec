@@ -51,12 +51,16 @@ class Compute(Protocol):
     def segment(self, x: np.ndarray) -> np.ndarray:
         """int16 samples, at most 10 s -> pyannote's frames (transcript.segment)."""
 
+    def scene(self, name: str, x: np.ndarray) -> np.ndarray:
+        """int16 samples -> a scene model's (sound.MODELS) scores, frames x classes (sound.scores)."""
+
 
 class Local:
     def __init__(self):
-        from alldayrec import infer, music, transcript
+        from alldayrec import infer, music, sound, transcript
         self.embed, self.music = infer.embedder(), music.heard  # the session built here, before the event loop starts
         self.segment = transcript.segment  # its session at the first call, as before
+        self.scene = sound.scores  # its sessions at the first call
 
 
 def models() -> dict:
@@ -67,7 +71,8 @@ def models() -> dict:
 
 def served() -> set:
     """The model files this process does without: those behind Compute when INFER_URL is set."""
-    return set(models()) if os.environ.get("INFER_URL") else set()
+    from alldayrec import sound
+    return set(models()) | set(sound.files()) if os.environ.get("INFER_URL") else set()
 
 
 def voiceprint(r: dict) -> np.ndarray:
@@ -86,9 +91,11 @@ def frames(r: dict) -> np.ndarray:
 
 
 class Remote:
-    def __init__(self, url: str, token: str, timeout: float):
+    def __init__(self, url: str, token: str, timeout: float, scene: dict | None = None):
+        """scene: a Remote for sound.py's calls only, its backoff its own (a service without /scene holds up no
+        voiceprint): the scene model files (and sha256) it needs in /health's "scene" instead of models()."""
         import httpx2
-        self.url, self._lock, self.ok = url.rstrip("/"), threading.Lock(), True  # ok: the models checked (same_models)
+        self.url, self._lock, self.ok, self.need = url.rstrip("/"), threading.Lock(), True, scene  # ok: the models checked (same_models)
         self.down_since, self.next_try, self.wait, self.logged = None, 0.0, 0.0, -LOG_EVERY_S
         # trust_env=False: the service is on a private network, never through a proxy from the environment
         self.http = httpx2.Client(timeout=httpx2.Timeout(timeout, connect=2), trust_env=False,
@@ -172,11 +179,19 @@ class Remote:
     def segment(self, x: np.ndarray) -> np.ndarray:
         return self._post("segment", x, frames)
 
+    def scene(self, name: str, x: np.ndarray) -> np.ndarray:
+        from alldayrec import sound
+        return self._post(f"scene/{name}", x, sound.parse(name, len(x)))
+
     def same_models(self) -> bool:
         """GET /health with the token; ValueError when its model files or DIM are not this server's."""
         r = self.http.get(f"{self.url}/health")
         r.raise_for_status()
         h = r.json()
+        if self.need is not None:
+            if any((h.get("scene") or {}).get(k) != v for k, v in self.need.items()):
+                raise ValueError(f"the service has other scene models ({h.get('scene')}) than this server ({self.need})")
+            return True
         if h.get("models") != models() or h.get("dim") != DIM:
             raise ValueError(f"the service has other models ({h.get('models')}, dim {h.get('dim')}) than this server "
                              f"({models()}, dim {DIM})")

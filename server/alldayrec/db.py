@@ -97,6 +97,16 @@ CREATE TABLE IF NOT EXISTS processed_audio (  -- layer final / late: transcribed
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, layer TEXT NOT NULL,
     PRIMARY KEY(device, start_ms, end_ms, layer));
 CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
+CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw output over one stretch of a device's decoded
+    device TEXT NOT NULL, model TEXT NOT NULL,      -- audio (<= 300 s, no piece-less time in it). model: <name>@<sha256 12>
+    start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- (sound.MODELS); frame i: start_ms + i * hop_ms, window_ms long
+    hop_ms INTEGER NOT NULL, window_ms INTEGER NOT NULL, n INTEGER NOT NULL,  -- (to end_ms at most; mn10_as's last up to 12 s)
+    db BLOB NOT NULL,                               -- int8 x n: each frame's level, dBFS, as recorded
+    top BLOB,                                       -- zlib(n x K x (uint16 class, float16 score)); NULL past the model's keep_days
+    minutes BLOB NOT NULL,                          -- zlib: per wall-clock minute (by each frame's middle): minute (unix),
+    at INTEGER NOT NULL,                            -- frames, float16 mean x classes, uint8 frames >= 0.2 x classes
+    PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
+CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close

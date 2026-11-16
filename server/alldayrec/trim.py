@@ -3,7 +3,7 @@
 
     cd server && uv run python -m alldayrec.trim vad   (--tenant ID | --db live.db --recordings DIR) [--shard i/k] > vad.jsonl
     cd server && uv run python -m alldayrec.trim plan  (--tenant ID | --db ... --recordings ...) --vad vad.jsonl  # changes nothing
-    cd server && uv run python -m alldayrec.trim apply --tenant ID --vad vad.jsonl [--limit N]
+    cd server && uv run python -m alldayrec.trim apply --tenant ID --vad vad.jsonl [--limit N] [--allow-unscened]
     cd server && uv run python -m alldayrec.trim purge --tenant ID --confirm-backup WHEN [--yes]  # without --yes: what it would delete
 
 Run it with the instance's environment (STORAGE, S3_*) and time zone: sentences and hour file names are in its wall
@@ -32,6 +32,10 @@ after one a trim dropped (in cold_starts; in this hour file or the next): its de
 before, so its first 100 ms are muted and faded in (audio.warmed) and the rest of it may differ by a few LSB. That
 start is TRIM_PAD_S or more from any speech the VAD heard and any sentence (else the dropped piece would be kept).
 A piece after a real gap (a reconnect) decodes cold as it always did, unchanged.
+A tenant with scene scores on (sounds.on: SOUND_MODEL and its "sound") keeps an hour whole while any piece a trim would
+drop has no row of the gate's model (the first of SOUND_MODEL), its history before SOUND_SINCE too ("no sound"; sounds.py
+backfill fills it): what no one said in is gone with the trim, its scene with it. --allow-unscened lets such hours go
+anyway, and says how many seconds without scene scores it drops. With sound off, as before.
 The VAD runs per device and day, over the hours that may be trimmed only: a piece next to midnight or to an hour left
 whole has the VAD's pad on one side only (a sentence's still counts).
 """
@@ -52,6 +56,7 @@ from pathlib import Path, PurePosixPath
 from alldayrec import audio
 from alldayrec import db
 from alldayrec import seal
+from alldayrec import sounds
 from alldayrec import store
 from alldayrec import tenant
 from alldayrec.late_store import union
@@ -153,9 +158,9 @@ def load_vad(path: str) -> dict:
     return out
 
 
-def plan(vads: dict, now_ms: int) -> list[dict]:
+def plan(vads: dict, now_ms: int, allow_unscened=False) -> list[dict]:
     """Every hour file: what a trim would keep, or why it is left."""
-    hours = list(candidates(now_ms).values())
+    hours, gate, unscened = list(candidates(now_ms).values()), sounds.on(), 0.0
     for h in hours:
         if h["reason"] is None:
             v = vads.get(h["path"])
@@ -166,6 +171,12 @@ def plan(vads: dict, now_ms: int) -> list[dict]:
             else:
                 h["kept"] = kept = keep(h, v)
                 h["kept_bytes"] = sum(r["size"] for r in kept)
+                if gate and (s := sounds.unscened(h["device"], [r for r in h["rows"] if r["start_ms"] not in {k["start_ms"] for k in kept}])):
+                    if not allow_unscened:
+                        h["reason"] = "no sound"
+                    unscened += s
+    if gate and allow_unscened and unscened:
+        log.warning("trim: --allow-unscened: %.0f s of audio to drop has no scene scores", unscened)
     return hours
 
 
@@ -436,6 +447,8 @@ def main():
     a.add_argument("--now", help="vad, plan: as if it were then (ISO, the instance's wall clock): what was trimmable then")
     a.add_argument("--shard", default="0/1", help="vad: i/k, the i-th of k parts")
     a.add_argument("--limit", type=int, help="apply: at most this many hour files")
+    a.add_argument("--allow-unscened", action="store_true", help="plan, apply: drop audio the scene model has not "
+                   "scored too (sounds.py; logs how many seconds); without it such an hour is left whole")
     a.add_argument("--day", action="append", help="vad: only this <device>/<date> (again for more)")
     a.add_argument("--confirm-backup", metavar="WHEN", help="purge: when (ISO, the instance's wall clock) a backup began "
                    "that was checked to hold the recordings: only originals trimmed before it are deleted")
@@ -457,7 +470,7 @@ def main():
     if o.cmd == "vad":
         return vad(tuple(map(int, o.shard.split("/"))), now_ms, days=set(o.day) if o.day else None)
     if o.cmd == "plan":
-        return print(json.dumps(report(plan(load_vad(o.vad), now_ms)), ensure_ascii=False))
+        return print(json.dumps(report(plan(load_vad(o.vad), now_ms, o.allow_unscened)), ensure_ascii=False))
     with lock():
         if o.cmd == "purge":
             backup = ms(o.confirm_backup)
@@ -465,7 +478,7 @@ def main():
                 a.error("--confirm-backup is in the future")
             return print(json.dumps(purge(int(time.time() * 1000), backup, o.yes)))
         leftovers()
-        hours = plan(load_vad(o.vad), now_ms)
+        hours = plan(load_vad(o.vad), now_ms, o.allow_unscened)
         done = 0
         for h in [h for h in hours if h["reason"] is None][:o.limit]:
             done += apply_one(h)
