@@ -136,8 +136,9 @@ def verdict(a: dict, b: dict) -> tuple[str, str]:
         return "inconclusive", f"rms {got:+.1f} dB apart, the gains say {want:+.1f}: the gain did not take, or the sound changed"
     # the gain after the rounding uses round(k*step) for every k in the bulk: neighbouring values are 1-3 grid steps
     # apart (+-1 for the rounding, 3% a step for a gain not exactly the code's), and the grid is filled. Only the
-    # bulk counts: sparse tails have wide gaps that fit any grid. Holes off the grid (a tone) are no answer. An
-    # input that is already integer before the rounding gives the same samples either way: no script can tell it
+    # bulk counts: sparse tails have wide gaps that fit any grid; but a bulk of a few values (a silent room with
+    # clicks) fits any grid too, and two adjacent values anywhere rule the grid out. Holes off the grid (a tone) are
+    # no answer. An input already integer before the rounding gives the same samples either way: no script can tell
     u = b["bulk"]
     off = 0
     for p, q in zip(u, u[1:]):
@@ -145,9 +146,9 @@ def verdict(a: dict, b: dict) -> tuple[str, str]:
         off += not (1 <= j <= 3 and abs(q - p - j * step) <= 1 + 0.03 * j * step)
     off_grid = off / max(len(u) - 1, 1)
     fill = len(u) / ((u[-1] - u[0]) / step + 1)
-    seen = (f"off-grid {off_grid:.2f}, grid fill {fill:.2f}, occupancy {b['occupancy']:.2f}, "
+    seen = (f"{len(u)} bulk values, off-grid {off_grid:.2f}, grid fill {fill:.2f}, occupancy {b['occupancy']:.2f}, "
             f"adjacent {b['adjacent']:.2f}, spacing {b['spacing']}")
-    grid = off_grid <= 0.01 and fill >= 0.9
+    grid = len(u) >= 5 and off_grid <= 0.01 and fill >= 0.9 and b["adjacent"] < 0.02
     if grid and b["occupancy"] < 0.9:
         return "after", f"{b['gain']:#04x}'s values on the x{step:.2f} grid, every grid point used ({seen})"
     if not grid and b["occupancy"] >= 0.9 and b["adjacent"] > 0.5:
@@ -237,7 +238,7 @@ def selftest():
     # reviews of #363: synthetic sources at 16 kHz, x in LSB at 0x28, each capture with its own noise; the higher gain
     # g before the rounding, round(g*x), or after it, round(g*round(x)). The verdict may be inconclusive, never the
     # other order
-    def source(kind, amp, sigma=0.0, dc=0.0, seed=42, n=1500, pops=False, sparks=0.0):
+    def source(kind, amp, sigma=0.0, dc=0.0, seed=42, n=1500, pops=False, sparks=0.0, spark=3000.0):
         r, x, lp1, lp2, slow = random.Random(seed), [], 0.0, 0.0, 0.0
         for i in range(n * N):
             if kind == "tone":  # 1 kHz
@@ -255,7 +256,7 @@ def selftest():
             for j in range(48):
                 x[s + j] += 12000 if j < 24 else -12000
         for _ in range(int(len(x) * sparks)):  # sparse clicks over the whole range, none clipped at the high gain
-            x[r.randrange(len(x))] += r.uniform(-30000, 30000) / 10
+            x[r.randrange(len(x))] += r.uniform(-spark, spark)
         return x
 
     def cap(x, gain, g=1.0, before=True):
@@ -279,6 +280,17 @@ def selftest():
         order(f"tone 4 sigma {sigma}", lo, hi, "b.b." if sigma >= 0.05 else "")
     order("tone 4 clicks", source("tone", 4, 0.003, seed=42, sparks=0.004),
           source("tone", 4, 0.003, seed=43, sparks=0.004))
+    # a silent room with 3% clicks: the bulk is one value, which fits any grid; the clicks' values are dense
+    for sparks in (0.025, 0.03, 0.035):
+        order(f"silence clicks {sparks}", source("tone", 0, 0.01, 0.3, 42, sparks=sparks, spark=1000),
+              source("tone", 0, 0.01, 0.3, 43, sparks=sparks, spark=1000), "i.i.")
+    # round 1: the 30 LSB tone, the gain before the rounding, the same noise in both captures, 6 s
+    for sigma in (0, 0.01, 0.1, 0.2, 0.3):
+        x = source("tone", 30, sigma, n=600)
+        v, rs = judge(cap(x, 0x28), cap(x, 0x50, 10))
+        assert v != "after", (sigma, verdict(*rs))
+    x = source("tone", 30, 0.2, n=600)  # after the rounding: round 1 said 'after'; its grid has holes, no answer now
+    assert judge(cap(x, 0x28), cap(x, 0x50, 10, before=False))[0] != "before"
     # round 2's matrix, 15 s each: tones (their grid has holes: no 'after'), speech-shaped noise by RMS, DC, clipping
     for name, kind, amp, sigma, dc, pops, n, want in (
             ("tone 30", "tone", 30, 0, 0, False, 1500, "iiii"),
