@@ -44,12 +44,16 @@ def setup(tmp: Path, name: str, ids: str, env: str | None = None) -> str:
     for t in tenant.load(data / "tenants.json"):
         t.data.mkdir()
         tenant.call(t, db.init)
-    units = tmp / "units"
-    units.mkdir(exist_ok=True)
-    (units / f"lr-{name}.WorkingDirectory").write_text(f"{d}/server\n")
-    (units / f"lr-{name}.EnvironmentFiles").write_text(f"{d}/.env (ignore_errors=no)\n")  # as systemd 255 prints it
-    (units / f"lr-{name}.User").write_text(getpass.getuser() + "\n")  # real systemd: not root's files in tmp
+    unit(tmp, name, f"{d}/.env (ignore_errors=no)")
     return f"{d}:lr-{name}"
+
+
+def unit(tmp: Path, name: str, *envs: str):
+    """What the stand-in systemctl show prints for lr-<name>: its settings as systemd 255 prints them, each env file
+    with its ignore_errors (yes: -<path> in the unit), User the caller (real systemd: not root's files in tmp)."""
+    (tmp / "units").mkdir(exist_ok=True)
+    (tmp / "units" / f"lr-{name}").write_text(f"WorkingDirectory={tmp / name}/server\nUser={getpass.getuser()}\n" +
+                                              "".join(f"EnvironmentFiles={e}\n" for e in envs))
 
 
 def gain_sh(tmp: Path, *args: str) -> subprocess.CompletedProcess:
@@ -58,14 +62,22 @@ def gain_sh(tmp: Path, *args: str) -> subprocess.CompletedProcess:
     b = tmp / "bin"
     if not b.exists():
         b.mkdir()
-        (b / "systemctl").write_text(f'#!/bin/sh\n[ "$1 $2 $4" = "show -p --value" ] && cat "{tmp}/units/$5.$3" 2>/dev/null; true\n')
-        if not REAL:  # its -p EnvironmentFile (sourced: plain lines only) and WorkingDirectory, none of the caller's env
+        # show -p WorkingDirectory -p User -p EnvironmentFiles <unit>: unit()'s lines; a unit with a .fail file fails
+        # (real systemd: a unit unit() did not make is answered by the real systemctl)
+        real = f'[ -e "{tmp}/units/$8" ] || exec {shutil.which("systemctl")} "$@"\n' if REAL else ""
+        (b / "systemctl").write_text(f'#!/bin/sh\n{real}[ "$1" = show ] && cat "{tmp}/units/$8" 2>/dev/null; '
+                                     f'[ ! -e "{tmp}/units/$8.fail" ]\n')
+        if not REAL:  # its -p EnvironmentFile (sourced in order: plain lines only; -: skipped when missing) and
+            # WorkingDirectory, none of the caller's env
             (b / "systemd-run").write_text(f'''#!/bin/bash
 echo "$@" >> "{tmp}/systemd-run.log"
+fs=()
 while [ "${{1#-}}" != "$1" ]; do
-  case $1 in -p) case $2 in EnvironmentFile=*) f=${{2#*=}} ;; WorkingDirectory=*) wd=${{2#*=}} ;; esac; shift 2 ;; *) shift ;; esac
+  case $1 in -p) case $2 in EnvironmentFile=*) fs+=("${{2#*=}}") ;; WorkingDirectory=*) wd=${{2#*=}} ;; esac; shift 2 ;; *) shift ;; esac
 done
-cd "$wd" && exec env -i /bin/bash -c 'set -a; . "$0"; set +a; exec "$@"' "$f" "$@"
+cd "$wd" && exec env -i /bin/bash -c 'set -a
+for f in "${{@:2:$1}}"; do [ "${{f#-}}" = "$f" ] || {{ f=${{f#-}}; [ -e "$f" ] || continue; }}; . "$f" || exit 1; done
+set +a; exec "${{@:$1+2}}"' _ ${{#fs[@]}} "${{fs[@]}}" "$@"
 ''')
         for f in b.iterdir():
             f.chmod(0o755)
@@ -92,7 +104,8 @@ def test_list_and_set(tmp_path):
     if not REAL:  # the unit's own settings, and DATA_DIR only from its .env
         log = (tmp_path / "systemd-run.log").read_text()
         assert f"-p EnvironmentFile={tmp_path}/one/.env -p WorkingDirectory={tmp_path}/one/server -p User=" in log, log
-        assert "DATA_DIR" not in log and " -E " not in log and "--setenv" not in log, log
+        assert "DATA_DIR=" not in log and " -E " not in log and "--setenv" not in log, log
+        assert log.startswith("--pipe --wait --quiet --collect --expand-environment=no "), log
 
 
 def test_no_tenant_or_failed(tmp_path):
@@ -116,6 +129,7 @@ def test_unknown_unit_runs_nothing(tmp_path):  # no EnvironmentFile: gain.py wou
 @pytest.mark.parametrize("env, value", [
     ("DATA_DIR=/made-up/nowhere-7q\n", "nowhere-7q"),  # no tenants file there: tenant.load names the path
     ("DATA_DIR={data}\nHOST=made-up-host-7q\n", "made-up-host-7q"),  # a tenant without a token on another HOST
+    ('DATA_DIR="/made-up/nl-7q\n  gain.py: fake-7q"\n', "7q"),  # a value whose own line looks like gain.py's message
 ])
 def test_no_env_values_in_output(tmp_path, env, value):
     d = tmp_path / "one-data"
@@ -144,3 +158,79 @@ def test_last_data_dir_wins_with_spaces(tmp_path):  # the review's case: the fir
     r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "4.5")
     assert r.returncode == 0, r.stdout + r.stderr
     assert (rows(tmp_path, "one", "a"), rows(tmp_path, "two", "a")) == (1, 0)
+
+
+def test_args_as_given(tmp_path):  # systemd expands no $VAR (nor %n) in gain.py's arguments: the note is what was typed
+    one = setup(tmp_path, "one", "a")
+    note = "made up ${LLM_API_KEY} $LLM_API_KEY %n"
+    r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "1", "--note", note)  # gain_sh: SECRET not in the output
+    assert r.returncode == 0 and note in r.stdout, r.stdout + r.stderr
+    with sqlite3.connect(tmp_path / "one-data/a/live.db") as c:
+        assert c.execute("SELECT note FROM device_gain").fetchall() == [(note,)]
+
+
+def test_env_files_in_order_optional_ones_optional(tmp_path):  # later files win; a missing optional (-) one is skipped
+    one, _ = setup(tmp_path, "one", "a", f"DATA_DIR={tmp_path / 'two-data'}\n"), setup(tmp_path, "two", "a")
+    (tmp_path / "over.env").write_text(f"DATA_DIR={tmp_path / 'one-data'}\n")
+    unit(tmp_path, "one", f"{tmp_path}/one/.env (ignore_errors=no)", f"{tmp_path}/over.env (ignore_errors=yes)",
+         f"{tmp_path}/missing.env (ignore_errors=yes)")
+    r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "4.5")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (rows(tmp_path, "one", "a"), rows(tmp_path, "two", "a")) == (1, 0)
+    if not REAL:
+        assert f"-p EnvironmentFile={tmp_path}/one/.env -p EnvironmentFile=-{tmp_path}/over.env -p EnvironmentFile=-" \
+            f"{tmp_path}/missing.env " in (tmp_path / "systemd-run.log").read_text()
+
+
+def test_no_data_dir_runs_nothing(tmp_path):  # the optional file with DATA_DIR missing: not the default dir's tenants.json
+    one, _ = setup(tmp_path, "one", "a"), setup(tmp_path, "decoy", "a")
+    home = tmp_path / "home"
+    base = home / "Library/Application Support" if sys.platform == "darwin" else home / ".local/share"
+    base.mkdir(parents=True)
+    (base / "alldayrec").symlink_to(tmp_path / "decoy-data")  # where gain.py would look without DATA_DIR
+    (tmp_path / "home.env").write_text(f"HOME={home}\nXDG_DATA_HOME={home}/.local/share\n")
+    unit(tmp_path, "one", f"{tmp_path}/home.env (ignore_errors=yes)", f"{tmp_path}/missing.env (ignore_errors=yes)")
+    r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "1")
+    assert r.returncode == 1 and "  gain.py: no DATA_DIR from the unit EnvironmentFiles" in r.stderr, r.stdout + r.stderr
+    assert "one: gain.py failed (exit 1)" in r.stderr and rows(tmp_path, "decoy", "a") == 0
+
+
+@pytest.mark.parametrize("bad", ["EnvironmentFiles=/made-up/x.env (ignore_errors=maybe)", "fail"])
+def test_systemctl_unknown_or_failed_runs_nothing(tmp_path, bad):
+    one = setup(tmp_path, "one", "a")
+    if bad == "fail":
+        (tmp_path / "units/lr-one.fail").touch()
+    else:
+        unit(tmp_path, "one", f"{tmp_path}/one/.env (ignore_errors=no)", bad.split("=", 1)[1])
+    r = gain_sh(tmp_path, one, "list")
+    assert r.returncode == 1 and "one: systemctl show lr-one failed or printed what" in r.stderr, r.stdout + r.stderr
+    assert not (tmp_path / "systemd-run.log").exists()
+
+
+@pytest.mark.parametrize("ids, args, said, rc", [
+    ("a", ["set", "LR-SH", "61"], "set: offset 61.0: a finite number of dB within +-60", 1),
+    ("a", ["set", "LR-SH", "1", "--since", "not-a-date"], "--since not-a-date: an ISO time or unix ms", 1),
+    ("ab", ["set", "LR-SH", "1"], "set: which tenant (--tenant)", 1),
+    ("a", ["set", "LR-SH", "not-a-float"], "python -m alldayrec.gain set: error: argument offset_db: invalid float", 2),
+])
+def test_own_messages_shown(tmp_path, ids, args, said, rc):  # what gain.py says of the command line, and its exit code
+    one = setup(tmp_path, "one", ids)
+    r = gain_sh(tmp_path, one, *(["--tenant", "a"] if ids == "a" else []), *args)
+    assert r.returncode == 1 and f"  gain.py: {said}" in r.stderr and f"one: gain.py failed (exit {rc})" in r.stderr, \
+        r.stdout + r.stderr
+    assert rc == 1 or "  gain.py: usage: python -m alldayrec.gain" in r.stderr
+    assert all(rows(tmp_path, "one", i) == 0 for i in ids)
+
+
+@real_only
+def test_real_unit(tmp_path):  # a unit systemd itself knows, its settings as the real systemctl show prints them
+    one, u = setup(tmp_path, "one", "a"), f"lr-gainsh-test-{os.getpid()}"
+    subprocess.run(["sudo", "-n", "systemd-run", "--quiet", "--unit", u, "--remain-after-exit",
+                    "-p", f"EnvironmentFile={tmp_path}/one/.env", "-p", f"EnvironmentFile=-{tmp_path}/missing.env",
+                    "-p", f"WorkingDirectory={tmp_path}/one/server", "-p", f"User={getpass.getuser()}", "true"], check=True)
+    try:
+        r = gain_sh(tmp_path, one.replace(":lr-one", f":{u}"), "--tenant", "a", "set", "LR-SH", "2")
+        assert r.returncode == 0 and "a\tLR-SH\t" in r.stdout, r.stdout + r.stderr
+        assert rows(tmp_path, "one", "a") == 1
+    finally:
+        subprocess.run(["sudo", "-n", "systemctl", "stop", u])

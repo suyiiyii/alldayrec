@@ -8,7 +8,8 @@
 #                                                        # (no clip_start) are calibrated too
 # Instances are dir:unit as in deploy.sh (LR_INSTANCES, default /opt/alldayrec:alldayrec), on the host LR_DEPLOY_HOST
 # names through LR_DEPLOY_SHELL (root, as for deploy.sh: systemd-run); each instance's tenants.json says which tenants
-# are its own. What gain.py prints on stderr is not shown (it may hold the .env's values): a failure says its exit code.
+# are its own. Of what gain.py prints on stderr only its own messages are shown (the rest may hold the .env's values):
+# a failure says its exit code.
 set -euo pipefail
 INSTANCES=${LR_INSTANCES:-/opt/alldayrec:alldayrec}
 
@@ -25,30 +26,57 @@ fi
 
 # on the deploy host (as root, as deploy.sh): remote <dir:unit ...> <gain.py's arguments>
 instances=$2; shift 2
-# what stopped gain.py, by its type only: its messages may hold the .env's values
-py='import runpy, sys
+# stderr is closed to everything but gain.py's own messages (err: fixed text and the command line, as main says) and,
+# of anything else that stopped it, its type: the rest may hold the .env's values. No DATA_DIR from the unit's
+# EnvironmentFiles (an optional one missing): it does not run, it would take the default dir's tenants.json
+py='import io, os, sys
+shown, said, rc = os.fdopen(os.dup(2), "w"), io.StringIO(), 1
+os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
 try:
-    runpy.run_module("alldayrec.gain", run_name="__main__")
+    if os.environ.get("DATA_DIR"):
+        from alldayrec import gain
+        gain.main(err=said)
+        rc = 0
+    else:
+        said.write("no DATA_DIR from the unit EnvironmentFiles\n")
 except SystemExit as e:
     if e.code is None or isinstance(e.code, int):
-        raise
-    sys.exit("  gain.py: SystemExit")
+        rc = e.code or 0
+    else:
+        said.write("SystemExit\n")
 except BaseException as e:
-    sys.exit("  gain.py: " + type(e).__name__)'
+    said.write(type(e).__name__ + "\n")
+for line in said.getvalue().splitlines():
+    print("  gain.py:", line, file=shown)
+sys.exit(rc)'
 ok='' failed=''
 for i in $instances; do
-  d=${i%%:*} u=${i#*:}
-  # as its unit runs it: systemd reads the unit's own EnvironmentFile (its quotes, spaces, the last one wins; never read
-  # here, never printed, never in process args), in its WorkingDirectory, as its User. A unit it does not know has none
-  # of them: gain.py would find another tenants.json, so it does not run
-  wd=$(systemctl show -p WorkingDirectory --value "$u") user=$(systemctl show -p User --value "$u") envs=()
-  while read -r f; do [ -z "$f" ] || envs+=(-p "EnvironmentFile=${f% (ignore_errors=*}"); done < <(systemctl show -p EnvironmentFiles --value "$u")
+  d=${i%%:*} u=${i#*:} wd='' user='' envs=() bad=''
+  # as its unit runs it: systemd reads the unit's own EnvironmentFiles in order, an optional one (-) still optional
+  # (their quotes, spaces, the last one wins; never read here, never printed, never in process args), in its
+  # WorkingDirectory, as its User. A unit it does not know has none of them: gain.py would find another tenants.json,
+  # so it does not run; nor when systemctl fails or prints what this does not know
+  props=$(systemctl show -p WorkingDirectory -p User -p EnvironmentFiles "$u") || bad=1
+  while IFS= read -r l; do
+    case $l in
+      WorkingDirectory=*) wd=${l#*=} ;;
+      User=*) user=${l#*=} ;;
+      EnvironmentFiles=*' (ignore_errors=yes)') f=${l#*=}; envs+=(-p "EnvironmentFile=-${f% (ignore_errors=yes)}") ;;
+      EnvironmentFiles=*' (ignore_errors=no)') f=${l#*=}; envs+=(-p "EnvironmentFile=${f% (ignore_errors=no)}") ;;
+      ''|EnvironmentFiles=) ;;
+      *) bad=1 ;;
+    esac
+  done <<< "$props"
+  if [ -n "$bad" ]; then
+    echo "  stop: $d: systemctl show $u failed or printed what gain.sh does not know" >&2; failed=1; continue
+  fi
   if [ -z "$wd" ] || [ ${#envs[@]} = 0 ]; then
     echo "  stop: $d: $u has no WorkingDirectory or EnvironmentFile" >&2; failed=1; continue
   fi
-  # a tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's
-  if systemd-run --pipe --wait --quiet --collect "${envs[@]}" -p "WorkingDirectory=$wd" ${user:+-p "User=$user"} \
-    "$d/server/.venv/bin/python" -c "$py" "$@" < /dev/null 2> >(grep -xE '  gain\.py: [A-Za-z_][A-Za-z0-9_]*' >&2); then
+  # the arguments as given: systemd expands no $VAR in them (else a ${LLM_API_KEY} would be its value, in gain.py's
+  # argv and in a note). A tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's
+  if systemd-run --pipe --wait --quiet --collect --expand-environment=no "${envs[@]}" -p "WorkingDirectory=$wd" \
+    ${user:+-p "User=$user"} "$d/server/.venv/bin/python" -c "$py" "$@" < /dev/null 2> >(grep '^  gain\.py: ' >&2); then
     ok=1
   else
     rc=$?

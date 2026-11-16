@@ -23,6 +23,7 @@ offset. Uploads' stored levels (pieces.rms, env) and the stored bytes stay those
 offset every exit is int16, as before this table.
 """
 import argparse
+import contextlib
 import datetime as dt
 import logging
 import math
@@ -151,11 +152,19 @@ def _ms(s: str) -> int:
     return int(s) if s.lstrip("-").isdigit() else int(dt.datetime.fromisoformat(s).timestamp() * 1000)
 
 
-def main(argv=None):
+def main(argv=None, err=None):
     """python -m alldayrec.gain [--tenant ID] list [DEVICE] | set DEVICE OFFSET_DB [--since T] [--capture DB] [--note TEXT],
     on the tenants of DATA_DIR/tenants.json (every one for list without --tenant), against the store a running server
-    already brought up to date. server/gain.sh runs it on the deploy host."""
+    already brought up to date. server/gain.sh runs it on the deploy host. Its own messages go to err (stderr): a wrong
+    command line (argparse's usage and error, exit 2) and a value it refuses (exit 1), made of fixed text and the
+    command line only, never a setting: gain.sh shows these and nothing else of its stderr."""
     from alldayrec import tenant
+    err = sys.stderr if err is None else err
+
+    def fail(msg: str):
+        print(msg, file=err)
+        sys.exit(1)
+
     ap = argparse.ArgumentParser(prog="python -m alldayrec.gain", description=main.__doc__)
     ap.add_argument("--tenant")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -167,28 +176,29 @@ def main(argv=None):
     st.add_argument("--since", default="0", help="ISO time or unix ms (default 0: all of its audio)")
     st.add_argument("--capture", type=float, help="the capture gain it was measured at, written down")
     st.add_argument("--note")
-    a = ap.parse_args(argv)
+    with contextlib.redirect_stderr(err):
+        a = ap.parse_args(argv)
     ts = [t for t in tenant.load(tenant.FILE) if a.tenant in (None, t.id)]
     if not ts:  # exit 3: gain.sh tells it from a failure (1)
         print(f"no tenant {a.tenant} here", file=sys.stderr)
         sys.exit(3)
     if a.cmd == "set":
         if len(ts) > 1:
-            sys.exit("set: which tenant (--tenant)")
+            fail("set: which tenant (--tenant)")
         try:
             since = _ms(a.since)
         except (ValueError, OverflowError, OSError):
-            sys.exit(f"--since {a.since}: an ISO time or unix ms")
+            fail(f"--since {a.since}: an ISO time or unix ms")
     now = int(dt.datetime.now().timestamp() * 1000)
     for t in ts:
         tenant.enter(t)
         if db.conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'device_gain'").fetchone() is None:
-            sys.exit(f"{t.id}: no device_gain table; start the server on this version first")
+            fail("a tenant has no device_gain table; start the server on this version first")
         if a.cmd == "set":
             try:
                 put(a.device, since, a.offset_db, a.capture, a.note)
             except ValueError as e:
-                sys.exit(f"set: {e}")
+                fail(f"set: {e}")
         for r in rows(a.device):
             print(t.id, r["device"], dt.datetime.fromtimestamp(r["since_ms"] / 1000).isoformat(timespec="seconds"),
                   f"offset={r['offset_db']}", f"capture={r['capture_db']}", r["source"], r["note"] or "", sep="\t")
