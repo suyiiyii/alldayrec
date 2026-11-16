@@ -2,11 +2,13 @@
 
     INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
-POST /embed, /music and /segment: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
+POST /embed, /music, /segment and /scene/<model> (one of SOUND_MODEL's, sound.py): the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
 MAX_S s, /segment SEG_S, else 413), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
-{"music": bool} or {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment).
-GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM (the server checks them at
-start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
+{"music": bool}, {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment) or {"shape": [frames,
+classes], "scores": base64 float16} (sound.encode; one call at a time, threads.SOUND).
+GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM, and in "scene" its scene
+models' files (the server checks them: the voiceprints' at start, the scene ones before a first scene score; a wrong
+token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
 no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
 alldayrec.tenant for MODELS_DIR's default (DATA_DIR/models), only that path. INFER_HOST (127.0.0.1) and INFER_PORT
 (8771): its own, so it never takes the server's HOST and PORT from a shared .env. INFER_CALLS and INFER_THREADS as for
@@ -28,6 +30,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from alldayrec import compute
 from alldayrec import infer
+from alldayrec import sound
 from alldayrec import threads
 
 MAX_S = 600  # a voiceprint takes at most 15 s of a sentence and a few enrollment samples; this bounds a request's memory
@@ -43,7 +46,7 @@ def authorized(request: Request) -> bool:
                                                         f"Bearer {state['token']}".encode())
 
 
-async def run(op: str, request: Request, f, most: int = MAX_S):
+async def run(op: str, request: Request, f, most: int = MAX_S, limiter=threads.INFER):
     if not authorized(request):
         CALLS[op, "401"] += 1
         return JSONResponse({"error": "unauthorized"}, 401)
@@ -63,7 +66,7 @@ async def run(op: str, request: Request, f, most: int = MAX_S):
     x = np.frombuffer(body, "<i2")
     t = time.perf_counter()
     try:
-        out = await anyio.to_thread.run_sync(f, x, limiter=threads.INFER)
+        out = await anyio.to_thread.run_sync(f, x, limiter=limiter)
     except Exception:
         CALLS[op, "500"] += 1
         raise
@@ -88,13 +91,20 @@ async def segment(request: Request):
     return await run("segment", request, lambda x: {"frames": state["compute"].segment(x).tolist()}, SEG_S)
 
 
+@app.post("/scene/{name}")
+async def scene(name: str, request: Request):
+    if name not in sound.names():
+        return JSONResponse({"error": f"no scene model {name} here (SOUND_MODEL)"}, 404)
+    return await run(f"scene/{name}", request, lambda x: sound.encode(state["compute"].scene(name, x)), limiter=threads.SOUND)
+
+
 @app.get("/health")
 async def health(request: Request):
     if "authorization" not in request.headers:
         return {"ok": True}
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, 401)
-    return {"ok": True, "models": compute.models(), "dim": compute.DIM}
+    return {"ok": True, "models": compute.models(), "dim": compute.DIM, **({"scene": f} if (f := sound.files()) else {})}
 
 
 @app.get("/metrics")
@@ -114,6 +124,7 @@ def main():
     if not os.environ.get("INFER_TOKEN"):
         raise SystemExit("not set: INFER_TOKEN (the server sends the same one)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    sound.check()
     infer.fetch()
     infer.check()
     state["compute"], state["token"] = compute.Local(), os.environ["INFER_TOKEN"]

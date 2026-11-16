@@ -58,13 +58,14 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `terms` | Terms: each term and when it was added or changed |
 | `name_hints` | What each label was called in a conversation (used only to suggest names) |
 | `profiles` | People cards of people with recognized names, each row with its source |
-| `pieces` | The index of uploaded pieces, which is also the processing queue |
+| `pieces` | The index of uploaded pieces, which is also the processing queue; `samples` is how many samples (16 kHz) a piece decoded to at its upload, NULL for pieces from before v0.5.0 |
 | `trims` | Hour files trimmed (`trim.py`): the original, the copy kept, its state, and every index row as it was before (for a restore from a backup) |
 | `cold_starts` | Recorder pieces whose piece right before was dropped by a trim: their start is faded in on reading |
 | `late_spans` | Exact late-audio intervals, processing state and retry counts (since v0.4.0) |
 | `processed_audio` | Actual processed coverage, including pauses, committed with final rows; prevents replay after restart (since v0.4.0) |
 | `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
 | `walls` | Where long conversations were split (one row per device and time): late audio never merges the two sides back (since v0.5.0) |
+| `sounds` | Environmental sound scores (only with [environmental sound](./configuration.md#optional-environmental-sound) on): one row per device, model and stretch of decoded audio, see [Environmental sound](#environmental-sound-sounds) below |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
 | `stars` | Starred sentences: the sentence id, device and start, its conversation (only stars from before this change have one; the rest are looked up when read, as for reports), when it was starred (since v0.3.0) |
@@ -98,3 +99,20 @@ The window includes today and the previous N−1 calendar dates in the command's
 A successful old summary stays visible until success and survives model failure. Retrying a previously failed summary first sets it pending, so backfill waits for this attempt. Todos can store a pinned `id`: a unique match by text or quote with the same owner/recipient inherits the old ID. Done/wrong rows never move or duplicate. Unmatched or ambiguous marked old todos are carried into the new summary unchanged with the same ID and mark, rather than rejecting the replacement. Other new actions get fresh IDs to avoid reusing an old action's ID. Rename/merge updates todo owner/recipient labels immediately; undo restores the changed fields by action ID, including when merging into an existing person. Regeneration, undo and remark operate on one ID. Older summaries still derive their original IDs from time/text until their first regeneration pins them. Stars live in `stars`; summary regeneration changes neither sentences nor stars.
 
 Existing daily recaps stay unchanged. On read, pinned IDs resolve to the current action and mark; older unpinned entries are matched by text/recipient/due. Missing actions are displayed without a mark control so a stale recap cannot mark another action. After backfill, regenerate affected dates with existing recaps via `POST /api/recap/{YYYY-MM-DD}` (`recap_redo`) to refresh highlights and todo references. This adds one model call per date with summaries, at most 30 calls for 30 days. For 100 conversations, expect 100 summary calls, up to 400 with all four attempts. Missing name hints can add one hints call per conversation, and each named participant with an existing profile triggers a profile call. Recaps, hints and profiles are additional to the 100. The script reports actual ledger counts; money depends on the configured model and input length.
+
+## Environmental sound (sounds)
+
+The key is (`device`, `model`, `start_ms`). `model` is the model's name and the first 12 hex digits of its file's sha256 (for example `mn10_as@58d4c290739e`): another model file is another model, and the old rows stay as they are. Each row is one stretch of decoded audio, at most 300 s:
+
+| Column | Content |
+|---|---|
+| `start_ms`, `end_ms` | Start and end of the stretch (ms timestamps) |
+| `hop_ms`, `window_ms`, `n` | The frames' spacing, their length, their count: `mn10_as` one frame per 10 s (a last bit under 2 s goes into the frame before), `yamnet` one 0.96 s frame every 0.48 s |
+| `db` | Each frame's level, dBFS rounded, one int8 per frame |
+| `top` | Each frame's 10 highest-scoring classes: zlib of `n × 10` (class uint16, score float16). Classes are AudioSet's, in the model's own order (`mn10_as` 527, `yamnet` 521). Cleared for `yamnet` after 30 days (by the hourly scoring loop of a tenant with sound on; the backfill command does not) |
+| `minutes` | One entry per minute (a frame belongs to the minute of its middle): zlib of (Unix minute int32, frames uint16, each class's mean score float16, each class's frames scoring 0.2 or more uint8). Kept |
+| `gaps` | The time in the row with no piece at all (JSON, `[[from, to], …]` ms): the model got zeros there, it does not count as scored |
+| `gain_db` | The gain (dB) applied to this row's input before the model. None is applied yet, so it is 0; once gains are calibrated per device, this records which one each row used |
+| `at` | When the row was written |
+
+Scoring a stretch again replaces its row. A row covers only decoded audio: it ends at a piece that will not decode or decodes short, which gets no row, so no row means not scored yet, or not successfully. A gap of at most 0.5 s with no piece between two pieces goes into the same row and into its `gaps`. What is scored = each row's `start_ms`–`end_ms` less its `gaps` (the trim gate and the scoring loop both go by this, to the millisecond). Whether a piece decoded in full is checked against `pieces.samples`, its sample count at upload, exactly: one sample short and its last millisecond is not covered. Older pieces have no `samples`, only `seconds` (to the millisecond), so a decode up to 1 ms short may go unnoticed there. A piece that comes into a gap later gets a row of its own, the first row never deleted, so a minute's frames may come from two rows. Measured on real recordings, an hour of audio takes about 80 KB for `mn10_as` and 250 KB for `yamnet` (60 KB after 30 days).

@@ -295,9 +295,9 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
             queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
             if report is not None:
                 report["late"] = queued_late
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x)))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env, samples) "
+                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x), len(x)))
         with _holds:
             held = db.kv(f"hold:{device}")
             if held and start_ms < held["at"] and not held.get("released"):
@@ -455,9 +455,9 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         with db.tx(durable=True) as t:
             seal.placed(t, path, start_ms, size, received, whole)
             is_late = late_store.record(t, device, start_ms, start_ms + round(count * 1000 / SR), received)
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                      (device, start_ms, round(count / SR, 3), path, pos, size, n, received, *h, env))
+            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env, samples) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      (device, start_ms, round(count / SR, 3), path, pos, size, n, received, *h, env, count))
         if report is not None:
             report["late"] = is_late
         with _holds:
@@ -510,9 +510,10 @@ def piece_blocks(p, end):
             yield pcm_blocks(pcm, max(0, count - skip)), skip
 
 
-def piece_window(p, offset, count):
+def piece_window(p, offset, count, exact=False):
     """Only decode the requested samples of a long import, with 2 s codec preroll.
     Short device pieces retain samples()'s exact Opus priming/dehum/AAC behavior.
+    exact: a long AAC also to its samples at upload, past its seconds (to the ms), so one decoded short is seen.
     """
     if p["seconds"] <= WHOLE_S:
         x = samples(p)
@@ -522,7 +523,7 @@ def piece_window(p, offset, count):
     if p["path"].endswith(".aac"):
         # Not past its registered length: the last frame's padding (save_file cut half a frame, 32 ms) is no audio
         # and would stand in for the start of the next piece. Other formats end at their audio: EOF decides there.
-        count = min(count, round(p["seconds"] * SR) - offset)
+        count = min(count, max(round(p["seconds"] * SR), exact and p["samples"] or 0) - offset)
         if count <= 0:
             return np.zeros(0, np.int16)
         offset += AAC_DELAY

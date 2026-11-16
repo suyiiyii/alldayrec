@@ -52,6 +52,7 @@ from alldayrec import routes_speakers
 from alldayrec import routes_upload
 from alldayrec import routes_voices
 from alldayrec import seal
+from alldayrec import sounds
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec import transcript
@@ -104,7 +105,8 @@ async def run_tenant(t: tenant.Tenant):
     with anyio.CancelScope() as t.scope:
         async with anyio.create_task_group() as t.tg:
             for name, fn in (("pipeline", pipelines), ("status", status_loop), ("summary", summary_worker), ("voices", voices_loop), ("late", late_processor),
-                             *((("recap", recap_loop),) if RECAP_AT else ()), *((("store", seal.loop),) if seal.on() else ())):
+                             *((("recap", recap_loop),) if RECAP_AT else ()), *((("store", seal.loop),) if seal.on() else ()),
+                             *((("sound", sounds.loop),) if sounds.on() else ())):
                 t.tg.start_soon(supervised, name, fn, name=f"{name}:{t.id}")
 
 
@@ -221,10 +223,11 @@ def main():
     h = logging.StreamHandler()
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
-    skip = compute.served()  # INFER_URL: the voiceprint, music and speaker-change models are the service's, never here
+    sounds.check()  # SOUND_MODEL's names, and its SOUND_SINCE
+    skip = compute.served()  # INFER_URL: the voiceprint, music, speaker-change and scene models are the service's, never here
     infer.fetch(skip=skip)  # a first start: the missing model files, downloaded
     infer.check(skip=skip)  # every model file there and the pinned one, before anything starts
-    log.info("models ok: %d files in %s", len(infer.MODELS) - len(skip), infer.DIR)
+    log.info("models ok: %d files in %s", len(set(infer.MODELS) - skip - infer.unused()), infer.DIR)
     # before the event loop: building the session keeps the GIL ~0.3 s, which in a thread held up the loop at each start
     c = compute.load()  # in this process, or the inference service (alldayrec --infer) at INFER_URL
     state["embed"] = c.embed

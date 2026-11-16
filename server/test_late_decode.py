@@ -35,9 +35,9 @@ def test_long_late_import_never_uses_whole_file_decode(store, monkeypatch, windo
     monkeypatch.setattr(audio, "decode", lambda *a, **kw: pytest.fail("whole long file decoded"))
     reads = []
     piece_window = audio.piece_window
-    def window(p, offset, count):
+    def window(p, offset, count, exact=False):
         reads.append((offset, count))
-        return piece_window(p, offset, count)
+        return piece_window(p, offset, count, exact)
     monkeypatch.setattr(audio, "piece_window", window)
     for a in range(0, windows * 30, 30):
         x = late.read_exact(D, ms(a), ms(a + 30))

@@ -11,6 +11,8 @@ tenant, create(); server/tenants.sh adds tenants):
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
 en; without it UI_LANG, else zh. One set by PUT /api/lang (the 我的 page's switch) is kept in the store and wins.
+"sound" (optional, false): true gives its audio scene scores when SOUND_MODEL is set (sounds.py). Its trims wait for
+them with SOUND_MODEL set either way (trim.py).
 """
 import contextvars
 import hmac
@@ -20,6 +22,7 @@ import os
 import secrets
 import sys
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -47,6 +50,7 @@ class Tenant:
     recordings: Path
     lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang's, kept in the store, wins (db.init)
     db: Path = None  # data / live.db unless given (a test's own file)
+    sound: bool = False  # tenants.json's "sound": scene scores (sounds.on)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
     events: list = field(default_factory=list)      # its system log, the last 300
@@ -74,6 +78,8 @@ class Tenant:
     summaries: tuple = None                         # (send, receive): its conversations waiting for a summary
     late_queued: set[str] = field(default_factory=set)  # dirty late summaries already queued/in flight
     summary_generations: dict[str, int] = field(default_factory=dict)  # newest queued request per conversation
+    scene_retry: dict = field(default_factory=dict)  # sounds.failed: (device, model) -> [a, b, until ms, tries] of parts that failed
+    scene_stats: Counter = field(default_factory=Counter)  # sounds.py: (audio | decode | compute | failed | backlog, model) -> s or n
     tg: "anyio.abc.TaskGroup | None" = None         # its tasks (run_tenant): pipelines, live analyses, loops
     scope: anyio.CancelScope | None = None          # cancelled: the tenant stops, every task of it with it
 
@@ -112,7 +118,7 @@ def load(path: Path = FILE) -> list[Tenant]:
         raise SystemExit(f"{path}: no tenants file (DATA_DIR; see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
-    expected = 'expected a JSON array of objects with string fields id, token, data, recordings and optional lang (zh or en)'
+    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en) and sound (true or false)'
 
     def invalid(reason):
         # Never include configuration values or decoder excerpts: they may contain tokens.
@@ -140,8 +146,10 @@ def load(path: Path = FILE) -> list[Tenant]:
             invalid(f"entry {i}: lang must be a string or null")
         if (x.get("lang") or os.environ.get("UI_LANG") or "zh") not in LANGS:
             invalid(f"entry {i}: lang (or UI_LANG) must be one of {', '.join(LANGS)}")
-    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh")
-          for x in config]
+        if not isinstance(x.get("sound", False), bool):
+            invalid(f"entry {i}: sound must be true or false")
+    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh",
+                 sound=x.get("sound", False)) for x in config]
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")

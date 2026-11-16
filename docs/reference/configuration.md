@@ -21,6 +21,7 @@ type: reference
 | `data` | 数据目录：`live.db` 等，见[数据目录](./data.md) |
 | `recordings` | 录音目录 |
 | `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。在网页「我的」页切换语言（`PUT /api/lang`）之后，以切换的结果为准，记在这个人的数据库里，重启后也保留 |
+| `sound` | 可选，默认 `false`。`true`：设了 `SOUND_MODEL` 时给这个人的录音自动算环境声音（见下面的[环境声音](#可选-环境声音)）。写没写都一样：设了 `SOUND_MODEL`，修剪就要等环境声音算完 |
 
 - 位置：`DATA_DIR/tenants.json`（见下面的 `DATA_DIR`）。Docker 镜像里 `DATA_DIR` 是 `/data`，也就是宿主机的 `data/tenants.json`。
 - 文件不存在时，服务器第一次启动会生成一个：一个租户 `main`，随机 token，目录是 `DATA_DIR/main` 和 `DATA_DIR/main/recordings`，并在日志里写出登录链接 `http://127.0.0.1:<PORT>/connect?token=<token>`。
@@ -109,6 +110,31 @@ type: reference
 - 服务器不会覆盖别人的对象：新对象只在这个键还不存在时才写（`If-None-Match: *`），合并只覆盖封存时的那个版本（`If-Match`）。两个实例配错成同一个前缀时，后封存的那个会被拒绝，日志里报错，那一小时留在本地。
 - 从 `s3` 改回 `local` 一段时间再改回 `s3`：这期间已封存的小时又来的块写在新的本地小时文件里；改回 `s3` 后，这些文件和它们的块留在本地照常读，日志里报一条错误，不会被删。
 
+### 可选：环境声音
+
+给全部录音（有人说话的和没人说话的）算 AudioSet 类别的打分，原样存进 `live.db` 的 `sounds` 表（格式见[数据目录](./data.md#环境声音-sounds)，隐私见[隐私](../explanation/privacy.md#环境声音)）。目前只给摘要以后用的数据打底，网页上还看不到。默认关。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SOUND_MODEL` | 空（关） | 跑哪些模型，逗号隔开：`mn10_as`（EfficientAT，每 10 秒一个结果）、`yamnet`（每 0.48 秒一帧）。第一个是修剪闸门看的主模型。两个可以同时跑，各存各的。`mn10_as.onnx` 只有写进这里才下载和校验（`yamnet.onnx` 听音乐也要用，总会下载） |
+| `SOUND_SINCE` | 无 | 设了 `SOUND_MODEL` 时必填，不填服务器拒绝启动：从这个时刻（ISO，实例所在时区，例如 `2026-11-17`）起的录音由服务器自己补算；之前的历史只用下面的回填命令算，服务器不会自己去算。换了模型文件（sha256 变了，算新模型）也只从这个时刻起算 |
+| `SOUND_EVERY_S`、`SOUND_SETTLE_S` | `60`、`120` | 每隔多少秒找一次还没算的录音；一块音频到了多少秒后才算 |
+
+- 每个租户还要在 `tenants.json` 里写 `"sound": true` 才自动算。没写的租户不算，但修剪闸门照样拦它（见下）：要修剪，先回填，或者加 `--allow-unscened`。
+- 算的范围以上传的音频块为准，不管有没有转写、转写成没成功。解不开的块、解出来比记录的时长短的块不写结果，之后退避重试。在服务器进程里用一个线程算（全进程同时只算一段，所有租户轮流）；设了 `INFER_URL` 时在推理服务的 `POST /scene/<模型>` 上算，推理服务也要设同样的 `SOUND_MODEL`。第一次采用推理服务的结果之前，先核对它 `/health` 里场景模型的 sha256，对不上就不采用，日志里报错，之后退避重试。推理服务没有这个模型或模型不对时，只有环境声音推迟，声纹照常。
+- 监控指标：`lr_scene_audio_seconds_total`（算了多少秒音频）、`lr_scene_compute_seconds_total`（模型用的时间）、`lr_scene_failed_total`（失败、等重试的段数），按 `model` 分；`lr_scene_decode_seconds_total`（解码用的时间，所有模型共用一次解码）、`lr_scene_backlog_seconds`（每小时一次全量扫描做完后，还有模型没算的秒数，失败后等重试的也算；都算完是 0）。
+- 修剪闸门：设了 `SOUND_MODEL` 时，所有租户（不管 `"sound"` 写没写，`--db` 指定的库也一样）的 `trim.py` 要丢掉的块里，只要有 1 毫秒没有主模型的结果，这个小时就整个留着（原因 `no sound`），`SOUND_SINCE` 之前的历史也一样。没有任何容差：块尾没算到的一小段、解不开或解短的块，都算没覆盖。先回填再修剪；确实不要这些结果时加 `--allow-unscened`，日志里写明丢掉了多少秒没算过的音频。`SOUND_MODEL` 为空时，修剪和以前完全一样。
+- 回填历史（很重，按 1 个核算，每小时录音：解码 45–120 秒（所有模型共用一次），EfficientAT 约 30 秒，YAMNet 约 35–40 秒；在一台忙的老 CPU 上测的墙钟时间）：
+
+```sh
+uv run python -m alldayrec.sounds backfill --tenant main --since 2026-10-01 --until 2026-11-17   # 用 SOUND_MODEL 里的模型
+uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <副本>/recordings --since 2026-10-01 --until 2026-11-17 --model mn10_as
+```
+
+回填先校验要跑的模型（包括 `--model` 指定的）：本地算时下载缺的文件、核对 sha256；设了 `INFER_URL` 时核对推理服务 `/health` 里场景模型的 sha256。对不上直接报错退出，不写任何结果。
+
+在副本上算完，可以只把结果拷回去：`sqlite3 live.db "ATTACH '<副本>/live.db' AS c; INSERT OR IGNORE INTO sounds SELECT * FROM c.sounds"`。`--until` 不要晚于 `SOUND_SINCE`，免得和服务器自己算的重叠。
+
 ### 高级：只有 `stepfun` 和 `stepfun-file` 用
 
 `stepfun` 或 `stepfun-file` 出现在 `ENGINE`、`DRAFT_ENGINE` 或 `ENGINE_FALLBACK` 里时，下面四个 `ASR_*` 都必填。
@@ -128,7 +154,7 @@ type: reference
 | `LIVE_DATA` | `replay_case.py` | 一个租户的数据目录 |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
 | `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这几个脚本 |
-| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里) |
+| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里)。设了 `SOUND_MODEL` 时所有租户还有闸门，见[环境声音](#可选-环境声音) |
 
 ## 其他环境变量
 

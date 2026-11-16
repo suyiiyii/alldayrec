@@ -61,10 +61,12 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, seconds REAL NOT NULL, path TEXT NOT NULL,  -- hour file, relative
     pos INTEGER, size INTEGER, n INTEGER,                                                       -- to the recordings dir;
     received_ms INTEGER, rms REAL, hum REAL, zero_ms INTEGER, full INTEGER,                     -- n: samples the client wrote;
-    env BLOB,                                                                                   -- received_ms: when it came
+    env BLOB, samples INTEGER,                                                                  -- received_ms: when it came
     PRIMARY KEY (start_ms, device));                                                            -- (NULL before 10-07);
                                                                                                 -- rms..full: audio.health();
-                                                                                                -- env: audio.envelope() (colocate.py)
+                                                                                                -- env: audio.envelope() (colocate.py);
+                                                                                                -- samples: what it decoded to
+                                                                                                -- (NULL before 11-16)
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE INDEX IF NOT EXISTS pieces_end ON pieces(device, start_ms + seconds * 1000);  -- where its audio ends: backlog, a stream's start, pending
 CREATE TABLE IF NOT EXISTS store_objects (    -- STORAGE=s3 (seal.py): each hour file (and import) on its way to an object;
@@ -97,6 +99,18 @@ CREATE TABLE IF NOT EXISTS processed_audio (  -- layer final / late: transcribed
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, layer TEXT NOT NULL,
     PRIMARY KEY(device, start_ms, end_ms, layer));
 CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
+CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw output over one stretch of a device's decoded
+    device TEXT NOT NULL, model TEXT NOT NULL,      -- audio (<= 300 s, piece-less time in it only as gaps). model: <name>@<sha256 12>
+    start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- (sound.MODELS); frame i: start_ms + i * hop_ms, window_ms long
+    hop_ms INTEGER NOT NULL, window_ms INTEGER NOT NULL, n INTEGER NOT NULL,  -- (to end_ms at most; mn10_as's last up to 12 s)
+    db BLOB NOT NULL,                               -- int8 x n: each frame's level, dBFS, as recorded
+    top BLOB,                                       -- zlib(n x K x (uint16 class, float16 score)); NULL past the model's keep_days
+    minutes BLOB NOT NULL,                          -- zlib: per wall-clock minute (by each frame's middle): minute (unix),
+    gaps TEXT NOT NULL,                             -- frames, float16 mean x classes, uint8 frames >= 0.2 x classes. gaps: JSON
+    gain_db REAL NOT NULL DEFAULT 0,                -- [[a, b] ms] in the row with no piece (zeros to the model, not covered).
+    at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
+    PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
+CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
@@ -228,6 +242,8 @@ def init():
         bank.fill(name)
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
+    if "samples" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-16: sounds.py's exact coverage; older pieces have none
+        conn().execute("ALTER TABLE pieces ADD COLUMN samples INTEGER")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")

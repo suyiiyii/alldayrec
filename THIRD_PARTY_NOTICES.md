@@ -24,6 +24,7 @@ AllDayRec is MIT-licensed ([LICENSE](LICENSE)). The parts below come from others
 - **pyannote segmentation-3.0** (`pyannote-segmentation-3.0.onnx`), which hears where speakers change inside a sentence, by [pyannote](https://github.com/pyannote/pyannote-audio) (CNRS): MIT, Copyright (c) 2022 CNRS. The file is sherpa-onnx's ONNX export, `model.onnx` of `sherpa-onnx-pyannote-segmentation-3-0.tar.bz2` in the k2-fsa/sherpa-onnx `speaker-segmentation-models` release; the server downloads it unchanged from this repository's `models-v1` release.
 - **ReDimNet2 B6** (`redimnet2-b6.onnx`), the voiceprint model, by [PalabraAI](https://github.com/PalabraAI/redimnet2): code and weights MIT. Exported to ONNX by `server/alldayrec/export_onnx.py` from the release weights `b6-vb2+vox2+cnc2_v0-lm.pt`; the server downloads that export from this repository's `models-v1` release, which carries this same notice. **Its training data includes VoxBlink2, licensed CC BY-NC-SA 4.0** (non-commercial, share-alike); the other training sets are VoxCeleb2 and CN-Celeb. Check whether that fits your use; you can always make the file yourself with `export_onnx.py`.
 - **YAMNet** (`yamnet.onnx`), the music classifier, by Google ([tensorflow/models](https://github.com/tensorflow/models/tree/master/research/audioset/yamnet), trained on AudioSet): code and weights Apache-2.0. Converted to ONNX as `server/alldayrec/export_onnx.py` describes; the server downloads it from this repository's `models-v1` release.
+- **EfficientAT mn10_as** (`mn10_as.onnx`), an environmental sound classifier (only with `mn10_as` in `SOUND_MODEL`), by Florian Schmid ([fschmid56/EfficientAT](https://github.com/fschmid56/EfficientAT), trained on AudioSet): code and weights MIT, Copyright (c) 2022 Florian Schmid (text below). Exported to ONNX from the release weights `mn10_as_mAP_471.pt` as `server/alldayrec/export_onnx.py` describes; the server downloads that export from this repository's `models-v1` release.
 
 ## Test data (not in the repository; the nightly speaker eval downloads it, `server/alldayrec/speaker_eval.py`)
 
@@ -290,6 +291,32 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 MIT License
 
 Copyright (c) 2026 Eliqi797
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## MIT License (fschmid56/EfficientAT)
+
+```text
+MIT License
+
+Copyright (c) 2022 Florian Schmid
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

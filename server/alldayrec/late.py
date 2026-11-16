@@ -22,11 +22,15 @@ log = logging.getLogger("live")
 LATE_PROCESS_TIMEOUT_S = float(os.environ.get("LATE_PROCESS_TIMEOUT_S", "1800"))
 
 
-def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarray:
+def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: list | None = None) -> np.ndarray:
     """Exact [a,b) on its wall clock (playback cut() adds 0.2 s each side, which ASR timestamps do not want). A piece
-    that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone)."""
+    that will not decode raises, or with `bad` is silence and its part of [a,b) goes onto bad (the span retries it alone).
+    filled: given, gets what of [a,b) has decoded audio (whole ms; a piece decoded short of its samples at upload not
+    its last ms); the rest is zeros (no piece there, or one that would not decode), which sounds.py must not take for
+    silence. The audio and bad are the same with or without it."""
     x = np.zeros(round((b - a) * SR / 1000), np.int16)
-    end, missed, filled = a, [], []
+    end, missed, got = a, [], []
+    peek = 0 if filled is None else 16  # a ms past b: a piece that ends at b from one cut short there (filled only)
     for p in db.conn().execute("SELECT * FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ? ORDER BY start_ms",
                                (device, b, a)).fetchall():
         if p["start_ms"] + p["seconds"] * 1000 <= end:
@@ -38,7 +42,7 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarr
             break
         # Long imports decode only this window; short pieces retain codec priming/dehum.
         try:
-            y = audio.piece_window(p, offset, len(x) - i)
+            y = audio.piece_window(p, offset, len(x) - i + peek, filled is not None)
         except subprocess.TimeoutExpired:
             if bad is None:
                 raise
@@ -50,13 +54,24 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None) -> np.ndarr
             log.warning("late audio of %s: piece %s (%s) would not decode, %.1f s", device, p["start_ms"], p["path"], (hi - lo) / 1000)
             missed.append([lo, hi])
             continue  # end stays: a later piece overlapping this one may have its audio
+        decoded = len(y)
+        if p["path"].endswith(".aac") and p["seconds"] > audio.WHOLE_S:
+            y = y[:max(0, round(p["seconds"] * SR) - offset)]  # the audio as without filled (exact may read past its seconds)
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
-            filled.append([round(start), round(end)])
+            got.append([round(start), round(end)])
+            if filled is not None:  # sounds.py's coverage, in whole ms (sounds.span()'s), none past what decoded
+                total, want, last = offset + decoded, p["samples"], round(p["start_ms"] + p["seconds"] * 1000)
+                to = p["start_ms"] + (offset + n) * 1000 // SR
+                if decoded < len(x) - i + peek:  # it ended by then: all of it, or short (never its last ms then)
+                    # all: its seconds (to 1 ms) and its samples at upload, exactly (pieces before 11-16 have none)
+                    whole = round(total / SR, 3) >= p["seconds"] and (want is None or total >= want)
+                    to = min(b, last) if whole else min(to, last - 1)
+                filled.append([p["start_ms"] + offset * 1000 // SR, to])  # its first ms: the piece before has the rest
     if missed:
-        bad += late_store.subtract(missed, filled)
+        bad += late_store.subtract(missed, got)
     return x
 
 
