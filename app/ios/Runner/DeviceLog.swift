@@ -123,6 +123,22 @@ enum DeviceLog {
     add([event(device, src, seq, at ?? now, data)])
   }
 
+  /// As app, only when `fields` differ from the ones this install last logged as `kind` for `device`: kept in prefs, so a
+  /// new recording or launch with the same values adds no event.
+  static func appChanged(_ device: String, _ kind: String, _ text: String, fields: [String: Any]) {
+    lock.lock(); let on = file != nil; lock.unlock()
+    guard on, let j = try? JSONSerialization.data(withJSONObject: fields, options: .sortedKeys),
+          changed(prefs, "logLast:\(kind):\(device)", String(decoding: j, as: UTF8.self)) else { return }
+    app(device, kind, text, fields: fields)
+  }
+
+  /// `value` is not the one kept under `key`: it is now.
+  static func changed(_ p: UserDefaults, _ key: String, _ value: String) -> Bool {
+    guard p.string(forKey: key) != value else { return false }
+    p.set(value, forKey: key)
+    return true
+  }
+
   /// The crashed thread's first frames in a MetricKit call stack tree (MXCallStackTree.jsonRepresentation()), as
   /// binary+offset: a build's dSYM turns them into lines; no data.
   static func frames(_ json: Data, max n: Int = 5) -> [String] {

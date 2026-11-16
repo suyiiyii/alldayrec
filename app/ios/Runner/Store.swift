@@ -56,6 +56,10 @@ enum Store {
   /// firmware has no such byte, and would take an ACK as a command that ends its READ: none is sent to it.
   static func acks(_ status: [UInt8]) -> Bool { status.count > 48 && status[48] & 1 != 0 }
 
+  /// The board's PDM gain in force (status byte 53, int8 in 0.5 dB steps, 0 = 0x28: firmware lr_store.h), dB: sent as hw
+  /// mic_gain_db; nil: an older firmware (53 bytes).
+  static func micGainDb(_ status: [UInt8]) -> Double? { status.count > 53 ? Double(Int8(bitPattern: status[53])) / 2 : nil }
+
   /// CTRL 0x08 ACK: the mirror has `f` up to `have`, all of it (of other files it says nothing).
   static func ack(_ f: Int64, _ have: Int64) -> [UInt8] {
     [8] + le(UInt32(truncatingIfNeeded: f)) + le(UInt32(truncatingIfNeeded: have))
@@ -458,4 +462,38 @@ enum UploadAnswer: Equatable {
   /// Uploads wait: stopped at `haltedAt` (unix ms; 0: not stopped) and not yet haltMs on, or while a bean's Wi-Fi fast
   /// transfer is on (UploadPath.device): every device's, the hotspot has no internet (11-09: -1005 with a VPN on).
   static func waits(haltedAt: Int64, now: Int64, beanWifi: Bool = false) -> Bool { beanWifi || haltedAt > 0 && now - haltedAt < haltMs }
+}
+
+/// The phone's own microphone gain, added before its encoder (Recorder.swift Slicer): with the server's calibration offset
+/// on top, the wearer's speech at -26 dBov (P.56). Each microphone piece goes up with it (capture_gain_db); a change
+/// here needs a new calibration.
+enum Capture {
+  static let gainDb = 6.0
+  /// As the server's gain.apply: under the knee every sample is x times the gain exactly; past it a tanh soft limit keeps
+  /// it at most full scale, no hard clip.
+  static let knee: Float = 0.9
+
+  static func louder(_ x: UnsafeMutableBufferPointer<Float>, db: Double = gainDb) {
+    let g = Float(pow(10, db / 20))
+    for i in x.indices {
+      let y = x[i] * g, a = abs(y)
+      x[i] = a <= knee ? y : a.isNaN ? 0 : (y < 0 ? -1 : 1) * (knee + (1 - knee) * tanh((a - knee) / (1 - knee)))
+    }
+  }
+}
+
+extension Store {
+  /// A queued file's start (unix ms), sample count, BLE recorder and capture gain: <start>_g<dB>_<n>.ogg for the
+  /// microphone's, the gain it was recorded with (nil in a name from an app before: sent without one), or
+  /// <start>_g<dB>.ogg for a piece a kill cut short; the BLE recorder's carry its name instead: <start>@LR-P1-XXXX.ogg,
+  /// uploaded as that device. Anything else (<start>_g6.part.ogg, still being written) is no piece.
+  static func piece(_ f: URL) -> (start: Int64, n: Int64?, device: String?, gainDb: Double?)? {
+    let at = f.deletingPathExtension().lastPathComponent.split(separator: "@", maxSplits: 1)
+    var p = at[0].split(separator: "_", omittingEmptySubsequences: false)
+    guard ["ogg", "aac"].contains(f.pathExtension), (1...3).contains(p.count), let start = Int64(p.removeFirst()) else { return nil }
+    var gain: Double?, n: Int64?
+    if p.first?.first == "g" { guard let g = Double(p.removeFirst().dropFirst()), g.isFinite else { return nil }; gain = g }
+    if let s = p.first { guard p.count == 1, let v = Int64(s) else { return nil }; n = v }
+    return (start, n, at.count == 2 ? String(at[1]) : nil, gain)
+  }
 }
