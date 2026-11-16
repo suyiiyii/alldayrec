@@ -7,6 +7,7 @@ import {
   initial,
   labelText,
   likeness,
+  selfDone,
   speakerColor,
   speakerLabel,
   speakerList,
@@ -108,8 +109,14 @@ assert.equal(checkDone("later", { ok: true }), "voiceCheck.doneLater");
 assert.equal(checkDone("yes", { ok: false }), "voiceCheck.stale");
 assert.equal(checkDone("yes", { ok: true, learned: 0, reason: "background_music" }), "voiceCheck.doneMusic");
 assert.equal(checkDone("yes", { ok: true, learned: 0 }), "voiceCheck.doneYes", "no reason given: as before");
+// 「哪个是你」's answer: a pick that became no voiceprint under music says so
+assert.equal(selfDone("pick", {}), "selfVoice.picked");
+assert.equal(selfDone("later", {}), "selfVoice.later");
+assert.equal(selfDone("none", {}), "selfVoice.none");
+assert.equal(selfDone("pick", { learned: 0, reason: "background_music" }), "selfVoice.pickedMusic");
 for (const l of ["zh", "en"] as const) {
   i18n.global.locale.value = l;
   assert.notEqual(t("voiceCheck.doneMusic"), "voiceCheck.doneMusic", l);
+  assert.notEqual(t("selfVoice.pickedMusic"), "selfVoice.pickedMusic", l);
 }
 i18n.global.locale.value = "zh";

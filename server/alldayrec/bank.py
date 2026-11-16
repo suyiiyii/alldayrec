@@ -11,13 +11,12 @@ by renames before the filter) is learnt again from the name's voices; without --
     python -m alldayrec.bank relearn <live.db>            per name: n before and after, voices used, cosine old/new
     python -m alldayrec.bank relearn <live.db> --apply    then restart the server: the diarists load the bank at start
 """
-import sqlite3
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from alldayrec import db
+from alldayrec import db, sounds, tenant
 from alldayrec.diarist import OWNER_MIN, _rows
 from alldayrec.tenant import T
 
@@ -156,13 +155,14 @@ def relearn(t) -> list[dict]:
     table: one per conversation x label, renames carry them along), those of conversations with ledger rows of the name
     left out (learnt since, sentence by sentence: they stay); and the name's voiceprint recomputed. Live only: the
     recorders' sound, the one enroll learns from and the diarists name (history voices are other microphones). From
-    the voices, not the old row: running it again changes nothing. Per name what it did."""
-    out = []
+    the voices, not the old row: running it again changes nothing. BG_GATE in effect (sounds.gating): only the voices
+    shown free of music under them (sounds.verified), those held back counted (unverified). Per name what it did."""
+    out, g = [], sounds.gating()
     for name, n in t.execute("SELECT name, n FROM enrolled WHERE row IS NULL AND name != '我'").fetchall():
-        vs = [(k or 1, db.vec(e)) for k, e in t.execute(
-            "SELECT k, e FROM voices WHERE label = ? AND device = 'live' AND e IS NOT NULL AND conv NOT IN "
-            "(SELECT conv FROM enrolled WHERE name = ? AND row IS NOT NULL AND conv IS NOT NULL)", (name, name))]
-        r = {"name": name, "old_n": n, "voices": len(vs)}
+        rs = t.execute(f"SELECT k, e{', used' if g else ''} FROM voices WHERE label = ? AND device = 'live' AND e IS NOT NULL AND conv NOT IN "
+                       "(SELECT conv FROM enrolled WHERE name = ? AND row IS NOT NULL AND conv IS NOT NULL)", (name, name)).fetchall()
+        vs = [(r[0] or 1, db.vec(r[1])) for r in rs if not g or sounds.verified(r[2])]
+        r = {"name": name, "old_n": n, "voices": len(vs), **({"unverified": len(rs) - len(vs)} if g else {})}
         if new := relearnt(vs):
             was = db.vec(t.execute("SELECT e FROM people WHERE name = ?", (name,)).fetchone()[0])
             t.execute("UPDATE enrolled SET n = ?, e = ? WHERE name = ? AND row IS NULL", (new[0], db.blob(new[1]), name))
@@ -231,15 +231,17 @@ if __name__ == "__main__":
         case ["relearn", store, *apply] if apply in ([], ["--apply"]):
             if apply:
                 db.open_db(Path(store))
-                with db.tx() as t:
-                    done = relearn(t)
             else:  # the same work on a copy in memory: the file is opened read-only
-                t = sqlite3.connect(":memory:")
-                db.read_only(store).backup(t)
+                tenant.enter(tenant.Tenant("local", "", Path(store).parent, Path(store).parent, db=Path(":memory:")))
+                db.read_only(store).backup(db.conn())
+            # BG_GATE: the tenant's "sound" (tenants.json) is not in the store: one with scene scores in it has it on
+            T().sound = sounds.BG_GATE and db.conn().execute("SELECT 1 FROM sounds LIMIT 1").fetchone() is not None
+            with db.tx() as t:
                 done = relearn(t)
             for r in done:
-                print(f"{r['name']}: n {r['old_n']} -> {r['new_n']}, voices {r['used']} used / {r['voices'] - r['used']} dropped, "
-                      f"cosine old/new {r['cos']}" if "new_n" in r else f"{r['name']}: kept (n {r['old_n']}, {r['voices']} voices)")
+                print((f"{r['name']}: n {r['old_n']} -> {r['new_n']}, voices {r['used']} used / {r['voices'] - r['used']} dropped, "
+                       f"cosine old/new {r['cos']}" if "new_n" in r else f"{r['name']}: kept (n {r['old_n']}, {r['voices']} voices)")
+                      + (f", {r['unverified']} not shown free of music (BG_GATE)" if r.get("unverified") else ""))
             print("written" if apply else "dry run: nothing written (--apply writes)")
         case _:
             raise SystemExit(__doc__)

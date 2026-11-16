@@ -1,6 +1,7 @@
 """BG_GATE (sounds.under_music): a sentence with music under it (mn10_as's Music in the sounds table) teaches no
 voiceprint: not the people bank (enroll), not a conversation's voice (voices_loop, and so not 我: learn_me), not a
-clip of 「这是你吗」 (selfvoice.shortlist). Off, or no scores: as before. Synthetic rows only, no models."""
+clip of 「这是你吗」 (selfvoice.shortlist), not 我 picked on 「哪个是你」 (self_answer), not bank.relearn. Off, or no scores: as
+before. Synthetic rows only, no models."""
 import datetime as dt
 
 import anyio
@@ -204,3 +205,108 @@ def test_off_is_as_before(audio_store, monkeypatch):
     assert db.conn().execute("SELECT used FROM voices").fetchone()[0] is None
     assert renamed(c, "Alex") and "Alex" in db.people()
     assert selfvoice.shortlist(rows, "S1", per=5) and not any(k.startswith("bg_") for k, _ in T().scene_stats)
+
+
+def self_card() -> dict | None:
+    """The 「哪个是你」 card of the voices there are, as self_round pops it (its fallback: a day after the first voice)."""
+    db.put_kv("selfvoice", {"first_at": "2020-01-01T00:00:00"})
+    anyio.run(routes_voices.self_round)
+    return db.kv("selfvoice").get("card")
+
+
+@pytest.mark.parametrize("built_on,score,popped", [(False, None, False), (True, 0.5, False), (True, None, True)])
+def test_self_card_of_voices_shown_free(audio_store, gate, monkeypatch, built_on, score, popped):
+    """The card's candidates: only voices shown free of music under them now (a voice made before the gate: not
+    known), each with what its bank is made of for the answer to check again."""
+    c, rows = cached(monkeypatch, [6.0, 6.0], built_on)
+    if score:
+        music(rows[0]["start"], 6, score)  # scored after the voice was made, before the card
+    card = self_card()
+    assert (card is not None) == popped
+    if popped:
+        assert card["candidates"][0]["members"] == [[c["id"], "S1"]]
+        assert "members" not in anyio.run(routes_voices.self_get)["card"]["candidates"][0]
+
+
+def test_self_answer_scores_after_card(audio_store, gate, monkeypatch):
+    """Music scored after the card popped, before the pick: nothing learnt, said so; the card comes again without it."""
+    c, rows = cached(monkeypatch, [6.0, 6.0], True)
+    assert self_card()
+    music(rows[0]["start"], 6, 0.5)
+    assert anyio.run(routes_voices.self_answer, {"answer": 0}) == {"ok": True, "learned": 0, "reason": "background_music"}
+    st = db.kv("selfvoice")
+    assert not core.owner_npz().exists() and st["card"] is None and "confirmed" not in st and st["log"][-1]["learned"] == 0
+    anyio.run(routes_voices.self_round)
+    assert db.kv("selfvoice")["card"] is None, "not made again of the voice now under music"
+
+
+@pytest.mark.parametrize("score", [None, 0.5])
+def test_self_answer_card_from_before_gate(audio_store, gate, monkeypatch, score):
+    """A card popped while the gate was off: what its bank is made of is not known, so nothing is learnt from it."""
+    monkeypatch.setattr(sounds, "BG_GATE", False)
+    c, rows = sample([6.0, 6.0])
+    voices_round(monkeypatch)
+    assert self_card()
+    monkeypatch.setattr(sounds, "BG_GATE", True)
+    if score:
+        music(rows[0]["start"], 20, score, score)
+    r = anyio.run(routes_voices.self_answer, {"answer": 0})
+    assert not core.owner_npz().exists() and r == {"ok": True, "learned": 0, "reason": "background_music"}
+
+
+def test_self_answer_learns_voices_shown_free(audio_store, gate, monkeypatch):
+    """The gate on, no music: the pick is 我's voiceprint, the card's bank made again from the same voices."""
+    c, rows = cached(monkeypatch, [6.0, 6.0], True)
+    card = self_card()
+    assert anyio.run(routes_voices.self_answer, {"answer": 0}) == {"ok": True}
+    assert np.allclose(routes_speakers.owner_bank()["self"], selfvoice.unit(card["candidates"][0]["bank"]))
+
+
+def relearn_store(monkeypatch, built_on: bool, score: float | None) -> list:
+    """Alex's NULL row (voiceprint B) and 5 live voices of Alex (A), made with the gate as built_on, then each
+    conversation's first sentence scored score; the gate on after."""
+    from alldayrec import bank
+    monkeypatch.setattr(sounds, "BG_GATE", built_on)
+    firsts = [sample([6.0, 6.0], hour=h)[1][0] for h in range(9, 14)]
+    voices_round(monkeypatch)
+    monkeypatch.setattr(sounds, "BG_GATE", True)
+    with db.tx() as t:
+        t.execute("UPDATE voices SET label = 'Alex'")
+        t.execute("INSERT INTO enrolled VALUES ('Alex', NULL, NULL, 1, ?)", (db.blob(np.eye(4)[1]),))
+        bank.recompute(t, "Alex")
+    for r in firsts:
+        if score:
+            music(r["start"], 6, score)
+    return firsts
+
+
+@pytest.mark.parametrize("built_on,score,learnt", [(False, None, False), (True, 0.5, False), (True, 0.1, True), (True, None, True)])
+def test_relearn(audio_store, gate, monkeypatch, built_on, score, learnt):
+    """bank.relearn learns a name's NULL row again only from voices shown free of music under them; too few: kept."""
+    from alldayrec import bank
+    relearn_store(monkeypatch, built_on, score)
+    with db.tx() as t:
+        r, = bank.relearn(t)
+    assert ("new_n" in r) == learnt and r.get("unverified", 0) == (0 if learnt else 5)
+    assert np.allclose(bank.unit(db.people()["Alex"][1][0]), np.eye(4)[0] if learnt else np.eye(4)[1])
+
+
+@pytest.mark.parametrize("gate_env,scored,kept", [("1", True, True), ("0", True, False), ("1", False, False)])
+def test_relearn_cli(audio_store, monkeypatch, tmp_path, gate_env, scored, kept):
+    """python -m alldayrec.bank relearn with the instance's BG_GATE: the tenant's sound read as scene scores in the
+    store (none: sound off, as before); the dry run writes nothing, --apply what the dry run said. Off: as before."""
+    import os, subprocess, sys
+    T().sound = True
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    relearn_store(monkeypatch, scored, 0.5 if scored else None)
+    env = {**os.environ, "BG_GATE": gate_env}
+    run = lambda *a: subprocess.run([sys.executable, "-m", "alldayrec.bank", "relearn", str(tmp_path / "t.db"), *a],
+                                    capture_output=True, text=True, check=True, env=env).stdout
+    files = lambda: [p.read_bytes() for p in sorted(tmp_path.glob("t.db*")) if p.suffix != ".db-shm"]  # shm: readers mark it
+    was = files()
+    out = run()
+    assert files() == was, "a dry run"
+    assert out.splitlines()[0] == ("Alex: kept (n 1, 0 voices), 5 not shown free of music (BG_GATE)" if kept else
+                                   "Alex: n 1 -> 10, voices 5 used / 0 dropped, cosine old/new 0.0")
+    assert run("--apply").splitlines()[0] == out.splitlines()[0]
+    assert np.allclose(selfvoice.unit(db.people()["Alex"][1][0]), np.eye(4)[1 if kept else 0])

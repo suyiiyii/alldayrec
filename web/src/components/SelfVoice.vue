@@ -6,6 +6,7 @@ import { onMounted, ref } from "vue";
 import { t } from "../i18n";
 import { get, post } from "../lib/api";
 import { play, player } from "../lib/audio";
+import { selfDone } from "../lib/speakers";
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
 
@@ -52,13 +53,8 @@ async function answer(a: number | "none" | "later") {
   busy.value = true;
   err.value = "";
   try {
-    await post("/api/self", { answer: a });
-    done.value =
-      typeof a === "number"
-        ? "selfVoice.picked"
-        : a === "later"
-          ? "selfVoice.later"
-          : "selfVoice.none";
+    const r = await post<{ learned?: number; reason?: string }>("/api/self", { answer: a });
+    done.value = selfDone(typeof a === "number" ? "pick" : a, r);
     card.value = null;
   } catch (e) {
     err.value = String((e as Error).message ?? e);

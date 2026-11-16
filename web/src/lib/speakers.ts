@@ -97,3 +97,9 @@ export function guesses(
 const DONE = { yes: "voiceCheck.doneYes", no: "voiceCheck.doneNo", later: "voiceCheck.doneLater" } as const;
 export const checkDone = (a: keyof typeof DONE, r: { ok: boolean; learned?: number; reason?: string }) =>
   !r.ok ? "voiceCheck.stale" : r.learned === 0 && r.reason === "background_music" ? "voiceCheck.doneMusic" : DONE[a];
+
+// POST /api/self's answer: the words SelfVoice.vue shows after it. A pick whose voices could not be shown free of
+// music under them (server BG_GATE) became no voiceprint; the card comes again
+const SELF_DONE = { pick: "selfVoice.picked", later: "selfVoice.later", none: "selfVoice.none" } as const;
+export const selfDone = (a: keyof typeof SELF_DONE, r: { learned?: number; reason?: string }) =>
+  r.learned === 0 && r.reason === "background_music" ? "selfVoice.pickedMusic" : SELF_DONE[a];
