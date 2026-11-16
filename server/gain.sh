@@ -24,7 +24,7 @@ fi
 
 # on the deploy host: remote <dir:unit ...> <gain.py's arguments>
 instances=$2; shift 2
-ok= failed=
+ok='' failed=''
 for i in $instances; do
   d=${i%%:*}
   # as its unit runs it: in <dir>/server, with <dir>/.env's variables (EnvironmentFile, the last one wins), read in
