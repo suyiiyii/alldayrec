@@ -1,4 +1,5 @@
-"""The heavy pure computations behind one interface (Compute): int16 16 kHz samples in, a voiceprint, a yes/no or a
+"""The heavy pure computations behind one interface (Compute): int16 16 kHz samples in (float32 at int16's scale where
+a device has a calibration offset, gain.py), a voiceprint, a yes/no or a
 chunk's speaker-change frames out, nothing of a tenant's (no database, no files, no names). Every caller reaches them as
 core.state's "embed", "music" and "turns" (transcript.turns over segment) from a thread under threads.INFER, so a
 backend is only a blocking function.
@@ -12,6 +13,8 @@ backend is only a blocking function.
   last, until one is answered; no sentence is lost or skipped, its device's pipeline waits (uploads are still taken and
   stored). Calls meanwhile sleep to the next try instead of each waiting out a timeout. An error is logged at most every LOG_EVERY_S; lr_infer_down_seconds says how long the
   service has been failing, lr_infer_calls_total{op,result} counts calls (remote, retried) and failed tries (error).
+  float32 samples go as float32 (application/x-f32le) to a service whose /health lists f32le among its formats; to an
+  older one (it would read them as int16) as int16 (gain.to16), with a warning once: deploy the service first.
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,
   every call fails as above until the service is fixed (each try asks again: no restart needed). The server stopping
   (STOP) ends a call waiting for the service with Stopping instead of waiting on to a SIGKILL. A 413 (samples over the
@@ -98,6 +101,7 @@ class Remote:
         # ok: the models checked (same_models); a scene Remote's before its first call, no score taken unchecked
         self.url, self._lock, self.ok, self.need = url.rstrip("/"), threading.Lock(), scene is None, scene
         self.down_since, self.next_try, self.wait, self.logged = None, 0.0, 0.0, -LOG_EVERY_S
+        self.f32, self.warned = False, False  # f32: the service takes float32 bodies (its /health's formats)
         # trust_env=False: the service is on a private network, never through a proxy from the environment
         self.http = httpx2.Client(timeout=httpx2.Timeout(timeout, connect=2), trust_env=False,
                                   headers={"Authorization": f"Bearer {token}"})  # thread-safe, keeps connections
@@ -125,7 +129,7 @@ class Remote:
 
     def _post(self, op: str, x: np.ndarray, parse):
         """parse(the service's answer), once one comes: every failure is tried again (failed())."""
-        body, tries = np.ascontiguousarray(x, "<i2").tobytes(), 0
+        tries = 0
         while True:
             while (w := self.next_try - time.monotonic()) > 0:  # the service failing: no try before the backoff's
                 if STOP.wait(w):
@@ -133,7 +137,8 @@ class Remote:
             try:
                 if not self.ok:
                     self.ok = self.same_models()
-                r = self.http.post(f"{self.url}/{op}", content=body, headers={"Content-Type": "application/octet-stream"})
+                body, kind = self._body(x)
+                r = self.http.post(f"{self.url}/{op}", content=body, headers={"Content-Type": kind})
                 r.raise_for_status()
                 out = parse(r.json())
             except Exception as e:  # refused, a timeout, a 4xx / 5xx, another model, a wrong answer
@@ -148,6 +153,19 @@ class Remote:
             self._back()
             CALLS[op, "retried" if tries else "remote"] += 1
             return out
+
+    def _body(self, x: np.ndarray) -> tuple[bytes, str]:
+        """x as the service takes it: int16 as before; float32 as f32le when its /health says it takes that, else
+        rounded to int16 (gain.to16; an older service reads any body as int16), warned of once."""
+        if x.dtype == np.int16:
+            return np.ascontiguousarray(x, "<i2").tobytes(), "application/octet-stream"
+        if self.f32:
+            return np.ascontiguousarray(x, "<f4").tobytes(), "application/x-f32le"
+        if not self.warned:
+            self.warned = True
+            log.warning("infer service takes no float32 samples (no f32le in its /health): calibrated audio sent as int16")
+        from alldayrec import gain
+        return gain.to16(x).tobytes(), "application/octet-stream"
 
     def _back(self):
         with self._lock:
@@ -191,6 +209,7 @@ class Remote:
         r = self.http.get(f"{self.url}/health")
         r.raise_for_status()
         h = r.json()
+        self.f32 = "f32le" in (h.get("formats") or [])
         if self.need is not None:
             if any((h.get("scene") or {}).get(k) != v for k, v in self.need.items()):
                 raise ValueError(f"the service has other scene models ({h.get('scene')}) than this server ({self.need})")

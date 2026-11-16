@@ -44,7 +44,7 @@ def store(tmp_path, monkeypatch):
 
     async def audio(start, end, fmt, device=None):
         cut.append((start, device))
-        return np.zeros(1600, np.int16).tobytes()
+        return np.zeros(1600, np.int16)
     monkeypatch.setattr(routes_audio, "cut", audio)
     monkeypatch.setitem(core.state, "embed", lambda x: np.array([0.0, 1, 0, 0]))
     return cut

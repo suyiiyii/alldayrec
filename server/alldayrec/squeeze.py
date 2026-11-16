@@ -17,8 +17,8 @@ BLOCK = 10 * MS
 
 
 def squeeze(x: np.ndarray, speech: list[tuple[float, float]], keep: float) -> tuple[np.ndarray, list[tuple[float, float]]]:
-    """x: int16 PCM; speech: (start, end) seconds into x. Returns the audio to send and the kept spans of x (ms) for
-    unsqueeze. keep 0 or no speech in x: x whole."""
+    """x: int16 PCM (or float32 at its scale: gain.apply's, kept float32); speech: (start, end) seconds into x. Returns
+    the audio to send and the kept spans of x (ms) for unsqueeze. keep 0 or no speech in x: x whole."""
     n = len(x) / MS
     spans = []
     for a, b in sorted(speech):
@@ -40,7 +40,7 @@ def squeeze(x: np.ndarray, speech: list[tuple[float, float]], keep: float) -> tu
         if b < n:
             p[len(p) - f:] *= np.linspace(1, 0, f)
         parts.append(p)
-    return np.concatenate(parts).astype(np.int16), [tuple(s) for s in spans]
+    return np.concatenate(parts).astype(x.dtype), [tuple(s) for s in spans]
 
 
 def at(ms: float, spans: list[tuple[float, float]], end: bool = False) -> float:
@@ -77,9 +77,9 @@ def lift(x: np.ndarray) -> np.ndarray:
 
 
 def louder(x: np.ndarray, db: float) -> np.ndarray:
-    """x raised by db (int16 PCM, the same length), lower only where a 10 ms block's peaks or its neighbours' would
-    pass -1 dBFS (LIFT_PEAK), ramped from block to block: no hard clip, no click; never below x. x itself when nothing
-    is raised (db <= 0, under 10 ms, or loud throughout)."""
+    """x raised by db (int16 PCM, the same length; float32 at its scale: float64, not rounded), lower only where a 10 ms
+    block's peaks or its neighbours' would pass -1 dBFS (LIFT_PEAK), ramped from block to block: no hard clip, no
+    click; never below x. x itself when nothing is raised (db <= 0, under 10 ms, or loud throughout)."""
     n = len(x) // BLOCK
     if n == 0 or db <= 0:
         return x
@@ -89,6 +89,8 @@ def louder(x: np.ndarray, db: float) -> np.ndarray:
     if not g.any():
         return x
     ramp = np.interp(np.arange(len(x)), np.arange(n) * BLOCK + BLOCK / 2, 10 ** (g / 20))
+    if x.dtype != np.int16:
+        return x * ramp  # float64, rounded once by whoever needs int16 (gain.to16)
     return np.clip(np.round(x * ramp), -32768, 32767).astype(np.int16)
 
 def check():

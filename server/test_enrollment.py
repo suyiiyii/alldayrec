@@ -27,7 +27,7 @@ def audio_store(tmp_path, monkeypatch):
     async def cut(start, end, fmt, device=None):
         cuts.append((start, end, device))
         n = round((dt.datetime.fromisoformat(end) - dt.datetime.fromisoformat(start)).total_seconds() * SR)
-        return (3000 * np.sin(2 * np.pi * 180 * np.arange(n) / SR)).astype(np.int16).tobytes()
+        return (3000 * np.sin(2 * np.pi * 180 * np.arange(n) / SR)).astype(np.int16)
 
     monkeypatch.setattr(routes_audio, "cut", cut)
     monkeypatch.setitem(core.state, "embed", lambda x: VOICE.copy())
@@ -168,7 +168,7 @@ def test_missing_audio_does_not_reduce_total_sentence_seconds(audio_store, monke
     async def partial(start, end, fmt, device=None):
         if start == rows[0]["start"]:
             raise HTTPException(404, "synthetic missing audio")
-        return (await cut(start, end, fmt, device))[:2 * SR]  # each available cut returns only one second
+        return (await cut(start, end, fmt, device))[:SR]  # each available cut returns only one second
 
     monkeypatch.setattr(routes_audio, "cut", partial)
     voices_round(monkeypatch)

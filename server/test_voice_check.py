@@ -54,7 +54,7 @@ def store(tmp_path, monkeypatch):
     db.open_db(tmp_path / "t.db")
 
     async def cut(start, end, fmt, device=None):  # the sentence's start, then a second of tone: loud enough for a level
-        return start.ljust(24).encode() + (3000 * np.sin(np.arange(SR) / 5)).astype(np.int16).tobytes()
+        return np.frombuffer(start.ljust(24).encode() + (3000 * np.sin(np.arange(SR) / 5)).astype(np.int16).tobytes(), np.int16)
     monkeypatch.setattr(routes_audio, "cut", cut)
     monkeypatch.setitem(core.state, "embed", lambda x: SAID[x[:12].tobytes().decode().strip()])
     routes_speakers.save_owner({"self": ME.astype(np.float32)})

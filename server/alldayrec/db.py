@@ -159,6 +159,11 @@ CREATE INDEX IF NOT EXISTS device_log_app ON device_log(at) WHERE src != 'rec'; 
 CREATE TABLE IF NOT EXISTS device_status (    -- every status a client read from a BLE recorder (battery, card, firmware)
     device TEXT NOT NULL, at TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS device_status_at ON device_status(device, at);
+CREATE TABLE IF NOT EXISTS device_gain (      -- gain.py: a device's gain from since_ms (unix ms) on, each column its newest
+    device TEXT NOT NULL, since_ms INTEGER NOT NULL,  -- non-NULL value: capture_db, what the device set (reported) or
+    capture_db REAL, offset_db REAL,          -- someone wrote down; offset_db, the calibration offset every reader gets
+    source TEXT NOT NULL, note TEXT,          -- (none: 0). source: manual (set by hand), reported (by its client)
+    PRIMARY KEY (device, since_ms, source));
 CREATE TABLE IF NOT EXISTS calls (            -- every ASR and LLM call: how it went and what it took, never what it said.
     at TEXT NOT NULL, kind TEXT NOT NULL,     -- kind: final, draft (ASR); summary, split, hints, profile, recap, resolve, live, ask (LLM)
     engine TEXT NOT NULL, device TEXT,        -- engine: the provider or model; device: whose audio (ASR)

@@ -261,7 +261,8 @@ def test_token(service, monkeypatch, caplog):
     assert httpx2.get(f"{service}/health").json() == {"ok": True}
     assert httpx2.get(f"{service}/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
     ok = {"Authorization": f"Bearer {TOKEN}"}
-    assert httpx2.get(f"{service}/health", headers=ok).json() == {"ok": True, "models": compute.models(), "dim": 192}
+    assert httpx2.get(f"{service}/health", headers=ok).json() == {"ok": True, "models": compute.models(), "dim": 192,
+                                                                  "formats": ["s16le", "f32le"]}
     assert httpx2.post(f"{service}/embed", content=x[:3], headers=ok).status_code == 400
     big = b"\0" * (infer_server.MAX_S * 32000 + 2)
     assert httpx2.post(f"{service}/music", content=big, headers=ok).status_code == 413

@@ -157,6 +157,13 @@ uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <�
 | `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这几个脚本 |
 | `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里)。设了 `SOUND_MODEL` 时所有租户还有闸门，见[环境声音](#可选-环境声音) |
 
+### 设备增益（`device_gain`）
+
+不是环境变量，用命令登记：`server/gain.sh set <租户> <设备> <dB> [--since <时间>]`（本机 `python -m alldayrec.gain`），见[电平和增益](../explanation/architecture.md#电平和增益)。
+
+- 标定设备本身灵敏度的偏移，从 `--since 0`（默认值）开始登记，这样它的全部音频都按它标定，包括历史声纹片段。
+- 历史声纹片段（`/api/voice-clip`）有的没有时间（`voices.clip_start` 为空，早期的外部生成器没有写）。这种片段只在这台设备的偏移对所有时间都是同一个值时才标定：最早一行偏移从 0 开始，而且所有登记的偏移都相同，就整段乘这个偏移，返回 WAV，带 `X-Gain-Db`。设备登记了不同的偏移，或者最早一行从 0 以后才开始，就无法判断片段在哪一段：原样返回存下的文件，记一条日志，计入指标 `lr_gain_untimed_clips_total`（按设备）。设备没有任何非 0 的偏移时，原样返回。要精确标定这些片段，需要回补它们的 `clip_start`。
+
 ## 其他环境变量
 
 服务器还读下面这些变量，`.env.example` 里没有列出。它们是调参用的，默认值就是作者在用的值。
@@ -179,10 +186,10 @@ uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <�
 | `INFER_TIMEOUT` | `30` | 每次尝试等推理服务回答的秒数（连接：2 秒） | `compute.py` |
 | `INFER_HOST`、`INFER_PORT` | `127.0.0.1`、`8771` | `alldayrec --infer` 监听的地址和端口（`--port` 也只改它的端口；它自己的变量，共用 `.env` 时不会拿到服务器的 `HOST`、`PORT`） | `infer_server.py` |
 | `MUSIC_DETECT` | `1` | 定稿时听出是音乐（外放的歌、伴奏和人声差不多一样响）的句子不取声纹，说话人记为 `S?`，不会进人物页；仍然转写，转写行上有音符图标。把这句的说话人纠正成某个人，它就算人声：音符去掉，照常学声纹。0 关闭 | `music.py` |
-| `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
-| `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |
+| `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；在设备的标定偏移之后算（[电平和增益](../explanation/architecture.md#电平和增益)）；0 关闭 | `infer.py` |
+| `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；在设备的标定偏移之后算；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
-| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭 | `audio.py` |
+| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭。登记了标定偏移（`device_gain`）的那段音频（从它的 `since_ms` 起）不再加它，回放只用偏移；等所有录音豆都登记了偏移，这一项就可以删掉 | `audio.py` |
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `SPLIT_TURNS` | `1` | 引擎把两个人的话并成一句时（快速的一问一答），先用 pyannote segmentation-3.0 听出句子里换人的地方，在最近的字边界切开，切点前后各 ≤3 s 的声纹不像才保留，每段各自认人；只对带字级时间的句子（`qwen` 引擎）生效；0 关闭，只按 `SPLIT_COS` 切 | `transcript.py` |
 | `SPLIT_COS` | `0.35` | `SPLIT_TURNS=0` 时，在句子里每 0.5 s 取一个 1.5 s 窗的声纹，切点前、后各 3 s 内的窗口相似度低于这个值就在最近的字边界切开，每段各自认人；只对 3 s 以上、带字级时间的句子（`qwen` 引擎）生效；0 关闭 | `transcript.py` |

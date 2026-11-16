@@ -11,6 +11,7 @@ import os
 import anyio.to_thread
 import numpy as np
 
+from alldayrec import gain
 from alldayrec import net
 from alldayrec import threads
 
@@ -30,7 +31,7 @@ async def balance() -> float:
 
 
 def _body(x: np.ndarray, words=()) -> bytes:
-    return json.dumps({"audio": {"data": base64.b64encode(x.tobytes()).decode(), "input": {
+    return json.dumps({"audio": {"data": base64.b64encode(gain.to16(x).tobytes()).decode(), "input": {
         "transcription": {"model": "stepaudio-2.5-asr", "language": "zh", "enable_itn": True, "enable_timestamp": True,
                           **({"hotwords": list(words)} if words else {})},
         "format": {"type": "pcm", "codec": "pcm_s16le", "rate": 16000, "bits": 16, "channel": 1}}}}).encode()

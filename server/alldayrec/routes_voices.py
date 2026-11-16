@@ -48,7 +48,7 @@ async def voices_loop():
                 es, ls, used = [], [], []
                 for r in long:
                     try:
-                        x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
+                        x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
                     except HTTPException:
                         continue
                     es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
@@ -116,7 +116,7 @@ async def self_card(cands: list[dict], vs: list[dict], why: str, n: int) -> dict
                 continue
             for r in await anyio.to_thread.run_sync(selfvoice.shortlist, conversation_rows(conv), m["label"], limiter=threads.DB):
                 try:
-                    x = np.frombuffer(await routes_audio.cut(r["start"], r["end"], "s16le", r.get("source")), np.int16)
+                    x = await routes_audio.cut(r["start"], r["end"], "pcm", r.get("source"))
                 except HTTPException:
                     continue
                 pool.append({**r, "conv": m["conv"], "lvl": selfvoice.level(x), "lmed": lvl.get((m["conv"], m["label"])),
@@ -229,7 +229,7 @@ async def check_clip(c: dict) -> dict | None:
     pool = []
     for r in await anyio.to_thread.run_sync(selfvoice.shortlist, conversation_rows(conv), c["label"], limiter=threads.DB):
         try:
-            x = np.frombuffer(await routes_audio.cut(r["start"], r["end"], "s16le", r.get("source")), np.int16)
+            x = await routes_audio.cut(r["start"], r["end"], "pcm", r.get("source"))
         except HTTPException:
             continue
         pool.append({**r, "conv": c["conv"], "lvl": selfvoice.level(x), "e": await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)})

@@ -17,6 +17,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import colocate
 from alldayrec import db
+from alldayrec import gain
 from alldayrec import infer
 from alldayrec import live
 from alldayrec import perf
@@ -63,7 +64,9 @@ def seg_embs(device: str, segs: list[dict], vs: list, at) -> list[tuple]:
     # a part is in segs, or label() joined it again into one holding its first word (by identity: segments overlap)
     row = lambda p: rows.get(id(p if id(p) in rows or not p.get("words") else p["words"][0]))
     return [(device, ts(p["start_ms"]), ts(p["end_ms"]), k if len(v) > 1 else 0, p.get("engine_speaker"), model,
-             np.asarray(e, np.float16).tobytes(), 0.0, r, i)  # gain_db: voices() embeds x as decoded (lift: the engine's)
+             np.asarray(e, np.float16).tobytes(), gain.offset_db(device, ts(p["start_ms"])) or 0.0, r, i)
+            # gain_db: the offset x (as voices() embeds it; lift: the engine's) has at the segment's start; one over a
+            # since_ms of the offset (gain.py) is recorded at its start's, the later part's not said
             for i, v in enumerate(vs) if v for k, (p, e) in enumerate(v, 1) if (r := row(p)) is not None]
 
 
@@ -757,7 +760,7 @@ async def pipeline(device: str):
                         while drafting() and time.perf_counter() - new < STREAM_IDLE_S:
                             if dseg.samples > sent:
                                 lo, sent = max(sent, dseg.audio_base), dseg.samples
-                                await s.send(dseg.audio[lo - dseg.audio_base:sent - dseg.audio_base].tobytes())
+                                await s.send(gain.to16(dseg.audio[lo - dseg.audio_base:sent - dseg.audio_base], device).tobytes())
                                 new = time.perf_counter()
                             await anyio.sleep(0.2)
                         await s.finish()
