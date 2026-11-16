@@ -6,6 +6,8 @@ when undated) from the card; the open file stays. `log` prints the recorder's ev
     uv run --no-project --with bleak python lr_sync.py OUT_DIR [--follow SECONDS] [--delete] [--name LR-P3-XXXX]
         [--server URL --token T]
     uv run --no-project --with bleak python lr_sync.py log [--name LR-P3-XXXX] [--from SEQ]
+    uv run --no-project --with bleak python lr_sync.py gain [DB] [--name LR-P3-XXXX]   the mic's PDM gain in force
+        (TIME's mic_gain), and with DB (-20..20, 0.5 dB steps) set first: CTRL 0x21, kept on the recorder
 """
 import asyncio
 import ctypes
@@ -481,6 +483,31 @@ async def log(name: str, start: int):
     print(f"next: lr_sync.py log --from {nxt}")
 
 
+def gain_code(db: float) -> int:
+    """dB (-20..20, 0.5 dB steps) -> CTRL 0x21's GAINL/GAINR code (0x28 = 0 dB)"""
+    if db * 2 != int(db * 2) or not -20 <= db <= 20:
+        raise ValueError(f"gain {db} dB: -20..20 in 0.5 dB steps")
+    return 0x28 + int(db * 2)
+
+
+def gain_db(status: bytes) -> float | None:
+    """TIME's mic_gain:i8 (half dB, 0 = 0x28) in dB; None: older firmware, no such byte"""
+    return struct.unpack_from("<b", status, 53)[0] / 2 if len(status) > 53 else None
+
+
+async def gain(name: str, db: float | None):
+    code = None if db is None else gain_code(db)
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, a: U(0) in a.service_uuids and (a.local_name or "").startswith(name), 20)
+    if not dev:
+        sys.exit("no device")
+    async with BleakClient(dev) as c:
+        if code is not None:  # an ATT error (0x13 out of range, 0x0e not kept) raises here
+            await c.write_gatt_char(CTRL, bytes([0x21, code]), response=True)
+        got = gain_db(await c.read_gatt_char(TIME))
+    print(f"{dev.name}: mic gain {'unknown (firmware without it)' if got is None else f'{got:+.1f} dB'}")
+
+
 def selftest():
     fixture = json.loads((Path(__file__).resolve().parents[2] / "fixtures/record-stream.json").read_text())
     files = {f["file"]: bytes.fromhex(f["hex"]) for f in fixture["archive"]["files"]}
@@ -575,6 +602,14 @@ def selftest():
     assert EVENTS[35][1](2, 31000, 8000 | 30 << 16) == \
         "back to the card (no ACK for 8 s): 31000 B not acked, last ACK 8000 ms before, at most 30 KB not acked"
     assert EVENTS[35][1](5, 9000, 0x10010004) == "9000 B a reset left in RAM, to the card as 10010004.BIN"
+    assert gain_code(0) == 0x28 and gain_code(-20) == 0 and gain_code(20) == 0x50 and gain_code(6.5) == 0x35
+    for bad in (20.5, -21, 1.25):
+        try:
+            gain_code(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    assert gain_db(bytes(53)) is None and gain_db(bytes(53) + b"\xf3") == -6.5 and gain_db(bytes(53) + b"\x28") == 20
     print("selftest ok")
 
 
@@ -584,6 +619,9 @@ if __name__ == "__main__":
     arg = lambda k, default=None: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else default
     if sys.argv[1] == "log":
         sys.exit(asyncio.run(log(arg("--name", "LR-"), int(arg("--from", 0)))))
+    if sys.argv[1] == "gain":
+        v = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
+        sys.exit(asyncio.run(gain(arg("--name", "LR-"), None if v is None else float(v))))
     d = Path(sys.argv[1])
     d.mkdir(parents=True, exist_ok=True)
     asyncio.run(main(d, "--delete" in sys.argv, arg("--name", "LR-"), float(arg("--follow", 0)), arg("--server"),

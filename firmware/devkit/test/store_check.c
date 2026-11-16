@@ -57,6 +57,8 @@ static void irq_unlock(unsigned int k) {}
 #define BT_GATT_SERVICE_DEFINE(name, ...) static struct bt_gatt_attr name##_attrs[12]; static struct { struct bt_gatt_attr *attrs; } name = {name##_attrs}
 #define BT_GATT_ERR(x) (-(x))
 #define BT_ATT_ERR_INVALID_ATTRIBUTE_LEN 13
+#define BT_ATT_ERR_UNLIKELY 0x0e
+#define BT_ATT_ERR_VALUE_NOT_ALLOWED 0x13
 #define BT_GATT_CCC_NOTIFY 1
 #define BT_ID_DEFAULT 0
 #define BT_ADDR_LE_ANY ((const bt_addr_le_t *) 0)
@@ -116,7 +118,8 @@ static int k_mutex_unlock(struct k_mutex *m)
     }
     return 0;
 }
-static int k_msgq_put(int *q, void *c, int t) { return 0; }
+static int queued;  // commands for the store's thread
+static int k_msgq_put(int *q, void *c, int t) { queued++; return 0; }
 static int k_msgq_get(int *q, void *c, int t) { return -1; }
 static int k_msgq_num_used_get(int *q) { return 0; }
 static void k_sleep(int t) {}
@@ -191,6 +194,10 @@ int lr_bond_count(void) { return 1; }
 uint32_t lr_pause_left(void) { return 0; }
 uint8_t lr_charge(void) { return 0; }
 void lr_pause(uint32_t s) {}
+static uint8_t gain = 0x28;  // the mic's gain (mic.c): its range, a save NVS did not take
+static int gain_save_err;
+uint8_t mic_gain(void) { return gain; }
+int mic_set_gain(uint8_t g) { return g > 0x50 ? -EINVAL : gain_save_err ? gain_save_err : (gain = g, 0); }
 static int reattached;  // the board left the USB bus and came back
 void usb_reattach(void) { reattached++; }
 volatile bool usb_disk_lent;
@@ -1197,6 +1204,25 @@ int main(void)
     assert(fe >= 0 && logged[fe].x == 0);
     time_read(&the_conn, 0, 0, 0, 0);
     assert(status[48] >> 1 == 1);
+    // GAIN: at once, never queued (a command would end a READ); TIME says it in half dB; refused past 0x50, with no g
+    // or when NVS did not take it, the gain in force unchanged
+    int q0 = queued;
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert((int8_t)status[53] == 0);
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN, 0x50}, 2, 0, 0) == 2);
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert((int8_t)status[53] == 40);
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN, 0x00}, 2, 0, 0) == 2);
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert((int8_t)status[53] == -40);
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN, 0x51}, 2, 0, 0) == -BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN}, 1, 0, 0) == -BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN, 0x29, 0}, 3, 0, 0) == -BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    gain_save_err = -EIO;
+    assert(ctrl_write(&the_conn, CTRL_ATTR, (uint8_t[]){GAIN, 0x29}, 2, 0, 0) == -BT_ATT_ERR_UNLIKELY);
+    time_read(&the_conn, 0, 0, 0, 0);
+    assert((int8_t)status[53] == -40 && queued == q0);
+    gain_save_err = 0;
     printf("store_check ok: %u + %u + %u B on the card\n", card_len[0], card_len[1], card_len[2]);
     return 0;
 }

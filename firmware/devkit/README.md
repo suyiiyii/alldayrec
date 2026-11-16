@@ -100,6 +100,13 @@ APPROTECT：`n4` 显式打开 `CONFIG_NRF_APPROTECT_USE_UICR`（NCS 2.7 的默�
 - 卡上的文件永远是流里同名文件的前缀：卡出问题时流照常推，卡恢复后从新段继续。
 - 手机模式（LR-P3，`CONFIG_LR_STORE_PHONE`）：App 跟着 LIVE、每 5 s 回一次 ACK（「这个文件我已存到哪」）时，卡停写，空闲 10 s 后断电（`CONFIG_LR_STORE_CARD_OFF`，`LR_CARD_ON=1 ./lr.sh build promicro-p3` 编出卡不断电的版本做对比）。没确认的批次留在 RAM 环（44 KB，约 11 s）里，READ 落在环里的直接从 RAM 回答。断连、取消订阅、8 s 没 ACK、环里没确认的超过 3/4（约 9 s）、重启或借卡时，没确认的批次接成一个新段写上卡，流在新段里继续；其中手机可能已经收到的那几秒，由服务端按帧去重。环放在 `__noinit`：看门狗复位或崩溃后，下次开机先把它写成上一次开机的下一个段。不发 ACK 的 App（老版本、`lr_listen.py`）下行为和以前一样。TIME 读取偏移 48 的字节 bit 0 表示固件收 ACK。
 
+麦克风增益（PDM 的 GAINL/GAINR，左右相同）：默认 `MIC_GAIN` 0x28 = 0 dB，0.5 dB 一档，0x00 = −20 dB，0x50 = +20 dB，均相对 PDM 模块自身的默认增益（手册 G_PDM,default 典型 3.2 dB）。不用重新烧录就能改：CTRL 写 `0x21 g:u8`（带响应写），先存进 NVS（`lr/mic_gain`），再写进正在跑的 PDM，不停麦克风、帧时钟不断；以后每次开机都用它。超过 0x50 或缺字节回 ATT 错误 0x13，NVS 没存上回 0x0e，增益都不变。TIME 读取偏移 53 的字节 `mic_gain`（i8，半 dB，0 = 0x28）是当前生效的增益，`mic_gain_db = int8 / 2`；老固件读到 53 字节、没有这个字节。手册只说增益在抽取滤波之后，溢出是饱和还是回绕、运行中改寄存器是否马上生效都没写，待上板实测。
+
+```bash
+uv run --no-project --with bleak python lr_sync.py gain --name LR-P3-XXXX        # 读当前增益
+uv run --no-project --with bleak python lr_sync.py gain 6 --name LR-P3-XXXX      # 设成 +6 dB（0x34）
+```
+
 参考客户端 `lr_sync.py`（对时、列文件含当前段、读取、可选跟读 LIVE 并和卡上逐字节比对、按 `'T'` 还原墙钟时间、导出 WAV、可选删除）：
 
 ```bash
@@ -125,4 +132,4 @@ uv run --no-project --with bleak python lr_listen.py --selftest
 - 写卡在自己的线程（`card_thread`）里做，切记录和 LIVE 不等卡：卡卡住时，记录照常发给手机。写卡队列（16 KB 能放 3 批，LR-P3 44 KB 能放 10 批）在写卡开始后还能再收约 3 s；卡卡住超过这么久，放不下的批次只是不上卡，记一条 APPEND_ERR（x 1，−EAGAIN），这一段后面的也不再上卡；写卡线程追上后从新段继续。所以卡上每个文件仍是流里同名文件的开头
 - `'T'` 的帧号取的是对时那一刻正在编码的帧，这一帧的声音比它早约 0–100 ms（麦克风按 100 ms 一块交数据），时间系统性偏晚约 50 ms
 - 热复位时 SD 卡可能卡在命令中间只能断电恢复；1200 bps 复位前会先卸载，看门狗复位仍有风险
-- 开机前约 0.3 s 音频丢失；`MIC_GAIN` 偏高会削顶；BLE 连接间隔（~20 Hz）串进麦克风的「哒哒」声未修
+- 开机前约 0.3 s 音频丢失；增益（`MIC_GAIN`，CTRL 0x21）偏高会削顶；BLE 连接间隔（~20 Hz）串进麦克风的「哒哒」声未修
