@@ -196,9 +196,10 @@ async def conversation_vectors(span: dict) -> dict:
     hi = iso(dt.datetime.fromtimestamp(span["end_ms"] / 1000) + dt.timedelta(seconds=GAP_S))
     cs = [db._conversation(r) for r in db.conn().execute(
         "SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ?", (span["device"], hi, lo))]
-    out = {}
+    out, g = {}, sounds.gating()
     for c in cs:
-        vs = {r["label"]: db.vec(r["e"]) for r in db.conn().execute("SELECT * FROM voices WHERE conv = ? AND e IS NOT NULL", (c["id"],))}
+        vs = {r["label"]: db.vec(r["e"]) for r in db.conn().execute("SELECT * FROM voices WHERE conv = ? AND e IS NOT NULL", (c["id"],))
+              if not g or sounds.verified(r["used"])}  # BG_GATE: one not shown free of music under it is made again below
         missing = set(c["participants"]) - set(vs)
         if missing and state.get("embed"):
             # Closed conversations may not have reached the five-minute voices loop (or be historical).

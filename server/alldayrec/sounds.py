@@ -146,11 +146,23 @@ def under_music(r: dict, use: str) -> bool:
     if not BG_GATE:
         return False
     a, b = (round(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end"))
-    m = music_max(r.get("source"), a, b) if on() and "mn10_as" in names() else None
+    m = music_max(r.get("source"), a, b) if gating() else None
     hit = m is not None and m >= BG_MUSIC_MIN
     if m is None or hit:
         T().scene_stats["bg_unscored" if m is None else "bg_skipped", use] += 1
     return hit
+
+
+def gating() -> bool:
+    """BG_GATE in effect: on, for a tenant with sound on and mn10_as among its models."""
+    return BG_GATE and on() and "mn10_as" in names()
+
+
+def verified(used: str | None) -> bool:
+    """A voices row's voiceprint fit to use while gating(): its sentences (voices.used, JSON [start, end, source]s,
+    written while BG_GATE is on) known and, by the scores there are now, none with music under it (one scored since
+    counts now). NULL: a row from before, or made by another path (late, split, a merge): not known, made again."""
+    return used is not None and not any(under_music({"start": a, "end": b, "source": d}, "cached") for a, b, d in json.loads(used))
 
 
 def covered(device: str, name: str, a: int, b: int) -> list:

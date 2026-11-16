@@ -1,7 +1,7 @@
 """Voices: the voiceprints of closed live conversations (voices_loop), and the 「哪个是你？」 and 「这是你吗？」 cards each
 round of them may pop (selfvoice.py)."""
 import datetime as dt
-import itertools
+import json
 import logging
 
 import anyio.to_thread
@@ -15,7 +15,7 @@ from alldayrec import sounds
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, state
-from alldayrec.routes_speakers import enroll_soon, learnable, owner_bank, rename, save_owner, self_voices, speaker_detach, speaker_groups
+from alldayrec.routes_speakers import enroll_soon, label_voice, learnable, owner_bank, rename, save_owner, self_voices, speaker_detach, speaker_groups
 from alldayrec.tenant import T
 
 log = logging.getLogger("live")
@@ -23,8 +23,8 @@ router = APIRouter()
 
 
 async def voices_loop():
-    """Voiceprints for the labels of closed live conversations (history ones are uploaded): up to 4 sentences of
-    >= 1.5 s, each capped at 15 s, independent of its summary. speech_s is the label's total sentence duration.
+    """Voiceprints for the labels of closed live conversations (history ones are uploaded; label_voice): up to 4
+    sentences of >= 1.5 s, each capped at 15 s, independent of its summary. speech_s is the label's total sentence duration.
     Short voices keep their clips and suggestions; learning 我 still needs ME_MIN_S per click. A conversation without
     a recording here is marked and not retried. Automatic people need enough non-media speech across conversations."""
     while True:
@@ -45,30 +45,14 @@ async def voices_loop():
                     by.setdefault(r["speaker"], []).append(r)
             out = []
             for label, rs in by.items():
-                dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-                # music under a sentence (BG_GATE): not one of the 4; n and speech_s count it still
-                long = list(itertools.islice((r for r in sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True) if not sounds.under_music(r, "voices")), 4))
-                es, ls, used = [], [], []
-                for r in long:
-                    try:
-                        x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
-                    except HTTPException:
-                        continue
-                    es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
-                    used.append(r)
-                    if (lv := selfvoice.level(x)) is not None:
-                        ls.append(lv)
-                if es:
-                    e = np.mean(es, 0)
-                    best = min(used, key=lambda r: abs(dur(r) - 6))
-                    out.append({"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
-                                "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
-                                "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
-                                "clip_text": best.get("text")})
+                if v := await label_voice(c, label, rs):
+                    out.append(v)
             with db.tx() as t:
                 if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
                     continue
                 db.insert_voices(t, out or [{"conv": c["id"]}])
+                if sounds.BG_GATE:  # what each is made of, to be checked again with the scores there are then (sounds.verified)
+                    t.executemany("UPDATE voices SET used = ? WHERE conv = ? AND label = ?", [(json.dumps(v["used"]), v["conv"], v["label"]) for v in out])
             T().speakers["at"] = 0.0
         try:
             await self_round()

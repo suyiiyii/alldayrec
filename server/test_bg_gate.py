@@ -97,6 +97,54 @@ def test_learn_me(audio_store, gate, monkeypatch, score, learned):
     assert renamed(c, "我")["learned"] == learned and core.owner_npz().exists() == learned
 
 
+def cached(monkeypatch, durations, built_on: bool):
+    """A conversation whose voices row is made first: BG_GATE off (before it was turned on) or on (before any score
+    came in); the gate on after."""
+    monkeypatch.setattr(sounds, "BG_GATE", built_on)
+    c, rows = sample(durations)
+    voices_round(monkeypatch)
+    used, = db.conn().execute("SELECT used FROM voices").fetchone()
+    assert (used is not None) == built_on, "what it is made of: written only while the gate is on"
+    monkeypatch.setattr(sounds, "BG_GATE", True)
+    return c, rows
+
+
+@pytest.mark.parametrize("built_on", [False, True])
+@pytest.mark.parametrize("score,learned", [(0.5, False), (0.1, True)])
+def test_learn_me_cached_voice(audio_store, gate, monkeypatch, built_on, score, learned):
+    """The voices row made before the scores or the gate: 我 learns from it only once shown free of music under it."""
+    c, rows = cached(monkeypatch, [6.0, 6.0], built_on)
+    music(rows[0]["start"], 20, score, score)
+    assert renamed(c, "我")["learned"] == learned and core.owner_npz().exists() == learned
+
+
+@pytest.mark.parametrize("built_on", [False, True])
+def test_voice_of_cached_voice(audio_store, gate, monkeypatch, built_on):
+    """voice_of holds back a cached voice not shown free of music; 我's is made again without the sentence under it."""
+    c, rows = cached(monkeypatch, [6.0, 6.0], built_on)
+    assert (routes_speakers.voice_of(c["id"], "S1") is not None) == built_on, "made before the gate: not known"
+    music(rows[0]["start"], 6, 0.5)  # the first sentence only, scored after the voice was made
+    assert routes_speakers.voice_of(c["id"], "S1") is None
+    n = len(audio_store)
+    e, speech = anyio.run(routes_speakers.voice_of_me, c["id"], "S1")
+    assert speech == 12.0 and [a for a, _, _ in audio_store[n:]] == [rows[1]["start"]], "made again from the second only"
+    assert anyio.run(routes_speakers.voice_of_me, c["id"], "S2") is None, "no voice at all: none made"
+
+
+@pytest.mark.parametrize("built_on,score", [(False, 0.1), (True, 0.1), (False, 0.5), (True, 0.5)])
+def test_late_cached_voice(audio_store, gate, monkeypatch, built_on, score):
+    """late.conversation_vectors takes a cached voice only once shown free of music; else makes it again, gated."""
+    from alldayrec import late
+    c, rows = cached(monkeypatch, [6.0, 6.0], built_on)
+    music(rows[1]["start"], 6, score)
+    read = []
+    monkeypatch.setattr(late, "read_exact", lambda device, a, b: read.append(a) or np.zeros(b - a, np.int16))
+    ms = lambda t: round(dt.datetime.fromisoformat(t).timestamp() * 1000)
+    span = {"device": DEVICE, "start_ms": ms(rows[0]["start"]), "end_ms": ms(rows[1]["end"])}
+    assert set(anyio.run(late.conversation_vectors, span)[c["id"]]) == {"S1"}
+    assert read == {(True, 0.1): [], (False, 0.1): [ms(rows[1]["start"]), ms(rows[0]["start"])]}.get((built_on, score), [ms(rows[0]["start"])])
+
+
 def test_shortlist(audio_store, gate):
     c, rows = sample([3.0, 3.0])
     music(rows[0]["start"], 3, 0.5)
@@ -143,5 +191,6 @@ def test_off_is_as_before(audio_store, monkeypatch):
     voices_round(monkeypatch)
     v, = db.voices()
     assert v["k"] == 4 and rows[0]["start"] in [a for a, _, _ in audio_store]
+    assert db.conn().execute("SELECT used FROM voices").fetchone()[0] is None
     assert renamed(c, "Alex") and "Alex" in db.people()
     assert selfvoice.shortlist(rows, "S1", per=5) and not any(k.startswith("bg_") for k, _ in T().scene_stats)
