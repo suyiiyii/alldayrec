@@ -672,6 +672,7 @@
       "PHONE": "Phone takes the stream",
       "FORMAT": "Format the card",
       "NVS_FAIL": "Erase record not saved",
+      "GAIN": "Mic gain",
       "unknown": "Unknown event"
     },
     "reset": {
@@ -763,6 +764,9 @@
     "phoneRecovered": "{b} B left in RAM by the last reset written to the card: {file}.BIN",
     "formatDone": "{gb} GB card formatted as {fs} in {s} s",
     "nvsFail": "settings did not take the block about to be erased, twice; erased anyway ({n}, first this boot)",
+    "gain": "mic gain {from} → {to} dB",
+    "gainUnkept": "mic gain {db} dB not saved: {err}; the next boot takes the saved one",
+    "gainBad": "saved mic gain unreadable ({n} B: {b}), default 0 dB in force",
     "formatFail": "{gb} GB card not formatted: {why}",
     "formatWhy": {
       "5": "the format failed",

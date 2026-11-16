@@ -97,6 +97,13 @@
  *    37 NVS_FAIL    NAND boards (nand_card.c): NVS twice did not take the block an erase was about to begin on, erased
  *                   all the same (that erase cut short would leave the block kept, the uploaded pointer held); the first
  *                   of a boot only, a erases so
+ *    38 GAIN        the mic's PDM gain (mic_gain.c), register codes (0x28 0 dB, 0.5 dB a step, 0x00 -20 .. 0x50 +20 dB):
+ *                   x 0 CTRL GAIN changed it, a the old code, b the new; t is the codec's frame when the registers
+ *                   were written, not the first sample at the new gain: the mic ring may hold up to 1 s of frames
+ *                   taken before (mic_ring.h), and when the registers take it is not measured; x 1 NVS did not take
+ *                   it, a the error, b the code in force not kept (the next boot takes NVS's); x 2 at boot NVS's
+ *                   record failed its check, the default in force: a its length, b its first 4 bytes (one each boot
+ *                   until a GAIN writes it again)
  *
  * Each record has a sequence number, one more than the last, across boots: a reader asks for those from the last
  * it has. Records gather in RAM (__noinit: a crash or watchdog reset keeps them for the next boot) and go to flash
@@ -110,6 +117,7 @@ enum {
     LR_DISCONNECT, LR_PARAM, LR_MTU, LR_PHY, LR_TIME, LR_SECURITY, LR_PAIRED, LR_PAIR_FAIL, LR_FORGET, LR_DROPPED,
     LR_SEGMENT, LR_DFU, LR_HEARTBEAT, LR_STACKS, LR_SD_RESET, LR_SD_WRITES, LR_READ, LR_READ_TIME, LR_SWITCH,
     LR_POWER, LR_LIVE_LOST, LR_HEALTH, LR_CARD_ID, LR_CARD_SIZE, LR_SD_ERRORS, LR_PHONE, LR_FORMAT, LR_NVS_FAIL,
+    LR_GAIN,
     LR_UPTIME = 0x80,
 };
 

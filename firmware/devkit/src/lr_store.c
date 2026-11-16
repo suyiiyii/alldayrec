@@ -526,7 +526,7 @@ static void put_sync(uint32_t frame, uint64_t epoch)
 //
 // Commands, handled on the store's own thread: SD access and notifications may block, the BT RX thread must not
 //
-enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, FORMAT = 9, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20, DEBUG = 0x30 };
+enum { LIST = 1, READ = 2, STOP = 3, DELETE = 4, FORGET = 5, USB_DISK = 6, LOG = 7, ACK = 8, FORMAT = 9, SYNC = 0x10, UNLEND = 0x12, FOLLOW = 0x13, PAUSE = 0x20, GAIN = 0x21, DEBUG = 0x30 };
 struct cmd {
     uint8_t op;
     uint32_t file, offset;
@@ -589,7 +589,7 @@ static ssize_t time_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
                          uint16_t offset)
 {
     extern int16_t usb_diag[4];
-    uint8_t v[53];
+    uint8_t v[55];
     sys_put_le16(boot, v);
     sys_put_le32(transport_frame_no, v + 2);
     sys_put_le16(store_err, v + 6);
@@ -609,6 +609,8 @@ static ssize_t time_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
     v[47] = lr_charge();  // a phone reads this byte every few seconds while it reads no backlog
     v[48] = IS_ENABLED(CONFIG_LR_STORE_PHONE) | card_state() << 1;  // bit 0: ACK taken (phone mode); an app acks only then
     sys_put_le32(lr_sd_sectors / 2, v + 49);  // the card's size, KB, as it answered: FORMAT's code
+    v[53] = (int8_t)(mic_gain() - 0x28);      // the mic's gain in force, half dB (0x28: 0 dB)
+    v[54] = !mic_gain_kept();                 // bit 0: that gain not (yet) the one NVS keeps
     return bt_gatt_attr_read(conn, attr, buf, len, offset, v, sizeof(v));
 }
 
@@ -636,6 +638,9 @@ static ssize_t ctrl_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     if (c.op == PAUSE && len >= 5) {  // nothing to do with the card: at once, and on a recorder without one too
         lr_pause(sys_get_le32(b + 1));
         return len;
+    }
+    if (c.op == GAIN) {  // never queued, a command would end a READ going on; NVS off this thread (mic_gain.c)
+        return len != 2 || mic_set_gain(b[1]) ? BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED) : len;
     }
     if (c.op == ACK && len >= 9) {  // at once too: a command would end a READ going on
         unsigned int key = irq_lock();
