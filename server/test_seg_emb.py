@@ -58,3 +58,23 @@ def test_trim_drops_with_the_audio(tmp_path, monkeypatch):
     kept = {r[0] for r in db.conn().execute("SELECT start_ms FROM pieces")}
     assert {s(3), s(4)} <= kept and not {s(5), s(10), s(15)} & kept, sorted((k - ms(t0)) // 1000 for k in kept)
     assert left() == [(DEVICE, s(3, 2), 0), ("other", s(10, 1), 0)]
+
+
+def test_rows_of_a_piece():
+    """Each labelled segment's own vector from the diarist (by its mark), its part; none for one too short to embed
+    (no mark) nor for one starting at hi or later (the next piece's)."""
+    from alldayrec import device_pipeline, infer
+    t0 = dt.datetime(2026, 10, 1, 10)
+    at = lambda s: t0 + dt.timedelta(seconds=s)
+    E = [np.eye(4)[i] for i in range(4)]
+    segs = [{"start_ms": 0, "end_ms": 2000, "engine_speaker": "A"},
+            {"start_ms": 2000, "end_ms": 2200, "engine_speaker": "A"},           # too short: no mark
+            {"start_ms": 3000, "end_ms": 5000, "engine_speaker": "B", "split": 1},
+            {"start_ms": 5000, "end_ms": 7000, "engine_speaker": "B", "split": 2},
+            {"start_ms": 9000, "end_ms": 9500, "engine_speaker": "A"}]           # from hi on
+    marks = [(1, 1), None, (3, 2), (4, 3), (4, 3)]
+    rows = device_pipeline.seg_embs("mic", segs, marks, E, at, at(0), at(9))
+    assert [r[:5] for r in rows] == [("mic", ms(at(0)), ms(at(2)), 0, "A"), ("mic", ms(at(3)), ms(at(5)), 1, "B"),
+                                     ("mic", ms(at(5)), ms(at(7)), 2, "B")]
+    assert [np.frombuffer(r[6], np.float16).tolist() for r in rows] == [E[0].tolist(), E[2].tolist(), E[3].tolist()]
+    assert {r[5] for r in rows} == {f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"}

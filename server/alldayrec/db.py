@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
 CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
-    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s), unix ms; part: of one split_speakers cut (1 on), 0 whole
+    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s; parts label() joins again: the last one's), unix ms; part:
+                                                    -- of one split_speakers cut (1 on), 0 whole
     model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
     PRIMARY KEY (device, start_ms, part));          -- goes with its sentences (replace_sentences) and its audio (trim.py)
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
