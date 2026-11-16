@@ -940,6 +940,7 @@ def auto_closed_on(day: str) -> int:
 
 # voices, apart pins, people bank, aliases, name hints
 
+# not used: a row written through these (a merge, a split, late) is not known to be free of music (sounds.verified)
 V_COLS = ("conv", "label", "device", "n", "speech_s", "k", "e", "clip", "clip_start", "clip_end", "clip_text", "level")
 
 

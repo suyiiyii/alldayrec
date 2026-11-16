@@ -145,6 +145,16 @@ def test_late_cached_voice(audio_store, gate, monkeypatch, built_on, score):
     assert read == {(True, 0.1): [], (False, 0.1): [ms(rows[1]["start"]), ms(rows[0]["start"])]}.get((built_on, score), [ms(rows[0]["start"])])
 
 
+def test_merged_voice_not_known(audio_store, gate, monkeypatch):
+    """A voice merged into (late_merge.put_voice, as late, split and unsplit do): its used gone, so made again."""
+    from alldayrec import late_merge
+    c, rows = cached(monkeypatch, [6.0, 6.0], True)
+    assert routes_speakers.voice_of(c["id"], "S1") is not None
+    with db.tx() as t:
+        late_merge.put_voice(t, {"conv": c["id"], "label": "S1", "e": db.blob(np.ones(4, np.float32))})
+    assert db.conn().execute("SELECT used FROM voices").fetchone()[0] is None and routes_speakers.voice_of(c["id"], "S1") is None
+
+
 def test_shortlist(audio_store, gate):
     c, rows = sample([3.0, 3.0])
     music(rows[0]["start"], 3, 0.5)
