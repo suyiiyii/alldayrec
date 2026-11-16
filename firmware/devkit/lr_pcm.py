@@ -1,7 +1,7 @@
 """Level-cal E1: is the nRF PDM's GAIN applied before or after its 16-bit rounding? Reads the mic's raw PCM that an
 LR_RAW_PCM=1 build (src/raw_pcm.c) sends on the USB serial port, and tells from the sample values. Gain applied after
-the rounding: at +20 dB (0x50, x10) the samples sit on multiples of ~10, the steps between used values ~10 LSB wide;
-before: every value in the dense middle is used, as at 0 dB. Standard library only.
+the rounding: at +20 dB (0x50, x10) the samples, and so the steps between adjacent samples, sit on multiples of ~10;
+before: the steps take every value in their dense middle, as at 0 dB. Standard library only.
     python3 lr_pcm.py capture OUT.raw [--seconds 12] [--port /dev/cu.usbmodemXXXX]   the frames as they come
     python3 lr_pcm.py stats A.raw [B.raw]   each capture's numbers; two at different gains: the verdict
     python3 lr_pcm.py --selftest
@@ -65,7 +65,8 @@ def stats(fr, bad=0) -> dict:
     x = [v for f in use for v in f[2]]
     clipped = sum(1 for v in x if v >= FULL or v <= -FULL)
     x = [v for v in x if -FULL < v < FULL]
-    r = {"gain": gain, "frames": len(fr), "used": len(use), "bad": bad, "gaps": gaps, "clipped": clipped}
+    r = {"gain": gain, "frames": len(fr), "used": len(use), "bad": bad, "gaps": gaps, "clipped": clipped,
+         "clipped_share": clipped / max(len(use) * N, 1)}
     if len(x) < 100 * N:
         return {**r, "error": f"{len(x)} samples left after skipping {SKIP} frames: capture longer"}
     mean = sum(x) / len(x)
@@ -84,8 +85,10 @@ def stats(fr, bad=0) -> dict:
         d = math.gcd(d, v - x[0])
     r["gcd"] = d
     r["low_bits"] = [round(sum(v >> k & 1 for v in x) / len(x), 3) for k in range(4)]  # ~0.5 each when all used
-    # occupancy: used values / all values between the 2nd and 98th percentile, where each value is expected often
-    s = sorted(x)
+    # occupancy: of the steps between adjacent samples (integers on the same grid as the samples, without the DC and
+    # the slow 2-20 Hz wander the raw path carries), the values used / all values between their 2nd and 98th
+    # percentile, where each value is expected often
+    s = sorted(b - a for f in use for a, b in zip(f[2], f[2][1:]) if -FULL < a < FULL and -FULL < b < FULL)
     lo, hi = s[len(s) // 50], s[-len(s) // 50]
     band = [v for v in s if lo <= v <= hi]
     r["band"] = (lo, hi)
@@ -105,8 +108,12 @@ def verdict(a: dict, b: dict) -> tuple[str, str]:
         return "inconclusive", f"gains {a['gain']:#04x} and {b['gain']:#04x} only x{step:.2f} apart: use 0x28 and 0x50"
     if a["occupancy"] < 0.9:
         return "inconclusive", f"{a['gain']:#04x} already leaves values unused (occupancy {a['occupancy']:.2f})"
-    if b["width"] < 3 * step or a["per_value"] < 10 or b["per_value"] < 10:
-        return "inconclusive", f"too little spread at {b['gain']:#04x} (band {b['band']}) or too few samples a value: a louder room or a steady soft sound"
+    if b["clipped_share"] > 0.01:
+        return "inconclusive", f"{b['clipped_share']:.1%} of {b['gain']:#04x}'s samples clipped: a quieter room, or 0x3c (S gain 10) as the higher gain"
+    if b["width"] < 3 * step:
+        return "inconclusive", f"too little spread at {b['gain']:#04x} (steps {b['band']}): the room too quiet, play a soft steady sound"
+    if a["per_value"] < 10 or b["per_value"] < 10:
+        return "inconclusive", f"too few samples a value ({min(a['per_value'], b['per_value']):.1f}): capture longer"
     if b["occupancy"] < 0.75:
         used = round(b["occupancy"] * b["width"])
         return "after", f"{b['gain']:#04x}'s used values {(b['width'] - 1) / max(used - 1, 1):.1f} apart (expected {step:.1f} after rounding)"
@@ -173,6 +180,19 @@ def selftest():
     for sigma in (1.5, 4, 30):
         assert judge(stream(0x28, sigma, dc=3.3), stream(0x50, sigma, 10, 3.3))[0] == "after", sigma
         assert judge(stream(0x28, sigma, dc=3.3), stream(0x50, sigma, 10, 3.3, before=True))[0] == "before", sigma
+    for before in (False, True):  # a slow 2 Hz wander of 1000 LSB (x10: 10000) under the noise: the steps ignore it
+        def wander(gain, scale):
+            out = []
+            for i in range(600):
+                pcm = []
+                for j in range(N):
+                    v = 1000 * math.sin(2 * math.pi * 2 * (i * N + j) / 16000) + rnd.gauss(0, 3)
+                    pcm.append(round(v * scale) if before else round(round(v) * scale))
+                out.append(frame(i, gain, pcm))
+            return b"".join(out)
+        assert judge(wander(0x28, 1), wander(0x50, 10))[0] == ("before" if before else "after"), before
+    v, rs = judge(stream(0x28, 3), stream(0x50, 20000, 1))  # a loud room at 0x50: ~10% of it at full scale
+    assert v == "inconclusive" and rs[1]["clipped"] > 0, rs[1]
     assert judge(stream(0x28, 2), stream(0x50, 2, 10.07))[0] == "after"  # a gain not exactly x10
     assert judge(stream(0x28, 2), stream(0x3c, 2, 3.16))[0] == "after"  # +10 dB
     assert judge(stream(0x28, 0.3), stream(0x50, 0.3, 10))[0] == "inconclusive"  # a dead quiet mic
@@ -191,6 +211,23 @@ def selftest():
     r = stats(fr, bad)
     assert r["gain"] == 0x50 and r["used"] == 489 - SKIP and r["gaps"] == 1 + 1 + 10, r
     assert stats([])["gain"] is None
+
+    # capture through a pty: bytes a cooked tty rewrites or acts on (CR, LF, ^C, ^D, XON, XOFF, DEL) come through as sent
+    import threading
+    special = [0x0A0D, 0x0D0A, 0x0304, 0x1311, 0x7F7F, -0x0A0D]
+    sent = b"".join(frame(i, 0x28, special * (N // len(special)) + special[:N % len(special)]) for i in range(50))
+    master, slave = os.openpty()
+    out = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"lr_pcm_selftest_{os.getpid()}.raw")
+    t = threading.Thread(target=capture, args=(out, 1.0, os.ttyname(slave)))
+    t.start()
+    time.sleep(0.3)  # capture has the port open and raw
+    os.write(master, sent)
+    t.join()
+    got = open(out, "rb").read()
+    os.remove(out)
+    os.close(master)
+    os.close(slave)
+    assert got == sent, (len(got), len(sent))
     print("selftest ok")
 
 
