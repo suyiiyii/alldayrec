@@ -10,6 +10,7 @@ by renames before the filter) is learnt again from the name's voices; without --
 
     python -m alldayrec.bank relearn <live.db>            per name: n before and after, voices used, cosine old/new
     python -m alldayrec.bank relearn <live.db> --apply    then restart the server: the diarists load the bank at start
+    python -m alldayrec.bank relearn --tenant ID [--apply]    the tenant's store; BG_GATE by its "sound" (tenants.json)
 """
 import sys
 from pathlib import Path
@@ -228,20 +229,25 @@ def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] 
 
 if __name__ == "__main__":
     match sys.argv[1:]:
+        case ["relearn", "--tenant", tid, *apply] if apply in ([], ["--apply"]):
+            # BG_GATE goes by the tenant's "sound": tenants.json's, not in the store
+            if not (src := next((t for t in tenant.load() if t.id == tid), None)):
+                raise SystemExit(f"--tenant {tid}: not in {tenant.FILE}")
+            store, sound = src.db, src.sound
         case ["relearn", store, *apply] if apply in ([], ["--apply"]):
-            if apply:
-                db.open_db(Path(store))
-            else:  # the same work on a copy in memory: the file is opened read-only
-                tenant.enter(tenant.Tenant("local", "", Path(store).parent, Path(store).parent, db=Path(":memory:")))
-                db.read_only(store).backup(db.conn())
-            # BG_GATE: the tenant's "sound" (tenants.json) is not in the store: one with scene scores in it has it on
-            T().sound = sounds.BG_GATE and db.conn().execute("SELECT 1 FROM sounds LIMIT 1").fetchone() is not None
-            with db.tx() as t:
-                done = relearn(t)
-            for r in done:
-                print((f"{r['name']}: n {r['old_n']} -> {r['new_n']}, voices {r['used']} used / {r['voices'] - r['used']} dropped, "
-                       f"cosine old/new {r['cos']}" if "new_n" in r else f"{r['name']}: kept (n {r['old_n']}, {r['voices']} voices)")
-                      + (f", {r['unverified']} not shown free of music (BG_GATE)" if r.get("unverified") else ""))
-            print("written" if apply else "dry run: nothing written (--apply writes)")
+            sound = False  # no tenant given: BG_GATE not in effect
         case _:
             raise SystemExit(__doc__)
+    if apply:
+        db.open_db(Path(store))
+    else:  # the same work on a copy in memory: the file is opened read-only
+        tenant.enter(tenant.Tenant("local", "", Path(store).parent, Path(store).parent, db=Path(":memory:")))
+        db.read_only(store).backup(db.conn())
+    T().sound = sound
+    with db.tx() as t:
+        done = relearn(t)
+    for r in done:
+        print((f"{r['name']}: n {r['old_n']} -> {r['new_n']}, voices {r['used']} used / {r['voices'] - r['used']} dropped, "
+               f"cosine old/new {r['cos']}" if "new_n" in r else f"{r['name']}: kept (n {r['old_n']}, {r['voices']} voices)")
+              + (f", {r['unverified']} not shown free of music (BG_GATE)" if r.get("unverified") else ""))
+    print("written" if apply else "dry run: nothing written (--apply writes)")

@@ -307,18 +307,27 @@ def test_relearn(audio_store, gate, monkeypatch, built_on, score, learnt):
     assert np.allclose(bank.unit(db.people()["Alex"][1][0]), np.eye(4)[0] if learnt else np.eye(4)[1])
 
 
-@pytest.mark.parametrize("gate_env,scored,kept", [("1", True, True), ("0", True, False), ("1", False, False)])
-def test_relearn_cli(audio_store, monkeypatch, tmp_path, gate_env, scored, kept):
-    """python -m alldayrec.bank relearn with the instance's BG_GATE: the tenant's sound read as scene scores in the
-    store (none: sound off, as before); the dry run writes nothing, --apply what the dry run said. Off: as before."""
-    import os, subprocess, sys
+@pytest.mark.parametrize("gate_env,sound,scored,kept", [("1", True, True, True), ("1", True, False, False), ("1", False, True, False),
+                                                       ("0", True, True, False), ("1", None, True, False)])
+def test_relearn_cli(audio_store, monkeypatch, tmp_path, gate_env, sound, scored, kept):
+    """python -m alldayrec.bank relearn --tenant ID with the instance's BG_GATE: the tenant's "sound" as tenants.json has
+    it, whatever scene scores the store holds (sound off, old scores kept: as off); a store given as a path (sound None):
+    as before. The dry run writes nothing, --apply what the dry run said."""
+    import json, os, subprocess, sys
+    db.open_db(tmp_path / "live.db")  # the tenant's store: data / live.db
     T().sound = True
     monkeypatch.setenv("SOUND_MODEL", "mn10_as")
-    relearn_store(monkeypatch, scored, 0.5 if scored else None)
-    env = {**os.environ, "BG_GATE": gate_env}
-    run = lambda *a: subprocess.run([sys.executable, "-m", "alldayrec.bank", "relearn", str(tmp_path / "t.db"), *a],
+    relearn_store(monkeypatch, True, 0.5 if scored else None)
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    (cfg / "tenants.json").write_text(json.dumps([{"id": "t1", "token": "", "data": str(tmp_path), "recordings": str(tmp_path),
+                                                   "sound": bool(sound)}]))
+    (cfg / "tenants.json").chmod(0o600)
+    env = {**os.environ, "BG_GATE": gate_env, "DATA_DIR": str(cfg)}
+    which = [str(tmp_path / "live.db")] if sound is None else ["--tenant", "t1"]
+    run = lambda *a: subprocess.run([sys.executable, "-m", "alldayrec.bank", "relearn", *which, *a],
                                     capture_output=True, text=True, check=True, env=env).stdout
-    files = lambda: [p.read_bytes() for p in sorted(tmp_path.glob("t.db*")) if p.suffix != ".db-shm"]  # shm: readers mark it
+    files = lambda: [p.read_bytes() for p in sorted(tmp_path.glob("live.db*")) if p.suffix != ".db-shm"]  # shm: readers mark it
     was = files()
     out = run()
     assert files() == was, "a dry run"
@@ -326,3 +335,13 @@ def test_relearn_cli(audio_store, monkeypatch, tmp_path, gate_env, scored, kept)
                                    "Alex: n 1 -> 10, voices 5 used / 0 dropped, cosine old/new 0.0")
     assert run("--apply").splitlines()[0] == out.splitlines()[0]
     assert np.allclose(selfvoice.unit(db.people()["Alex"][1][0]), np.eye(4)[1 if kept else 0])
+
+
+def test_relearn_cli_unknown_tenant(audio_store, tmp_path):
+    """--tenant ID not in tenants.json: a stop before the store is opened."""
+    import json, os, subprocess, sys
+    (tmp_path / "tenants.json").write_text(json.dumps([{"id": "t1", "token": "", "data": str(tmp_path), "recordings": str(tmp_path)}]))
+    (tmp_path / "tenants.json").chmod(0o600)
+    r = subprocess.run([sys.executable, "-m", "alldayrec.bank", "relearn", "--tenant", "t2", "--apply"],
+                       capture_output=True, text=True, env={**os.environ, "DATA_DIR": str(tmp_path)})
+    assert r.returncode == 1 and "--tenant t2: not in" in r.stderr and not (tmp_path / "live.db").exists()

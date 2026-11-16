@@ -85,7 +85,7 @@ type: reference
 
 `perf_` 开头的表只记耗时和资源用量，不记内容，保留 90 天。`GET /api/perf?day=YYYY-MM-DD` 读一天的；从数据库副本导出用 `python -m alldayrec.perf export <live.db> <YYYY-MM-DD>`。
 
-`enrolled` 出现之前学到的声纹，每人只有一行汇总，不对应具体的句子。那时学进了别人声音的，可以用 `python -m alldayrec.bank relearn <live.db>` 从这个人现在名下的声音（实时录音里的）重新算出这一行：只打印每人前后的句数、用上和丢掉的声音数、新旧声纹的余弦，不写库；加 `--apply` 才写，写完重启服务端（声纹在启动时载入）。之后逐句学到的不受影响。打开了 `BG_GATE` 时只用查得出没有音乐的声音（见[配置项](./configuration.md#可选-环境声音)）。
+`enrolled` 出现之前学到的声纹，每人只有一行汇总，不对应具体的句子。那时学进了别人声音的，可以用 `python -m alldayrec.bank relearn <live.db>` 从这个人现在名下的声音（实时录音里的）重新算出这一行：只打印每人前后的句数、用上和丢掉的声音数、新旧声纹的余弦，不写库；加 `--apply` 才写，写完重启服务端（声纹在启动时载入）。之后逐句学到的不受影响。用 `relearn --tenant <ID>` 跑、打开了 `BG_GATE` 且这个租户开了环境声音时，只用查得出没有音乐的声音（见[配置项](./configuration.md#可选-环境声音)）。
 
 摘要提示词更新后，已有摘要保持原样，`summaries.prompt_version` 记录各条的版本。部署新版本后，在服务端的 `server/` 目录中回填：
 
