@@ -111,6 +111,23 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
     at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
     PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
+CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
+    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s) or part, unix ms; part: of one split_speakers cut (1 on,
+                                                    -- each its own even when label() joins them again), 0 whole
+    model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
+    gain_db REAL NOT NULL DEFAULT 0,                -- the gain its audio was given before the model (dB; 0: as decoded)
+    sentence INTEGER NOT NULL,                      -- its row's rowid in sentences: segments overlap and two rows can
+    seg INTEGER NOT NULL,                           -- start in one ms (one id); seg: its engine segment's place in the
+    sentence_start TEXT NOT NULL,                   -- piece (0 on); sentence_start: that row's start as it went in.
+    PRIMARY KEY (sentence, seg, part));             -- Goes with its sentence (replace_sentences), its audio (trim.py)
+-- A voiceprint's sentence: rowid = sentence AND source = device AND start = sentence_start, else none (its own span
+-- tells nothing: final_rows can end a row before a segment in it starts).
+-- shortcut: sentences has no INTEGER PRIMARY KEY, so a rowid holds only while the file is copied whole (the backup
+-- API; docs/how-to/backup.md); a SQL dump or INSERT ... SELECT renumbers it: the rule leaves orphans (trim.py drops
+-- them with their audio) and mixes up only two rows of one device starting in one ms. To take a logical import, give
+-- sentences an explicit INTEGER PRIMARY KEY in a controlled migration (enrolled.row too)
+CREATE INDEX IF NOT EXISTS seg_emb_audio ON seg_emb(device, start_ms);  -- trim.py's delete with the audio
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
@@ -382,16 +399,49 @@ def sentences(lo: str, hi: str, inclusive: bool = False, source: str | None = No
                                                  (lo, hi, source, source))]
 
 
-def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str):
-    """A device's pass replaces only that device's rows: another device may have recorded the same minutes."""
-    c.execute("DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))
+def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str) -> list[int | None]:
+    """A device's pass replaces only that device's rows: another device may have recorded the same minutes. Returns
+    each row's rowid as it went in, None for one the late layer protected."""
+    q = "FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0"
+    gone = c.execute(f"SELECT rowid, source, start {q}", (lo, hi, source)).fetchall()
+    c.execute(f"DELETE {q}", (lo, hi, source))
+    # their voiceprints, by row (db seg_emb's rule): a joined row's later segments can start at hi or after (a shorter
+    # pass now), another row's can start in this one's span
+    c.executemany("DELETE FROM seg_emb WHERE sentence = ? AND device = ? AND sentence_start = ?", gone)
     protected = c.execute("SELECT id, start, end FROM sentences WHERE source = ? AND late = 1 AND start < ? AND end > ?", (source, hi, lo)).fetchall()
-    insert_sentences(c, [r for r in rows if not any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)])
+    return [None if any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)
+            else insert_sentences(c, [r])[0] for r in rows]
 
 
-def insert_sentences(c: sqlite3.Connection, rows: list[dict]):
-    c.executemany(f"INSERT INTO sentences ({','.join(S_COLS)}) VALUES ({','.join('?' * len(S_COLS))})",
-                  [tuple(r.get(k) for k in S_COLS) for r in rows])
+def ms(s: str) -> int:
+    """A row's start or end (iso) as seg_emb holds it, unix ms."""
+    return int(dt.datetime.fromisoformat(s).timestamp() * 1000)
+
+
+def put_seg_embs(c: sqlite3.Connection, source: str, rows: list[dict], ids: list[int | None], embs: list[tuple]) -> bool:
+    """A pass's voiceprints (device_pipeline.seg_embs: each with its row's place in the pass's rows) beside the rows
+    replace_sentences put in (ids: what it returned), none for a row it did not. False: none written (logged, a key
+    already there too); the rows stay, for the voiceprints are only beside them."""
+    c.execute("SAVEPOINT seg_emb")
+    try:
+        c.executemany("INSERT INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      [(*e[:8], ids[e[8]], e[9], rows[e[8]]["start"]) for e in embs if ids[e[8]] is not None])
+    except Exception as e:
+        if not c.in_transaction:  # SQLite dropped the whole transaction (disk full, I/O): the rows are gone too
+            raise
+        c.execute("ROLLBACK TO seg_emb")
+        log.warning("%s: segment voiceprints not kept: %r", source, e)
+        return False
+    finally:
+        if c.in_transaction:
+            c.execute("RELEASE seg_emb")
+    return True
+
+
+def insert_sentences(c: sqlite3.Connection, rows: list[dict]) -> list[int]:
+    """Their rowids, in order."""
+    q = f"INSERT INTO sentences ({','.join(S_COLS)}) VALUES ({','.join('?' * len(S_COLS))})"
+    return [c.execute(q, tuple(r.get(k) for k in S_COLS)).lastrowid for r in rows]
 
 
 def processed(device: str, start_ms: int, end_ms: int, layer: str | None = None) -> list[list[int]]:

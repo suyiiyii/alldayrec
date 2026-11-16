@@ -17,6 +17,7 @@ from alldayrec import asr
 from alldayrec import audio
 from alldayrec import colocate
 from alldayrec import db
+from alldayrec import infer
 from alldayrec import live
 from alldayrec import perf
 from alldayrec import qwen_stream
@@ -49,6 +50,21 @@ STREAM_IDLE_S = 12
 # calls, and of them taking voiceprints (each a threads.INFER call, INFER_THREADS threads). Realtime has one piece
 FINAL_ASR_CONCURRENCY = int(os.environ.get("FINAL_ASR_CONCURRENCY", "4"))
 FINAL_EMBED_CONCURRENCY = int(os.environ.get("FINAL_EMBED_CONCURRENCY", "2"))
+
+
+def seg_embs(device: str, segs: list[dict], vs: list, at) -> list[tuple]:
+    """seg_emb's rows of a final piece: the voiceprint voices() took of each engine segment or of each of its parts
+    (vs), with its own span, as float16, the row it went in (its place in final_rows' rows; segs: as label() and
+    final_rows left them) and the segment's place in vs; none for a part in no row. No new inference; db.put_seg_embs
+    puts the rowid and the start for the row."""
+    model = f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"
+    ts = lambda s: db.ms(iso(at(s / 1000)))  # as its row's start: db.ms of the same iso
+    rows = {id(o): g["row"] for g in segs for o in (g, *(g.get("words") or []))}
+    # a part is in segs, or label() joined it again into one holding its first word (by identity: segments overlap)
+    row = lambda p: rows.get(id(p if id(p) in rows or not p.get("words") else p["words"][0]))
+    return [(device, ts(p["start_ms"]), ts(p["end_ms"]), k if len(v) > 1 else 0, p.get("engine_speaker"), model,
+             np.asarray(e, np.float16).tobytes(), 0.0, r, i)  # gain_db: voices() embeds x as decoded (lift: the engine's)
+            for i, v in enumerate(vs) if v for k, (p, e) in enumerate(v, 1) if (r := row(p)) is not None]
 
 
 async def pipeline(device: str):
@@ -184,14 +200,17 @@ async def pipeline(device: str):
         return (rows, changed) if missing <= len(rows) // 10 else None
 
     async def commit(closed: list[dict], rows: list[dict] | None = None, lo: str = "", hi: dt.datetime | None = None, coverage=None,
-                     layer: str = "final"):
-        """One transaction: the piece's rows replace [lo, hi), closed conversations (with the live analysis that
-        overlaps one), the finalized time, the open conversation. layer standby: the piece was left to another device."""
+                     layer: str = "final", embs: list[tuple] = ()):
+        """One transaction: the piece's rows (and its segments' voiceprints, embs: seg_embs, whose failure leaves the
+        rest) replace [lo, hi), closed conversations (with the live analysis that overlaps one), the finalized time,
+        the open conversation. layer standby: the piece was left to another device."""
         recs = [record(c) for c in closed]
         lv = st.live
         with db.tx() as t:
             if rows is not None:
-                db.replace_sentences(t, lo, iso(hi), rows, device)
+                ids = db.replace_sentences(t, lo, iso(hi), rows, device)
+                if embs and not db.put_seg_embs(t, device, rows, ids, embs):
+                    st.seg_emb_failed += 1
                 db.record_processed(t, device, coverage or [], layer)
             attached, relabelled = False, []
             for rec in recs:
@@ -456,8 +475,15 @@ async def pipeline(device: str):
         del st.final_latency[:-10]
         closed = [c for r in rows for c in grouper.sentence(r)]
         closed += grouper.advance(hi)
+        embs = []
+        if T().seg_emb:
+            try:
+                embs = seg_embs(device, segs, j["vs"], at)
+            except Exception as e:  # only beside the rows: never holds them up
+                log.warning("%s: segment voiceprints not kept: %r", device, e)
+                st.seg_emb_failed += 1
         with perf.timed(fcost, "commit_ms"):
-            await commit(closed, rows, iso(lo), hi, heard)
+            await commit(closed, rows, iso(lo), hi, heard, embs=embs)
         final_row(len(x) / SR, len(rows))
         st.refine = {"at": dt.datetime.now().isoformat(timespec="seconds"), "ms": round((j["took"] + time.perf_counter() - t) * 1000),
                         "engine": engine, "speakers": by_label, "changed": len(rows), "piece_s": round(len(x) / SR),

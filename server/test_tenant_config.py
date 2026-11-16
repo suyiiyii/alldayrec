@@ -24,6 +24,7 @@ ONE = {"id": "sample", "token": SECRET, "data": "data", "recordings": "recording
     *[json.dumps([{**ONE, field: value}]) for field in ONE for value in (None, True, 12, [], {})],
     *[json.dumps([{**ONE, "lang": value}]) for value in (True, 12, [], {}, "fr", SECRET)],
     json.dumps([{**ONE, "id": SECRET, "lang": "fr"}]),
+    *[json.dumps([{**ONE, "seg_emb": value}]) for value in (None, 1, "true", [], SECRET)],
 ])
 def test_invalid_config_exits_cleanly(tmp_path, content):
     check_invalid_config(tmp_path, content)
@@ -48,7 +49,7 @@ def check_invalid_config(tmp_path, content, setup=""):
     assert "Traceback" not in output and SECRET not in output
     if setup:
         assert result.stderr == (f"{path}: JSON exceeds parser limits; expected a JSON array of objects "
-                                 "with string fields id, token, data, recordings, optional lang (zh or en) and sound (true or false)\n")
+                                 "with string fields id, token, data, recordings, optional lang (zh or en), sound and seg_emb (true or false)\n")
     assert result.stdout == ""
     assert path.read_bytes() == original and path.stat().st_mode & 0o777 == 0o600
 
@@ -97,3 +98,12 @@ def test_valid_config_keeps_language_fallback(tmp_path, monkeypatch, lang):
     loaded, = tenant.load(path)
     assert (loaded.id, loaded.token, loaded.data, loaded.recordings, loaded.lang) == (
         ONE["id"], SECRET, Path("data"), Path("recordings"), lang or "en")
+
+
+@pytest.mark.parametrize("given, want", [({}, False), ({"seg_emb": False}, False), ({"seg_emb": True}, True)])
+def test_seg_emb_is_off_unless_asked(tmp_path, given, want):
+    path = tmp_path / "tenants.json"
+    path.write_text(json.dumps([{**ONE, **given}]))
+    path.chmod(0o600)
+    loaded, = tenant.load(path)
+    assert loaded.seg_emb is want

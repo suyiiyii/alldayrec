@@ -23,6 +23,7 @@ from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
+from alldayrec import infer
 from alldayrec import monitor
 from alldayrec import perf
 from alldayrec import pipeline_state
@@ -341,6 +342,7 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     queue position and diarists; a rename in one teaches only its own diarists."""
     rig(tmp_path, monkeypatch, hear)  # the fake VAD, engines and LLM
     a, b = make(tmp_path, "a", "ta"), make(tmp_path, "b", "tb")
+    a.seg_emb = True  # a keeps its segments' voiceprints, b (as by default) does not
     silence = np.zeros(PIECE_S * SR, np.int16)
     t0 = dt.datetime.fromtimestamp(round(dt.datetime.now().timestamp()) - 6 * PIECE_S)
     tones = {a: (1, 2), b: (51, 52)}
@@ -379,6 +381,15 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     assert a.devices[DEV].seg is not b.devices[DEV].seg
     assert len(dias["a"]) == len(dias["b"]) == 2 and not set(map(id, dias["a"])) & set(map(id, dias["b"])), "each its own diarists"
     assert not a.dias and not b.dias, "gone with their pipelines"
+    embs = {t.id: tenant.call(t, lambda: db.conn().execute("SELECT * FROM seg_emb ORDER BY start_ms").fetchall()) for t in (a, b)}
+    rows = tenant.call(a, db.sentences, core.iso(t0), "~", False, DEV)
+    assert [(r["device"], r["part"], r["engine_speaker"], r["model"], r["gain_db"]) for r in embs["a"]] == [(DEV, 0, "SPEAKER_0", f"redimnet2-b6.onnx@{infer.MODELS[infer.EMB][:12]}", 0.0)] * 2
+    owners = tenant.call(a, lambda: [r[0] for r in db.conn().execute("SELECT s.id FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence AND s.source = e.device"
+                                                                    " AND s.start = e.sentence_start ORDER BY e.start_ms")])
+    assert owners == [r["id"] for r in rows], "each with its own row"
+    assert [(r["start_ms"], r["end_ms"]) for r in embs["a"]] == [tuple(int(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end")) for r in rows]
+    assert all(np.allclose(np.frombuffer(r["e"], np.float16), [0, 1, 0, 0]) for r in embs["a"]), "the voiceprint the diarist took, as float16"
+    assert embs["b"] == [], "off: nothing kept"
 
 
 def test_outside_any_tenant():

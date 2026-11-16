@@ -12,6 +12,7 @@ AllDayRec starts from one idea: a whole day of audio is very private data and be
 - The original audio: one file per device per hour, kept for good (see [Data layout](../reference/data.md)).
 - The database `live.db`: transcripts, conversations, summaries, to-dos, speakers, voiceprints.
 - Speech detection and voiceprints: FireRedVAD and ReDimNet2 run on the local CPU, and voice features never leave the server.
+- Per-segment voiceprints (`seg_emb` in `tenants.json`, off by default): when on, the voiceprint taken of each recognized segment at finalization is kept in the `seg_emb` table of `live.db`. These are the voiceprints of everyone speaking near the wearer, passers-by who never agreed to it included, kept only to re-cluster and review speakers on the server later. Off, none is kept; when sentences are finalized again or audio is trimmed, their voiceprints go in the same transaction; deleting this person's `live.db` deletes them all.
 
 There is no account to sign up for. Web/API access uses the tokens in `tenants.json`; MCP also accepts separately created, revocable [AI connection links](../how-to/connect-mcp.md#create-an-ai-connection-link).
 
