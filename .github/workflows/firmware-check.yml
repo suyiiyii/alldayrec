@@ -38,17 +38,21 @@ jobs:
           mkdir -p $d/zephyr/settings $d/zephyr/drivers/clock_control $d/haly && touch $d/zephyr/settings/settings.h $d/zephyr/devicetree.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h
           touch $d/zephyr/device.h $d/zephyr/drivers/gpio.h $d/zephyr/drivers/clock_control/nrf_clock_control.h $d/nrfx_pdm.h
           cc -w -pthread -I$d -o $d/gain_check test/gain_check.c && $d/gain_check  # the mic's gain: at once, NVS after, a bad record, a GAIN during PDM init (src/mic_gain.c, src/mic.c)
+          cc -w -I$d -o $d/raw_pcm_check test/raw_pcm_check.c && $d/raw_pcm_check  # E1's raw PCM: frames the mic ring or the host queue lost are a gap in seq (src/raw_pcm.c)
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
+      - run: python3 lr_pcm.py --selftest  # E1's raw PCM frames (src/raw_pcm.c) and its before / after verdict
       - run: python3 ../selftest/selftest.py check && uv run ../selftest/swd.py test  # the self-test's verdicts, LR-N5's SWD flash / diag and UICR file
 
-  nand-build:  # n5 and promicro-nand compile (lr.sh build), and LR-N5's self-test: not released, so a PR is where a broken one shows
+  # n5 and promicro-nand compile (lr.sh build), LR-N5's self-test, and the raw-PCM test builds (LR_RAW_PCM=1, kept as
+  # artifacts to flash for a lab test): not released, so a PR is where a broken one shows
+  nand-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        variant: [n5, promicro-nand, selftest-n5]
+        variant: [n5, promicro-nand, selftest-n5, promicro-p3-rawpcm, n4-rawpcm]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -69,6 +73,15 @@ jobs:
               west build -b xiao_ble/nrf52840 -d "$GITHUB_WORKSPACE/firmware/selftest/build-n5" \
               "$GITHUB_WORKSPACE/firmware/selftest" -o=-j4 -- -DNCS_TOOLCHAIN_VERSION=NONE \
               "-DDTC_OVERLAY_FILE=$GITHUB_WORKSPACE/firmware/selftest/promicro.overlay" -DLR_N5=1
+          elif [ "${VARIANT%-rawpcm}" != "$VARIANT" ]; then
+            LR_RAW_PCM=1 LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "${VARIANT%-rawpcm}"
           else
             LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "$VARIANT"
           fi
+      - if: endsWith(matrix.variant, '-rawpcm')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: firmware-test-${{ matrix.variant }}-${{ github.event.pull_request.head.sha }}
+          path: firmware/devkit/build/lr-${{ matrix.variant }}/zephyr/zephyr.uf2
+          retention-days: 14
+          if-no-files-found: error

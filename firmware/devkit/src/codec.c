@@ -85,6 +85,10 @@ void codec_entry()
             continue;
         }
         transport_frame_no += left_out;  // the buffers the ring had no room for: a gap in the frame numbers (mic_ring.h)
+#ifdef CONFIG_LR_RAW_PCM
+        void raw_pcm_put(const int16_t *pcm, size_t n, uint32_t left_out);
+        raw_pcm_put(codec_input_samples, CODEC_PACKAGE_SAMPLES, left_out);  // tests: as the PDM gave it, before anything below
+#endif
 #ifdef CONFIG_LR_POWER_DEBUG
         extern bool lr_debug_codec_off;
         if (lr_debug_codec_off) {  // power tests: the mic's frames dropped before the codec, nothing goes on
