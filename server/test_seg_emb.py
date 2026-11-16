@@ -76,6 +76,8 @@ def test_trim_drops_with_the_audio(tmp_path, monkeypatch):
     kept = {r[0] for r in db.conn().execute("SELECT start_ms FROM pieces")}
     assert {s(3), s(4)} <= kept and not {s(5), s(10), s(15)} & kept, sorted((k - ms(t0)) // 1000 for k in kept)
     assert left() == [(DEVICE, s(3, 2), 0), ("other", s(10, 1), 0)]
+    q = "DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ? AND end_ms > ?"  # trim.apply_one's
+    assert "seg_emb_audio" in " ".join(r[3] for r in db.conn().execute("EXPLAIN QUERY PLAN " + q, ("d", 0, 1, 0)))
 
 
 def test_replace_sentences_drops_a_joined_rows_later_segments(tmp_path):
@@ -261,3 +263,15 @@ def test_one_rows_two_segments_that_start_in_the_same_ms(tmp_path):
     s = passes(segs, vs, 0, 40)
     assert [r["text"] for r in db.sentences("2026", "~", source="mic")] == ["t1t2"]
     assert kept() == [(s(20), [1, 0, 0, 0]), (s(30), [0, 1, 0, 0])]
+
+
+def test_a_second_write_is_refused(tmp_path):
+    """The same voiceprint (row, segment, part) written again: refused, the first one stays, never overwritten."""
+    db.open_db(tmp_path / "live.db")
+    segs, vs = apart((0, 20))
+    s = passes(segs, vs, 0, 40)
+    ids = [db.conn().execute("SELECT rowid FROM sentences").fetchone()[0]]
+    again = [(*e[:6], np.zeros(4, np.float16).tobytes(), *e[7:]) for e in device_pipeline.seg_embs("mic", segs, vs, lambda x: dt.datetime(2026, 10, 1, 10) + dt.timedelta(seconds=x))]
+    with db.tx() as t:
+        assert not db.put_seg_embs(t, "mic", ids, again)
+    assert kept() == [(s(20), [1, 0, 0, 0])]

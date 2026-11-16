@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voic
     sentence INTEGER NOT NULL,                      -- its row's rowid in sentences: segments overlap and two rows can
     seg INTEGER NOT NULL,                           -- start in one ms (one id); seg: its engine segment's place in the
     PRIMARY KEY (sentence, seg, part));             -- piece (0 on). Goes with its sentence (replace_sentences), its audio (trim.py)
+CREATE INDEX IF NOT EXISTS seg_emb_audio ON seg_emb(device, start_ms);  -- trim.py's delete with the audio
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
