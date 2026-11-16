@@ -1,8 +1,8 @@
 /*
  * CONFIG_LR_RAW_PCM, tests only, never released (LR_RAW_PCM=1 ./lr.sh build V): every 10 ms mic buffer as the PDM gave
  * it (before the high-pass and Opus) on the USB serial port, for lr_pcm.py. Level-cal E1: is the PDM's GAIN applied
- * before or after its 16-bit rounding, seen in the raw sample values. A frame: "LRPC", seq u32 (gaps: frames this
- * dropped), the gain in force u8, 0, the byte sum of the samples u16, 160 samples s16, all little-endian. Nothing
+ * before or after its 16-bit rounding, seen in the raw sample values. A frame: "LRPC", seq u32 (gaps: frames lost,
+ * in the mic ring or here), the gain in force u8, 0, the byte sum of the samples u16, 160 samples s16, all little-endian. Nothing
  * reading the port: the frames are dropped here (read from the code, not seen on a board: the class waits on the
  * one transfer in flight, nothing spins).
  */
@@ -37,14 +37,16 @@ static void raw_tx(const struct device *dev, void *user)
     k_spin_unlock(&raw_lock, k);
 }
 
-/* The codec thread, each buffer as it takes it: a whole frame or none, never waits */
-void raw_pcm_put(const int16_t *pcm, size_t n)
+/* The codec thread, each buffer as it takes it, with the mic ring's buffers left out just before it (a gap in seq):
+ * a whole frame or none, never waits. Host check: test/raw_pcm_check.c */
+void raw_pcm_put(const int16_t *pcm, size_t n, uint32_t left_out)
 {
     static bool started;
     if (!started) {
         uart_irq_callback_set(cdc, raw_tx);
         started = true;
     }
+    raw_seq += left_out;
     struct __packed {
         char magic[4];
         uint32_t seq;

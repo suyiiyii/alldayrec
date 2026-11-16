@@ -123,7 +123,7 @@ uv run --no-project --with bleak --with sounddevice python lr_listen.py --name L
 uv run --no-project --with bleak python lr_listen.py --selftest
 ```
 
-只做测试的原始 PCM 固件（`LR_RAW_PCM=1 ./lr.sh build promicro-p3`，产物在 `build/lr-promicro-p3-rawpcm`，不发布）：每个 10 ms 的麦克风缓冲在高通和 Opus 之前原样送到 USB 串口，录音照常。`lr_pcm.py` 在 Mac 上接收，统计样本值（每帧差分的最大公约数、低位使用率、中段取值占用率），比较两档增益，判断 PDM 的 GAIN 是在 16 位取整之前还是之后生效：
+只做测试的原始 PCM 固件（`LR_RAW_PCM=1 ./lr.sh build promicro-p3`，产物在 `build/lr-promicro-p3-rawpcm`，不发布）：每个 10 ms 的麦克风缓冲在高通和 Opus 之前原样送到 USB 串口，录音照常。`lr_pcm.py` 在 Mac 上接收，统计样本值（每帧差分的最大公约数、低位使用率、中段取值占用率、相邻取值的间距），比较两档增益，判断 PDM 的 GAIN 是在 16 位取整之前还是之后生效。判 after 要求高档的取值落在增益倍数的格点上、没有相邻取值；两档的 RMS 差和增益差相差超过 3 dB、证据互相矛盾、或者采集为空或全是同一个值，都判不出（inconclusive，后两种退出码 1）。帧号的空档包括麦克风环丢掉的帧（主机检查：`test/raw_pcm_check.c`）：
 
 ```bash
 python3 lr_pcm.py capture g28.raw --seconds 12
