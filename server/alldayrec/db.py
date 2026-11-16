@@ -105,7 +105,8 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
     top BLOB,                                       -- zlib(n x K x (uint16 class, float16 score)); NULL past the model's keep_days
     minutes BLOB NOT NULL,                          -- zlib: per wall-clock minute (by each frame's middle): minute (unix),
     gaps TEXT NOT NULL,                             -- frames, float16 mean x classes, uint8 frames >= 0.2 x classes. gaps: JSON
-    at INTEGER NOT NULL,                            -- [[a, b] ms] in the row with no piece (zeros to the model, not covered)
+    gain_db REAL NOT NULL DEFAULT 0,                -- [[a, b] ms] in the row with no piece (zeros to the model, not covered).
+    at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
     PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');

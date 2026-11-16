@@ -91,6 +91,7 @@ def test_scores_what_decoded_and_only_that(on, monkeypatch):
     assert catch_up() == 0 and not decodes, "nothing left but the bad piece, waiting"
     lv = np.frombuffer(db.conn().execute("SELECT db FROM sounds WHERE model = ? ORDER BY start_ms", (sound.model_id("mn10_as"),)).fetchone()[0], np.int8)
     assert len(lv) == 6 and abs(int(lv[0]) - round(20 * np.log10(1000 / 32768))) <= 1, "each frame's level as recorded"
+    assert {g for (g,) in db.conn().execute("SELECT gain_db FROM sounds")} == {0}, "no gain applied yet"
     assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces WHERE start_ms != ?", (ms(t0) + 130_000,)).fetchall()) == 0
 
 

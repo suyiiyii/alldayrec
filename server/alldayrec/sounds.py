@@ -96,8 +96,8 @@ def row(name: str, start_ms: int, x: np.ndarray, v: np.ndarray) -> tuple:
 
 def write(c, device: str, name: str, r: tuple, gaps=()):
     """gaps: what of the row's [start_ms, end_ms) had no decoded audio (zeros to the model): not covered."""
-    c.execute("INSERT OR REPLACE INTO sounds VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              (device, model_id(name), *r, json.dumps(list(gaps)), int(time.time() * 1000)))
+    c.execute("INSERT OR REPLACE INTO sounds (device, model, start_ms, end_ms, hop_ms, window_ms, n, db, top, minutes, gaps, at) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (device, model_id(name), *r, json.dumps(list(gaps)), int(time.time() * 1000)))
 
 
 def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
