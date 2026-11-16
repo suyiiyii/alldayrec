@@ -4,8 +4,8 @@
 // init at boot: a GAIN on the BT RX thread while it runs is not undone by the gain it read.
 //   d=$(mktemp -d) && mkdir -p $d/zephyr/settings $d/zephyr/logging $d/zephyr/drivers/clock_control $d/hal $d/haly && \
 //   touch $d/zephyr/{kernel,logging/log,devicetree,device,drivers/gpio,drivers/clock_control/nrf_clock_control}.h \
-//   $d/zephyr/settings/settings.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h $d/nrfx_pdm.h && cc -w -I$d -o $d/gain_check \
-//   test/gain_check.c && $d/gain_check
+//   $d/zephyr/settings/settings.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h $d/nrfx_pdm.h && cc -w -pthread -I$d -o \
+//   $d/gain_check test/gain_check.c && $d/gain_check
 #include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
@@ -77,22 +77,19 @@ void lr_log(uint8_t code, uint8_t x, uint32_t a, uint32_t b)
 void lr_log_sync(void) { syncs++; }
 #define LAST logged[(n_logged - 1) % 16]
 
-// The BT RX thread run where it may preempt the main thread; a lock held then makes it wait until let go
+// The BT RX thread is a real thread and the lock a real mutex: a GAIN that does not take the lock writes the registers
+// before the init does, and the init's older gain stays in force
+#include <pthread.h>
+#include <sched.h>
+#include <stdatomic.h>
 struct k_mutex {
-    bool held;
+    pthread_mutex_t m;
 };
-#define K_MUTEX_DEFINE(name) struct k_mutex name
+#define K_MUTEX_DEFINE(name) struct k_mutex name = {PTHREAD_MUTEX_INITIALIZER}
 #define K_FOREVER 0
-static void (*rx_waiting)(void);
-static void rx(void (*f)(void), struct k_mutex *m)
-{
-    if (m->held) {
-        rx_waiting = f;
-    } else {
-        f();
-    }
-}
-static void (*at_lock)(void);  // the BT RX thread's turn just before a lock is taken
+static _Thread_local bool on_rx;
+static atomic_int rx_at;  // 1: the BT RX thread is at a k_mutex_lock(), 2: its GAIN returned
+static void (*at_lock)(void);  // the BT RX thread's turn just before the main thread takes a lock
 static int k_mutex_lock(struct k_mutex *m, int t)
 {
     void (*f)(void) = at_lock;
@@ -100,20 +97,12 @@ static int k_mutex_lock(struct k_mutex *m, int t)
     if (f) {
         f();
     }
-    assert(!m->held);
-    m->held = true;
-    return 0;
-}
-static int k_mutex_unlock(struct k_mutex *m)
-{
-    m->held = false;
-    void (*f)(void) = rx_waiting;
-    rx_waiting = NULL;
-    if (f) {
-        f();
+    if (on_rx) {
+        atomic_store(&rx_at, 1);
     }
-    return 0;
+    return pthread_mutex_lock(&m->m);
 }
+static int k_mutex_unlock(struct k_mutex *m) { return pthread_mutex_unlock(&m->m); }
 
 #include "../src/mic_gain.c"
 
@@ -155,11 +144,23 @@ static void nrfy_gpio_pin_clear(int pin) {}
 static void nrfx_pdm_buffer_set(int16_t *b, int n) {}
 static void nrfx_pdm_irq_handler(void) {}
 static nrfx_err_t nrfx_pdm_start(void) { return 0; }
-static void (*in_init)(void);  // the BT RX thread's turn inside nrfx_pdm_init(), after mic_start() read the gain
+static void (*in_init)(void);  // a GAIN on the BT RX thread once nrfx_pdm_init() runs, after mic_start() read the gain
+static pthread_t rx;
+static void *rx_run(void *arg)
+{
+    on_rx = true;
+    in_init();
+    atomic_store(&rx_at, 2);
+    return NULL;
+}
 static nrfx_err_t nrfx_pdm_init(nrfx_pdm_config_t const *c, void (*handler)(nrfx_pdm_evt_t const *))
 {
     if (in_init) {
-        rx(in_init, &mic_gain_mtx);
+        atomic_store(&rx_at, 0);
+        assert(!pthread_create(&rx, NULL, rx_run, NULL));
+        while (!atomic_load(&rx_at)) {  // until it waits on the lock, or (no lock) has written the registers
+            sched_yield();
+        }
     }
     nrf_pdm_gain_set(NRF_PDM0, c->gain_l, c->gain_r);
     return 0;
@@ -237,18 +238,22 @@ int main(void)
     boot_with((uint8_t[]){0x30, 0xCF}, 2);
     gainl = gainr = 0;
     in_init = gain_34;
-    assert(mic_start() == 0);
+    assert(mic_start() == 0 && !pthread_join(rx, NULL));
     in_init = NULL;
-    assert(!rx_waiting && !mic_gain_mtx.held && LAST.code == 38 && LAST.x == 0 && LAST.a == 0x30 && LAST.b == 0x34);
+    assert(rx_at == 2 && LAST.code == 38 && LAST.x == 0 && LAST.a == 0x30 && LAST.b == 0x34);
     run_work();
     assert(mic_gain() == 0x34 && gainl == 0x34 && gainr == 0x34 && nvs[0] == 0x34 && mic_gain_kept());
     // a GAIN just before the init takes the lock, and one before mic_start(): the init takes that one
     boot_with((uint8_t[]){0x30, 0xCF}, 2);
     at_lock = gain_34;
-    assert(mic_start() == 0 && gainl == 0x34 && gainr == 0x34);
+    assert(mic_start() == 0);
+    run_work();
+    assert(mic_gain() == 0x34 && gainl == 0x34 && gainr == 0x34 && nvs[0] == 0x34 && mic_gain_kept());
     boot_with((uint8_t[]){0x30, 0xCF}, 2);
     gain_34();
-    assert(mic_start() == 0 && gainl == 0x34 && gainr == 0x34);
+    assert(mic_start() == 0);
+    run_work();
+    assert(mic_gain() == 0x34 && gainl == 0x34 && gainr == 0x34 && nvs[0] == 0x34 && mic_gain_kept());
     printf("gain_check ok\n");
     return 0;
 }

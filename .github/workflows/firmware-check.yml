@@ -37,7 +37,7 @@ jobs:
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)
           mkdir -p $d/zephyr/settings $d/zephyr/drivers/clock_control $d/haly && touch $d/zephyr/settings/settings.h $d/zephyr/devicetree.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h
           touch $d/zephyr/device.h $d/zephyr/drivers/gpio.h $d/zephyr/drivers/clock_control/nrf_clock_control.h $d/nrfx_pdm.h
-          cc -w -I$d -o $d/gain_check test/gain_check.c && $d/gain_check  # the mic's gain: at once, NVS after, a bad record, a GAIN during PDM init (src/mic_gain.c, src/mic.c)
+          cc -w -pthread -I$d -o $d/gain_check test/gain_check.c && $d/gain_check  # the mic's gain: at once, NVS after, a bad record, a GAIN during PDM init (src/mic_gain.c, src/mic.c)
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
       - run: python3 ../selftest/selftest.py check && uv run ../selftest/swd.py test  # the self-test's verdicts, LR-N5's SWD flash / diag and UICR file

@@ -515,7 +515,7 @@ async def gain(name: str, db: float | None):
     if not dev:
         sys.exit("no device")
     async with BleakClient(dev) as c:
-        if code is not None:  # an ATT error (0x13 out of range) raises here; NVS takes it a few ms after
+        if code is not None:  # an ATT error (0x13 out of range) raises here; NVS takes it later, no time promised
             await c.write_gatt_char(CTRL, bytes([0x21, code]), response=True)
             await asyncio.sleep(0.5)
         status = await c.read_gatt_char(TIME)
