@@ -416,7 +416,7 @@ class Slicer(private val dir: File, @Volatile var fgS: Int, @Volatile var bgS: I
         }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         codec.start()
         rec.startRecording()
-        DeviceLog.app(device, "capture", "采集：App 增益 $CAPTURE_GAIN_DB dB · 音源 MIC", fields = mapOf("capture_gain_db" to CAPTURE_GAIN_DB, "audio_source" to "MIC"))
+        DeviceLog.appChanged(device, "capture", "采集：App 增益 $CAPTURE_GAIN_DB dB · 音源 MIC", mapOf("capture_gain_db" to CAPTURE_GAIN_DB, "audio_source" to "MIC"))
         // The encoder's own header says pre-skip 104: its 6.5 ms lookahead counted at 16 kHz, in a 48 kHz field
         // (AOSP C2SoftOpusEnc), and every piece repeated it, cutting 2.2 ms of real audio at each seam. The
         // encoder runs on across pieces, so only the run's first piece has the delay to skip: 6.5 ms = 312 at 48 kHz.

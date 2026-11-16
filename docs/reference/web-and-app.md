@@ -63,8 +63,8 @@ App 的四个底部标签 **时间线**、**实时**、**人物** 显示服务�
 
 | 来源 | 采集增益 | 上报 |
 |---|---|---|
-| iPhone 麦克风 | 编码前在浮点域乘 **+6 dB**；0.9 满幅以下逐样本不变，超过 0.9 用 tanh 软限幅，输出不超过满幅。AVAudioSession 用 `.measurement` 模式（没有系统的语音处理） | 每块音频上传时带 `capture_gain_db=6`；设备日志里的 `capture` 事件记下 `capture_gain_db`、`session_mode`、`input_gain`、`input_gain_settable`（变了才记） |
-| 安卓麦克风 | **0 dB**，音源 `MIC` | 每块音频上传时带 `capture_gain_db=0`；每次开始录音，设备日志里的 `capture` 事件记下 `capture_gain_db`、`audio_source` |
+| iPhone 麦克风 | 编码前在浮点域乘 **+6 dB**；放大后仍在 0.9 满幅以内的样本就是输入乘增益，不再限幅；超过 0.9 用 tanh 软限幅，输出不超过满幅。AVAudioSession 用 `.measurement` 模式（没有系统的语音处理） | 每块音频的文件名记下录制时的增益（`<start>_g6_<n>.ogg`），上传时带 `capture_gain_db=6`；旧版 App 录下、还没传完的块不带这个字段。设备日志里的 `capture` 事件记下 `capture_gain_db`、`session_mode`、`input_gain`、`input_gain_settable` |
+| 安卓麦克风 | **0 dB**，音源 `MIC` | 每块音频上传时带 `capture_gain_db=0`；设备日志里的 `capture` 事件记下 `capture_gain_db`、`audio_source` |
 | 蓝牙录音设备 | 设备自己的 PDM 增益（固件），App 不再加 | 从 TIME 状态的第 53 字节读出 `mic_gain_db = int8 / 2`（dB，0 对应 0x28），随设备状态 `/api/device-status` 上报；旧固件的 TIME 只有 53 字节，值为 null |
 
-服务端只在值变了时记一行。改了采集增益，就要重新标定偏移。
+`capture` 事件只在某个值和上次记下的不同时才写（跨录音启停和 App 重启都算）。增益本身，服务端的增益历史只在值变了时记一行。改了采集增益，就要重新标定偏移。

@@ -96,4 +96,24 @@ class DeviceLogTest {
         assertEquals(false, DeviceLog.cleaned(10, "stop $pkg due to from pid 4451", xiaomi = true))  // adb am force-stop (AOSP)
         assertEquals(false, DeviceLog.cleaned(10, null, xiaomi = true))
     }
+
+    /** The capture event (Slicer.micLoop) once per values, not per recording: the last ones in prefs, so a new process
+     *  reading the same prefs logs the same values no more. */
+    @Test fun changedAcrossLaunches() {
+        val kv = HashMap<String, String>()
+        fun prefs(): android.content.SharedPreferences {  // a launch: a new prefs object over what is on disk
+            lateinit var edit: android.content.SharedPreferences.Editor
+            edit = java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(android.content.SharedPreferences.Editor::class.java)) { _, m, a ->
+                if (m.name == "putString") kv[a[0] as String] = a[1] as String
+                if (m.name == "commit") true else edit } as android.content.SharedPreferences.Editor
+            return java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(android.content.SharedPreferences::class.java)) { _, m, a ->
+                when (m.name) { "getString" -> kv[a[0] as String] ?: a[1]; "edit" -> edit; else -> null } } as android.content.SharedPreferences
+        }
+        val v = mapOf("capture_gain_db" to 0, "audio_source" to "MIC").toSortedMap().toString()
+        assertEquals(true, DeviceLog.changed(prefs(), "logLast:capture:phone", v))
+        assertEquals("same values, next recording", false, DeviceLog.changed(prefs(), "logLast:capture:phone", v))
+        assertEquals("same values in another order", false,
+                     DeviceLog.changed(prefs(), "logLast:capture:phone", mapOf("audio_source" to "MIC", "capture_gain_db" to 0).toSortedMap().toString()))
+        assertEquals("a value changed", true, DeviceLog.changed(prefs(), "logLast:capture:phone", mapOf("capture_gain_db" to 3, "audio_source" to "MIC").toSortedMap().toString()))
+    }
 }

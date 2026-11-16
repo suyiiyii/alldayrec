@@ -146,7 +146,7 @@ enum Recorder {
     let l = link, b = bean
     return ["running": slicer != nil || l != nil || b != nil, "uploading": uploader != nil && !q.isEmpty, "files": slicer?.files ?? l?.files ?? b?.files ?? NSNull(),
             "slice": slicer?.sliceS() ?? (l != nil || b != nil ? sliceS() : nil) ?? NSNull(), "error": slicer?.error ?? NSNull(), "sent": uploader?.sent ?? NSNull(),
-            "pending": q.count, "pendingBytes": bytes, "oldest": q.first.flatMap { Uploader.piece($0)?.start } ?? NSNull(),
+            "pending": q.count, "pendingBytes": bytes, "oldest": q.first.flatMap { Store.piece($0)?.start } ?? NSNull(),
             "note": uploader?.note ?? NSNull(), "interruptedAt": interruptedAt ?? NSNull(),
             "source": (slicer != nil ? "mic" : l != nil || b != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? b?.state ?? NSNull(),
             "connected": l?.state["code"] as? String == "connected" || b?.connected == true, "tag": l?.tag ?? b?.name ?? NSNull(),
@@ -290,7 +290,7 @@ enum Recorder {
     for f in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
       let m = (try? f.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0
       last = max(last, m)
-      if f.lastPathComponent.contains(".part.") {  // no sample count: <start>.ogg (or .aac from the app before)
+      if f.lastPathComponent.contains(".part.") {  // no sample count: <start>_g<dB>.ogg (or <start>.aac from the app before)
         try? fm.moveItem(at: f, to: dir.appendingPathComponent(f.lastPathComponent.replacingOccurrences(of: ".part.", with: ".")))
       }
     }
@@ -538,11 +538,11 @@ final class Slicer {
       anchorMs = Recorder.now()
       let r = try OpusPieces(open: { [unowned self] first in
         fileSlice = sliceS()
-        return dir.appendingPathComponent("\(anchorMs + first * 1000 / Int64(OpusPieces.rate)).part.ogg")
+        return dir.appendingPathComponent(String(format: "%lld_g%g.part.ogg", anchorMs + first * 1000 / Int64(OpusPieces.rate), Capture.gainDb))
       }, full: { [unowned self] n in  // the slice length is up, or the state changed to a shorter slice that is already over
         let sr = Int64(OpusPieces.rate), state = sliceS()
         return n >= Int64(fileSlice) * sr || (state < fileSlice && n >= Int64(state) * sr)
-      }, closed: { [unowned self] url, _, n in  // <start>.part.ogg becomes <start>_<n>.ogg
+      }, closed: { [unowned self] url, _, n in  // <start>_g<dB>.part.ogg becomes <start>_g<dB>_<n>.ogg (Store.piece)
         try? FileManager.default.moveItem(at: url, to: url.deletingLastPathComponent().appendingPathComponent(url.lastPathComponent.replacingOccurrences(of: ".part.ogg", with: "_\(n).ogg")))
         files += 1
       })
@@ -555,19 +555,16 @@ final class Slicer {
     try engine.start()
   }
 
-  /// How this run captures, in the device log when it changed: the app's gain, the session mode and the system's own
-  /// input gain (whether iOS lets it be set: level calibration, 11-19 E5). Records only; on the main thread.
+  /// How this run captures, in the device log when a value changed (also across runs and launches: DeviceLog.appChanged):
+  /// the app's gain, the session mode and the system's own input gain (whether iOS lets it be set: level calibration,
+  /// 11-19 E5). Records only.
   private func logCapture() {
     let s = AVAudioSession.sharedInstance()
     let f: [String: Any] = ["capture_gain_db": Capture.gainDb, "session_mode": s.mode.rawValue, "input_gain": s.inputGain,
                             "input_gain_settable": s.isInputGainSettable]
-    let line = String(format: "采集：App 增益 %+g dB · %@ · 系统输入增益 %.2f（%@）", Capture.gainDb, s.mode.rawValue, s.inputGain,
-                      s.isInputGainSettable ? "可调" : "不可调")
-    guard line != captureLine else { return }
-    captureLine = line
-    DeviceLog.app(device, "capture", line, fields: f)
+    DeviceLog.appChanged(device, "capture", String(format: "采集：App 增益 %+g dB · %@ · 系统输入增益 %.2f（%@）", Capture.gainDb,
+                                                   s.mode.rawValue, s.inputGain, s.isInputGainSettable ? "可调" : "不可调"), fields: f)
   }
-  private var captureLine: String?  // main: the last one logged
 
   private func convert(_ buf: AVAudioPCMBuffer, _ resampler: AVAudioConverter, _ run: OpusPieces) {
     guard let o = AVAudioPCMBuffer(pcmFormat: out, frameCapacity: AVAudioFrameCount(Double(buf.frameLength) * out.sampleRate / buf.format.sampleRate) + 16)
@@ -615,23 +612,14 @@ final class Uploader: Thread {
   @Shared static var watchedUntil: Int64 = 0
   static func monoMs() -> Int64 { Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000) }
 
-  /// A queued file's start (unix ms) and sample count: <start>_<n>.ogg, or <start>.ogg for a piece a kill cut short;
-  /// the BLE recorder's carry its name instead: <start>@LR-P1-XXXX.ogg, uploaded as that device.
-  static func piece(_ f: URL) -> (start: Int64, n: Int64?, device: String?)? {
-    let at = f.deletingPathExtension().lastPathComponent.split(separator: "@", maxSplits: 1)
-    let p = at[0].split(separator: "_").map { Int64($0) }
-    guard ["ogg", "aac"].contains(f.pathExtension), (1...2).contains(p.count), let start = p[0] else { return nil }
-    return (start, p.count == 2 ? p[1] : nil, at.count == 2 ? String(at[1]) : nil)
-  }
-
   /// The first pieces of the queue of one BLE recorder that follow each other (a stop or a kill leaves a gap), at most
   /// 30: one request, one stretch from its first piece's start. Following means later: with what is said now first,
   /// the backlog after it is older and goes on its own. The microphone's go one at a time, each with its n.
   private func batch(_ q: [URL]) -> [URL] {
-    guard let d = Uploader.piece(q[0])?.device else { return [q[0]] }
+    guard let d = Store.piece(q[0])?.device else { return [q[0]] }
     var out = [q[0]]
     for f in q.dropFirst() {
-      guard out.count < 30, let p = Uploader.piece(f), p.device == d, (1...1500).contains(p.start - Uploader.piece(out.last!)!.start) else { break }
+      guard out.count < 30, let p = Store.piece(f), p.device == d, (1...1500).contains(p.start - Store.piece(out.last!)!.start) else { break }
       out.append(f)
     }
     return out
@@ -639,7 +627,7 @@ final class Uploader: Thread {
 
   static func files(_ dir: URL) -> [URL] {
     ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
-      .compactMap { f in piece(f).map { (f, $0.start) } }
+      .compactMap { f in Store.piece(f).map { (f, $0.start) } }
       .sorted { $0.1 < $1.1 }.map { $0.0 }
   }
 
@@ -653,19 +641,18 @@ final class Uploader: Thread {
     if UploadAnswer.waits(haltedAt: haltedAt, now: Recorder.now(), beanWifi: UploadPath.device != nil) { Thread.sleep(forTimeInterval: 2); return }
     // a recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card)
     let all = Uploader.files(dir), ahead = { (f: URL) in
-      Uploader.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
+      Store.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
     }
     let q = all.filter(ahead) + all.filter { !ahead($0) }
     ends(q)
-    guard let f = q.first, let p = Uploader.piece(f) else { Thread.sleep(forTimeInterval: 1); return }
+    guard let f = q.first, let p = Store.piece(f) else { Thread.sleep(forTimeInterval: 1); return }
     let b = batch(q)
     // the hold with every upload while there is one: the server lets go when an upload comes without it
     let hold = p.device.flatMap(Recorder.hold).map { "&hold=\($0)" } ?? ""
     do {
       var got: Data?
       let code = try post("\(server)/api/chunks?device=\(enc(p.device ?? device))&start=\(p.start)" + (p.n.map { "&n=\($0)" } ?? "") + hold
-                          // shortcut: pieces queued before an update that changed the gain go with the new one; record only
-                          + (p.device == nil ? String(format: "&capture_gain_db=%g", Capture.gainDb) : ""),
+                          + (p.gainDb.map { String(format: "&capture_gain_db=%g", $0) } ?? ""),
                           try b.reduce(Data()) { $0 + (try Data(contentsOf: $1)) }, f.pathExtension == "ogg" ? "audio/ogg" : "audio/aac",
                           reply: { got = $0 })
       let answer = UploadAnswer.of(code, got)
@@ -687,7 +674,7 @@ final class Uploader: Thread {
         // a bean's file with these in it stays on the bean (BeanSync.confirmed): said before they leave the queue
         if let d = p.device {
           let k = "refused:\(d)", u = Recorder.defaults
-          u.set(Array(Set((u.stringArray(forKey: k) ?? []) + b.compactMap { Uploader.piece($0).map { "\($0.start)" } })), forKey: k)
+          u.set(Array(Set((u.stringArray(forKey: k) ?? []) + b.compactMap { Store.piece($0).map { "\($0.start)" } })), forKey: k)
         }
         b.forEach { try? FileManager.default.removeItem(at: $0) }; note = ["code": "rejected"]
       case .auth, .refused:  // not the server's "not audio": a proxy's, a token's; the pieces stay
@@ -737,7 +724,7 @@ final class Uploader: Thread {
     let d = Recorder.defaults
     for k in d.dictionaryRepresentation().keys where k.hasPrefix("end:") {
       let device = String(k.dropFirst(4)), at = (d.object(forKey: k) as? NSNumber)?.int64Value ?? 0
-      let left = q.compactMap { Uploader.piece($0) }.filter { $0.device == device }.map(\.start)
+      let left = q.compactMap { Store.piece($0) }.filter { $0.device == device }.map(\.start)
       if left.contains(where: { $0 >= at }) { d.removeObject(forKey: k); continue }  // recording again: no end
       if !left.isEmpty || Recorder.now() < endDue[k] ?? 0 { continue }
       if end(at, device: device) { endDue[k] = nil; if (d.object(forKey: k) as? NSNumber)?.int64Value == at { d.removeObject(forKey: k) } }
@@ -758,9 +745,9 @@ final class Uploader: Thread {
   /// `device`'s pieces waiting (how many, KB, the oldest's age in s) and how uploads go: failures in a row, s since the
   /// last one the server took (nil: none since the launch).
   func queued(_ device: String) -> [String: Any] {
-    let q = Uploader.files(dir).filter { Uploader.piece($0)?.device == device }, now = Recorder.now()
+    let q = Uploader.files(dir).filter { Store.piece($0)?.device == device }, now = Recorder.now()
     let bytes = q.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-    return ["queue_n": q.count, "queue_kb": bytes / 1024, "queue_age_s": q.first.flatMap { Uploader.piece($0).map { (now - $0.start) / 1000 } } ?? NSNull(),
+    return ["queue_n": q.count, "queue_kb": bytes / 1024, "queue_age_s": q.first.flatMap { Store.piece($0).map { (now - $0.start) / 1000 } } ?? NSNull(),
             "upload_fails": fails, "upload_ok_s": okAt > 0 ? (now - okAt) / 1000 : NSNull()]
   }
 
@@ -769,7 +756,7 @@ final class Uploader: Thread {
     guard let archive else { try? fm.removeItem(at: f); return }
     let fmt = DateFormatter()
     fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
-    let day = archive.appendingPathComponent(fmt.string(from: Date(timeIntervalSince1970: Double(Uploader.piece(f)!.start) / 1000)))
+    let day = archive.appendingPathComponent(fmt.string(from: Date(timeIntervalSince1970: Double(Store.piece(f)!.start) / 1000)))
     do {
       try fm.createDirectory(at: day, withIntermediateDirectories: true)
       try? fm.removeItem(at: day.appendingPathComponent(f.lastPathComponent))

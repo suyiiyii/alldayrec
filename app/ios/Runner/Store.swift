@@ -477,7 +477,23 @@ enum Capture {
     let g = Float(pow(10, db / 20))
     for i in x.indices {
       let y = x[i] * g, a = abs(y)
-      x[i] = a <= knee ? y : (y < 0 ? -1 : 1) * (knee + (1 - knee) * tanh((a - knee) / (1 - knee)))
+      x[i] = a <= knee ? y : a.isNaN ? 0 : (y < 0 ? -1 : 1) * (knee + (1 - knee) * tanh((a - knee) / (1 - knee)))
     }
+  }
+}
+
+extension Store {
+  /// A queued file's start (unix ms), sample count, BLE recorder and capture gain: <start>_g<dB>_<n>.ogg for the
+  /// microphone's, the gain it was recorded with (nil in a name from an app before: sent without one), or
+  /// <start>_g<dB>.ogg for a piece a kill cut short; the BLE recorder's carry its name instead: <start>@LR-P1-XXXX.ogg,
+  /// uploaded as that device. Anything else (<start>_g6.part.ogg, still being written) is no piece.
+  static func piece(_ f: URL) -> (start: Int64, n: Int64?, device: String?, gainDb: Double?)? {
+    let at = f.deletingPathExtension().lastPathComponent.split(separator: "@", maxSplits: 1)
+    var p = at[0].split(separator: "_", omittingEmptySubsequences: false)
+    guard ["ogg", "aac"].contains(f.pathExtension), (1...3).contains(p.count), let start = Int64(p.removeFirst()) else { return nil }
+    var gain: Double?, n: Int64?
+    if p.first?.first == "g" { guard let g = Double(p.removeFirst().dropFirst()), g.isFinite else { return nil }; gain = g }
+    if let s = p.first { guard p.count == 1, let v = Int64(s) else { return nil }; n = v }
+    return (start, n, at.count == 2 ? String(at[1]) : nil, gain)
   }
 }

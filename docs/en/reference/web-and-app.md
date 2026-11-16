@@ -63,8 +63,8 @@ The standard: the wearer's normal speech at −26 dBov (ITU-T P.56). It takes tw
 
 | Source | Capture gain | Reported |
 |---|---|---|
-| iPhone microphone | **+6 dB** in float before the encoder; below 0.9 of full scale each sample is exactly the plain gain, past 0.9 a tanh soft limiter keeps it at most full scale. The AVAudioSession runs in `.measurement` mode (no voice processing by the system) | Each uploaded piece carries `capture_gain_db=6`; a `capture` event in the device log records `capture_gain_db`, `session_mode`, `input_gain`, `input_gain_settable` (when they change) |
-| Android microphone | **0 dB**, source `MIC` | Each uploaded piece carries `capture_gain_db=0`; at each recording start a `capture` event in the device log records `capture_gain_db`, `audio_source` |
+| iPhone microphone | **+6 dB** in float before the encoder; a sample still under 0.9 of full scale after the gain is exactly the input times the gain, past 0.9 a tanh soft limiter keeps it at most full scale. The AVAudioSession runs in `.measurement` mode (no voice processing by the system) | Each piece is named with the gain it was recorded with (`<start>_g6_<n>.ogg`) and uploaded with it as `capture_gain_db=6`; pieces recorded by an app before this one go up without the field. A `capture` event in the device log records `capture_gain_db`, `session_mode`, `input_gain`, `input_gain_settable` |
+| Android microphone | **0 dB**, source `MIC` | Each uploaded piece carries `capture_gain_db=0`; a `capture` event in the device log records `capture_gain_db`, `audio_source` |
 | Bluetooth recorder | The recorder's own PDM gain (firmware); the app adds none | Read from byte 53 of its TIME status as `mic_gain_db = int8 / 2` (dB, 0 = 0x28) and sent with its status (`/api/device-status`); older firmware has a 53-byte TIME, and the value is null |
 
-The server writes a row only when a value changes. A change of capture gain needs a new calibration of the offset.
+The app writes a `capture` event only when one of its values differs from the last one it logged (kept across recordings and app launches). For the gains themselves, the server's gain history adds a row only when a value changes. A change of capture gain needs a new calibration of the offset.

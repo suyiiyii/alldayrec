@@ -150,6 +150,16 @@ object DeviceLog {
             .apply { if (level != null) put("level", level) })))
     }
 
+    /** As [app], only when `fields` differ from the ones this install last logged as `kind` for `device`: kept in prefs,
+     *  so a new recording or launch with the same values adds no event. */
+    fun appChanged(device: String, kind: String, text: String, fields: Map<String, Any?>) {
+        if (::file.isInitialized && changed(prefs, "logLast:$kind:$device", fields.toSortedMap().toString())) app(device, kind, text, fields = fields)
+    }
+
+    /** `value` is not the one kept under `key`: it is now. */
+    fun changed(p: SharedPreferences, key: String, value: String): Boolean =
+        (p.getString(key, null) != value).also { if (it) p.edit().putString(key, value).apply() }
+
     /** The phone, for the status sent with its recorder's: this build, the system, the model as the
      *  maker names it (never the name the person gave the phone), its battery and whether it saves power or runs hot
      *  (the system slows or stops apps then), and this app's memory. */
