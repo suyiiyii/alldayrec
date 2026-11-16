@@ -44,7 +44,7 @@
  *               answered, file system or not; 0: none answered) mic_gain:i8 (the mic's PDM gain in force, half dB: 0
  *               the default 0x28, -40..40 = -20..+20 dB on the module's own; older firmware: no such byte)
  *               gain_flags:u8 (bit 0: that gain is not the one NVS keeps, the next boot would not take it: its save
- *               still to come, a few ms after the GAIN, or failed (event GAIN x 1), or NVS's record was bad at boot
+ *               still to come, when the system workqueue gets to it, or failed (event GAIN x 1), or NVS's record was bad at boot
  *               (GAIN x 2, the default in force); a GAIN of the same value saves it again)
  *   ...02 CTRL  write commands, notify replies:
  *               0x01 LIST                -> 0x81 file:u32 size:u32 per file (the open one too, with what the stream
