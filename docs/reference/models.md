@@ -4,7 +4,7 @@ type: reference
 
 # 模型文件
 
-服务器在本机 CPU 上跑四个模型（开了环境声音时是五个）（onnxruntime，不需要显卡），文件放在 `MODELS_DIR`（默认是 `DATA_DIR/models`，Docker 里是 `data/models`）。
+服务器在本机 CPU 上跑四个模型（`SOUND_MODEL` 里有 `mn10_as` 时是五个）（onnxruntime，不需要显卡），文件放在 `MODELS_DIR`（默认是 `DATA_DIR/models`，Docker 里是 `data/models`）。
 
 | 文件 | 模型 | 用途 | 许可 | 下载自 |
 |---|---|---|---|---|

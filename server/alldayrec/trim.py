@@ -32,10 +32,11 @@ after one a trim dropped (in cold_starts; in this hour file or the next): its de
 before, so its first 100 ms are muted and faded in (audio.warmed) and the rest of it may differ by a few LSB. That
 start is TRIM_PAD_S or more from any speech the VAD heard and any sentence (else the dropped piece would be kept).
 A piece after a real gap (a reconnect) decodes cold as it always did, unchanged.
-A tenant with scene scores on (sounds.on: SOUND_MODEL and its "sound") keeps an hour whole while any piece a trim would
-drop has no row of the gate's model (the first of SOUND_MODEL), its history before SOUND_SINCE too ("no sound"; sounds.py
-backfill fills it): what no one said in is gone with the trim, its scene with it. --allow-unscened lets such hours go
-anyway, and says how many seconds without scene scores it drops. With sound off, as before.
+With SOUND_MODEL set, every tenant (its "sound" on or not, a --db store too) keeps an hour whole while any ms of a piece
+a trim would drop has no scores of the gate's model (the first of SOUND_MODEL; sounds.unscened), its history before
+SOUND_SINCE too ("no sound"; sounds.py backfill fills it): what no one said in is gone with the trim, its scene with it.
+--allow-unscened lets such hours go anyway, and says how many seconds without scene scores it drops. SOUND_MODEL empty:
+as before.
 The VAD runs per device and day, over the hours that may be trimmed only: a piece next to midnight or to an hour left
 whole has the VAD's pad on one side only (a sentence's still counts).
 """
@@ -160,7 +161,7 @@ def load_vad(path: str) -> dict:
 
 def plan(vads: dict, now_ms: int, allow_unscened=False) -> list[dict]:
     """Every hour file: what a trim would keep, or why it is left."""
-    hours, gate, unscened = list(candidates(now_ms).values()), sounds.on(), 0.0
+    hours, gate, unscened = list(candidates(now_ms).values()), bool(sounds.names()), 0.0
     for h in hours:
         if h["reason"] is None:
             v = vads.get(h["path"])

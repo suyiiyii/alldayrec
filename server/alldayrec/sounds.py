@@ -6,13 +6,16 @@ A tenant takes part with "sound": true in tenants.json and SOUND_MODEL set (on()
 wall clock; required with SOUND_MODEL) is where its loop starts: the loop never goes over the audio before it, nor
 does a new model file (another model id), by itself; history is `python -m alldayrec.sounds backfill`.
 
-Each tenant's loop() wakes every SOUND_EVERY_S: a device's pieces SOUND_SETTLE_S after they came, as stretches (pieces
-at most TOL_MS apart), less what each model already covered (its rows), are its holes. A hole is read in parts of at
-most CHUNK_MS (late.read_exact; a stretch still growing only in whole parts), the model runs over what of it decoded
-(filled), and one row per stretch of that goes in: per frame its level and top K classes, per wall-clock minute the
-mean of every class and the frames at HIT or more. A piece that will not decode, or a part that fails (the store, the
-service), writes nothing: it stays a hole, tried again after a backoff (lr_scene_failed_total). Holes are looked for
-in the last RECENT_S each pass, in all since SOUND_SINCE every FULL_S (late pieces behind). trim.py's gate: unscened.
+Each tenant's loop() wakes every SOUND_EVERY_S: what of a device's pieces (SOUND_SETTLE_S after they came) each model
+has no scores of (covered: its rows less their gaps) is its holes, to the ms. Holes at most TOL_MS apart are read
+together, in parts of at most CHUNK_MS (late.read_exact; a stretch still growing only in whole parts), the model runs
+over what of it decoded (filled), and one row per stretch of that goes in, a gap with no piece of up to TOL_MS bridged
+(zeros to the model, kept as the row's gaps, no coverage): per frame its level and top K classes, per wall-clock
+minute the mean of every class and the frames at HIT or more. A piece that will not decode, or decodes short of its
+seconds, or a part that fails (the store, the service), writes nothing over it: it stays a hole, tried again after a
+backoff (lr_scene_failed_total). A piece that comes later into a row's gap gets a row of its own (the first kept).
+Holes are looked for in the last RECENT_S each pass, in all since SOUND_SINCE every FULL_S (late pieces behind), a
+device's pieces BATCH_MS at a time. trim.py's gate: unscened.
 """
 import argparse
 import datetime as dt
@@ -27,15 +30,16 @@ import zlib
 import anyio
 import numpy as np
 
-from alldayrec import db, late, sound, tenant, threads
+from alldayrec import db, infer, late, sound, tenant, threads
 from alldayrec.late_store import subtract, union
 from alldayrec.sound import MODELS, SR, model_id, names, windows
 from alldayrec.tenant import T
 
 log = logging.getLogger("live")
 K, HIT = 10, 0.2  # each frame's top K classes; a minute counts the frames at HIT or more per class
-TOL_MS = 500  # pieces this close are one stretch (the zeros between them read as audio), what is left of a hole is none
+TOL_MS = 500  # holes this close are read together, a gap with no piece this short is inside a row (never coverage)
 CHUNK_MS = 300_000
+BATCH_MS = 6 * 3600_000  # todo(): a device's pieces starting in this much time at once
 SOUND_EVERY_S = float(os.environ.get("SOUND_EVERY_S", "60"))
 SOUND_SETTLE_S = float(os.environ.get("SOUND_SETTLE_S", "120"))
 RECENT_S, FULL_S = 6 * 3600, 3600
@@ -58,7 +62,8 @@ def check():
 
 
 def on() -> bool:
-    """The current tenant's audio gets scene scores (and trim.py's gate holds for it)."""
+    """The current tenant's audio gets scene scores (its loop runs). trim.py's gate holds for every tenant once
+    SOUND_MODEL is set, this one's "sound" or not."""
     return bool(names()) and T().sound
 
 
@@ -88,9 +93,10 @@ def row(name: str, start_ms: int, x: np.ndarray, v: np.ndarray) -> tuple:
             np.clip(np.round(lv), -127, 0).astype(np.int8).tobytes(), zlib.compress(top.tobytes()), zlib.compress(out.tobytes()))
 
 
-def write(c, device: str, name: str, r: tuple):
-    c.execute("INSERT OR REPLACE INTO sounds VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-              (device, model_id(name), *r, int(time.time() * 1000)))
+def write(c, device: str, name: str, r: tuple, gaps=()):
+    """gaps: what of the row's [start_ms, end_ms) had no decoded audio (zeros to the model): not covered."""
+    c.execute("INSERT OR REPLACE INTO sounds VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              (device, model_id(name), *r, json.dumps(list(gaps)), int(time.time() * 1000)))
 
 
 def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
@@ -108,8 +114,18 @@ def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
 
 
 def covered(device: str, name: str, a: int, b: int) -> list:
-    return [[s, e] for s, e in db.conn().execute("SELECT start_ms, end_ms FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
-                                                  (device, model_id(name), a, b))]
+    """What of [a, b) (and about) the model has scores of decoded audio for: its rows less their gaps."""
+    return union([h for s, e, g in db.conn().execute("SELECT start_ms, end_ms, gaps FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
+                                                     (device, model_id(name), a, b)) for h in subtract([[s, e]], json.loads(g))])
+
+
+def span(start_ms: int, seconds: float) -> list:
+    """A piece's audio, in whole ms (its seconds are its decoded length to 1 ms; late.read_exact's filled the same)."""
+    return [start_ms, round(start_ms + seconds * 1000)]
+
+
+def both(x: list, y: list) -> list:
+    return subtract(x, subtract(x, y))
 
 
 def stretches(ranges) -> list:
@@ -117,43 +133,63 @@ def stretches(ranges) -> list:
     return [[a, b - TOL_MS] for a, b in union([[a, b + TOL_MS] for a, b in ranges])]
 
 
-def left(ranges, device: str, name: str) -> list:
-    """What of ranges the model has not covered, but bits of TOL_MS or less."""
-    lo, hi = min((a for a, _ in ranges), default=0), max((b for _, b in ranges), default=0)
-    return [h for h in subtract(ranges, covered(device, name, lo, hi)) if h[1] - h[0] > TOL_MS]
+def need(spans, device: str, name: str, now_ms: int) -> list:
+    """What of spans (pieces' audio) the model has no scores of and does not wait out a failure for: to the ms."""
+    if not spans:
+        return []
+    wait = [[a, b] for a, b, until, _ in T().scene_retry.get((device, name), []) if until > now_ms]
+    return subtract(spans, covered(device, name, min(a for a, _ in spans), max(b for _, b in spans)) + wait)
 
 
 def unscened(device: str, rows) -> float:
-    """Seconds of these pieces rows (trim.py's to drop) that the gate's model (the first of SOUND_MODEL) has no rows for."""
-    return sum(b - a for a, b in left([[r["start_ms"], r["start_ms"] + r["seconds"] * 1000] for r in rows], device, names()[0])) / 1000
+    """Seconds of these pieces rows (trim.py's to drop) that the gate's model (the first of SOUND_MODEL) has no scores
+    of, to the ms: no tolerance, a failure waiting or not."""
+    spans = [span(r["start_ms"], r["seconds"]) for r in rows]
+    if not spans:
+        return 0.0
+    return sum(b - a for a, b in subtract(spans, covered(device, names()[0], min(a for a, _ in spans), max(b for _, b in spans)))) / 1000
 
 
-def todo(models: list, lo: int, hi: int, now_ms: int, every=True) -> list[tuple]:
-    """(device, a, b): the parts to read now, oldest first: every device's settled pieces in [lo, hi) as stretches,
-    less what each model has covered or waits out after a failure (the models' holes together: one read for all); a
-    stretch still growing (a fresh piece at its end) only in whole CHUNK_MS. every=False: only the devices with a piece
-    starting after lo (a pass over the recent hours)."""
-    c, out = db.conn(), []
-    devices = ({d for (d,) in c.execute("SELECT DISTINCT device FROM pieces")} if every else  # (device, ...) index: 0.2 s for 2M pieces
-               {d for (d,) in c.execute("SELECT device FROM pieces WHERE start_ms > ?", (lo,))})  # the primary key's range
-    for device in sorted(devices):
-        got = c.execute("SELECT start_ms, seconds, received_ms FROM pieces WHERE device = ? AND start_ms + seconds * 1000 > ? AND start_ms < ?",
-                        (device, lo, hi)).fetchall()
-        ok = lambda s, sec, rec: (rec or s + sec * 1000) <= now_ms - SOUND_SETTLE_S * 1000
-        fresh = [s for s, sec, rec in got if not ok(s, sec, rec)]
-        have = stretches([[max(s, lo), min(s + sec * 1000, hi)] for s, sec, rec in got if ok(s, sec, rec)])
-        for a, b in union([h for name in models for h in need(have, device, name, now_ms)]):
-            a, b = round(a), round(b)
-            growing = any(b - TOL_MS <= s <= b + TOL_MS for s in fresh)
-            while b - a >= CHUNK_MS or (b > a and not growing):
-                out.append((device, a, min(b, a + CHUNK_MS)))
-                a += CHUNK_MS
-    return sorted(out, key=lambda t: t[1])
+def devices(after: int | None = None) -> list:
+    """The devices with pieces, or (a pass over the recent hours) those with a piece starting after `after`."""
+    c = db.conn()
+    return sorted({d for (d,) in (c.execute("SELECT DISTINCT device FROM pieces") if after is None else  # (device, ...) index: 0.2 s for 2M pieces
+                                  c.execute("SELECT device FROM pieces WHERE start_ms > ?", (after,)))})  # the primary key's range
 
 
-def need(ranges, device: str, name: str, now_ms: int) -> list:
-    """What of ranges the model has yet to do: not covered, not waiting out a failure."""
-    return left(subtract(ranges, [[a, b] for a, b, until, _ in T().scene_retry.get((device, name), []) if until > now_ms]), device, name)
+def todo(models: list, device: str, lo: int, hi: int, now_ms: int) -> tuple[list, int | None]:
+    """(a, b), oldest first, the parts of device's settled pieces before hi to read now, of the pieces starting in
+    BATCH_MS from its first at lo or after (and, from lo itself, the one going on into it): the models' holes together
+    (one read for all), at most TOL_MS apart as one, a stretch still growing (a fresh piece at its end) only in whole
+    CHUNK_MS; and the next batch's lo (None: none before hi)."""
+    c = db.conn()
+    first = c.execute("SELECT start_ms FROM pieces WHERE device = ? AND start_ms >= ? ORDER BY start_ms LIMIT 1", (device, lo)).fetchone()
+    if first is None or first[0] >= hi:
+        return [], None
+    end = first[0] + BATCH_MS
+    got = c.execute("SELECT start_ms, seconds, received_ms FROM pieces WHERE device = ? AND start_ms >= ? AND start_ms < ?",
+                    (device, lo, min(end, hi))).fetchall()
+    got += c.execute("SELECT start_ms, seconds, received_ms FROM pieces WHERE device = ? AND start_ms < ? ORDER BY start_ms DESC LIMIT 1",
+                     (device, lo)).fetchall()  # it may go on into lo (else, ending before, it adds nothing)
+    ok = lambda s, sec, rec: (rec or s + sec * 1000) <= now_ms - SOUND_SETTLE_S * 1000
+    fresh = [s for s, sec, rec in got if not ok(s, sec, rec)]
+    spans = union([[max(a, lo), min(b, hi)] for s, sec, rec in got if ok(s, sec, rec) for a, b in [span(s, sec)]])
+    out = []
+    for a, b in stretches([h for name in models for h in need(spans, device, name, now_ms)]):
+        growing = any(b - TOL_MS <= s <= b + TOL_MS for s in fresh)
+        while b - a >= CHUNK_MS or (b > a and not growing):
+            out.append((a, min(b, a + CHUNK_MS)))
+            a += CHUNK_MS
+    return out, end if end < hi else None
+
+
+def pending(models: list, lo: int, hi: int, now_ms: int):
+    """Every device's todo() in [lo, hi), batch by batch, as (device, a, b): a caller on one thread (backfill)."""
+    for device in devices():
+        at = lo
+        while at is not None:
+            parts, at = todo(models, device, at, hi, now_ms)
+            yield from ((device, a, b) for a, b in parts)
 
 
 def failed(device: str, name: str, ranges: list, now_ms: int):
@@ -165,10 +201,13 @@ def failed(device: str, name: str, ranges: list, now_ms: int):
 
 
 def one(device: str, models: list, a: int, b: int) -> float:
-    """[a, b) of device's audio, read once, through each model that has yet to do some of it, what decoded of it as
+    """[a, b) of device's audio, read once, through each model that has yet to do some of it, what decoded of that as
     one row per stretch; seconds of audio scored (all models)."""
     now_ms, bad, filled = int(time.time() * 1000), [], []
-    todo_ = {name: n for name in models if (n := need([[a, b]], device, name, now_ms))}
+    spans = union([[max(p, a), min(q, b)] for s, sec in db.conn().execute(
+        "SELECT start_ms, seconds FROM pieces WHERE device = ? AND start_ms < ? AND start_ms + seconds * 1000 > ?", (device, b, a))
+        for p, q in [span(s, sec)]])
+    todo_ = {name: n for name in models if (n := need(spans, device, name, now_ms))}
     if not todo_:
         return 0.0
     t = time.perf_counter()
@@ -180,10 +219,13 @@ def one(device: str, models: list, a: int, b: int) -> float:
             failed(device, name, n, now_ms)
         return 0.0
     T().scene_stats["decode", ""] += time.perf_counter() - t
-    done, got = 0.0, stretches([[max(p, a), min(q, b)] for p, q in filled])
+    filled = union([[max(p, a), min(q, b)] for p, q in filled])
+    unfilled = union(bad + subtract(spans, filled))  # would not decode, or decoded short: never inside a row
+    done = 0.0
     for name, n in todo_.items():
         rows = []
-        for s, e in subtract(got, subtract([[a, b]], n)):
+        # this model's audio, at most TOL_MS apart as one where only time with no piece is between
+        for s, e in subtract(stretches(both(filled, n)), unfilled + subtract(spans, n)):
             y = x[round((s - a) * SR / 1000):round((e - a) * SR / 1000)]
             if not len(y):
                 continue
@@ -195,13 +237,13 @@ def one(device: str, models: list, a: int, b: int) -> float:
                 failed(device, name, [[s, e]], now_ms)
                 continue
             T().scene_stats["compute", name] += time.perf_counter() - t
-            rows.append(row(name, s, y, v))
+            rows.append((row(name, s, y, v), subtract([[s, e]], filled)))
         with db.tx() as c:
-            for r in rows:
-                write(c, device, name, r)
-        if bad:
-            failed(device, name, bad, now_ms)
-        scored = sum(r[1] - r[0] for r in rows) / 1000
+            for r, gaps in rows:
+                write(c, device, name, r, gaps)
+        if wrong := both(unfilled, n):
+            failed(device, name, wrong, now_ms)
+        scored = sum(r[1] - r[0] for r, _ in rows) / 1000
         T().scene_stats["audio", name] += scored
         done += scored
     return done
@@ -225,18 +267,23 @@ async def loop():
         if full:
             full_at = time.monotonic()
             await anyio.to_thread.run_sync(expire, now_ms, limiter=threads.DB)
-        parts = await anyio.to_thread.run_sync(todo, names(), lo, now_ms, now_ms, full, limiter=threads.DB)
+        backlog = 0.0
+        for device in await anyio.to_thread.run_sync(devices, None if full else lo, limiter=threads.DB):
+            at = lo
+            while at is not None:  # a batch at a time (pending(), but each step on a thread of its own)
+                parts, at = await anyio.to_thread.run_sync(todo, names(), device, at, now_ms, now_ms, limiter=threads.DB)
+                backlog += sum(b - a for a, b in parts) / 1000
+                for a, b in parts:
+                    await anyio.to_thread.run_sync(one, device, names(), a, b, limiter=threads.SOUND)
         if full:
-            T().scene_stats["backlog", ""] = sum(b - a for _, a, b in parts) / 1000
-        for device, a, b in parts:
-            await anyio.to_thread.run_sync(one, device, names(), a, b, limiter=threads.SOUND)
+            T().scene_stats["backlog", ""] = backlog
         await anyio.sleep(SOUND_EVERY_S)
 
 
 def backfill(models: list, lo: int, hi: int) -> float:
     """Every hole of the models in [lo, hi) (SOUND_SINCE does not count here), in this process; seconds done."""
     done = 0.0
-    for device, a, b in todo(models, lo, hi, int(time.time() * 1000)):
+    for device, a, b in pending(models, lo, hi, int(time.time() * 1000)):
         done += one(device, models, a, b)
         print(json.dumps({"device": device, "at": dt.datetime.fromtimestamp(a / 1000).isoformat(), "done_s": round(done)}),
               file=sys.stderr, flush=True)
@@ -268,6 +315,17 @@ def main():
     models = o.model or names()
     if not models or any(n not in MODELS for n in models):
         a.error(f"--model or SOUND_MODEL: one or more of {', '.join(MODELS)}")
+    os.environ["SOUND_MODEL"] = ",".join(models)  # what runs below, and what files() and infer's checks go by
+    if os.environ.get("INFER_URL"):  # the service's scene models, as a first score would (it would wait on, not stop)
+        r = sound._remote()
+        try:
+            r.ok = r.same_models()
+        except Exception as e:
+            raise SystemExit(f"INFER_URL: {e}") from None
+    else:  # the files this runs, missing ones downloaded: the pinned ones or a stop, as at the server's start
+        skip = set(infer.MODELS) - set(sound.files())
+        infer.fetch(infer.DIR, skip)
+        infer.check(infer.DIR, skip)
     print(json.dumps({"models": [model_id(n) for n in models],
                       "done_s": round(backfill(models, ms(o.since), ms(o.until) if o.until else int(time.time() * 1000)))}))
 

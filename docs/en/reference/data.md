@@ -109,8 +109,9 @@ The key is (`device`, `model`, `start_ms`). `model` is the model's name and the 
 | `start_ms`, `end_ms` | Start and end of the stretch (ms timestamps) |
 | `hop_ms`, `window_ms`, `n` | The frames' spacing, their length, their count: `mn10_as` one frame per 10 s (a last bit under 2 s goes into the frame before), `yamnet` one 0.96 s frame every 0.48 s |
 | `db` | Each frame's level, dBFS rounded, one int8 per frame |
-| `top` | Each frame's 10 highest-scoring classes: zlib of `n × 10` (class uint16, score float16). Classes are AudioSet's, in the model's own order (`mn10_as` 527, `yamnet` 521). Cleared for `yamnet` after 30 days |
+| `top` | Each frame's 10 highest-scoring classes: zlib of `n × 10` (class uint16, score float16). Classes are AudioSet's, in the model's own order (`mn10_as` 527, `yamnet` 521). Cleared for `yamnet` after 30 days (by the hourly scoring loop of a tenant with sound on; the backfill command does not) |
 | `minutes` | One entry per minute (a frame belongs to the minute of its middle): zlib of (Unix minute int32, frames uint16, each class's mean score float16, each class's frames scoring 0.2 or more uint8). Kept |
+| `gaps` | The time in the row with no piece at all (JSON, `[[from, to], …]` ms): the model got zeros there, it does not count as scored |
 | `at` | When the row was written |
 
-Scoring a stretch again replaces its row. A piece that will not decode gets no row, so no row means not scored yet, or not successfully. Measured on real recordings, an hour of audio takes about 80 KB for `mn10_as` and 250 KB for `yamnet` (60 KB after 30 days).
+Scoring a stretch again replaces its row. A row covers only decoded audio: it ends at a piece that will not decode or decodes short, which gets no row, so no row means not scored yet, or not successfully. A gap of at most 0.5 s with no piece between two pieces goes into the same row and into its `gaps`. What is scored = each row's `start_ms`–`end_ms` less its `gaps` (the trim gate and the scoring loop both go by this, to the millisecond). A piece that comes into a gap later gets a row of its own, the first row never deleted, so a minute's frames may come from two rows. Measured on real recordings, an hour of audio takes about 80 KB for `mn10_as` and 250 KB for `yamnet` (60 KB after 30 days).

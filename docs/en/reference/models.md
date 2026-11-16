@@ -4,7 +4,7 @@ type: reference
 
 # Model files
 
-The server runs four models (five with environmental sound on) on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
+The server runs four models (five with `mn10_as` in `SOUND_MODEL`) on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
 
 | File | Model | Use | License | Downloaded from |
 |---|---|---|---|---|

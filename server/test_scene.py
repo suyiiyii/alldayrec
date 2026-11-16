@@ -4,6 +4,8 @@ stretch was cut; trim.py's gate; tenants apart; the service's /scene and its bac
 A stand-in model (CI has no model files): its scores of a frame are of that frame's samples only."""
 import datetime as dt
 import logging
+import sys
+import threading
 import time
 import types
 
@@ -22,7 +24,7 @@ from alldayrec import tenant
 from alldayrec import trim
 from alldayrec.tenant import T
 from test_backlog import DEVICE, SR, flac, save, tone
-from test_compute import TOKEN, bound, serve
+from test_compute import TOKEN, background, bound, serve
 from test_trim import hour, vad
 
 SINCE = "2026-01-01"
@@ -50,10 +52,11 @@ def ms(t: dt.datetime) -> int:
 
 
 def catch_up(models=("mn10_as", "yamnet"), lo=0, hi=None) -> int:
-    parts = sounds.todo(list(models), lo, hi or int(time.time() * 1000) + 3600_000, int(time.time() * 1000))
-    for device, a, b in parts:
+    n = 0
+    for device, a, b in sounds.pending(list(models), lo, hi or int(time.time() * 1000) + 3600_000, int(time.time() * 1000)):
         sounds.one(device, list(models), a, b)
-    return len(parts)
+        n += 1
+    return n
 
 
 def rows(name: str) -> list:
@@ -97,11 +100,11 @@ def test_growing_stretch_waits_for_whole_parts(on, monkeypatch):
     db.conn().execute("UPDATE pieces SET received_ms = ?", (int(time.time() * 1000),))
     now = int(time.time() * 1000)
     monkeypatch.setattr(sounds, "SOUND_SETTLE_S", 60)
-    assert [(b - a) for _, a, b in sounds.todo(["mn10_as"], 0, now + 3600_000, now + 30_000)] == []
+    assert [(b - a) for _, a, b in sounds.pending(["mn10_as"], 0, now + 3600_000, now + 30_000)] == []
     db.conn().execute("UPDATE pieces SET received_ms = ? WHERE start_ms < ?", (now - 120_000, ms(t0) + 300_000))
-    assert [(a - ms(t0), b - a) for _, a, b in sounds.todo(["mn10_as"], 0, now + 3600_000, now)] == [(0, 300_000)]
+    assert [(a - ms(t0), b - a) for _, a, b in sounds.pending(["mn10_as"], 0, now + 3600_000, now)] == [(0, 300_000)]
     db.conn().execute("UPDATE pieces SET received_ms = ?", (now - 120_000,))
-    assert [(a - ms(t0), b - a) for _, a, b in sounds.todo(["mn10_as"], 0, now + 3600_000, now)] == [(0, 300_000), (300_000, 60_000)]
+    assert [(a - ms(t0), b - a) for _, a, b in sounds.pending(["mn10_as"], 0, now + 3600_000, now)] == [(0, 300_000), (300_000, 60_000)]
 
 
 def test_rerun_replaces(on):
@@ -159,7 +162,8 @@ def test_yamnet_calls_give_its_frames(monkeypatch, n):
 
 def test_gate(tmp_path, monkeypatch, caplog):
     """An hour trim would cut down: left whole ("no sound") while what it drops has no rows of the gate's model, its
-    history before SOUND_SINCE too; trimmed once it has; --allow-unscened lets it go and says how much; off, as before."""
+    history before SOUND_SINCE too, a tenant without "sound" too; trimmed once it has; --allow-unscened lets it go and says
+    how much; SOUND_MODEL empty, as before."""
     t0, _ = hour(tmp_path, monkeypatch)
     v, now = vad(), int(time.time() * 1000)
     assert [h["reason"] for h in trim.plan(v, now)] == [None], "sound off: as before"
@@ -168,9 +172,8 @@ def test_gate(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(sound, "scene", fake)
     T().sound = True
     assert [h["reason"] for h in trim.plan(v, now)] == ["no sound"]
-    T().sound = False
-    assert [h["reason"] for h in trim.plan(v, now)] == [None], "the tenant's sound off: as before"
-    T().sound = True
+    T().sound = False  # hour() is trim's --db: a tenant of its own, no "sound"
+    assert [h["reason"] for h in trim.plan(v, now)] == ["no sound"], "every tenant once SOUND_MODEL is set, its sound on or not"
     with caplog.at_level(logging.WARNING, "live"):
         assert [h["reason"] for h in trim.plan(v, now, allow_unscened=True)] == [None]
     dropped = 300 - 10 * len(trim.plan(v, now, allow_unscened=True)[0]["kept"])
@@ -246,7 +249,6 @@ def test_remote_scene(scene_service, monkeypatch):
     service does not run fails only the scene Remote: a voiceprint at once meanwhile."""
     x = tone(5, 12)
     r = compute.Remote(scene_service, TOKEN, 5.0, scene=sound.files())
-    assert r.same_models()
     assert np.allclose(r.scene("mn10_as", x), fake("mn10_as", x), atol=1e-3)
     with pytest.raises(Exception, match="413"):
         r.scene("mn10_as", np.zeros((infer_server.MAX_S + 1) * SR, np.int16))
@@ -257,3 +259,164 @@ def test_remote_scene(scene_service, monkeypatch):
     assert r.next_try > time.monotonic() + 3, "the scene Remote waits"
     t = time.monotonic()
     assert compute.Remote(scene_service, TOKEN, 5.0).embed(x).shape == (compute.DIM,) and time.monotonic() - t < 2
+
+
+def test_gate_strict(tmp_path, monkeypatch):
+    """The gate holds for any audio to drop the model has no scores of, however short: 0.5 s of each piece is."""
+    t0, _ = hour(tmp_path, monkeypatch)
+    v, now = vad(), int(time.time() * 1000)
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    monkeypatch.setenv("SOUND_SINCE", (t0 + dt.timedelta(days=1)).date().isoformat())
+    h = trim.plan(v, now, allow_unscened=True)[0]
+    dropped = [r for r in h["rows"] if r["start_ms"] not in {k["start_ms"] for k in h["kept"]}]
+    with db.tx() as c:
+        for r in dropped:
+            x = tone(1, r["seconds"] - 0.5)
+            sounds.write(c, DEVICE, "mn10_as", sounds.row("mn10_as", r["start_ms"], x, fake("mn10_as", x)))
+    assert sounds.unscened(DEVICE, dropped) == 0.5 * len(dropped)
+    assert [h["reason"] for h in trim.plan(v, now)] == ["no sound"]
+
+
+def pieces(t0, *spans):
+    """Pieces of tone at (start s, seconds) after t0."""
+    for s, n in spans:
+        save(t0 + dt.timedelta(seconds=s), flac(tone(int(s), n)))
+
+
+def test_bad_piece_is_no_coverage(on):
+    """A short piece that will not decode between two that do: no row over it (not even bridged), it gates; once it
+    decodes, its own row, and nothing of the pieces is left."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 1), (1, 0.4), (1.4, 1))
+    size = db.conn().execute("SELECT size FROM pieces WHERE start_ms = ?", (ms(t0) + 1000,)).fetchone()[0]
+    db.conn().execute("UPDATE pieces SET size = 20 WHERE start_ms = ?", (ms(t0) + 1000,))
+    catch_up(["mn10_as"])
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 1000], [1400, 2400]]
+    assert sounds.covered(DEVICE, "mn10_as", ms(t0) + 1000, ms(t0) + 1400) == []
+    every = db.conn().execute("SELECT * FROM pieces").fetchall()
+    assert sounds.unscened(DEVICE, every) == 0.4
+    db.conn().execute("UPDATE pieces SET size = ? WHERE start_ms = ?", (size, ms(t0) + 1000))
+    T().scene_retry.clear()
+    catch_up(["mn10_as"])
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 1000], [1000, 1400], [1400, 2400]]
+    assert sounds.unscened(DEVICE, every) == 0
+
+
+def test_late_audio_into_a_gap(on):
+    """Two pieces 0.3 s apart are one row (the gap zeros to the model), the gap no coverage; a piece that comes into it
+    later gets its own row, the first one kept."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 1), (1.3, 1))
+    catch_up(["mn10_as"])
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 2300]]
+    pieces(t0, (1, 0.3))
+    every = db.conn().execute("SELECT * FROM pieces").fetchall()
+    assert sounds.unscened(DEVICE, every) == 0.3, "the gate holds for it: a row's gaps are no coverage"
+    assert catch_up(["mn10_as"]) == 1, "the late piece is read"
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 2300], [1000, 1300]]
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0
+    assert catch_up(["mn10_as"]) == 0
+
+
+def test_short_piece_alone(on):
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 0.3))
+    assert catch_up(["mn10_as"]) == 1 and [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 300]]
+
+
+def test_piece_short_of_its_seconds(on):
+    """A piece that decodes 0.3 s short of its seconds: that 0.3 s is a hole, it gates, and it waits out a backoff
+    instead of being read again each pass."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 10))
+    db.conn().execute("UPDATE pieces SET seconds = 10.3")
+    assert catch_up(["mn10_as"]) == 1 and T().scene_stats["failed", "mn10_as"] == 1
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0.3
+    assert catch_up(["mn10_as"]) == 0
+
+
+@pytest.mark.parametrize("n", [16008, 15992, 16000])
+def test_odd_lengths_leave_nothing(on, n):
+    """Pieces whose samples are not whole ms, at even and odd ms, back to back: nothing left over, no crumb read."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    at = 0
+    for k in range(4):
+        save(t0 + dt.timedelta(milliseconds=at + k), flac(tone(k, n / SR)))
+        at += round(n / 16)
+    catch_up(["mn10_as"])
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0
+    assert catch_up(["mn10_as"]) == 0
+
+
+def test_remote_scene_checks_the_service_first(scene_service, monkeypatch, caplog):
+    """sound.scene over INFER_URL: the service's scene sha256 checked before a first score is taken; another one, no
+    score taken, a clear error, the call waits (until the stop). A model the Remote was not made for: refused."""
+    monkeypatch.setenv("INFER_URL", scene_service)
+    monkeypatch.setenv("INFER_TOKEN", TOKEN)
+    sound._remote.cache_clear()
+    monkeypatch.setattr(infer_server, "sound", types.SimpleNamespace(names=sound.names, encode=sound.encode,
+                                                                     files=lambda: {infer.MN10: "0" * 64}))
+    monkeypatch.setattr(compute, "STOP", threading.Event())
+    ok = infer_server.CALLS["scene/mn10_as", "ok"]
+    with caplog.at_level(logging.ERROR):
+        got = background(sound.scene, "mn10_as", tone(5, 12))
+        time.sleep(1)
+        assert "out" not in got and infer_server.CALLS["scene/mn10_as", "ok"] == ok
+        assert "other scene models" in caplog.text
+        compute.STOP.set()
+        got["thread"].join(5)
+    assert isinstance(got.get("error"), compute.Stopping), got
+    sound._remote.cache_clear()
+    with pytest.raises(ValueError, match="not checked"):
+        compute.Remote(scene_service, TOKEN, 5.0, scene={}).scene("mn10_as", tone(5, 12))
+
+
+def backfill_cli(monkeypatch, db_path, *args):
+    monkeypatch.setattr(sys, "argv", ["sounds", "backfill", "--db", str(db_path), "--since", SINCE, *args])
+    sounds.main()
+
+
+def test_backfill_checks_its_models(tmp_path, monkeypatch, scene_service):
+    """backfill checks the model files it runs (--model's, not only SOUND_MODEL's) or the service's, first: another
+    one (or none) stops it, nothing written."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    db.open_db(tmp_path / "live.db", tmp_path / "rec")
+    pieces(t0, (0, 5))
+    monkeypatch.setattr(sounds, "SOUND_SETTLE_S", 0)
+    d = tmp_path / "models"
+    d.mkdir()
+    (d / infer.YAMNET).write_bytes(b"not the pinned one")
+    monkeypatch.setattr(infer, "DIR", d)
+    got = []
+    monkeypatch.setattr(infer, "download", lambda url, dest, sha: got.append(dest.name))
+    monkeypatch.delenv("INFER_URL", raising=False)
+    monkeypatch.setenv("SOUND_MODEL", "")
+    with pytest.raises(SystemExit, match="has another sha256"):
+        backfill_cli(monkeypatch, tmp_path / "live.db", "--model", "yamnet")
+    with pytest.raises(SystemExit, match="mn10_as.onnx is missing"):
+        backfill_cli(monkeypatch, tmp_path / "live.db", "--model", "mn10_as")
+    assert got == [infer.MN10], "--model's file fetched, only it"
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    monkeypatch.setenv("INFER_URL", scene_service)
+    monkeypatch.setenv("INFER_TOKEN", TOKEN)
+    sound._remote.cache_clear()
+    monkeypatch.setattr(infer_server, "sound", types.SimpleNamespace(names=sound.names, encode=sound.encode,
+                                                                     files=lambda: {infer.MN10: "0" * 64}))
+    with pytest.raises(SystemExit, match="other scene models"):
+        backfill_cli(monkeypatch, tmp_path / "live.db")
+    sound._remote.cache_clear()
+    db.open_db(tmp_path / "live.db", tmp_path / "rec")
+    assert not db.conn().execute("SELECT count(*) FROM sounds").fetchone()[0]
+
+
+def test_scan_in_batches(on, monkeypatch):
+    """The scan reads a device's pieces a batch at a time (BATCH_MS from a piece on), the empty days between skipped:
+    its memory is a batch's, not the history's; the same rows as one pass."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 5 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, *[(30 * k, 30) for k in range(6)], *[(2 * 86400 + 30 * k, 30) for k in range(6)])
+    monkeypatch.setattr(sounds, "BATCH_MS", 60_000)
+    seen, todo = [], sounds.todo
+    monkeypatch.setattr(sounds, "todo", lambda models, device, lo, hi, now: seen.append(r := todo(models, device, lo, hi, now)) or r)
+    catch_up(["mn10_as"])
+    assert len(seen) <= 8 and all(b - a <= 60_000 for parts, _ in seen for a, b in parts), seen
+    assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0

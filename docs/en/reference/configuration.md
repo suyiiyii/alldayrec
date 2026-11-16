@@ -21,7 +21,7 @@ A JSON array with one entry per person (tenant). Its permissions must be 600.
 | `data` | The data directory: `live.db` and more, see [Data layout](./data.md) |
 | `recordings` | The recordings directory |
 | `lang` | Optional. The language the LLM writes this person's content in (summaries, to-dos, live analysis, the daily recap, "ask AI" answers and more): `zh` or `en`. Without it, `UI_LANG` applies, and without `UI_LANG`, `zh`. Once the language is switched on the web page 「我的」 (Me) (`PUT /api/lang`), that choice wins: it is kept in this person's database and survives a restart |
-| `sound` | Optional, default `false`. `true`: with `SOUND_MODEL` set, this person's recordings get environmental sound scores (see [Environmental sound](#optional-environmental-sound) below), and trims wait for them |
+| `sound` | Optional, default `false`. `true`: with `SOUND_MODEL` set, this person's recordings get environmental sound scores by themselves (see [Environmental sound](#optional-environmental-sound) below). Either way, with `SOUND_MODEL` set, trims wait for those scores |
 
 - Location: `DATA_DIR/tenants.json` (see `DATA_DIR` below). In the Docker image `DATA_DIR` is `/data`, which makes it `data/tenants.json` on the host.
 - When the file is missing, the server's first start makes one: one tenant `main` with a random token and the directories `DATA_DIR/main` and `DATA_DIR/main/recordings`, and logs the link that signs you in, `http://127.0.0.1:<PORT>/connect?token=<token>`.
@@ -116,20 +116,22 @@ Scores every recording (with speech or without) on AudioSet's classes and keeps 
 
 | Variable | Default | Description |
 |---|---|---|
-| `SOUND_MODEL` | empty (off) | The models to run, comma-separated: `mn10_as` (EfficientAT, one result per 10 s) and `yamnet` (a frame every 0.48 s). The first is the main model the trim gate looks at. Both can run at once, each stored on its own. Only the models named here have their files downloaded and checked |
+| `SOUND_MODEL` | empty (off) | The models to run, comma-separated: `mn10_as` (EfficientAT, one result per 10 s) and `yamnet` (a frame every 0.48 s). The first is the main model the trim gate looks at. Both can run at once, each stored on its own. `mn10_as.onnx` is downloaded and checked only when named here (`yamnet.onnx` is always, for hearing music) |
 | `SOUND_SINCE` | none | Required with `SOUND_MODEL` (the server refuses to start without it): the server scores the recordings from this time on (ISO, the instance's time zone, e.g. `2026-11-17`) by itself; the history before it only through the backfill command below, never by itself. A new model file (another sha256: a new model) also starts from this time |
 | `SOUND_EVERY_S`, `SOUND_SETTLE_S` | `60`, `120` | How often to look for recordings not scored yet; how many seconds after a piece arrived it is scored |
 
-- A tenant also needs `"sound": true` in `tenants.json`; one without it behaves exactly as with the feature off.
-- What gets scored is every uploaded audio piece, transcribed or not, whether its transcription worked or not. A piece that will not decode gets no result and is tried again after a backoff. The models run on one thread in the server process (one stretch at a time in the whole process, the tenants taking turns); with `INFER_URL` set, on the inference service's `POST /scene/<model>`, which needs the same `SOUND_MODEL`. An inference service without the model delays only the sound scores, never the voiceprints.
+- A tenant also needs `"sound": true` in `tenants.json` to be scored by itself. One without it is not scored, but the trim gate still holds it (below): backfill first, or trim with `--allow-unscened`.
+- What gets scored is every uploaded audio piece, transcribed or not, whether its transcription worked or not. A piece that will not decode, or decodes shorter than its recorded length, gets no result and is tried again after a backoff. The models run on one thread in the server process (one stretch at a time in the whole process, the tenants taking turns); with `INFER_URL` set, on the inference service's `POST /scene/<model>`, which needs the same `SOUND_MODEL`. Before the first result from the service is used, the sha256 of its scene models in `/health` is checked; another one is not used, it is logged as an error and tried again after a backoff. An inference service without the model, or with another one, delays only the sound scores, never the voiceprints.
 - Metrics: `lr_scene_audio_seconds_total` (seconds of audio scored), `lr_scene_compute_seconds_total` (time in the model), `lr_scene_failed_total` (stretches that failed, waiting to be tried again), each by `model`; `lr_scene_decode_seconds_total` (time decoding: once for all the models) and `lr_scene_backlog_seconds` (seconds some model has not scored yet, updated hourly).
-- The trim gate: for a tenant with sound scores on, `trim.py` leaves an hour whole (reason `no sound`) while any piece it would drop has no result of the main model, the history before `SOUND_SINCE` too. Backfill first, then trim; when those results are really not wanted, `--allow-unscened` trims anyway and logs how many seconds of unscored audio it dropped.
+- The trim gate: with `SOUND_MODEL` set, for every tenant (with `"sound"` or not, a `--db` store too), `trim.py` leaves an hour whole (reason `no sound`) while any millisecond of the pieces it would drop has no result of the main model, the history before `SOUND_SINCE` too. There is no tolerance: an unscored bit at the end of a piece, a piece that will not decode or decodes short, all count as not covered. Backfill first, then trim; when those results are really not wanted, `--allow-unscened` trims anyway and logs how many seconds of unscored audio it dropped. With `SOUND_MODEL` empty, trimming is exactly as before.
 - Backfilling history (heavy, on one core, per recorded hour: 45–120 s decoding (once for all the models), about 30 s for EfficientAT, 35–40 s for YAMNet; wall-clock time measured on a busy older CPU):
 
 ```sh
 uv run python -m alldayrec.sounds backfill --tenant main --since 2026-10-01 --until 2026-11-17   # SOUND_MODEL's models
 uv run python -m alldayrec.sounds backfill --db <copy>/live.db --recordings <copy>/recordings --since 2026-10-01 --until 2026-11-17 --model mn10_as
 ```
+
+Backfilling checks the models it runs first (`--model`'s too): run locally, it downloads missing files and checks their sha256; with `INFER_URL` set, it checks the sha256 of the inference service's scene models in `/health`. Another one stops it with an error, nothing written.
 
 Scored on a copy, only the results can be copied back: `sqlite3 live.db "ATTACH '<copy>/live.db' AS c; INSERT OR IGNORE INTO sounds SELECT * FROM c.sounds"`. Keep `--until` no later than `SOUND_SINCE`, so it does not overlap what the server scores itself.
 

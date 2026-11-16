@@ -95,7 +95,8 @@ class Remote:
         """scene: a Remote for sound.py's calls only, its backoff its own (a service without /scene holds up no
         voiceprint): the scene model files (and sha256) it needs in /health's "scene" instead of models()."""
         import httpx2
-        self.url, self._lock, self.ok, self.need = url.rstrip("/"), threading.Lock(), True, scene  # ok: the models checked (same_models)
+        # ok: the models checked (same_models); a scene Remote's before its first call, no score taken unchecked
+        self.url, self._lock, self.ok, self.need = url.rstrip("/"), threading.Lock(), scene is None, scene
         self.down_since, self.next_try, self.wait, self.logged = None, 0.0, 0.0, -LOG_EVERY_S
         # trust_env=False: the service is on a private network, never through a proxy from the environment
         self.http = httpx2.Client(timeout=httpx2.Timeout(timeout, connect=2), trust_env=False,
@@ -181,6 +182,8 @@ class Remote:
 
     def scene(self, name: str, x: np.ndarray) -> np.ndarray:
         from alldayrec import sound
+        if sound.MODELS[name]["file"] not in (self.need or {}):
+            raise ValueError(f"scene model {name} not checked against the service: not in this Remote's (SOUND_MODEL)")
         return self._post(f"scene/{name}", x, sound.parse(name, len(x)))
 
     def same_models(self) -> bool:

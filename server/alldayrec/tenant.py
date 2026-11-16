@@ -11,8 +11,8 @@ tenant, create(); server/tenants.sh adds tenants):
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
 en; without it UI_LANG, else zh. One set by PUT /api/lang (the 我的 page's switch) is kept in the store and wins.
-"sound" (optional, false): true gives its audio scene scores when SOUND_MODEL is set (sounds.py), and holds its trims
-to them.
+"sound" (optional, false): true gives its audio scene scores when SOUND_MODEL is set (sounds.py). Its trims wait for
+them with SOUND_MODEL set either way (trim.py).
 """
 import contextvars
 import hmac

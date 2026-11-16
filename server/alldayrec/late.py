@@ -56,7 +56,8 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
-            filled.append([round(start), round(end)])
+            whole = p["start_ms"] + p["seconds"] * 1000  # its seconds: what it decoded to at its upload, to 1 ms
+            filled.append([round(start), max(round(end), min(b, round(whole))) if abs(end - whole) < 1 else round(end)])
     if missed:
         bad += late_store.subtract(missed, filled)
     return x
