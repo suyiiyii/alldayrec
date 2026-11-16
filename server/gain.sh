@@ -35,7 +35,7 @@ os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
 try:
     if os.environ.get("DATA_DIR"):
         from alldayrec import gain
-        gain.main(err=said)
+        gain.main([os.fsdecode(a) for a in sys.stdin.buffer.read().split(b"\0")[:-1]], err=said)
         rc = 0
     else:
         said.write("no DATA_DIR from the unit EnvironmentFiles\n")
@@ -73,14 +73,16 @@ for i in $instances; do
   if [ -z "$wd" ] || [ ${#envs[@]} = 0 ]; then
     echo "  stop: $d: $u has no WorkingDirectory or EnvironmentFile" >&2; failed=1; continue
   fi
-  # the arguments as given: systemd expands no $VAR in them (else a ${LLM_API_KEY} would be its value, in gain.py's
-  # argv and in a note). A tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's
-  if systemd-run --pipe --wait --quiet --collect --expand-environment=no "${envs[@]}" -p "WorkingDirectory=$wd" \
-    ${user:+-p "User=$user"} "$d/server/.venv/bin/python" -c "$py" "$@" < /dev/null 2> >(grep '^  gain\.py: ' >&2); then
+  # gain.py's arguments on stdin (NUL-separated), not in the command: systemd expands ${VAR} there (245 also without
+  # --expand-environment), so a ${LLM_API_KEY} in a note would be its value; $py has no $ or % (test_gain_sh). A
+  # tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's. systemd-run's own
+  # errors are not shown either (they share the stream): the exit code says it failed
+  if systemd-run --pipe --wait --quiet --collect "${envs[@]}" -p "WorkingDirectory=$wd" ${user:+-p "User=$user"} \
+    "$d/server/.venv/bin/python" -c "$py" < <(printf '%s\0' "$@") 2> >(grep '^  gain\.py: ' >&2); then
     ok=1
   else
     rc=$?
-    [ "$rc" = 3 ] || { echo "  stop: $d: gain.py failed (exit $rc)" >&2; failed=1; }
+    [ "$rc" = 3 ] || { echo "  stop: $d: systemd-run or gain.py failed (exit $rc)" >&2; failed=1; }
   fi
 done
 [ -z "$failed" ] || exit 1
