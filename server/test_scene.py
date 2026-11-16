@@ -79,7 +79,7 @@ def test_scores_what_decoded_and_only_that(on, monkeypatch):
     db.conn().execute("INSERT INTO processed_audio VALUES (?, ?, ?, 'standby')", (DEVICE, ms(t0) + 120_000, ms(t0) + 150_000))
     decodes = []
     window = audio.piece_window
-    monkeypatch.setattr(audio, "piece_window", lambda p, o, n: decodes.append(p["start_ms"]) or window(p, o, n))
+    monkeypatch.setattr(audio, "piece_window", lambda p, *a: decodes.append(p["start_ms"]) or window(p, *a))
     reads, read = [], late.read_exact
     monkeypatch.setattr(late, "read_exact", lambda *a: reads.append(a[1:3]) or read(*a))
     assert catch_up() == len(reads) == 2, "one read per stretch for both models"
@@ -374,6 +374,31 @@ def test_long_aac_leaves_nothing(on, monkeypatch):
     catch_up(["mn10_as"])
     assert sounds.unscened(DEVICE, db.conn().execute("SELECT * FROM pieces").fetchall()) == 0 and not T().scene_stats["failed", "mn10_as"]
     assert catch_up(["mn10_as"]) == 0
+
+
+def test_long_aac_one_sample_short_is_a_hole(on):
+    """A real long AAC (over WHOLE_S: piece_window reads it) of n samples, 1/16 ms past its seconds; its last frame
+    then zeroed on disk (same size, same row): it decodes one sample short, and its last ms is left a hole. Whole
+    before that, and the same audio with or without filled."""
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "aac",
+                           "-f", "adts", "pipe:1"], input=np.tile(tone(1, 6), 51).tobytes(), capture_output=True, check=True).stdout
+    last = 0
+    while (size := (body[last + 3] & 3) << 11 | body[last + 4] << 3 | body[last + 5] >> 5) < len(body) - last:
+        last += size  # the last ADTS frame's offset
+    assert audio.save(DEVICE, ms(t0), body, "audio/aac", n=len(audio.decode(body[:last], aac=True, n=10 ** 9)) + 1)
+    p = db.conn().execute("SELECT * FROM pieces").fetchone()
+    assert p["seconds"] > audio.WHOLE_S and p["samples"] % 16 == 1
+    tail = ms(t0) + 300_000, ms(t0) + 307_000
+    filled = []
+    np.testing.assert_array_equal(late.read_exact(DEVICE, *tail, [], filled), late.read_exact(DEVICE, *tail, []))  # same audio
+    assert filled == [[tail[0], round(ms(t0) + p["seconds"] * 1000)]], "whole while it decodes to its samples"
+    f = T().recordings / p["path"]
+    data = f.read_bytes()
+    f.write_bytes(data[:p["pos"] + last] + bytes(len(body) - last) + data[p["pos"] + len(body):])
+    assert len(audio.samples(p)) == p["samples"] - 1
+    catch_up(["mn10_as"])
+    assert sounds.unscened(DEVICE, [p]) == 0.001
 
 
 @pytest.mark.parametrize("codec", ["opus", "aac"])

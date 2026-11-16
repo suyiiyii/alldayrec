@@ -42,7 +42,7 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
             break
         # Long imports decode only this window; short pieces retain codec priming/dehum.
         try:
-            y = audio.piece_window(p, offset, len(x) - i + peek)
+            y = audio.piece_window(p, offset, len(x) - i + peek, filled is not None)
         except subprocess.TimeoutExpired:
             if bad is None:
                 raise
@@ -54,17 +54,18 @@ def read_exact(device: str, a: int, b: int, bad: list | None = None, filled: lis
             log.warning("late audio of %s: piece %s (%s) would not decode, %.1f s", device, p["start_ms"], p["path"], (hi - lo) / 1000)
             missed.append([lo, hi])
             continue  # end stays: a later piece overlapping this one may have its audio
+        decoded = len(y)
+        if p["path"].endswith(".aac") and p["seconds"] > audio.WHOLE_S:
+            y = y[:max(0, round(p["seconds"] * SR) - offset)]  # the audio as without filled (exact may read past its seconds)
         n = min(len(y), len(x) - i)
         if n > 0 and i >= 0:
             x[i:i + n] = y[:n]
             end = start + n * 1000 / SR
             got.append([round(start), round(end)])
             if filled is not None:  # sounds.py's coverage, in whole ms (sounds.span()'s), none past what decoded
-                total, want, last = offset + len(y), p["samples"], round(p["start_ms"] + p["seconds"] * 1000)
-                if want is not None and p["path"].endswith(".aac") and p["seconds"] > audio.WHOLE_S:
-                    want = min(want, round(p["seconds"] * SR))  # piece_window reads a long AAC to its seconds only
+                total, want, last = offset + decoded, p["samples"], round(p["start_ms"] + p["seconds"] * 1000)
                 to = p["start_ms"] + (offset + n) * 1000 // SR
-                if len(y) < len(x) - i + peek:  # it ended by then: all of it, or short (never its last ms then)
+                if decoded < len(x) - i + peek:  # it ended by then: all of it, or short (never its last ms then)
                     # all: its seconds (to 1 ms) and its samples at upload, exactly (pieces before 11-16 have none)
                     whole = round(total / SR, 3) >= p["seconds"] and (want is None or total >= want)
                     to = min(b, last) if whole else min(to, last - 1)

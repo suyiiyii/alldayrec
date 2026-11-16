@@ -510,9 +510,10 @@ def piece_blocks(p, end):
             yield pcm_blocks(pcm, max(0, count - skip)), skip
 
 
-def piece_window(p, offset, count):
+def piece_window(p, offset, count, exact=False):
     """Only decode the requested samples of a long import, with 2 s codec preroll.
     Short device pieces retain samples()'s exact Opus priming/dehum/AAC behavior.
+    exact: a long AAC also to its samples at upload, past its seconds (to the ms), so one decoded short is seen.
     """
     if p["seconds"] <= WHOLE_S:
         x = samples(p)
@@ -522,7 +523,7 @@ def piece_window(p, offset, count):
     if p["path"].endswith(".aac"):
         # Not past its registered length: the last frame's padding (save_file cut half a frame, 32 ms) is no audio
         # and would stand in for the start of the next piece. Other formats end at their audio: EOF decides there.
-        count = min(count, round(p["seconds"] * SR) - offset)
+        count = min(count, max(round(p["seconds"] * SR), exact and p["samples"] or 0) - offset)
         if count <= 0:
             return np.zeros(0, np.int16)
         offset += AAC_DELAY
