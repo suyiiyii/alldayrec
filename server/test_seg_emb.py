@@ -16,7 +16,7 @@ def ms(t: dt.datetime) -> int:
 
 
 def put(device: str, a: int, b: int, part: int = 0):
-    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?)",
+    db.conn().execute("INSERT INTO seg_emb VALUES (?, ?, ?, ?, 'SPEAKER_0', 'm@0', ?, 0)",
                       (device, a, b, part, np.ones(4, np.float16).tobytes()))
 
 
@@ -77,4 +77,4 @@ def test_rows_of_a_piece():
     assert [r[:5] for r in rows] == [("mic", ms(at(0)), ms(at(2)), 0, "A"), ("mic", ms(at(3)), ms(at(5)), 1, "B"),
                                      ("mic", ms(at(5)), ms(at(7)), 2, "B")]
     assert [np.frombuffer(r[6], np.float16).tolist() for r in rows] == [E[0].tolist(), E[2].tolist(), E[3].tolist()]
-    assert {r[5] for r in rows} == {f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"}
+    assert {r[5] for r in rows} == {f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"} and {r[7] for r in rows} == {0.0}

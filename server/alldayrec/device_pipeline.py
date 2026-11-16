@@ -58,7 +58,7 @@ def seg_embs(device: str, segs: list[dict], marks: list, E: list, at, lo: dt.dat
     model = f"{infer.EMB}@{infer.MODELS[infer.EMB][:12]}"
     ts = lambda s: int(at(s / 1000).timestamp() * 1000)
     return [(device, ts(g["start_ms"]), ts(g["end_ms"]), g.get("split", 0), g.get("engine_speaker"), model,
-             np.asarray(E[m[0] - 1], np.float16).tobytes())
+             np.asarray(E[m[0] - 1], np.float16).tobytes(), 0.0)  # gain_db: voices() embeds x as decoded (lift: the engine's)
             for g, m in zip(segs, marks) if m and lo <= at(g["start_ms"] / 1000) < hi]
 
 
@@ -204,7 +204,7 @@ async def pipeline(device: str):
         with db.tx() as t:
             if rows is not None:
                 db.replace_sentences(t, lo, iso(hi), rows, device)
-                t.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?)", embs)
+                t.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?)", embs)
                 db.record_processed(t, device, coverage or [], layer)
             attached, relabelled = False, []
             for rec in recs:

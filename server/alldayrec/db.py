@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voic
     part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s; parts label() joins again: the last one's), unix ms; part:
                                                     -- of one split_speakers cut (1 on), 0 whole
     model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
+    gain_db REAL NOT NULL DEFAULT 0,                -- the gain its audio was given before the model (dB; 0: as decoded)
     PRIMARY KEY (device, start_ms, part));          -- goes with its sentences (replace_sentences) and its audio (trim.py)
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
