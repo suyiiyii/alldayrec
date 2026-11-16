@@ -23,6 +23,7 @@ from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
+from alldayrec import gain
 from alldayrec import infer
 from alldayrec import monitor
 from alldayrec import perf
@@ -79,6 +80,7 @@ def seed(t: tenant.Tenant):
         db.put_device_log(DEV, [{"src": "app", "seq": 1, "at": AT, "data": {"kind": mark}},
                                 {"src": "app", "seq": 3, "at": AT, "data": {"kind": "mic_lost", "reason": mark}}])  # GET /api/phone-spans
         db.add_device_status(DEV, AT, {"battery": 50, "note": mark})
+        gain.put(DEV, 0, 3.0, note=mark)  # GET /api/device-gain; /api/audio, /api/listen: each its own offset
         db.add_call("final", f"engine-{mark}", DEV, 100)
         db.add_balance("stepfun", 1.0)
         audio.save(DEV, MS, OGG, "audio/ogg")
@@ -176,6 +178,7 @@ REQUESTS = {
     ("POST", "/api/voice-check"): ("POST", "/api/voice-check", dict(json={"answer": "later"})),
     ("GET", "/api/audio"): ("GET", "/api/audio", dict(params={"start": AT, "end": f"{TODAY}T10:00:06.000", "device": DEV})),
     ("GET", "/api/listen"): ("GET", "/api/listen", dict(params={"device": DEV})),
+    ("GET", "/api/device-gain"): ("GET", "/api/device-gain", {}),
     ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"device": DEV})),
     ("POST", "/api/sentences/{sid}/report"): ("POST", "/api/sentences/f1/report",
                                               dict(json={"note": "MARKa 上报", "page": "live", "row": {"start": AT, "source": DEV}})),

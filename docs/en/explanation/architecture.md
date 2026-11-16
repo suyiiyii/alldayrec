@@ -87,6 +87,19 @@ A request takes at most 600 s of audio, and speaker-change frames (`/segment`) a
 
 Upgrade the inference service and the server together, to the same version. The server wants exactly its own model files in `/health`, so when a version changes the models (adding speaker-change detection, for one), neither side upgraded first matches the other: every call waits until the other side is upgraded too. Uploads are taken meanwhile, and they catch up after the upgrade.
 
+## Levels and gains
+
+Recording devices differ in level: the same words through a phone, a recorder and an imported file can be tens of dB apart. Every device is brought to one standard level: the wearer's own speech at an active speech level (ITU-T P.56) of **−26 dBov**. In two steps:
+
+1. **Capture gain**, set on the device: a recorder's PDM gain, a phone's gain before its encoder in the app. As high as it can be without the loudest real sound clipping. When a device's reported value changes (`mic_gain_db` in a recorder's status, `capture_gain_db` with a phone's uploaded piece), the server writes a row to the `device_gain` table (source `reported`); it is a record only and never changes the audio.
+2. **Calibration offset**, applied by the server: after decoding, a fixed number of dB (`offset_db`) multiplied in floating point maps the device's level to −26 dBov, losing nothing. It is only set by hand: `server/gain.sh set <tenant> <device> <dB>` (or `python -m alldayrec.gain` locally); `server/gain.sh list` lists it.
+
+Each `device_gain` row holds from its `since_ms` on: for a device and a time, each of the two columns is its newest non-empty value with `since_ms` no later than that time. With no row the offset is 0 dB and the audio is exactly as before.
+
+The offset is applied where `audio.py` decodes each piece (`samples`, and `piece_window` and `piece_blocks` for long imports), once, so every reader of the audio gets the same gain: transcription and the VAD, voiceprints, music detection, late audio, `trim.py`'s VAD, playback on the web and in the app (`/api/audio`) and listening in (`/api/listen`). Whatever it takes past full scale is held under it by a soft limiter, never hard-clipped, and the samples it held are counted in the metric `lr_gain_limited_samples_total`. The adaptive gains come after it: the VAD's `VAD_GAIN_MAX_DB` and `ASR_GAIN_MAX_DB` before the engine work on audio that already has the offset. The stored bytes and the levels recorded at upload (`pieces`' rms and envelope) stay as they came. `/api/audio` (with a device) and `/api/listen` answer with an `X-Gain-Db` header: how many dB louder this audio is than the stored audio.
+
+A device with an offset plays back at that offset alone; a recorder not yet registered still plays `PLAY_GAIN_DB` louder. Once every recorder has an offset, `PLAY_GAIN_DB` can go.
+
 ## Where recordings are kept
 
 Every read and write of recording bytes in `server/alldayrec/audio.py` goes through one storage interface (`store.py`): append (local only), read by position and length, write whole, exists, delete. Each piece's row in the `pieces` table holds its path, position and length. By default (`STORAGE=local`) every recording is in the `recordings` directory. With `STORAGE=s3`, an hour file lives like this:

@@ -30,6 +30,7 @@ import anyio.to_thread
 import numpy as np
 
 from alldayrec import db
+from alldayrec import gain
 from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import seal
@@ -52,15 +53,25 @@ _append = threading.Lock()  # uploads are saved in threads (threads.MEDIA): one 
 # Played louder: our recorders (LR-*) come out 11-13 dB quieter than a bean or a phone at the same distance (11-06,
 # the same speech side by side: a fixed gain, not their floor). Their mic gain stays where it is (its full scale is the
 # mic's own overload point: more gain clips in the PDM first) and what is kept and transcribed is as it came; only what
-# is played to someone (/api/audio's WAV, /api/listen) is raised, by louder()'s limiter. 0: as it came
+# is played to someone (/api/audio's WAV, /api/listen) is raised, by louder()'s limiter. 0: as it came. Only where the
+# recorder has no calibration offset (gain.py): one that has is played as the models hear it, at its offset alone.
+# Once every recorder has one, this goes
 PLAY_GAIN_DB = float(os.environ.get("PLAY_GAIN_DB", "12"))
 
 
-def played(x: np.ndarray, device: str) -> np.ndarray:
-    """A device's audio as it is played: a recorder's PLAY_GAIN_DB louder, held under -1 dBFS (squeeze.louder); a
+def played(x: np.ndarray, device: str, at_ms: float) -> np.ndarray:
+    """A device's audio from at_ms as it is played: samples() already has its calibration offset (gain.py), which is
+    all a device with one gets; a recorder without one PLAY_GAIN_DB louder, held under -1 dBFS (squeeze.louder); a
     phone's, a bean's or an import's as it came. One gain, not a level target: the conversation player plays back to
     back 110 s cuts and the live page 1 s polls, and a gain set by each one's level would jump between them."""
-    return squeeze.louder(x, PLAY_GAIN_DB) if device.startswith("LR-") else x
+    return squeeze.louder(x, PLAY_GAIN_DB) if device.startswith("LR-") and gain.offset_db(device, round(at_ms)) is None else x
+
+
+def play_db(device: str, at_ms: float) -> float:
+    """The gain (dB) what played() hands out from at_ms has over the stored audio (X-Gain-Db): the offset, else
+    PLAY_GAIN_DB for a recorder (its limiter may take peaks lower), else 0."""
+    g = gain.offset_db(device, round(at_ms))
+    return g if g is not None else PLAY_GAIN_DB if device.startswith("LR-") else 0.0
 
 
 AAC_DELAY = 2112  # samples an AAC encoder puts before the audio (at the iPhone's 16 kHz: 132 ms)
@@ -507,12 +518,12 @@ def piece_blocks(p, end):
             pcm, count = decoded
             skip = max(0, round((end - p["start_ms"]) * SR / 1000))
             pcm.seek(skip * 2, os.SEEK_CUR)
-            yield pcm_blocks(pcm, max(0, count - skip)), skip
+            yield (gain.apply(x, p["device"], p["start_ms"]) for x in pcm_blocks(pcm, max(0, count - skip))), skip
 
 
 def piece_window(p, offset, count, exact=False):
     """Only decode the requested samples of a long import, with 2 s codec preroll.
-    Short device pieces retain samples()'s exact Opus priming/dehum/AAC behavior.
+    Short device pieces retain samples()'s exact Opus priming/dehum/AAC behavior. Both with the device's offset (gain.py).
     exact: a long AAC also to its samples at upload, past its seconds (to the ms), so one decoded short is seen.
     """
     if p["seconds"] <= WHOLE_S:
@@ -539,7 +550,7 @@ def piece_window(p, offset, count, exact=False):
                     return None
                 decoded_pcm, _ = decoded
                 decoded_pcm.seek(offset * 2, os.SEEK_CUR)
-                return np.frombuffer(decoded_pcm.read(count * 2), np.int16)
+                return gain.apply(np.frombuffer(decoded_pcm.read(count * 2), np.int16), p["device"], p["start_ms"])
         mov = header[4:8] == b"ftyp"
         args = ["ffmpeg", "-nostdin", "-v", "error", "-threads", "1", *(["-ss", str(seek)] if seek else []),
                 *(["-f", "mov"] if mov else []), "-i", source.name,
@@ -549,7 +560,7 @@ def piece_window(p, offset, count, exact=False):
         if decode_process(args, pcm):
             return None
         pcm.seek(0)
-        return np.frombuffer(pcm.read(count * 2), np.int16)
+        return gain.apply(np.frombuffer(pcm.read(count * 2), np.int16), p["device"], p["start_ms"])
 
 
 def gone(p) -> bool:
@@ -584,9 +595,10 @@ def read(p) -> bytes:
 
 
 def samples(p) -> np.ndarray | None:
-    """A pieces row's audio, decoded, a recorder's going on from the piece before it (decode, primed) and without its
-    board's 10 ms hum (dehum). Every reader takes pieces from here (the pipeline, playback, listening); the levels
-    stored at upload (save) stay those of the piece as it came."""
+    """A pieces row's audio, decoded, a recorder's going on from the piece before it (decode, primed), without its
+    board's 10 ms hum (dehum) and with its device's calibration offset (gain.apply). Every reader takes pieces from
+    here (the pipeline, playback, listening), long imports from piece_window and piece_blocks, which apply it too; the
+    levels stored at upload (save) and the stored bytes (read) stay those of the piece as it came."""
     if gone(p):
         return None
     body, ogg = read(p), p["path"].endswith(".ogg")
@@ -597,7 +609,7 @@ def samples(p) -> np.ndarray | None:
     if (x is not None and ogg and prev is None and sliced(packets(body))
             and db.conn().execute("SELECT 1 FROM cold_starts WHERE device = ? AND start_ms = ?", (p["device"], p["start_ms"])).fetchone()):
         x = warmed(x)  # the first of a kept stretch (trim.py): the piece before it, its decoder's priming, is gone
-    return x
+    return x if x is None else gain.apply(x, p["device"], p["start_ms"])
 
 
 def fresh(p, end: float) -> tuple[float, np.ndarray] | None:
@@ -944,9 +956,11 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> bytes | None:
     """[a, b] (+0.2 s each side) of one device (any when None) as `fmt`, or None when no stored audio covers it: wav
-    to be played (played(): a recorder's louder), s16le as stored (voiceprints). Each piece is put at its own time and
-    where none has audio (before the first, between two, after the last) it is silence: a second of the cut is a
-    second of the recording, so the conversation player's windows and the sentence it highlights stay on time."""
+    to be played (played(): a recorder's louder), s16le as the models get it (voiceprints); both with each piece's
+    offset (samples). Each piece is put at its own time and where none has audio (before the first, between two, after
+    the last) it is silence: a second of the cut is a second of the recording, so the conversation player's windows
+    and the sentence it highlights stay on time. shortcut: one device's wav takes played()'s PLAY_GAIN_DB choice at
+    its first piece, so a cut over the since_ms of its first offset row plays its earlier part without PLAY_GAIN_DB."""
     a_ms, b_ms = int(a.timestamp() * 1000), int(b.timestamp() * 1000)
     pieces = db.conn().execute(
         "SELECT * FROM pieces WHERE start_ms <= ? AND start_ms + seconds * 1000 >= ? AND (? IS NULL OR device = ?) ORDER BY start_ms",
@@ -990,13 +1004,13 @@ def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None) -> 
     many = len({d for _, _, d in parts}) > 1  # no device asked for and two answered: each piece at its own device's gain
     x, free = np.zeros(need, np.int16), np.ones(need, bool)
     for i, y, d in parts:  # where two devices overlap, the first one's
-        y = played(y, d) if many and fmt != "s16le" else y
+        y = played(y, d, at + i * 1000 / SR) if many and fmt != "s16le" else y
         f = free[i:i + len(y)]
         x[i:i + len(y)][f] = y[f]
         free[i:i + len(y)] = False
     if fmt == "s16le":
         return x.tobytes()
-    return wav(x if many else played(x, parts[0][2]))
+    return wav(x if many else played(x, parts[0][2], at + parts[0][0] * 1000 / SR))
 
 
 def wav(x: np.ndarray) -> bytes:
@@ -1028,7 +1042,7 @@ def newer(device: str, after: int | None) -> tuple[int, int, np.ndarray] | None:
         if got := fresh(p, end):
             end = got[0] + len(got[1]) * 1000 / SR
             xs.append(got)
-    return (round(xs[0][0]), ps[-1]["start_ms"], played(np.concatenate([x for _, x in xs]), device)) if xs else None
+    return (round(xs[0][0]), ps[-1]["start_ms"], played(np.concatenate([x for _, x in xs]), device, xs[0][0])) if xs else None
 
 
 if __name__ == "__main__":  # the stream's order, resume point and late pieces, on synthetic tones

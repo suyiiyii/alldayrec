@@ -168,6 +168,7 @@ def metrics() -> str:
     db.balance. Devices by their LR-… name, a phone (named by its owner) by a hash of it; never what was said, nor a name
     of anyone."""
     s, now, out = status(), dt.datetime.now(), []
+    label = lambda d: d if d.startswith("LR-") else "phone-" + hashlib.sha256(d.encode()).hexdigest()[:8]
 
     def m(name, v, **labels):
         if v is not None:
@@ -175,7 +176,7 @@ def metrics() -> str:
     m("lr_up", 1, commit=s["commit"])
     m("lr_summaries_pending", s["summaries_pending"])
     for d in s["devices"]:
-        dev = d["device"] if d["device"].startswith("LR-") else "phone-" + hashlib.sha256(d["device"].encode()).hexdigest()[:8]
+        dev = label(d["device"])
         hw, snd, arr = d["hw"] or {}, d["sound"] or {}, d["arrival"] or {}
         # the pipeline, its last 10 min of audio (sound), the recorder as its phone last read it (hw)
         for name, v in (("behind_seconds", d["behind_s"]), ("latency_seconds", d["latency_s"]), ("queued_pieces", d["queued"]),
@@ -187,6 +188,8 @@ def metrics() -> str:
             m(f"lr_{name}", v, device=dev)
         if hw.get("fw"):
             m("lr_device_info", 1, device=dev, firmware=hw["fw"])
+    for d, n in list(T().gain_limited.items()):  # gain.apply: samples a calibration offset took past full scale, soft-limited
+        m("lr_gain_limited_samples_total", n, device=label(d))
     for c in db.calls(STARTED):
         for result, n in {"ok": c["n"] - sum(c["failed"].values()), **c["failed"]}.items():  # failed: by HTTP code or class
             m("lr_calls_total", n, kind=c["kind"], engine=c["engine"], result=result)

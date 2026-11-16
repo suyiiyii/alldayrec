@@ -88,7 +88,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz samples the client wrote into it (the iPhone's AAC: the decoder adds some at both ends). | `device` (query, string)<br>`start` (query, integer)<br>`n?` (query, integer)<br>`hold?` (query, integer) |
+| `POST` | One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz samples the client wrote into it (the iPhone's AAC: the decoder adds some at both ends). | `device` (query, string)<br>`start` (query, integer)<br>`n?` (query, integer)<br>`hold?` (query, integer)<br>`capture_gain_db?` (query, number) |
 
 ### `/api/chunks/end`
 
@@ -452,13 +452,19 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it. | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
+| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it; X-Gain-Db (with a device): the gain it has over the stored audio (audio.play_db). | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
 
 ### `/api/listen`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
 | `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start; 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
+
+### `/api/device-gain`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Each device's gain rows (gain.py: since_ms on, capture_db, offset_db, source, note) and the level they calibrate to (target_dbov); read-only, set with server/gain.sh. | — |
 
 ### `/api/stars`
 

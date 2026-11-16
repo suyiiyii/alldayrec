@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from alldayrec import audio
+from alldayrec import gain
 from alldayrec import store
 from alldayrec import threads
 from alldayrec.core import NO_CACHE
@@ -17,9 +18,11 @@ log = logging.getLogger("live")
 
 @router.get("/api/audio")
 async def audio_wav(start: str, end: str, device: str | None = None):
-    """WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it."""
+    """WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it;
+    X-Gain-Db (with a device): the gain it has over the stored audio (audio.play_db)."""
     wav = await cut(start, end, "wav", device)
-    return Response(wav, media_type="audio/wav")
+    at = (dt.datetime.fromisoformat(start).timestamp() - 0.2) * 1000
+    return Response(wav, media_type="audio/wav", headers={"X-Gain-Db": f"{audio.play_db(device, at):g}"} if device else None)
 
 
 @router.get("/api/listen")
@@ -32,7 +35,15 @@ async def listen(device: str, after: int | None = None):
     if got is None:
         return Response(status_code=204)
     start, last, x = got
-    return Response(audio.wav(x), media_type="audio/wav", headers={"X-Start": str(start), "X-After": str(last), **NO_CACHE})
+    return Response(audio.wav(x), media_type="audio/wav", headers={"X-Start": str(start), "X-After": str(last),
+                                                                   "X-Gain-Db": f"{audio.play_db(device, start):g}", **NO_CACHE})
+
+
+@router.get("/api/device-gain")
+async def device_gain():
+    """Each device's gain rows (gain.py: since_ms on, capture_db, offset_db, source, note) and the level they calibrate
+    to (target_dbov); read-only, set with server/gain.sh."""
+    return {"target_dbov": gain.TARGET_DBOV, "rows": await anyio.to_thread.run_sync(gain.rows, limiter=threads.DB)}
 
 
 async def cut(start: str, end: str, fmt: str, device: str | None = None) -> bytes:

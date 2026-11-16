@@ -75,6 +75,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |
+| `device_gain` | Each device's gains by time: device, from when (unix ms), capture gain `capture_db` (reported by the device or written down), calibration offset `offset_db` (applied by the server after decoding, to −26 dBov; none: 0), source (`manual`, `reported`), note. See [Levels and gains](../explanation/architecture.md#levels-and-gains) (since v0.5.0) |
 | `calls` | Duration, result and usage of each ASR and LLM call, without content |
 | `balances` | Prepaid account balances, recorded hourly |
 | `perf_stalls` | Times the event loop was held up: when it ended, how many milliseconds, in which functions (only in the first tenant's store; since v0.3.0) |
