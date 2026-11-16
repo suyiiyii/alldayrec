@@ -113,8 +113,8 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
 CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
-    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s; parts label() joins again: the last one's), unix ms; part:
-                                                    -- of one split_speakers cut (1 on), 0 whole
+    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s) or part, unix ms; part: of one split_speakers cut (1 on,
+                                                    -- each its own even when label() joins them again), 0 whole
     model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
     gain_db REAL NOT NULL DEFAULT 0,                -- the gain its audio was given before the model (dB; 0: as decoded)
     PRIMARY KEY (device, start_ms, part));          -- goes with its sentences (replace_sentences) and its audio (trim.py)
@@ -391,11 +391,41 @@ def sentences(lo: str, hi: str, inclusive: bool = False, source: str | None = No
 
 def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str):
     """A device's pass replaces only that device's rows: another device may have recorded the same minutes."""
-    c.execute("DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))
-    c.execute("DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ?",  # the pass's own go in again
-              (source, *(int(dt.datetime.fromisoformat(x).timestamp() * 1000) for x in (lo, hi))))
+    q = "FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0"
+    gone = c.execute(f"SELECT start, end {q}", (lo, hi, source)).fetchall()
+    c.execute(f"DELETE {q}", (lo, hi, source))
+    # their voiceprints: a joined row's later segments can start at hi or after (a shorter pass now)
+    c.executemany("DELETE FROM seg_emb WHERE device = ? AND start_ms >= ? AND start_ms < ?",
+                  [(source, ms(a), ms(b)) for a, b in [(lo, hi), *gone]])
     protected = c.execute("SELECT id, start, end FROM sentences WHERE source = ? AND late = 1 AND start < ? AND end > ?", (source, hi, lo)).fetchall()
     insert_sentences(c, [r for r in rows if not any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)])
+
+
+def ms(s: str) -> int:
+    """A row's start or end (iso) as seg_emb holds it, unix ms."""
+    return int(dt.datetime.fromisoformat(s).timestamp() * 1000)
+
+
+def put_seg_embs(c: sqlite3.Connection, source: str, lo: str, hi: str, embs: list[tuple]) -> bool:
+    """A pass's voiceprints (device_pipeline.seg_embs) after replace_sentences put its rows in [lo, hi): each one kept
+    only with the row it starts in (none for a row the late layer's protected). False: none written (logged); the
+    rows stay, for the voiceprints are only beside them."""
+    spans = [(ms(a), ms(b)) for a, b in c.execute(
+        "SELECT start, end FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))]
+    c.execute("SAVEPOINT seg_emb")
+    try:
+        c.executemany("INSERT OR REPLACE INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      [e for e in embs if any(a <= e[1] < b for a, b in spans)])
+    except Exception as e:
+        if not c.in_transaction:  # SQLite dropped the whole transaction (disk full, I/O): the rows are gone too
+            raise
+        c.execute("ROLLBACK TO seg_emb")
+        log.warning("%s: segment voiceprints not kept: %r", source, e)
+        return False
+    finally:
+        if c.in_transaction:
+            c.execute("RELEASE seg_emb")
+    return True
 
 
 def insert_sentences(c: sqlite3.Connection, rows: list[dict]):
