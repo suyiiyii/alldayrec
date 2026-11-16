@@ -7,7 +7,8 @@
 #                                                        # A device's own sensitivity: from 0, so history voice clips
 #                                                        # (no clip_start) are calibrated too
 # Instances are dir:unit as in deploy.sh (LR_INSTANCES, default /opt/alldayrec:alldayrec), on the host LR_DEPLOY_HOST
-# names through LR_DEPLOY_SHELL; each instance's tenants.json says which tenants are its own.
+# names through LR_DEPLOY_SHELL (root, as for deploy.sh: systemd-run); each instance's tenants.json says which tenants
+# are its own. What gain.py prints on stderr is not shown (it may hold the .env's values): a failure says its exit code.
 set -euo pipefail
 INSTANCES=${LR_INSTANCES:-/opt/alldayrec:alldayrec}
 
@@ -22,24 +23,36 @@ if [ "${1:-}" != remote ]; then  # on this machine
   exit
 fi
 
-# on the deploy host: remote <dir:unit ...> <gain.py's arguments>
+# on the deploy host (as root, as deploy.sh): remote <dir:unit ...> <gain.py's arguments>
 instances=$2; shift 2
+# what stopped gain.py, by its type only: its messages may hold the .env's values
+py='import runpy, sys
+try:
+    runpy.run_module("alldayrec.gain", run_name="__main__")
+except SystemExit as e:
+    if e.code is None or isinstance(e.code, int):
+        raise
+    sys.exit("  gain.py: SystemExit")
+except BaseException as e:
+    sys.exit("  gain.py: " + type(e).__name__)'
 ok='' failed=''
 for i in $instances; do
-  d=${i%%:*}
-  # as its unit runs it: in <dir>/server, with <dir>/.env's variables (EnvironmentFile, the last one wins), read in
-  # Python before the package is imported (never sourced, never printed, never in process args)
+  d=${i%%:*} u=${i#*:}
+  # as its unit runs it: systemd reads the unit's own EnvironmentFile (its quotes, spaces, the last one wins; never read
+  # here, never printed, never in process args), in its WorkingDirectory, as its User. A unit it does not know has none
+  # of them: gain.py would find another tenants.json, so it does not run
+  wd=$(systemctl show -p WorkingDirectory --value "$u") user=$(systemctl show -p User --value "$u") envs=()
+  while read -r f; do [ -z "$f" ] || envs+=(-p "EnvironmentFile=${f% (ignore_errors=*}"); done < <(systemctl show -p EnvironmentFiles --value "$u")
+  if [ -z "$wd" ] || [ ${#envs[@]} = 0 ]; then
+    echo "  stop: $d: $u has no WorkingDirectory or EnvironmentFile" >&2; failed=1; continue
+  fi
   # a tenant another instance has: gain.py says so (exit 3); list without a tenant: every instance's
-  if (cd "$d/server" && .venv/bin/python -c 'import os, runpy
-for line in open("../.env"):
-    k, eq, v = line.strip().partition("=")
-    if eq and k and not k.startswith(("#", ";")):
-        os.environ[k] = v
-runpy.run_module("alldayrec.gain", run_name="__main__")' "$@") 2> >(grep -v '^no tenant ' >&2); then
+  if systemd-run --pipe --wait --quiet --collect "${envs[@]}" -p "WorkingDirectory=$wd" ${user:+-p "User=$user"} \
+    "$d/server/.venv/bin/python" -c "$py" "$@" < /dev/null 2> >(grep -xE '  gain\.py: [A-Za-z_][A-Za-z0-9_]*' >&2); then
     ok=1
   else
     rc=$?
-    [ "$rc" = 3 ] || { echo "  stop: $d: gain.py failed (exit $rc), above" >&2; failed=1; }
+    [ "$rc" = 3 ] || { echo "  stop: $d: gain.py failed (exit $rc)" >&2; failed=1; }
   fi
 done
 [ -z "$failed" ] || exit 1
