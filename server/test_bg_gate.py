@@ -254,6 +254,22 @@ def test_self_answer_card_from_before_gate(audio_store, gate, monkeypatch, score
     assert not core.owner_npz().exists() and r == {"ok": True, "learned": 0, "reason": "background_music"}
 
 
+def test_self_answer_drops_a_voice_scored_after_card(audio_store, gate, monkeypatch):
+    """One candidate of two conversations' voices, music scored under one after the card popped: 我 is the other's
+    voice alone, not the bank the card was made with."""
+    clean, dirty = selfvoice.unit([1, 0.3, 0, 0]), selfvoice.unit([1, -0.3, 0, 0])  # 0.83 alike: one candidate
+    (c1, _), (c2, rows2) = sample([6.0, 6.0], hour=10), sample([6.0, 6.0], hour=11)
+    voices_round(monkeypatch)
+    with db.tx() as t:
+        t.executemany("UPDATE voices SET e = ? WHERE conv = ?", [(db.blob(clean), c1["id"]), (db.blob(dirty), c2["id"])])
+    card = self_card()
+    music(rows2[0]["start"], 6, 0.5)
+    assert anyio.run(routes_voices.self_answer, {"answer": 0}) == {"ok": True}
+    assert not np.allclose(routes_speakers.owner_bank()["self"], selfvoice.unit(card["candidates"][0]["bank"]), atol=1e-3)
+    assert np.allclose(routes_speakers.owner_bank()["self"], clean, atol=1e-6)
+    assert sorted(card["candidates"][0]["members"]) == [[c1["id"], "S1"], [c2["id"], "S1"]], "one candidate of both"
+
+
 def test_self_answer_learns_voices_shown_free(audio_store, gate, monkeypatch):
     """The gate on, no music: the pick is 我's voiceprint, the card's bank made again from the same voices."""
     c, rows = cached(monkeypatch, [6.0, 6.0], True)
