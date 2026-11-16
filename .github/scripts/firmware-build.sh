@@ -10,7 +10,7 @@ VARIANT=${FIRMWARE_VARIANT:-$FAMILY}
 source "${FIRMWARE_ENV_FILE:?Run firmware-setup-ncs.sh or firmware-setup-idf.sh first}"
 export RUNNER_TEMP=${RUNNER_TEMP:-$(mktemp -d)}
 export CMAKE_BUILD_PARALLEL_LEVEL=2 MAKEFLAGS=-j2 IDF_PY_BUILD_JOBS=2 LR_BUILD_JOBS=2
-unset LR_LOG
+unset LR_LOG LR_RAW_PCM
 VERSION="$(git log -1 --format=%cd --date=format:%Y%m%d.%H%M%S)-$(git rev-parse --short HEAD)"
 case "$FAMILY" in
   devkit)

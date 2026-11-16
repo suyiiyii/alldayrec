@@ -88,7 +88,7 @@ def main():
         git("fetch", "-q", "origin", "main")
         if subprocess.run(["git", "-C", str(D), "merge-base", "--is-ancestor", commit, "origin/main"]).returncode:
             sys.exit(f"{short} is not on origin/main (--unmerged for a test server)")
-    env = {k: v for k, v in os.environ.items() if k != "LR_LOG"}  # the log build is not for people's boards
+    env = {k: v for k, v in os.environ.items() if k not in ("LR_LOG", "LR_RAW_PCM")}  # test builds are not for people's boards
     for v in a.variants:
         subprocess.run([str(D / "lr.sh"), "build", v], check=True, env=env)
         subprocess.run([str(D / "lr.sh"), "pkg", v], check=True, env=env)

@@ -71,6 +71,13 @@ if [ "${LR_DEBUG:-}" = 1 ]; then
   V="$V-debug"
   FWS=-debug  # its revision says so
 fi
+# LR_RAW_PCM=1 ./lr.sh build V: the mic's raw PCM on the USB serial port (CONFIG_LR_RAW_PCM, lr_pcm.py), in
+# build/lr-V-rawpcm; tests only, never released; not with LR_LOG (the same port)
+if [ "${LR_RAW_PCM:-}" = 1 ]; then
+  EXTRA+=(-DCONFIG_LR_RAW_PCM=y)
+  V="$V-rawpcm"
+  FWS=${FWS:-}-rawpcm
+fi
 # LR_LOG=1 ./lr.sh build V: logs on the USB serial port (cat /dev/cu.usbmodem*), in build/lr-V-log
 if [ "${LR_LOG:-}" = 1 ]; then
   OVL="$OVL;$D/overlay/lr_log.overlay"
