@@ -10,7 +10,7 @@ from contextlib import nullcontext
 import anyio
 import numpy as np
 
-from alldayrec import asr, audio, colocate, compute, db, late_merge, late_store, store, threads, ws
+from alldayrec import asr, audio, colocate, compute, db, late_merge, late_store, sounds, store, threads, ws
 from alldayrec.conversations import GAP_S
 from alldayrec.core import conversation_rows, iso, owner_npz, state
 from alldayrec.diarist import Diarist, relabel
@@ -196,9 +196,10 @@ async def conversation_vectors(span: dict) -> dict:
     hi = iso(dt.datetime.fromtimestamp(span["end_ms"] / 1000) + dt.timedelta(seconds=GAP_S))
     cs = [db._conversation(r) for r in db.conn().execute(
         "SELECT * FROM conversations WHERE device = ? AND start <= ? AND end >= ?", (span["device"], hi, lo))]
-    out = {}
+    out, g = {}, sounds.gating()
     for c in cs:
-        vs = {r["label"]: db.vec(r["e"]) for r in db.conn().execute("SELECT * FROM voices WHERE conv = ? AND e IS NOT NULL", (c["id"],))}
+        vs = {r["label"]: db.vec(r["e"]) for r in db.conn().execute("SELECT * FROM voices WHERE conv = ? AND e IS NOT NULL", (c["id"],))
+              if not g or sounds.verified(r["used"])}  # BG_GATE: one not shown free of music under it is made again below
         missing = set(c["participants"]) - set(vs)
         if missing and state.get("embed"):
             # Closed conversations may not have reached the five-minute voices loop (or be historical).
@@ -209,7 +210,7 @@ async def conversation_vectors(span: dict) -> dict:
                                 key=lambda r: (r["end"], r["start"]), reverse=True):
                     a = round(dt.datetime.fromisoformat(r["start"]).timestamp() * 1000)
                     b = min(a + 15_000, round(dt.datetime.fromisoformat(r["end"]).timestamp() * 1000))
-                    if b - a < 1500:
+                    if b - a < 1500 or sounds.under_music(r, "late"):  # music under it (BG_GATE): no voiceprint from it
                         continue
                     x = await anyio.to_thread.run_sync(read_exact, span["device"], a, b, limiter=threads.MEDIA)
                     es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))

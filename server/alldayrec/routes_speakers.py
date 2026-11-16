@@ -1,6 +1,7 @@
 """Who speaks: a conversation's labels renamed, the speakers page (voices grouped across conversations), aliases, and a
 person's page and profile. The voiceprints of closed conversations and the 「哪个是你？」 card: routes_voices.py."""
 import datetime as dt
+import itertools
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ from alldayrec import hints
 from alldayrec import profiles
 from alldayrec import routes_audio
 from alldayrec import selfvoice
+from alldayrec import sounds
 from alldayrec import speakers
 from alldayrec import summary
 from alldayrec import threads
@@ -52,7 +54,7 @@ async def rename(conv_id: str, body: dict):
     if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(conv_id, frm)], to, limiter=threads.DB)):
         return {"check": q}
     also = None if speakers.ANON.fullmatch(to) else await earlier(conv_id, frm)
-    me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
+    me = [await voice_of_me(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
     return {**r, **learn_me(to, me, [before]), "undo": keep_undo([before]), "also": also}
@@ -174,10 +176,49 @@ UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not aft
 ME_MIN_S = 10.0  # 「这是我」 needs this much total sentence speech per click across labels with voiceprints
 
 
+async def label_voice(c: dict, label: str, rs: list[dict]) -> dict | None:
+    """A label's voices row in conversation c (voices_loop's), from its sentences rs: the mean voiceprint of up to 4 of
+    >= 1.5 s, the longest, each capped at 15 s; one with music under it (BG_GATE) is not one of the 4, n and speech_s
+    count it still. used: those it is made of. None: no sentence of it to hear here."""
+    dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
+    long = list(itertools.islice((r for r in sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True) if not sounds.under_music(r, "voices")), 4))
+    es, ls, used = [], [], []
+    for r in long:
+        try:
+            x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
+        except HTTPException:
+            continue
+        es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
+        used.append(r)
+        if (lv := selfvoice.level(x)) is not None:
+            ls.append(lv)
+    if not es:
+        return None
+    e = np.mean(es, 0)
+    best = min(used, key=lambda r: abs(dur(r) - 6))
+    return {"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
+            "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
+            "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
+            "clip_text": best.get("text"), "used": [(r["start"], r["end"], r.get("source")) for r in used]}
+
+
 def voice_of(conv: str, label: str) -> tuple[np.ndarray, float] | None:
-    """A label's voiceprint in one conversation (the voices table: a mean of its longest sentences) and its speech."""
-    r = db.conn().execute("SELECT e, speech_s FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone()
-    return (db.vec(r[0]), r[1] or 0.0) if r else None
+    """A label's voiceprint in one conversation (the voices table: a mean of its longest sentences) and its speech.
+    BG_GATE in effect (sounds.gating): None for one not shown free of music under its sentences (sounds.verified)."""
+    g = sounds.gating()
+    r = db.conn().execute(f"SELECT e, speech_s{', used' if g else ''} FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone()
+    return (db.vec(r[0]), r[1] or 0.0) if r and (not g or sounds.verified(r[2])) else None
+
+
+async def voice_of_me(conv: str, label: str) -> tuple[np.ndarray, float] | None:
+    """voice_of, for learn_me: a voice voice_of holds back (BG_GATE) made again here from the label's sentences, those
+    with music under them left out (label_voice; not stored); None as voice_of when the label has no voice at all."""
+    if (v := voice_of(conv, label)) or not sounds.gating() or not db.conn().execute(
+            "SELECT 1 FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone():
+        return v
+    c = find_conversation(conv)
+    v = c and await label_voice(c, label, [r for r in conversation_rows(c) if r.get("speaker") == label and not r.get("music")])
+    return (v["e"], v["speech_s"]) if v else None
 
 
 def save_owner(bank: dict[str, np.ndarray]):
@@ -305,18 +346,24 @@ async def enroll_soon(to: str, rows: list[dict]):
 async def enroll(to: str, rows: list[dict]):
     """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists: those
     bank.pick keeps (alike within their label, not what 我 could have said, at most CAP a click), recorded each in
-    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py) teaches nothing.
-    A failure is logged: it must not end the tenant's tasks beside it."""
+    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py), or with music
+    under it (sounds.under_music, BG_GATE), teaches nothing. A failure is logged: it must not end the tenant's tasks
+    beside it."""
     try:
-        labels = {}  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
+        labels, bg = {}, 0  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
         for r in rows:
             if r.get("music"):
+                continue
+            if sounds.under_music(r, "enroll"):
+                bg += 1
                 continue
             try:
                 x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
             except HTTPException:  # history conversations have no recording here
                 continue
             labels.setdefault(r.get("conv"), []).append((r, await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)))
+        if not labels and bg:
+            ws.note(f"{to}：记住了 0 句的声纹，{bg} 句有背景音乐没用上", "state")
         if labels:
             ls = list(labels.items())
             had = db.people().get(to)
@@ -324,7 +371,8 @@ async def enroll(to: str, rows: list[dict]):
             with db.tx() as t:
                 n = sum(bank.learn(t, to, conv, [l[j] for i2, j in keep if i2 == i]) for i, (conv, l) in enumerate(ls))
             bank.sync(to)
-            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else ""), "state")
+            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else "")
+                    + (f"，{bg} 句有背景音乐没用上" if bg else ""), "state")
     except Exception:
         log.exception("enroll %s", to)
 
@@ -524,7 +572,7 @@ async def speaker_name(body: dict):
     for m in ms:
         if m["label"] == to:
             continue
-        v = voice_of(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
+        v = await voice_of_me(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
         try:
             _, more, before = apply_rename(m["conv"], m["label"], to)
         except HTTPException as e:  # the conversation changed since the page loaded

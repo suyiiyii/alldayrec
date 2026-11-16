@@ -45,6 +45,7 @@ CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- i
 CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; label and e NULL: no recording, not retried
     conv TEXT NOT NULL, label TEXT, device TEXT, n INTEGER, speech_s REAL, k INTEGER, e BLOB,
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
+    used TEXT,  -- the sentences e is made of, written while BG_GATE is on (sounds.verified); last: undo inserts rows by position
     UNIQUE (conv, label));
 CREATE TABLE IF NOT EXISTS apart (voice TEXT NOT NULL, grp TEXT NOT NULL, PRIMARY KEY (voice, grp));
 CREATE TABLE IF NOT EXISTS people (name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);  -- bank.py: the mean of enrolled
@@ -262,6 +263,8 @@ def init():
     for (name,) in conn().execute("SELECT p.name FROM people p LEFT JOIN people_samples s ON s.name = p.name "
                                   "WHERE s.n IS NOT p.n").fetchall():
         bank.fill(name)
+    if "used" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 11-17: voices made before BG_GATE: not known
+        conn().execute("ALTER TABLE voices ADD COLUMN used TEXT")
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
     if "samples" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-16: sounds.py's exact coverage; older pieces have none
@@ -937,6 +940,7 @@ def auto_closed_on(day: str) -> int:
 
 # voices, apart pins, people bank, aliases, name hints
 
+# not used: a row written through these (a merge, a split, late) is not known to be free of music (sounds.verified)
 V_COLS = ("conv", "label", "device", "n", "speech_s", "k", "e", "clip", "clip_start", "clip_end", "clip_text", "level")
 
 

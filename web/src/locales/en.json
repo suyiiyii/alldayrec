@@ -898,6 +898,7 @@
       "unsure": "not sure"
     },
     "picked": "Got it: in new conversations from now on, what you say shows as “Me”. Existing conversations stay as they are.",
+    "pickedMusic": "Not saved this time: the voice you picked had music under it, or it could not be checked. You will be asked again.",
     "later": "OK, we'll ask again tomorrow.",
     "none": "OK, we'll ask again once there's more recorded.",
     "title": "Which one is you?",
@@ -924,6 +925,7 @@
     "doneYes": "Got it.",
     "doneNo": "Got it: not them.",
     "doneLater": "OK, this one will not be asked again.",
+    "doneMusic": "Got it. These sentences had music under them, so no voiceprint was learnt this time.",
     "stale": "This conversation was just renamed; the card no longer applies."
   },
   "nameCheck": {

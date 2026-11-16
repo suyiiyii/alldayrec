@@ -1,6 +1,7 @@
 """Voices: the voiceprints of closed live conversations (voices_loop), and the 「哪个是你？」 and 「这是你吗？」 cards each
 round of them may pop (selfvoice.py)."""
 import datetime as dt
+import json
 import logging
 
 import anyio.to_thread
@@ -10,10 +11,11 @@ from fastapi import APIRouter, HTTPException
 from alldayrec import db
 from alldayrec import routes_audio
 from alldayrec import selfvoice
+from alldayrec import sounds
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, state
-from alldayrec.routes_speakers import enroll_soon, learnable, owner_bank, rename, save_owner, self_voices, speaker_detach, speaker_groups
+from alldayrec.routes_speakers import enroll_soon, label_voice, learnable, owner_bank, rename, save_owner, self_voices, speaker_detach, speaker_groups, voice_of
 from alldayrec.tenant import T
 
 log = logging.getLogger("live")
@@ -21,8 +23,8 @@ router = APIRouter()
 
 
 async def voices_loop():
-    """Voiceprints for the labels of closed live conversations (history ones are uploaded): up to 4 sentences of
-    >= 1.5 s, each capped at 15 s, independent of its summary. speech_s is the label's total sentence duration.
+    """Voiceprints for the labels of closed live conversations (history ones are uploaded; label_voice): up to 4
+    sentences of >= 1.5 s, each capped at 15 s, independent of its summary. speech_s is the label's total sentence duration.
     Short voices keep their clips and suggestions; learning 我 still needs ME_MIN_S per click. A conversation without
     a recording here is marked and not retried. Automatic people need enough non-media speech across conversations."""
     while True:
@@ -43,29 +45,14 @@ async def voices_loop():
                     by.setdefault(r["speaker"], []).append(r)
             out = []
             for label, rs in by.items():
-                dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-                long = sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True)[:4]
-                es, ls, used = [], [], []
-                for r in long:
-                    try:
-                        x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
-                    except HTTPException:
-                        continue
-                    es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
-                    used.append(r)
-                    if (lv := selfvoice.level(x)) is not None:
-                        ls.append(lv)
-                if es:
-                    e = np.mean(es, 0)
-                    best = min(used, key=lambda r: abs(dur(r) - 6))
-                    out.append({"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
-                                "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
-                                "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
-                                "clip_text": best.get("text")})
+                if v := await label_voice(c, label, rs):
+                    out.append(v)
             with db.tx() as t:
                 if db.resolve_conversation(c["id"]) != c["id"] or db.kv(f"conversation_revision:{c['id']}") != revision:
                     continue
                 db.insert_voices(t, out or [{"conv": c["id"]}])
+                if sounds.BG_GATE:  # what each is made of, to be checked again with the scores there are then (sounds.verified)
+                    t.executemany("UPDATE voices SET used = ? WHERE conv = ? AND label = ?", [(json.dumps(v["used"]), v["conv"], v["label"]) for v in out])
             T().speakers["at"] = 0.0
         try:
             await self_round()
@@ -82,13 +69,28 @@ async def voices_loop():
 CLIP_CONVS = 6  # a candidate's clips come from its biggest conversations: a sentence decoded costs ~5 CPU-s of ReDimNet2
 
 
+def self_cands() -> list[dict]:
+    """self_voices, those the card's candidates are made of: BG_GATE in effect, only those shown free of music under
+    them (voice_of; a voice made before the gate is not one), so that the bank picked is one self_answer can learn."""
+    vs = self_voices()
+    return [v for v in vs if voice_of(v["conv"], v["label"])] if sounds.gating() else vs
+
+
+def self_bank(members: list | None) -> np.ndarray | None:
+    """BG_GATE: a candidate's bank again from its voices (members, conv and label) still shown free of music under
+    them now (voice_of: scores may have come in since the card), the unit mean selfvoice.wearer makes; None: none
+    left, or a card made before the gate (no members), nothing to learn."""
+    es = [selfvoice.unit(v[0]) for c, label in members or [] if (v := voice_of(c, label))]
+    return selfvoice.unit(np.mean(es, 0)) if es else None
+
+
 async def self_round():
     """After the voices of closed conversations came in: pop the card when it is due (selfvoice.due). Off while 我 has a
     voiceprint (a hand-made npz, or the one picked here)."""
     st = await anyio.to_thread.run_sync(db.kv, "selfvoice", limiter=threads.DB) or {}
     if owner_npz().exists() or st.get("card"):  # the card up waits for the user; nothing else changes st meanwhile
         return
-    vs = await anyio.to_thread.run_sync(self_voices, limiter=threads.DB)
+    vs = await anyio.to_thread.run_sync(self_cands, limiter=threads.DB)
     if not vs:
         return
     now = dt.datetime.now()
@@ -124,7 +126,8 @@ async def self_card(cands: list[dict], vs: list[dict], why: str, n: int) -> dict
         clips = selfvoice.pick(pool, c["bank"], [b for b in banks if b is not c["bank"]])
         out.append({"tier": selfvoice.tier(c["p"]), "p": round(c["p"], 3), "convs": c["convs"], "speech_s": round(c["speech_s"]),
                     "bank": [float(x) for x in c["bank"]],
-                    "clips": [{"start": r["start"], "end": r["end"], "device": r.get("source"), "text": r.get("text")} for r in clips]})
+                    "clips": [{"start": r["start"], "end": r["end"], "device": r.get("source"), "text": r.get("text")} for r in clips],
+                    **({"members": [[m["conv"], m["label"]] for m in c["members"]]} if sounds.gating() else {})})  # self_bank
     return {"at": dt.datetime.now().isoformat(timespec="seconds"), "why": why, "convs": n, "candidates": out}
 
 
@@ -133,7 +136,7 @@ async def self_get():
     """The card while it is up: candidates most likely first (none preselected), each with a tier instead of a %."""
     st = db.kv("selfvoice") or {}
     c = None if owner_npz().exists() else st.get("card")
-    return {"card": c and {**c, "candidates": [{k: v for k, v in x.items() if k not in ("bank", "p")} for x in c["candidates"]]}}
+    return {"card": c and {**c, "candidates": [{k: v for k, v in x.items() if k not in ("bank", "p", "members")} for x in c["candidates"]]}}
 
 
 @router.post("/api/self")
@@ -141,29 +144,37 @@ async def self_answer(body: dict):
     """The answer to the card: a candidate's index becomes 我's voiceprint (owner-redimnet2.npz), taken by every
     pipeline from its next conversation on: the conversations before keep their labels and summaries. "none" (都不是)
     and "later" (以后再说) put the card away until selfvoice.due brings it again. Every answer is logged with the card's
-    probabilities: what POP_P and the tiers are to be checked against."""
+    probabilities: what POP_P and the tiers are to be checked against. BG_GATE in effect: what is learnt is the bank of
+    the candidate's voices shown free of music under them now (self_bank); none: ok, but learned 0 and reason
+    background_music, nothing learnt and the card away, to come again from the voices there are then."""
     st = db.kv("selfvoice") or {}
-    card, a, now = st.get("card"), body.get("answer"), dt.datetime.now()
+    card, a, now, learned = st.get("card"), body.get("answer"), dt.datetime.now(), {}
     if not card or owner_npz().exists():
         raise HTTPException(409, "[no_pending_voice] 没有待确认的声音，刷新页面再试")
     if a == "none":
-        vs = await anyio.to_thread.run_sync(self_voices, limiter=threads.DB)
+        vs = await anyio.to_thread.run_sync(self_cands, limiter=threads.DB)
         st["wait"] = {"convs": len({v["conv"] for v in vs})}
     elif a == "later":
         st["wait"] = {"until": (now + dt.timedelta(seconds=selfvoice.LATER_S)).isoformat(timespec="seconds")}
     elif isinstance(a, int) and not isinstance(a, bool) and 0 <= a < len(card["candidates"]):
-        save_owner({"self": selfvoice.unit(card["candidates"][a]["bank"]).astype(np.float32)})
-        st["confirmed"] = {"at": now.isoformat(timespec="seconds"), "pick": a}
+        bank = card["candidates"][a]["bank"]
+        if sounds.gating():
+            bank = await anyio.to_thread.run_sync(self_bank, card["candidates"][a].get("members"), limiter=threads.DB)
+        if bank is None:
+            learned = {"learned": 0, "reason": "background_music"}
+        else:
+            save_owner({"self": selfvoice.unit(bank).astype(np.float32)})
+            st["confirmed"] = {"at": now.isoformat(timespec="seconds"), "pick": a}
     else:
         raise HTTPException(400, "bad answer")
     st["log"] = st.get("log", []) + [{"at": now.isoformat(timespec="seconds"), "why": card["why"], "convs": card["convs"],
-                                      "p": [x["p"] for x in card["candidates"]], "answer": a}]
+                                      "p": [x["p"] for x in card["candidates"]], "answer": a, **learned}]
     st["card"] = None
     db.put_kv("selfvoice", st)
     if "confirmed" in st:
         ws.note(f"「我」的声音已确认（第 {a + 1} 个）：从下一段对话起认出「我」，已有的对话不变", "state")
     await ws.broadcast({"type": "self"})
-    return {"ok": True}
+    return {"ok": True, **learned}
 
 
 # 「这是你吗？」/「这是 P 吗？」(selfvoice.unsure): one voice at a time, CHECK_DAY a day, each conversation asked once; kv
@@ -250,10 +261,12 @@ async def check_answer(body: dict):
     """yes: as a rename by hand (a, b: the label becomes 我 or the name; c: the name's sentences teach its samples);
     no: the voice kept apart from the name (c: back to a fresh S<n> first), nothing learnt; later: the card away. The
     conversation is not asked about again either way; every answer is logged with the card's kind and score. A voice
-    renamed since the card popped (a: named by the user; c: its label gone): nothing done, ok false, logged stale."""
+    renamed since the card popped (a: named by the user; c: its label gone): nothing done, ok false, logged stale. A
+    c's yes whose sentences all have music under them (sounds.under_music): ok, but learned 0 and reason
+    background_music, nothing taught."""
     if body.get("answer") not in ("yes", "no", "later"):
         raise HTTPException(400, "bad answer")
-    st, a = db.kv("voicecheck") or {}, body["answer"]
+    st, a, learned = db.kv("voicecheck") or {}, body["answer"], {}
     if not (c := st.get("card")):
         raise HTTPException(409, "[no_pending_voice] 没有待确认的声音，刷新页面再试")
     st["card"] = None
@@ -266,7 +279,10 @@ async def check_answer(body: dict):
         elif a == "yes":
             if not (rows := taught_by(c)):
                 raise HTTPException(409, "renamed since")  # the label's sentences gone: nothing to teach, not an empty ok
-            await enroll_soon(c["name"], rows)
+            if rows := [r for r in rows if not sounds.under_music(r, "check")]:
+                await enroll_soon(c["name"], rows)
+            else:  # every one with music under it (BG_GATE): a yes that taught nothing, said so
+                learned = {"learned": 0, "reason": "background_music"}
         elif a == "no" and c["kind"] == "c":
             await speaker_detach({"conv": c["conv"], "label": c["label"], "group": c["name"]})
         elif a == "no":
@@ -280,4 +296,4 @@ async def check_answer(body: dict):
     st["log"] = (st.get("log") or [])[-199:] + [{"at": dt.datetime.now().isoformat(timespec="seconds"), "kind": c["kind"], "score": c["score"], "answer": a}]
     db.put_kv("voicecheck", st)
     await ws.broadcast({"type": "voicecheck"})
-    return {"ok": a != "stale"}
+    return {"ok": a != "stale", **learned}
