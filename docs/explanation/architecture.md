@@ -92,7 +92,7 @@ INFER_TOKEN=<同一个令牌>
 每台录音设备的音量不一样：同样一段话，手机、录音豆、导入的录音可以差几十 dB。所有设备都对齐到同一个标准电平：佩戴者自己说话的有效语音电平（ITU-T P.56）**−26 dBov**。分两步：
 
 1. **采集增益**，在设备上设：录音豆调 PDM 增益，手机在 App 里编码前乘。前提是最响的真实情况也不削顶，在此前提下尽量高。设备上报的值（录音豆设备状态里的 `mic_gain_db`，手机上传音频块时的 `capture_gain_db`）变了，服务器就在 `device_gain` 表里记一行（来源 `reported`）；它只做记录，不改音频。
-2. **标定偏移**，在服务器上乘：解码以后用浮点乘一个固定的 dB 数（`offset_db`），把这台设备的电平映射到 −26 dBov，没有信息损失。只能手工设：`server/gain.sh set <租户> <设备> <dB>`（或本机 `python -m alldayrec.gain`），`server/gain.sh list` 列出。
+2. **标定偏移**，在服务器上乘：解码以后用浮点乘一个固定的 dB 数（`offset_db`），把这台设备的电平映射到 −26 dBov，没有信息损失。只能手工设：`server/gain.sh set <租户> <设备> <dB>`（或本机 `python -m alldayrec.gain`），`server/gain.sh list` 列出。标定设备本身灵敏度的偏移从 `--since 0`（默认）开始登记，没有时间的历史声纹片段才能被标定（[设备增益](../reference/configuration.md#设备增益-device-gain)）。
 
 `device_gain` 每行从 `since_ms` 起生效：给定设备和时刻，两列各取 `since_ms` 不晚于它的最新一个非空值；每个样本按它自己的时刻取偏移：一块音频、一段剪辑、一次收听跨过某个 `since_ms`，就在那里切开分别乘。没有记录就是 0 dB，音频和以前逐字节一样。
 

@@ -3,7 +3,9 @@
 #   server/gain.sh list [<tenant>]                       # every row, and each device's offset and capture gain now
 #   server/gain.sh set <tenant> <device> <offset_db> [--since <ISO time or unix ms>] [--capture <dB>] [--note <text>]
 #                                                        # from --since on (default 0: all of its audio); the same
-#                                                        # device and --since again replaces it. Takes effect at once
+#                                                        # device and --since again replaces it. Takes effect at once.
+#                                                        # A device's own sensitivity: from 0, so history voice clips
+#                                                        # (no clip_start) are calibrated too
 # Instances are dir:unit as in deploy.sh (LR_INSTANCES, default /opt/alldayrec:alldayrec), on the host LR_DEPLOY_HOST
 # names through LR_DEPLOY_SHELL; each instance's tenants.json says which tenants are its own.
 set -euo pipefail

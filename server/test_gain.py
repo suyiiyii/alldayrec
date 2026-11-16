@@ -408,6 +408,46 @@ def test_voice_clip_offset_inside(tmp_path, first):
     assert np.array_equal(pcm(r.content), gain.to16(np.concatenate([x[:h], up(x[h:], DB2)])))
 
 
+@pytest.mark.parametrize("rows", [[(0, DB2)], [(0, DB2), (T0 + 500, DB2)]])
+def test_voice_clip_untimed_one(tmp_path, rows):
+    """A clip as the history generator wrote it (no clip_start): its device's one offset for all time, from since 0, on
+    every sample (WAV, X-Gain-Db)."""
+    d = "LR-CLIP-TEST"
+    c, body = clip_rig(tmp_path, d, timed=False)
+    for since, g in rows:
+        gain.put(d, since, g)
+    r = c.get("/api/voice-clip/made-up.ogg")
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/wav" and r.headers["x-gain-db"] == f"{DB2:g}"
+    assert np.array_equal(pcm(r.content), gain.to16(up(audio.decode(body), DB2))) and not T().gain_untimed
+
+
+@pytest.mark.parametrize("rows", [[(0, DB2), (T0 + 500, 0.0)], [(0, 0.0), (T0, DB2)], [(T0, DB2)]])
+def test_voice_clip_untimed_several(tmp_path, rows, caplog):
+    """No clip_start and the device's offset not one value for all time (several, or its first from after 0): no time to
+    pick one by, so served as stored, logged and counted (lr_gain_untimed_clips_total)."""
+    d = "LR-CLIP-TEST"
+    c, body = clip_rig(tmp_path, d, timed=False)
+    for since, g in rows:
+        gain.put(d, since, g)
+    with caplog.at_level(logging.WARNING):
+        for _ in range(2):
+            r = c.get("/api/voice-clip/made-up.ogg")
+            assert r.status_code == 200 and r.headers["content-type"] == "audio/ogg" and r.content == body
+    assert "x-gain-db" not in r.headers and T().gain_untimed == {d: 2}
+    assert sum("served as stored" in m for m in caplog.messages) == 2
+
+
+def test_voice_clip_untimed_none(tmp_path):
+    """No clip_start and no row of its device (or only 0 dB ones): as stored, nothing counted, as on main."""
+    d = "LR-CLIP-TEST"
+    c, body = clip_rig(tmp_path, d, timed=False)
+    for _ in range(2):
+        r = c.get("/api/voice-clip/made-up.ogg")
+        assert r.status_code == 200 and r.headers["content-type"] == "audio/ogg" and r.content == body
+        gain.put(d, 0, 0.0)
+    assert not T().gain_untimed
+
+
 def test_seg_emb_gain(tmp_path):
     """A segment voiceprint's gain_db: its device's offset at the segment's start; one over a since_ms has its start's."""
     from alldayrec import device_pipeline

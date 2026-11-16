@@ -50,7 +50,7 @@ type: reference
 | `conversations` | 对话：起止时间、参与者、说话秒数、句数、设备 |
 | `summaries` | 每段对话的摘要（JSON） |
 | `timelines` | 对话结束时的实时分析 |
-| `voices` | 每段对话里每个说话人标签的声纹和声音片段 |
+| `voices` | 每段对话里每个说话人标签的声纹和声音片段（片段的起止 `clip_start`、`clip_end`；早期外部生成的历史片段没有，为空，这种片段只在设备的偏移对所有时间是同一个值时才标定，见[设备增益](configuration.md#设备增益-device-gain)） |
 | `apart` | 被标成「不是这个人」的声音 |
 | `people` | 认出名字的人的声纹 |
 | `enrolled` | 每个人的声纹是从哪些句子学来的，一句一行；撤销和拆开时据此减掉 |
@@ -75,7 +75,7 @@ type: reference
 | `kv` | 每台设备的处理进度等键值 |
 | `device_log` | 手机上传的设备事件，包括录音设备自己的日志 |
 | `device_status` | 客户端读到的录音设备状态（电量、存储卡、固件） |
-| `device_gain` | 每台设备的增益，按时间段生效：设备、生效起点（unix 毫秒）、采集增益 `capture_db`（设备上报或手工登记）、标定偏移 `offset_db`（服务器解码后乘，对齐到 −26 dBov；没有记录为 0）、来源（`manual` 手工、`reported` 上报）、备注。见[电平和增益](../explanation/architecture.md#电平和增益)（v0.5.0 起有） |
+| `device_gain` | 每台设备的增益，按时间段生效：设备、生效起点（unix 毫秒）、采集增益 `capture_db`（设备上报或手工登记）、标定偏移 `offset_db`（服务器解码后乘，对齐到 −26 dBov；没有记录为 0）、来源（`manual` 手工、`reported` 上报）、备注。标定灵敏度的偏移从 0 开始登记（[设备增益](configuration.md#设备增益-device-gain)）。见[电平和增益](../explanation/architecture.md#电平和增益)（v0.5.0 起有） |
 | `calls` | 每次语音识别和大模型调用的耗时、结果和用量，不记内容 |
 | `balances` | 预付费账户的余额，每小时一次 |
 | `perf_stalls` | 事件循环被卡住的记录：结束时刻、毫秒、卡在哪些函数（只在第一个租户的库里；v0.3.0 起有） |

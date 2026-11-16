@@ -50,7 +50,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `conversations` | Conversations: start and end time, participants, seconds of speech, number of sentences, device |
 | `summaries` | Each conversation's summary (JSON) |
 | `timelines` | The live analysis as it stood when a conversation ended |
-| `voices` | The voiceprint and voice clips of each speaker label in each conversation |
+| `voices` | The voiceprint and voice clips of each speaker label in each conversation (a clip's span `clip_start`, `clip_end`; empty for the history clips the early external generator made, which are calibrated only while their device's offset is one value for all time: see [Device gain](configuration.md#device-gain-device-gain)) |
 | `apart` | Voices marked 「不是这个人」 (Not this person) |
 | `people` | Voiceprints of people with recognized names |
 | `enrolled` | The sentences each person's voiceprint was learnt from, one row each; an undo or a split takes them back out |
@@ -75,7 +75,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `kv` | Key-value pairs such as each device's processing progress |
 | `device_log` | Device events uploaded by the phones, including the recorders' own logs |
 | `device_status` | Recorder status read by the clients (battery, card, firmware) |
-| `device_gain` | Each device's gains by time: device, from when (unix ms), capture gain `capture_db` (reported by the device or written down), calibration offset `offset_db` (applied by the server after decoding, to −26 dBov; none: 0), source (`manual`, `reported`), note. See [Levels and gains](../explanation/architecture.md#levels-and-gains) (since v0.5.0) |
+| `device_gain` | Each device's gains by time: device, from when (unix ms), capture gain `capture_db` (reported by the device or written down), calibration offset `offset_db` (applied by the server after decoding, to −26 dBov; none: 0), source (`manual`, `reported`), note. An offset for the device's sensitivity is set from 0 ([Device gain](configuration.md#device-gain-device-gain)). See [Levels and gains](../explanation/architecture.md#levels-and-gains) (since v0.5.0) |
 | `calls` | Duration, result and usage of each ASR and LLM call, without content |
 | `balances` | Prepaid account balances, recorded hourly |
 | `perf_stalls` | Times the event loop was held up: when it ended, how many milliseconds, in which functions (only in the first tenant's store; since v0.3.0) |

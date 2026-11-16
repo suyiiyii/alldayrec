@@ -157,6 +157,13 @@ When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_
 | `EMB_MODEL`, `SEG_MODEL`, `OWNER_SURE`, `LINK_MIN`, `OWNER_DEFAULT_DEVICE` | `replay_case.py`, `service_case.py` | See those scripts |
 | `TRIM_AFTER_DAYS` (default `2`), `TRIM_PAD_S` (`10`), `TRIM_VAD` (`0.1`), `TRIM_PURGE_AFTER_H` (`24`) | `trim.py` | Trimming: how many days after its newest piece an hour file may be trimmed; the seconds kept on each side of speech and of sentences; the VAD threshold for speech (a VAD file made at another threshold is not used); how many hours after a trim `purge` may delete the original (at least 24: less and `purge` refuses to run). See [Where recordings are kept](../explanation/architecture.md#where-recordings-are-kept). With `SOUND_MODEL` set there is also a gate, for every tenant: see [Environmental sound](#optional-environmental-sound) |
 
+### Device gain (`device_gain`)
+
+Not an environment variable: set with a command, `server/gain.sh set <tenant> <device> <dB> [--since <time>]` (`python -m alldayrec.gain` locally). See [Levels and gains](../explanation/architecture.md#levels-and-gains).
+
+- An offset that calibrates the device's own sensitivity is set from `--since 0` (the default), so all of its audio is calibrated by it, the history voices' clips too.
+- Some history voice clips (`/api/voice-clip`) have no time (`voices.clip_start` empty: the early external generator wrote none). Such a clip is calibrated only while its device's offset is one value for all time: when the device's first offset row starts at 0 and every offset set is the same, the whole clip gets that offset, as WAV with `X-Gain-Db`. When the device has different offsets, or its first one starts after 0, there is no telling which one the clip falls under: the stored file is served as it is, logged, and counted in the metric `lr_gain_untimed_clips_total` (by device). A device with no non-zero offset gets the stored file. To calibrate these clips exactly, backfill their `clip_start`.
+
 ## Other environment variables
 
 The server also reads the variables below, which `.env.example` doesn't list. They are for tuning, and their defaults are the values the author uses.

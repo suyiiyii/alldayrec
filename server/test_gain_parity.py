@@ -10,6 +10,7 @@ import wave
 
 import anyio
 import numpy as np
+import pytest
 from starlette.testclient import TestClient
 
 from alldayrec import audio
@@ -110,25 +111,30 @@ def test_asr_input_digest(tmp_path, capsys):
         print(f"\nasr input sha256 {h.hexdigest()}")
 
 
-def clip_rig(tmp_path, d):
-    """A tenant with one history voice of d, its 1 s clip from T0 (made-up noise, Opus): its client and the clip's bytes."""
+def clip_rig(tmp_path, d, timed=True):
+    """A tenant with one history voice of d, its 1 s clip from T0 (made-up noise, Opus): its client and the clip's bytes.
+    Not timed: the row as the history generator wrote it (clip, clip_text, device; no clip_start, no clip_end)."""
     t = db.open_db(tmp_path / "t.db")
     clips = t.data / "voices" / "clips"
     clips.mkdir(parents=True)
     body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "libopus",
                            "-f", "ogg", "pipe:1"], input=speech(1, 3, -30).tobytes(), capture_output=True, check=True).stdout
     (clips / "made-up.ogg").write_bytes(body)
+    v = {"conv": "made-up-conv", "label": "S1", "device": d, "n": 1, "speech_s": 1, "k": 1, "e": np.array([1.0, 0.0]),
+         "clip": "made-up.ogg", "clip_text": "made up"}
+    if timed:
+        v |= {"clip_start": at(T0).isoformat(), "clip_end": at(T0 + 1000).isoformat()}
     with db.tx() as tx:
-        db.insert_voices(tx, [{"conv": "made-up-conv", "label": "S1", "device": d, "n": 1, "speech_s": 1, "k": 1,
-                               "e": np.array([1.0, 0.0]), "clip": "made-up.ogg", "clip_start": at(T0).isoformat(),
-                               "clip_end": at(T0 + 1000).isoformat(), "clip_text": "made up"}])
+        db.insert_voices(tx, [v])
     core.TENANTS[:] = [t]  # no token: no auth
     return TestClient(server.app), body  # no `with`: the lifespan does not start
 
 
-def test_voice_clip_as_stored(tmp_path):
-    """A history voice's clip of a device with no offset: its stored bytes, as main serves them."""
-    c, body = clip_rig(tmp_path, "LR-CLIP-TEST")
+@pytest.mark.parametrize("timed", [True, False])
+def test_voice_clip_as_stored(tmp_path, timed):
+    """A history voice's clip of a device with no offset, timed or as the history generator wrote it: its stored bytes,
+    as main serves them."""
+    c, body = clip_rig(tmp_path, "LR-CLIP-TEST", timed)
     r = c.get("/api/voice-clip/made-up.ogg")
     assert r.status_code == 200 and r.headers["content-type"] == "audio/ogg" and r.content == body
 

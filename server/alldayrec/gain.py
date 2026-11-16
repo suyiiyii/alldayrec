@@ -48,6 +48,14 @@ def offset_db(device: str, at_ms: float) -> float | None:
     return None if r is None else r[0]
 
 
+def only_db(device: str) -> float | None:
+    """The device's offset when it is one value for all time (its first offset row from since 0, every offset the same):
+    what a clip of no time (a history voice's, clip_start NULL) takes; None: none set, or not one value."""
+    r = db.conn().execute("SELECT MIN(since_ms) <= 0 AND COUNT(DISTINCT offset_db) = 1, MAX(offset_db) FROM device_gain "
+                          "WHERE device = ? AND offset_db IS NOT NULL", (device,)).fetchone()
+    return r[1] if r[0] else None
+
+
 def capture_db(device: str, at_ms: int) -> float | None:
     """The capture gain the device had at at_ms, as reported or written down (at the same since_ms: the manual one);
     None: unknown."""
