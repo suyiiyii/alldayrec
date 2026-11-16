@@ -51,10 +51,15 @@ void raw_pcm_put(const int16_t *pcm, size_t n)
         h.sum += b[i];
     }
     k_spinlock_key_t k = k_spin_lock(&raw_lock);
-    if (ring_buf_space_get(&raw_rb) >= sizeof(h) + n * 2) {
+    bool put = ring_buf_space_get(&raw_rb) >= sizeof(h) + n * 2;
+    if (put) {
         ring_buf_put(&raw_rb, (const uint8_t *) &h, sizeof(h));
         ring_buf_put(&raw_rb, b, n * 2);
-        uart_irq_tx_enable(cdc);
     }
     k_spin_unlock(&raw_lock, k);
+    // after the unlock: it submits the class's work, which may yield to it. raw_tx turns TX off only under the lock,
+    // seeing the ring empty, so this frame is never left waiting
+    if (put) {
+        uart_irq_tx_enable(cdc);
+    }
 }
