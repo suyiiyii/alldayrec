@@ -5,7 +5,6 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/settings/settings.h>
 
 #include "config.h"
 #include "led.h"
@@ -80,53 +79,14 @@ static void hfxo_hold(void)
     }
 }
 
-/* The PDM gain in force (GAINL = GAINR), kept in NVS: CTRL 0x21 sets it (lr_store.c), every boot starts with it */
-#define GAIN_KEY "lr/mic_gain"
-static uint8_t gain = MIC_GAIN;
-
-static int gain_loaded(const char *key, size_t len, settings_read_cb read, void *arg, void *param)
-{
-    uint8_t g;
-    if (len == 1 && read(arg, &g, 1) == 1 && g <= NRF_PDM_GAIN_MAXIMUM) {
-        gain = g;
-    }
-    return 0;
-}
-
-uint8_t mic_gain(void)
-{
-    return gain;
-}
-
-int mic_set_gain(uint8_t g)
-{
-    if (g > NRF_PDM_GAIN_MAXIMUM) {
-        return -EINVAL;
-    }
-    if (g == gain) {
-        return 0;  // not written again: the settings partition is small
-    }
-    int err = settings_save_one(GAIN_KEY, &g, 1);  // kept first: the gain in force is always the one the next boot takes
-    if (err) {
-        return err;
-    }
-    gain = g;
-    // into the running PDM, not stopped and started: that would break the frame clock the stream's times hang on
-    nrf_pdm_gain_set(NRF_PDM0, g, g);
-    LOG_INF("mic gain 0x%02x", g);
-    return 0;
-}
-
 int mic_start()
 {
     hfxo_hold();
-    settings_subsys_init();
-    settings_load_subtree_direct(GAIN_KEY, gain_loaded, NULL);
 
     // Configure PDM
     nrfx_pdm_config_t pdm_config = NRFX_PDM_DEFAULT_CONFIG(PDM_CLK_PIN, PDM_DIN_PIN);
-    pdm_config.gain_l = gain;
-    pdm_config.gain_r = gain;
+    pdm_config.gain_l = mic_gain();  // NVS's, or MIC_GAIN (mic_gain.c)
+    pdm_config.gain_r = mic_gain();
     pdm_config.interrupt_priority = MIC_IRC_PRIORITY;
     pdm_config.clock_freq = NRF_PDM_FREQ_1280K;
     pdm_config.mode = NRF_PDM_MODE_MONO;

@@ -170,6 +170,21 @@ function readDone(r: Rec) {
   });
 }
 
+// the mic's PDM gain, register codes (0x28 0 dB, 0.5 dB a step): x 0 a -> b, x 1 NVS did not take b (a the error), x 2
+// NVS's record bad at boot (a its length, b its first bytes), the default in force (lr_log.h GAIN)
+const codeDb = (c: number) => {
+  const d = (c - 0x28) / 2;
+  return `${d >= 0 ? "+" : ""}${d.toFixed(1)}`;
+};
+const gain = (r: Rec) =>
+  r.x === 0
+    ? t("rec.gain", { from: codeDb(r.a), to: codeDb(r.b) })
+    : r.x === 1
+      ? t("rec.gainUnkept", { db: codeDb(r.b), err: err(r.a) })
+      : r.x === 2
+        ? t("rec.gainBad", { n: r.a, b: hex(r.b >>> 0, 8) })
+        : `x ${r.x}`;
+
 // code: [name, its arguments in words]; what it means is rec.ev.<name>
 const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   1: [
@@ -283,6 +298,7 @@ const EVENTS: Record<number, [string, (r: Rec) => string]> = {
   35: ["PHONE", phoneMode],
   36: ["FORMAT", format],
   37: ["NVS_FAIL", (r) => t("rec.nvsFail", { n: r.a })],
+  38: ["GAIN", gain],
 };
 // every few minutes or every connection: hidden unless asked for
 const ROUTINE = new Set([9, 11, 12, 13, 14, 15, 20, 22, 23, 25, 32, 33]);
@@ -311,6 +327,7 @@ export function describe(r: Rec): Said {
     (code === BOOT && (r.a & 0b1010) !== 0); // the last boot ended by the watchdog or a lockup
   const warn =
     [BOOT, DISCONNECT, DFU, 5, 8, 18, 30, 34, 37].includes(code) ||
+    (code === 38 && r.x !== 0) || // the gain not kept, or NVS's record bad
     (code === 31 && (r.a & 0xfffff) + (r.a >>> 20) > 0); // the mic gave all-zero frames, or PDM errors
   return {
     name,

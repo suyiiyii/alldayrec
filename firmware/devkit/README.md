@@ -100,10 +100,10 @@ APPROTECT：`n4` 显式打开 `CONFIG_NRF_APPROTECT_USE_UICR`（NCS 2.7 的默�
 - 卡上的文件永远是流里同名文件的前缀：卡出问题时流照常推，卡恢复后从新段继续。
 - 手机模式（LR-P3，`CONFIG_LR_STORE_PHONE`）：App 跟着 LIVE、每 5 s 回一次 ACK（「这个文件我已存到哪」）时，卡停写，空闲 10 s 后断电（`CONFIG_LR_STORE_CARD_OFF`，`LR_CARD_ON=1 ./lr.sh build promicro-p3` 编出卡不断电的版本做对比）。没确认的批次留在 RAM 环（44 KB，约 11 s）里，READ 落在环里的直接从 RAM 回答。断连、取消订阅、8 s 没 ACK、环里没确认的超过 3/4（约 9 s）、重启或借卡时，没确认的批次接成一个新段写上卡，流在新段里继续；其中手机可能已经收到的那几秒，由服务端按帧去重。环放在 `__noinit`：看门狗复位或崩溃后，下次开机先把它写成上一次开机的下一个段。不发 ACK 的 App（老版本、`lr_listen.py`）下行为和以前一样。TIME 读取偏移 48 的字节 bit 0 表示固件收 ACK。
 
-麦克风增益（PDM 的 GAINL/GAINR，左右相同）：默认 `MIC_GAIN` 0x28 = 0 dB，0.5 dB 一档，0x00 = −20 dB，0x50 = +20 dB，均相对 PDM 模块自身的默认增益（手册 G_PDM,default 典型 3.2 dB）。不用重新烧录就能改：CTRL 写 `0x21 g:u8`（带响应写），先存进 NVS（`lr/mic_gain`），再写进正在跑的 PDM，不停麦克风、帧时钟不断；以后每次开机都用它。超过 0x50 或缺字节回 ATT 错误 0x13，NVS 没存上回 0x0e，增益都不变。TIME 读取偏移 53 的字节 `mic_gain`（i8，半 dB，0 = 0x28）是当前生效的增益，`mic_gain_db = int8 / 2`；老固件读到 53 字节、没有这个字节。手册只说增益在抽取滤波之后，溢出是饱和还是回绕、运行中改寄存器是否马上生效都没写，待上板实测。
+麦克风增益（PDM 的 GAINL/GAINR，左右相同）：默认 `MIC_GAIN` 0x28 = 0 dB，0.5 dB 一档，0x00 = −20 dB，0x50 = +20 dB，均相对 PDM 模块自身的默认增益（手册 G_PDM,default 典型 3.2 dB）。不用重新烧录就能改：CTRL 写 `0x21 g:u8`（带响应写），在蓝牙接收线程里只校验、写进正在跑的 PDM（不停麦克风、帧时钟不断）、记一条事件 GAIN（x 0，旧值、新值），马上回复；存 NVS（`lr/mic_gain`，存成 `{g, ~g}` 两字节，翻一位就对不上）交给系统工作队列，几毫秒后完成，以后每次开机都用它。超过 0x50 或不是 2 字节回 ATT 错误 0x13，增益不变。TIME 读取偏移 53 的字节 `mic_gain`（i8，半 dB，0 = 0x28）是当前生效的增益，`mic_gain_db = int8 / 2`；偏移 54 的 bit 0 = 1 表示这个增益还没存进 NVS（刚写、还在存，或者存失败，失败另记事件 GAIN x 1），下次开机不会用它，再写一次同样的值会重存。开机时 NVS 里的记录校验不过（含本改动初稿的 1 字节格式，从未发布，不兼容），用默认 0x28、记事件 GAIN x 2，bit 0 置 1，直到写一次增益。老固件读到 53 字节、没有这两个字节。手册只说增益在抽取滤波之后，溢出是饱和还是回绕、运行中改寄存器是否马上生效都没写，待上板实测。
 
 ```bash
-uv run --no-project --with bleak python lr_sync.py gain --name LR-P3-XXXX        # 读当前增益
+uv run --no-project --with bleak python lr_sync.py gain --name LR-P3-XXXX        # 读当前增益，没存进 NVS 时提示
 uv run --no-project --with bleak python lr_sync.py gain 6 --name LR-P3-XXXX      # 设成 +6 dB（0x34）
 ```
 

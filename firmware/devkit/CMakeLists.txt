@@ -9,6 +9,7 @@ target_sources(app PRIVATE
     src/main.c
     src/transport.c
     src/mic.c
+    src/mic_gain.c
     src/led.c
     src/codec.c
     src/lib/battery/battery.c

@@ -43,6 +43,11 @@ check(
 );
 check(said(35, 5, 9000, 0x10010004), "上次重启时内存里的 9000 B 写上卡：10010004.BIN");
 check(said(37, 0, 1, 0), "设置区两次都没记下要擦的块，照样擦了（1 次，本次开机第一条）");
+check(said(38, 0, 0x28, 0x34), "麦克风增益 +0.0 → +6.0 dB");
+check(said(38, 1, -5 >>> 0, 0x1b), "麦克风增益 -6.5 dB 没存进设置区：-5 -EIO；下次开机用存着的");
+check(said(38, 2, 2, 0xd720), "存着的麦克风增益校验不过（2 B：0000d720），用默认 0 dB");
+check(describe({ boot: 1, t: 100, code: 38, x: 0, a: 0x28, b: 0x34 }).level, ""); // a change: no warning
+check(describe({ boot: 1, t: 100, code: 38, x: 1, a: -5 >>> 0, b: 0x1b }).level, "warn"); // not kept
 check(said(6, 3, -5, 4096), "文件长度没写上卡：-5 -EIO（4096 B）");
 check(said(6, 0, -5, 512), "-5 -EIO（512 B）");
 check(said(4, 3, 4212, 1810000), "音频批次 4212（文件 1074xxxx），剩 1767 MB；卡上的计数读不出；新计数没写进卡");  // a boot number counted before

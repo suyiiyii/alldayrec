@@ -672,6 +672,7 @@
       "PHONE": "手机接管录音流",
       "FORMAT": "格式化存储卡",
       "NVS_FAIL": "擦除记录没写进设置区",
+      "GAIN": "麦克风增益",
       "unknown": "未知事件"
     },
     "reset": {
@@ -763,6 +764,9 @@
     "phoneRecovered": "上次重启时内存里的 {b} B 写上卡：{file}.BIN",
     "formatDone": "{gb} GB 的卡格式化成 {fs}，用时 {s} s",
     "nvsFail": "设置区两次都没记下要擦的块，照样擦了（{n} 次，本次开机第一条）",
+    "gain": "麦克风增益 {from} → {to} dB",
+    "gainUnkept": "麦克风增益 {db} dB 没存进设置区：{err}；下次开机用存着的",
+    "gainBad": "存着的麦克风增益校验不过（{n} B：{b}），用默认 0 dB",
     "formatFail": "{gb} GB 的卡没有格式化：{why}",
     "formatWhy": {
       "5": "格式化失败",

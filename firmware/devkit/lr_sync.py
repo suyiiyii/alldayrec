@@ -7,7 +7,7 @@ when undated) from the card; the open file stays. `log` prints the recorder's ev
         [--server URL --token T]
     uv run --no-project --with bleak python lr_sync.py log [--name LR-P3-XXXX] [--from SEQ]
     uv run --no-project --with bleak python lr_sync.py gain [DB] [--name LR-P3-XXXX]   the mic's PDM gain in force
-        (TIME's mic_gain), and with DB (-20..20, 0.5 dB steps) set first: CTRL 0x21, kept on the recorder
+        (TIME's mic_gain) and whether NVS keeps it, and with DB (-20..20, 0.5 dB steps) set first: CTRL 0x21
 """
 import asyncio
 import ctypes
@@ -429,6 +429,9 @@ EVENTS = {
          f"{a * 512 / 1e9:.2f} GB card not formatted: " + {17: "it mounted after all", 19: "no card answered",
                                                         5: "the format failed"}.get(x, f"error {x}")),
     37: ("NVS_FAIL", lambda x, a, b: f"NVS did not take the block of {a} NAND erase(s), erased all the same (first this boot)"),
+    38: ("GAIN", lambda x, a, b: {0: f"mic gain {code_db(a):+.1f} -> {code_db(b):+.1f} dB",
+                                  1: f"mic gain {code_db(b):+.1f} dB not kept in NVS: {err(a)} (the next boot takes NVS's)",
+                                  2: f"NVS's mic gain record bad ({a} B: {b:08x}), the default 0 dB in force"}.get(x, f"x {x}")),
 }
 
 
@@ -490,9 +493,19 @@ def gain_code(db: float) -> int:
     return 0x28 + int(db * 2)
 
 
+def code_db(code: int) -> float:
+    """a GAINL/GAINR code (0x28 = 0 dB, 0.5 dB a step) in dB"""
+    return (code - 0x28) / 2
+
+
 def gain_db(status: bytes) -> float | None:
     """TIME's mic_gain:i8 (half dB, 0 = 0x28) in dB; None: older firmware, no such byte"""
     return struct.unpack_from("<b", status, 53)[0] / 2 if len(status) > 53 else None
+
+
+def gain_kept(status: bytes) -> bool | None:
+    """TIME's gain_flags bit 0 clear: the gain in force is the one NVS keeps; None: firmware without the byte"""
+    return not status[54] & 1 if len(status) > 54 else None
 
 
 async def gain(name: str, db: float | None):
@@ -502,10 +515,13 @@ async def gain(name: str, db: float | None):
     if not dev:
         sys.exit("no device")
     async with BleakClient(dev) as c:
-        if code is not None:  # an ATT error (0x13 out of range, 0x0e not kept) raises here
+        if code is not None:  # an ATT error (0x13 out of range) raises here; NVS takes it a few ms after
             await c.write_gatt_char(CTRL, bytes([0x21, code]), response=True)
-        got = gain_db(await c.read_gatt_char(TIME))
-    print(f"{dev.name}: mic gain {'unknown (firmware without it)' if got is None else f'{got:+.1f} dB'}")
+            await asyncio.sleep(0.5)
+        status = await c.read_gatt_char(TIME)
+    got, kept = gain_db(status), gain_kept(status)
+    print(f"{dev.name}: mic gain {'unknown (firmware without it)' if got is None else f'{got:+.1f} dB'}"
+          + ("" if kept is not False else ", NOT kept in NVS: the next boot takes another (lr_sync.py log: GAIN)"))
 
 
 def selftest():
@@ -610,6 +626,10 @@ def selftest():
         except ValueError:
             pass
     assert gain_db(bytes(53)) is None and gain_db(bytes(53) + b"\xf3") == -6.5 and gain_db(bytes(53) + b"\x28") == 20
+    assert gain_kept(bytes(54)) is None and gain_kept(bytes(55)) is True and gain_kept(bytes(54) + b"\x01") is False
+    assert EVENTS[38][1](0, 0x28, 0x34) == "mic gain +0.0 -> +6.0 dB"
+    assert EVENTS[38][1](1, (-5) & 0xFFFFFFFF, 0x1b) == "mic gain -6.5 dB not kept in NVS: -5 -EIO (the next boot takes NVS's)"
+    assert EVENTS[38][1](2, 2, 0xD720) == "NVS's mic gain record bad (2 B: 0000d720), the default 0 dB in force"
     print("selftest ok")
 
 
