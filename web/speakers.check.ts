@@ -1,7 +1,8 @@
 // node --experimental-strip-types speakers.check.ts: speakerColor, initial, speakerList (src/lib/speakers.ts), both languages
 import assert from "node:assert/strict";
-import { i18n } from "./src/i18n.ts";
+import { i18n, t } from "./src/i18n.ts";
 import {
+  checkDone,
   guesses,
   initial,
   labelText,
@@ -99,3 +100,16 @@ assert.deepEqual(guesses(sug, "S2"), [{ name: "小李", at: "t2" }, { name: "小
 assert.deepEqual(guesses({ ...sug, names: [], like: [] }, "S2"), [{ name: "阿强" }, { name: "阿明" }]);
 assert.deepEqual(guesses(sug, "小王"), []);
 assert.deepEqual(guesses(null, "S2"), []);
+
+// the voice check's answer -> its words: a yes that learnt nothing under music says so, the rest as before
+assert.equal(checkDone("yes", { ok: true }), "voiceCheck.doneYes");
+assert.equal(checkDone("no", { ok: true }), "voiceCheck.doneNo");
+assert.equal(checkDone("later", { ok: true }), "voiceCheck.doneLater");
+assert.equal(checkDone("yes", { ok: false }), "voiceCheck.stale");
+assert.equal(checkDone("yes", { ok: true, learned: 0, reason: "background_music" }), "voiceCheck.doneMusic");
+assert.equal(checkDone("yes", { ok: true, learned: 0 }), "voiceCheck.doneYes", "no reason given: as before");
+for (const l of ["zh", "en"] as const) {
+  i18n.global.locale.value = l;
+  assert.notEqual(t("voiceCheck.doneMusic"), "voiceCheck.doneMusic", l);
+}
+i18n.global.locale.value = "zh";

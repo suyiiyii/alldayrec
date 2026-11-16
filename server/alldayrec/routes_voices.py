@@ -1,6 +1,7 @@
 """Voices: the voiceprints of closed live conversations (voices_loop), and the 「哪个是你？」 and 「这是你吗？」 cards each
 round of them may pop (selfvoice.py)."""
 import datetime as dt
+import itertools
 import logging
 
 import anyio.to_thread
@@ -10,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from alldayrec import db
 from alldayrec import routes_audio
 from alldayrec import selfvoice
+from alldayrec import sounds
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, state
@@ -44,7 +46,8 @@ async def voices_loop():
             out = []
             for label, rs in by.items():
                 dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-                long = sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True)[:4]
+                # music under a sentence (BG_GATE): not one of the 4; n and speech_s count it still
+                long = list(itertools.islice((r for r in sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True) if not sounds.under_music(r, "voices")), 4))
                 es, ls, used = [], [], []
                 for r in long:
                     try:
@@ -250,10 +253,12 @@ async def check_answer(body: dict):
     """yes: as a rename by hand (a, b: the label becomes 我 or the name; c: the name's sentences teach its samples);
     no: the voice kept apart from the name (c: back to a fresh S<n> first), nothing learnt; later: the card away. The
     conversation is not asked about again either way; every answer is logged with the card's kind and score. A voice
-    renamed since the card popped (a: named by the user; c: its label gone): nothing done, ok false, logged stale."""
+    renamed since the card popped (a: named by the user; c: its label gone): nothing done, ok false, logged stale. A
+    c's yes whose sentences all have music under them (sounds.under_music): ok, but learned 0 and reason
+    background_music, nothing taught."""
     if body.get("answer") not in ("yes", "no", "later"):
         raise HTTPException(400, "bad answer")
-    st, a = db.kv("voicecheck") or {}, body["answer"]
+    st, a, learned = db.kv("voicecheck") or {}, body["answer"], {}
     if not (c := st.get("card")):
         raise HTTPException(409, "[no_pending_voice] 没有待确认的声音，刷新页面再试")
     st["card"] = None
@@ -266,7 +271,10 @@ async def check_answer(body: dict):
         elif a == "yes":
             if not (rows := taught_by(c)):
                 raise HTTPException(409, "renamed since")  # the label's sentences gone: nothing to teach, not an empty ok
-            await enroll_soon(c["name"], rows)
+            if rows := [r for r in rows if not sounds.under_music(r, "check")]:
+                await enroll_soon(c["name"], rows)
+            else:  # every one with music under it (BG_GATE): a yes that taught nothing, said so
+                learned = {"learned": 0, "reason": "background_music"}
         elif a == "no" and c["kind"] == "c":
             await speaker_detach({"conv": c["conv"], "label": c["label"], "group": c["name"]})
         elif a == "no":
@@ -280,4 +288,4 @@ async def check_answer(body: dict):
     st["log"] = (st.get("log") or [])[-199:] + [{"at": dt.datetime.now().isoformat(timespec="seconds"), "kind": c["kind"], "score": c["score"], "answer": a}]
     db.put_kv("voicecheck", st)
     await ws.broadcast({"type": "voicecheck"})
-    return {"ok": a != "stale"}
+    return {"ok": a != "stale", **learned}

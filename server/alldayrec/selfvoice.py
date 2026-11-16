@@ -14,6 +14,8 @@ import os
 
 import numpy as np
 
+from alldayrec import sounds
+
 TAU = 0.65  # one person's voices across conversations (LR boards alike over 0.5-0.7; old mics merged people below 0.65)
 KMAX = 5    # candidates peeled
 SHOW = 3    # on the card: the user was among the first 3 at every trigger point of the replays
@@ -148,7 +150,7 @@ def shortlist(rows: list[dict], label: str, per: int = 3) -> list[dict]:
     out = []
     for i, r in enumerate(rows):
         d = a1[i] - a0[i]
-        if who[i] != label or len(r.get("text") or "") < CLIP_CHARS or d > CLIP_S or r.get("music"):
+        if who[i] != label or len(r.get("text") or "") < CLIP_CHARS or d > CLIP_S or r.get("music") or sounds.under_music(r, "clip"):
             continue
         o = who != label
         gap = float(np.maximum(a0[o] - a1[i], a0[i] - a1[o]).min()) if o.any() else 99.0  # < 0: they overlap

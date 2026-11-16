@@ -924,6 +924,7 @@
     "doneYes": "Got it.",
     "doneNo": "Got it: not them.",
     "doneLater": "OK, this one will not be asked again.",
+    "doneMusic": "Got it. These sentences had music under them, so no voiceprint was learnt this time.",
     "stale": "This conversation was just renamed; the card no longer applies."
   },
   "nameCheck": {

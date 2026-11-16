@@ -91,3 +91,9 @@ export function guesses(
     .slice(0, 3)
     .map((g) => ("at" in g ? { name: g.name, at: g.at } : { name: g.name }));
 }
+
+// POST /api/voice-check's answer: the words VoiceCheck.vue shows after it. A yes whose sentences all had music under
+// them (server BG_GATE) taught no voiceprint, and says so
+const DONE = { yes: "voiceCheck.doneYes", no: "voiceCheck.doneNo", later: "voiceCheck.doneLater" } as const;
+export const checkDone = (a: keyof typeof DONE, r: { ok: boolean; learned?: number; reason?: string }) =>
+  !r.ok ? "voiceCheck.stale" : r.learned === 0 && r.reason === "background_music" ? "voiceCheck.doneMusic" : DONE[a];

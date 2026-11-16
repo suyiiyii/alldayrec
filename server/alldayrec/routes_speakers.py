@@ -23,6 +23,7 @@ from alldayrec import hints
 from alldayrec import profiles
 from alldayrec import routes_audio
 from alldayrec import selfvoice
+from alldayrec import sounds
 from alldayrec import speakers
 from alldayrec import summary
 from alldayrec import threads
@@ -305,18 +306,24 @@ async def enroll_soon(to: str, rows: list[dict]):
 async def enroll(to: str, rows: list[dict]):
     """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists: those
     bank.pick keeps (alike within their label, not what 我 could have said, at most CAP a click), recorded each in
-    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py) teaches nothing.
-    A failure is logged: it must not end the tenant's tasks beside it."""
+    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py), or with music
+    under it (sounds.under_music, BG_GATE), teaches nothing. A failure is logged: it must not end the tenant's tasks
+    beside it."""
     try:
-        labels = {}  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
+        labels, bg = {}, 0  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
         for r in rows:
             if r.get("music"):
+                continue
+            if sounds.under_music(r, "enroll"):
+                bg += 1
                 continue
             try:
                 x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
             except HTTPException:  # history conversations have no recording here
                 continue
             labels.setdefault(r.get("conv"), []).append((r, await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)))
+        if not labels and bg:
+            ws.note(f"{to}：记住了 0 句的声纹，{bg} 句有背景音乐没用上", "state")
         if labels:
             ls = list(labels.items())
             had = db.people().get(to)
@@ -324,7 +331,8 @@ async def enroll(to: str, rows: list[dict]):
             with db.tx() as t:
                 n = sum(bank.learn(t, to, conv, [l[j] for i2, j in keep if i2 == i]) for i, (conv, l) in enumerate(ls))
             bank.sync(to)
-            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else ""), "state")
+            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else "")
+                    + (f"，{bg} 句有背景音乐没用上" if bg else ""), "state")
     except Exception:
         log.exception("enroll %s", to)
 

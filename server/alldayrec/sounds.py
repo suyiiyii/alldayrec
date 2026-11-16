@@ -118,6 +118,41 @@ def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
     return out
 
 
+BG_GATE = os.environ.get("BG_GATE", "0") == "1"
+BG_MUSIC_MIN = float(os.environ.get("BG_MUSIC_MIN", "0.23"))  # 5 % false alarms on 74 negative windows: tentative
+MUSIC = 137  # AudioSet's Music, in mn10_as's order
+
+
+def music_max(device: str | None, a: int, b: int) -> float | None:
+    """The highest Music score of the mn10_as frames over [a, b) of device (any when None), from their top K (a frame
+    without Music in it: 0); None when no frame there has one."""
+    out, by = None, "device = ? AND " if device else ""  # with the device: on the sounds_end index
+    for s, e, hop, n, top in db.conn().execute(
+            f"SELECT start_ms, end_ms, hop_ms, n, top FROM sounds WHERE {by}model = ? AND end_ms > ? AND start_ms < ? AND top IS NOT NULL",
+            (*([device] if device else []), model_id("mn10_as"), a, b)):
+        t = np.frombuffer(zlib.decompress(top), TOP).reshape(n, K)
+        for i in range(n):
+            if s + i * hop < b and a < (e if i == n - 1 else s + (i + 1) * hop):  # the last frame runs to the row's end
+                # shortcut: Music outside the top K counts 0 (it is under the K-th score); fine while K-th < BG_MUSIC_MIN
+                out = max(out or 0.0, float(t[i]["s"][t[i]["c"] == MUSIC].max(initial=0)))
+    return out
+
+
+def under_music(r: dict, use: str) -> bool:
+    """BG_GATE: a sentence row (start, end, source) with music under it, mn10_as's Music BG_MUSIC_MIN or more in a
+    frame over it: still a voice (not music.py's music), but none to learn a voiceprint from (lr_bg_gate_skipped_total).
+    Off, or nothing to go by (the tenant's sound off, no mn10_as, no frame scored there): False, as before
+    (lr_bg_gate_unscored_total). Both by use, the caller's: one sentence may be asked about by several."""
+    if not BG_GATE:
+        return False
+    a, b = (round(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end"))
+    m = music_max(r.get("source"), a, b) if on() and "mn10_as" in names() else None
+    hit = m is not None and m >= BG_MUSIC_MIN
+    if m is None or hit:
+        T().scene_stats["bg_unscored" if m is None else "bg_skipped", use] += 1
+    return hit
+
+
 def covered(device: str, name: str, a: int, b: int) -> list:
     """What of [a, b) (and about) the model has scores of decoded audio for: its rows less their gaps."""
     return union([h for s, e, g in db.conn().execute("SELECT start_ms, end_ms, gaps FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
