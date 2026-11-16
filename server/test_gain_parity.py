@@ -10,11 +10,14 @@ import wave
 
 import anyio
 import numpy as np
+from starlette.testclient import TestClient
 
 from alldayrec import audio
+from alldayrec import core
 from alldayrec import db
 from alldayrec import late
 from alldayrec import routes_audio
+from alldayrec import server
 from alldayrec import squeeze
 
 SR = audio.SR
@@ -105,3 +108,41 @@ def test_asr_input_digest(tmp_path, capsys):
         h.update(xs.tobytes() + repr(spans).encode())
     with capsys.disabled():
         print(f"\nasr input sha256 {h.hexdigest()}")
+
+
+def clip_rig(tmp_path, d):
+    """A tenant with one history voice of d, its 1 s clip from T0 (made-up noise, Opus): its client and the clip's bytes."""
+    t = db.open_db(tmp_path / "t.db")
+    clips = t.data / "voices" / "clips"
+    clips.mkdir(parents=True)
+    body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "libopus",
+                           "-f", "ogg", "pipe:1"], input=speech(1, 3, -30).tobytes(), capture_output=True, check=True).stdout
+    (clips / "made-up.ogg").write_bytes(body)
+    with db.tx() as tx:
+        db.insert_voices(tx, [{"conv": "made-up-conv", "label": "S1", "device": d, "n": 1, "speech_s": 1, "k": 1,
+                               "e": np.array([1.0, 0.0]), "clip": "made-up.ogg", "clip_start": at(T0).isoformat(),
+                               "clip_end": at(T0 + 1000).isoformat(), "clip_text": "made up"}])
+    core.TENANTS[:] = [t]  # no token: no auth
+    return TestClient(server.app), body  # no `with`: the lifespan does not start
+
+
+def test_voice_clip_as_stored(tmp_path):
+    """A history voice's clip of a device with no offset: its stored bytes, as main serves them."""
+    c, body = clip_rig(tmp_path, "LR-CLIP-TEST")
+    r = c.get("/api/voice-clip/made-up.ogg")
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/ogg" and r.content == body
+
+
+def test_seg_emb_digest(tmp_path, monkeypatch, capsys):
+    """The segment voiceprints a final pass keeps (seg_emb on): every column but the times (now-relative here) as
+    offsets from the first, hashed, printed to compare with the same test on main; gain_db 0 throughout."""
+    from test_seg_emb import finalize
+    finalize(tmp_path, monkeypatch)
+    rows = db.conn().execute("SELECT start_ms, end_ms, part, engine_speaker, model, e, gain_db, seg FROM seg_emb "
+                             "ORDER BY start_ms, part").fetchall()
+    assert rows and {r[6] for r in rows} == {0.0}
+    h = hashlib.sha256()
+    for r in rows:
+        h.update(repr((r[0] - rows[0][0], r[1] - rows[0][0], *r[2:])).encode())
+    with capsys.disabled():
+        print(f"\nseg_emb sha256 {h.hexdigest()} ({len(rows)} rows)")

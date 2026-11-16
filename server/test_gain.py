@@ -32,7 +32,7 @@ from alldayrec import server
 from alldayrec import squeeze
 from alldayrec import tenant
 from alldayrec.tenant import T
-from test_gain_parity import T0, at, pcm, speech, streamed
+from test_gain_parity import T0, at, clip_rig, pcm, speech, streamed
 
 SR = audio.SR
 DB2 = 20 * math.log10(2)  # x2: 1000 comes out 2000
@@ -377,26 +377,48 @@ def test_validation(tmp_path, monkeypatch, capsys):
 
 
 def test_voice_clip(tmp_path):
-    """A history voice's clip: as stored while its device has no offset (revalidated, not cached for a year); with one,
-    decoded at it (WAV, X-Gain-Db)."""
-    t = db.open_db(tmp_path / "t.db")
+    """A history voice's clip: as stored while its device has no offset (revalidated, not cached for a year), or only
+    0 dB ones; with one, decoded at it (WAV, X-Gain-Db)."""
     d = "LR-CLIP-TEST"
-    clips = t.data / "voices" / "clips"
-    clips.mkdir(parents=True)
-    body = subprocess.run(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0", "-c:a", "libopus",
-                           "-f", "ogg", "pipe:1"], input=speech(1, 3, -30).tobytes(), capture_output=True, check=True).stdout
-    (clips / "made-up.ogg").write_bytes(body)
-    with db.tx() as tx:
-        db.insert_voices(tx, [{"conv": "made-up-conv", "label": "S1", "device": d, "n": 1, "speech_s": 1, "k": 1,
-                               "e": np.array([1.0, 0.0]), "clip": "made-up.ogg", "clip_start": at(T0).isoformat(),
-                               "clip_end": at(T0 + 1000).isoformat(), "clip_text": "made up"}])
-    c = client(t)
+    c, body = clip_rig(tmp_path, d)
+    r = c.get("/api/voice-clip/made-up.ogg")
+    assert r.status_code == 200 and r.content == body and r.headers["cache-control"] == "no-cache" and "x-gain-db" not in r.headers
+    gain.put(d, T0, 0.0)
+    gain.put(d, T0 + 5000, DB2)  # after the clip
     r = c.get("/api/voice-clip/made-up.ogg")
     assert r.status_code == 200 and r.content == body and r.headers["cache-control"] == "no-cache" and "x-gain-db" not in r.headers
     gain.put(d, T0, DB2)
     r = c.get("/api/voice-clip/made-up.ogg", headers={"if-none-match": r.headers.get("etag", "x")})
     assert r.status_code == 200 and r.headers["content-type"] == "audio/wav" and r.headers["x-gain-db"] == f"{DB2:g}"
     assert np.array_equal(pcm(r.content), gain.to16(up(audio.decode(body), DB2)))
+
+
+@pytest.mark.parametrize("first", [None, 0.0])
+def test_voice_clip_offset_inside(tmp_path, first):
+    """An offset that starts inside a clip whose start has none (or 0 dB): decoded, each sample at its own time's;
+    its first half as decoded, the rest x2 (X-Gain-Db: the first sample's, 0)."""
+    d = "LR-CLIP-TEST"
+    c, body = clip_rig(tmp_path, d)
+    if first is not None:
+        gain.put(d, T0, first)
+    gain.put(d, T0 + 500, DB2)
+    r = c.get("/api/voice-clip/made-up.ogg")
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/wav" and r.headers["x-gain-db"] == "0"
+    x, h = audio.decode(body), SR // 2
+    assert np.array_equal(pcm(r.content), gain.to16(np.concatenate([x[:h], up(x[h:], DB2)])))
+
+
+def test_seg_emb_gain(tmp_path):
+    """A segment voiceprint's gain_db: its device's offset at the segment's start; one over a since_ms has its start's."""
+    from alldayrec import device_pipeline
+    db.open_db(tmp_path / "t.db")
+    d = "LR-SEG-TEST"
+    gain.put(d, T0 + 1000, DB2)
+    segs = [{"row": k, "start_ms": a, "end_ms": b} for k, (a, b) in enumerate([(0, 900), (800, 2000), (1000, 2000)])]
+    vs = [[(g, np.ones(4))] for g in segs]
+    rows = device_pipeline.seg_embs(d, segs, vs, lambda s: at(T0) + dt.timedelta(seconds=s))
+    assert [r[7] for r in rows] == [0.0, 0.0, DB2]
+    assert device_pipeline.seg_embs("LR-NONE", segs, vs, lambda s: at(T0) + dt.timedelta(seconds=s))[2][7] == 0.0
 
 
 class Old:

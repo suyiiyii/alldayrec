@@ -760,18 +760,20 @@ async def person_profile(name: str):
 
 @router.get("/api/voice-clip/{name}")
 async def voice_clip(name: str):
-    """A history voice's sample: as stored, or, when its device has an offset at the clip's start (gain.py), decoded
-    with it as WAV (X-Gain-Db). Revalidated each time (no-cache): an offset set later must not meet a cached copy."""
+    """A history voice's sample: as stored, or, when its device has a non-zero offset anywhere in the clip (gain.py),
+    decoded with it, each sample at its own time's, as WAV (X-Gain-Db: its first sample's). Revalidated each time
+    (no-cache): an offset set later must not meet a cached copy."""
     p = T().data / "voices" / "clips" / name  # the history voices' samples
     if not re.fullmatch(r"[\w.-]+\.ogg", name) or not p.is_file():
         raise HTTPException(404, "no such clip")
-    r = await anyio.to_thread.run_sync(lambda: db.conn().execute(
-        "SELECT device, clip_start FROM voices WHERE clip = ? AND device IS NOT NULL AND clip_start IS NOT NULL LIMIT 1", (name,)).fetchone(),
+    r = await anyio.to_thread.run_sync(lambda: db.conn().execute(  # only a device with a non-zero offset is decoded
+        "SELECT device, clip_start FROM voices WHERE clip = ? AND device IS NOT NULL AND clip_start IS NOT NULL AND EXISTS ("
+        "SELECT 1 FROM device_gain g WHERE g.device = voices.device AND g.offset_db != 0) LIMIT 1", (name,)).fetchone(),
         limiter=threads.DB)
-    at = r and dt.datetime.fromisoformat(r["clip_start"]).timestamp() * 1000
-    if r and (g := await anyio.to_thread.run_sync(gain.offset_db, r["device"], at, limiter=threads.DB)):
-        x = await anyio.to_thread.run_sync(audio.decode, p.read_bytes(), limiter=threads.MEDIA)
-        if x is not None:
-            y = await anyio.to_thread.run_sync(lambda: gain.to16(gain.apply(x, r["device"], at), r["device"]), limiter=threads.DB)
-            return Response(audio.wav(y), media_type="audio/wav", headers={"Cache-Control": "no-cache", "X-Gain-Db": f"{g:g}"})
+    if r and (x := await anyio.to_thread.run_sync(audio.decode, p.read_bytes(), limiter=threads.MEDIA)) is not None:
+        at = dt.datetime.fromisoformat(r["clip_start"]).timestamp() * 1000
+        y, g = await anyio.to_thread.run_sync(lambda: (gain.apply(x, r["device"], at), gain.offset_db(r["device"], at)), limiter=threads.DB)
+        if y is not x:  # some sample of it has a non-zero offset (apply: x itself where none has)
+            return Response(audio.wav(gain.to16(y, r["device"])), media_type="audio/wav",
+                            headers={"Cache-Control": "no-cache", "X-Gain-Db": f"{g or 0:g}"})
     return FileResponse(p, media_type="audio/ogg", headers={"Cache-Control": "no-cache"})

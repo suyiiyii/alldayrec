@@ -432,7 +432,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `GET` | A history voice's sample: as stored, or, when its device has an offset at the clip's start (gain.py), decoded with it as WAV (X-Gain-Db). | `name` (path, string) |
+| `GET` | A history voice's sample: as stored, or, when its device has a non-zero offset anywhere in the clip (gain.py), decoded with it, each sample at its own time's, as WAV (X-Gain-Db: its first sample's). | `name` (path, string) |
 
 ### `/api/self`
 

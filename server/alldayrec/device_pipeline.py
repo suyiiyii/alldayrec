@@ -64,7 +64,9 @@ def seg_embs(device: str, segs: list[dict], vs: list, at) -> list[tuple]:
     # a part is in segs, or label() joined it again into one holding its first word (by identity: segments overlap)
     row = lambda p: rows.get(id(p if id(p) in rows or not p.get("words") else p["words"][0]))
     return [(device, ts(p["start_ms"]), ts(p["end_ms"]), k if len(v) > 1 else 0, p.get("engine_speaker"), model,
-             np.asarray(e, np.float16).tobytes(), 0.0, r, i)  # gain_db: voices() embeds x as decoded (lift: the engine's)
+             np.asarray(e, np.float16).tobytes(), gain.offset_db(device, ts(p["start_ms"])) or 0.0, r, i)
+            # gain_db: the offset x (as voices() embeds it; lift: the engine's) has at the segment's start; one over a
+            # since_ms of the offset (gain.py) is recorded at its start's, the later part's not said
             for i, v in enumerate(vs) if v for k, (p, e) in enumerate(v, 1) if (r := row(p)) is not None]
 
 
