@@ -105,7 +105,7 @@ def test_list_and_set(tmp_path):
         log = (tmp_path / "systemd-run.log").read_text()
         assert f"-p EnvironmentFile={tmp_path}/one/.env -p WorkingDirectory={tmp_path}/one/server -p User=" in log, log
         assert "DATA_DIR=" not in log and " -E " not in log and "--setenv" not in log, log
-        assert log.startswith("--pipe --wait --quiet --collect --expand-environment=no "), log
+        assert log.startswith("--pipe --wait --quiet --collect -p "), log
 
 
 def test_no_tenant_or_failed(tmp_path):
@@ -115,7 +115,7 @@ def test_no_tenant_or_failed(tmp_path):
     assert gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "1").returncode == 0
     (tmp_path / "two-data/tenants.json").write_text("not json")  # two fails; one still lists
     r = gain_sh(tmp_path, f"{one} {two}", "list")
-    assert r.returncode == 1 and "a\t" in r.stdout and "two: gain.py failed (exit 1)" in r.stderr, r.stdout + r.stderr
+    assert r.returncode == 1 and "a\t" in r.stdout and "two: systemd-run or gain.py failed (exit 1)" in r.stderr, r.stdout + r.stderr
     assert "no instance has that tenant" not in r.stderr and "invalid JSON" not in r.stderr
 
 
@@ -137,7 +137,7 @@ def test_no_env_values_in_output(tmp_path, env, value):
     if "HOST" in env:
         (d / "tenants.json").write_text(json.dumps([{"id": "a", "token": "", "data": str(d / "a"), "recordings": str(d / "a")}]))
     r = gain_sh(tmp_path, one, "list")
-    assert r.returncode == 1 and "one: gain.py failed (exit 1)" in r.stderr and "gain.py: SystemExit" in r.stderr, r.stdout + r.stderr
+    assert r.returncode == 1 and "one: systemd-run or gain.py failed (exit 1)" in r.stderr and "gain.py: SystemExit" in r.stderr, r.stdout + r.stderr
     assert value not in r.stdout + r.stderr
 
 
@@ -160,13 +160,21 @@ def test_last_data_dir_wins_with_spaces(tmp_path):  # the review's case: the fir
     assert (rows(tmp_path, "one", "a"), rows(tmp_path, "two", "a")) == (1, 0)
 
 
-def test_args_as_given(tmp_path):  # systemd expands no $VAR (nor %n) in gain.py's arguments: the note is what was typed
+def test_py_has_nothing_systemd_expands():  # ${VAR}, $VAR, %n: it is in the command systemd-run starts
+    s = (HERE / "gain.sh").read_text()
+    py = s[s.index("\npy='") + 5:s.index("'\n", s.index("\npy='") + 5)]
+    assert "gain.main(" in py and "$" not in py and "%" not in py, py
+
+
+def test_args_as_given(tmp_path):  # on stdin, not in the command: no ${VAR}, $VAR or %n expanded, the note as typed
     one = setup(tmp_path, "one", "a")
     note = "made up ${LLM_API_KEY} $LLM_API_KEY %n"
     r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "1", "--note", note)  # gain_sh: SECRET not in the output
     assert r.returncode == 0 and note in r.stdout, r.stdout + r.stderr
     with sqlite3.connect(tmp_path / "one-data/a/live.db") as c:
         assert c.execute("SELECT note FROM device_gain").fetchall() == [(note,)]
+    if not REAL:  # nor in the command, where some systemd would expand it
+        assert "LLM_API_KEY" not in (tmp_path / "systemd-run.log").read_text()
 
 
 def test_env_files_in_order_optional_ones_optional(tmp_path):  # later files win; a missing optional (-) one is skipped
@@ -192,7 +200,7 @@ def test_no_data_dir_runs_nothing(tmp_path):  # the optional file with DATA_DIR 
     unit(tmp_path, "one", f"{tmp_path}/home.env (ignore_errors=yes)", f"{tmp_path}/missing.env (ignore_errors=yes)")
     r = gain_sh(tmp_path, one, "--tenant", "a", "set", "LR-SH", "1")
     assert r.returncode == 1 and "  gain.py: no DATA_DIR from the unit EnvironmentFiles" in r.stderr, r.stdout + r.stderr
-    assert "one: gain.py failed (exit 1)" in r.stderr and rows(tmp_path, "decoy", "a") == 0
+    assert "one: systemd-run or gain.py failed (exit 1)" in r.stderr and rows(tmp_path, "decoy", "a") == 0
 
 
 @pytest.mark.parametrize("bad", ["EnvironmentFiles=/made-up/x.env (ignore_errors=maybe)", "fail"])
@@ -216,7 +224,7 @@ def test_systemctl_unknown_or_failed_runs_nothing(tmp_path, bad):
 def test_own_messages_shown(tmp_path, ids, args, said, rc):  # what gain.py says of the command line, and its exit code
     one = setup(tmp_path, "one", ids)
     r = gain_sh(tmp_path, one, *(["--tenant", "a"] if ids == "a" else []), *args)
-    assert r.returncode == 1 and f"  gain.py: {said}" in r.stderr and f"one: gain.py failed (exit {rc})" in r.stderr, \
+    assert r.returncode == 1 and f"  gain.py: {said}" in r.stderr and f"one: systemd-run or gain.py failed (exit {rc})" in r.stderr, \
         r.stdout + r.stderr
     assert rc == 1 or "  gain.py: usage: python -m alldayrec.gain" in r.stderr
     assert all(rows(tmp_path, "one", i) == 0 for i in ids)
