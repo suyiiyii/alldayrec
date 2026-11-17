@@ -9,7 +9,7 @@ For an account with [environmental sound](../reference/configuration.md#optional
 
 ## A conversation's sound
 
-- Under the title of a conversation card on the timeline and of the conversation page: up to 3 sound tags, most minutes first, for example 「🎵 可能有背景音乐 12 分钟」 (maybe music, 12 min), 「🚗 可能在车里 8 分钟」 (maybe in a vehicle, 8 min), 「🤫 可能大半时间安静」 (maybe mostly quiet).
+- Under the title of a conversation card on the timeline and of the conversation page: up to 3 sound tags, most minutes first, for example 「🎵 可能有背景音乐 12 分钟」 (maybe music, 12 min), 「🚗 可能在交通工具上 8 分钟」 (maybe in a vehicle, 8 min), 「🤫 可能大半时间安静」 (maybe mostly quiet).
 - Short ones are left out: at least 2 minutes, and at least a tenth of the conversation's time with sound data. Speech is not a tag (every conversation has it).
 
 ## A day's sound bar
@@ -23,7 +23,7 @@ Tap a stretch of the bar to see its start, end and what may have been heard:
 
 ## Find conversations by sound
 
-At the front of the tag row under the timeline's search box are 「🎵 有音乐」 (music), 「🚗 在车里」 (in a vehicle) and 「🤫 安静」 (quiet): tap one to see only the conversations with that sound tag, tap it again to stop. They work together with words and tags.
+At the front of the tag row under the timeline's search box are 「🎵 有音乐」 (music), 「🚗 在交通工具上」 (in a vehicle) and 「🤫 安静」 (quiet): tap one to see only the conversations with that sound tag, tap it again to stop. They work together with words and tags.
 
 ## Wrong: tap 不对
 

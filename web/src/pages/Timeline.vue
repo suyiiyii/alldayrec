@@ -38,7 +38,7 @@ import { toast } from "../lib/toast";
 // Pinned on top while it shows today unfiltered: the conversation going on (the live card) and what is due. Each past
 // day opens with its recap, yesterday's unfolded. Without words or a tag, a day's fragments (too little speech for a
 // summary) fold into one line under its recap, a tap shows them in their places, and its sound bar (SoundBar) is
-// under the day's head. With the tenant's sound on (the status says so), 有音乐 / 在车里 / 安静 filter it too (?sound=).
+// under the day's head. With the tenant's sound on (the status says so), 有音乐 / 在交通工具上 / 安静 filter it too (?sound=).
 // Until the first conversation, the steps to it from where the user is (next) instead.
 const PAGE = 30;
 const route = useRoute(),

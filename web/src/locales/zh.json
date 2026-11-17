@@ -1135,19 +1135,19 @@
     "hint": "模型从声音猜的，可能不对；点一段看详情",
     "tag": {
       "music": "🎵 可能有背景音乐 {n} 分钟",
-      "vehicle": "🚗 可能在车里 {n} 分钟",
+      "vehicle": "🚗 可能在交通工具上 {n} 分钟",
       "quiet": "🤫 可能安静 {n} 分钟"
     },
     "mostlyQuiet": "🤫 可能大半时间安静",
     "ev": {
       "speech": "说话",
       "music": "音乐",
-      "vehicle": "车里",
+      "vehicle": "交通工具",
       "quiet": "安静"
     },
     "filter": {
       "music": "🎵 有音乐",
-      "vehicle": "🚗 在车里",
+      "vehicle": "🚗 在交通工具上",
       "quiet": "🤫 安静"
     },
     "maybe": "可能：",
