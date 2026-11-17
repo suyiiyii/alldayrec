@@ -182,7 +182,9 @@ def evidence_v2(name: str, convs: list[dict], mentions: list[dict], rows=lambda 
         if not looked(s):
             continue
         theirs = {r["start"] for r in segment(name, m["conv_rows"], s)[0]}  # none where that conversation is skipped
-        rs = [r for r in m["rows"] if heard(r, s) and _s(r) >= MIN_ROW_S and (r.get("speaker") != name or r["start"] in theirs)]
+        here = {r["start"] for r in m["conv_rows"]}  # its spans tell nothing of the next conversation's rows
+        rs = [r for r in m["rows"] if r["start"] in here and heard(r, s) and _s(r) >= MIN_ROW_S
+              and (r.get("speaker") != name or r["start"] in theirs)]
         if m["at"] not in {r["start"] for r in rs}:
             continue
         near = "\n".join(("  >> " if r["start"] == m["at"] else "     ") + f"{r.get('speaker') or 'S?'}: {r['text']}" for r in rs)

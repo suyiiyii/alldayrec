@@ -248,3 +248,13 @@ def test_v2_refresh_asks_nothing_twice(monkeypatch):
     anyio.run(rename, "c4", {"from": "张三", "to": "王五"})
     anyio.run(lambda: make_profile("张三", auto=True))
     assert len(asked) == 3, "evidence changed: asked again"
+
+
+def test_v2_mention_rows_stay_in_their_conversation():
+    d = "2026-10-03T10:00:00.000"
+    rs = [row(d, 0, 3, "李四", "张三下周搬家"), row(d, 4, 3, "我", "是吗")]
+    nxt = row(d, 10, 3, "S1", "下一段对话的话")
+    m = {"conv": "c1", "title": None, "at": rs[0]["start"], "rows": rs + [nxt], "conv_rows": rs,
+         "summary": {"status": "done", "model": "m", "ai_spans": [], "media_spans": []}}
+    text = profiles.evidence_v2("张三", [], [m])[0]
+    assert ">> 李四: 张三下周搬家" in text and "是吗" in text and "下一段对话" not in text
