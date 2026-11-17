@@ -758,6 +758,8 @@ async def person(name: str):
         raise HTTPException(404, "no conversation with this name")
     top = lambda d, n: sorted(d, key=lambda k: -d[k])[:n]
     pf = db.profile(name)
+    if pf and T().persona_v2 and not await anyio.to_thread.run_sync(profile_stands, pf, limiter=threads.DB):
+        pf = None  # made from labels or words since changed (or by v1): void, made again on the next click
     return {"name": name, "count": len(convs), "first": convs[-1]["start"], "last": convs[0]["start"],
             "aliases": sorted(a for a, n in db.aliases().items() if n == name),
             "profile": pf, "profile_newer": sum(c["start"] > pf["upto"] for c in convs) if pf and pf.get("upto") else 0,
@@ -786,8 +788,45 @@ def mentions(name: str, limit: int = 30, per_conv: int = 3) -> list[dict]:
     return out
 
 
-async def make_profile(name: str) -> dict:
-    """The person's profile from their 40 latest conversations, their todos and mine to them, and 30 mentions."""
+def profile_stands(pf: dict) -> bool:
+    """A v2 profile's conversations still hold what it was made from (profiles.fresh)."""
+    now = {}
+    for x in pf.get("used") or []:
+        c = find_conversation(x["conv"])
+        now[x["conv"]] = profiles.sha(conversation_rows(c), db.summary(c["id"])) if c else None
+    return profiles.fresh(pf, now)
+
+
+def profile_inputs(name: str) -> tuple[str, dict, dict, str | None]:
+    """profiles.evidence_v2's from the store, with the newest conversation with them (upto)."""
+    convs = [c for c in all_conversations() if name in (c.get("participants") or [])]
+    if not convs:
+        raise HTTPException(404, "no conversation with this name")
+    ms = [] if name == "我" else mentions(name)  # 我 is in nearly every row
+    for m in ms:
+        c = find_conversation(m["conv"])
+        m.update(summary=db.summary(c["id"]), conv_rows=conversation_rows(c))
+    return *profiles.evidence_v2(name, convs, ms, conversation_rows), convs[0]["start"]
+
+
+async def make_profile(name: str, auto: bool = False) -> dict:
+    """The person's profile from their 40 latest conversations, their todos and mine to them, and 30 mentions.
+    persona_v2: from what they said themselves in the 40 latest conversations that can tell (profiles.evidence_v2),
+    only of a named person, and no call when none can; auto (a refresh after a summary): none either when the model
+    would be asked just what it was last time, the stored one kept up to the conversations as they are now."""
+    if T().persona_v2:
+        if speakers.ANON.fullmatch(name):  # an unnamed voice: nobody the owner named or confirmed
+            raise HTTPException(400, "[not_named] 只给命名过的人写档案")
+        text, ev, made, upto = await anyio.to_thread.run_sync(profile_inputs, name, limiter=threads.DB)
+        if not any(e["kind"] == "self" for e in ev.values()):  # hearsay alone makes no profile
+            raise HTTPException(422, f"[no_evidence] 还没有 {name} 自己说的、能当证据的原句")
+        pf = db.profile(name)
+        if auto and pf and pf.get("input") == profiles.key(text, ev):
+            pf.update(upto=upto, used=made["used"], skipped=made["skipped"])
+        else:
+            pf = await profiles.profile_v2(name, text, ev, made, upto)
+        db.put_profile(pf)
+        return pf
     p = await person(name)
     ms = await anyio.to_thread.run_sync(mentions, name, limiter=threads.DB)
     pf = await profiles.profile(name, p["conversations"][:40], (p["theirs"] + p["mine"])[:30], ms)
