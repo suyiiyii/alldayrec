@@ -500,7 +500,7 @@ function edit(label: string) {
           }}
         </button>
         <template v-if="s?.status === 'done'">
-          <section v-if="s.place?.label" class="card place" :title="t('conv.place.hint')">
+          <section v-if="s.place?.label" class="card place">
             <div class="where">
               <Icon name="map-pin" :size="16" />{{
                 t("conv.place.maybe", {
@@ -522,6 +522,7 @@ function edit(label: string) {
                 /></template>
               </li>
             </ul>
+            <div class="hint">{{ t("conv.place.hint") }}</div>
           </section>
           <div v-if="s.summary" class="card summary">{{ said(s.summary) }}</div>
           <div v-else-if="!s.model" class="card muted">{{ t("conv.tooShort") }}</div>
@@ -884,6 +885,11 @@ button.person,
   align-items: center;
   gap: var(--space-1);
   font-weight: 500;
+}
+.place .hint {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
 .place .why {
   list-style: none;
