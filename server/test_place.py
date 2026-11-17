@@ -7,7 +7,7 @@ from alldayrec import core, db, place, profiles, summaries, summary, tenant
 
 CID = "c20261020100000"
 START = "2026-10-20T10:00:00.000"
-TEXTS = [("我", "上高速了，前面收费站"), ("S1", "导航说还有二十公里"), ("S2", "欢迎来到海边乐园"), ("我", "帮我查一下明天的会")]
+TEXTS = [("我", "上高速了，前面收费站"), ("S1", "导航说还有二十公里"), ("S2", "欢迎来到海边乐园"), ("我", "帮我查一下明天的会"), ("S1", "嗯，好。")]
 
 
 def rows():
@@ -26,19 +26,22 @@ def test_checked_keeps_only_what_holds():
         {"kind": "line", "at": "10:00:02"},  # a video's line: no place of the recorder's
         {"kind": "line", "at": "10:00:03"},  # said to an AI
         {"kind": "line", "at": "10:09:99"}, "x",  # no such line, not an object
-        {"kind": "sound", "event": "engine"}, {"kind": "sound", "event": "music"},  # music: no minutes measured
+        {"kind": "line", "at": "10:00:04"},  # 嗯，好。: says nothing of a place
+        {"kind": "sound", "event": "vehicle"}, {"kind": "sound", "event": "music"},  # music: no minutes measured
         {"kind": "sound", "event": "typing"},  # not an event the layer gives
-        {"kind": "line", "at": "10:00:01"}]}, r, SPANS, {"covered": 20, "engine": 18.4, "speech": 5})
+        {"kind": "line", "at": "10:00:01"}]}, r, SPANS, {"covered": 20, "vehicle": 18.4, "speech": 5})
     assert got == {"label": "car", "detail": "高速上", "confidence": "high", "evidence": [
         {"kind": "line", "at": r[0]["start"], "who": "我", "text": "上高速了，前面收费站"},
-        {"kind": "sound", "event": "engine", "minutes": 18},  # measured, not the model's number
+        {"kind": "sound", "event": "vehicle", "minutes": 18},  # measured, not the model's number
         {"kind": "line", "at": r[1]["start"], "who": "S1", "text": "导航说还有二十公里"}]}, got
+    assert place.checked({"label": "车上", "detail": "空", "confidence": "medium", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                         r, SPANS, None)["detail"] == ""  # "空": the model's way of writing none
     # unsure, low, an unknown label, or nothing that holds: no place shown
     for res in ({"label": "不确定", "confidence": "low", "evidence": []},
                 {"label": "车上", "confidence": "low", "evidence": [{"kind": "line", "at": "10:00:00"}]},
                 {"label": "火星", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
                 {"label": "户外", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:02"}]},
-                {"label": "车上", "confidence": "high", "evidence": [{"kind": "sound", "event": "engine"}]},  # no sound data
+                {"label": "车上", "confidence": "high", "evidence": [{"kind": "sound", "event": "vehicle"}]},  # no sound data
                 ["not an object"]):
         assert place.checked(res, r, SPANS, None) == {"label": None}, res
 
@@ -49,7 +52,7 @@ def test_prompt_marks_media_and_ai_lines(tmp_path):
     user = place.prompt(conv, rows(), SPANS, None)[1]["content"]
     assert "[10:00:02] S2（外放）: 欢迎来到海边乐园" in user and "[10:00:03] 我（对AI）: 帮我查一下明天的会" in user
     assert "[10:00:00] 我: 上高速了" in user and "没有环境声音数据" in user and "2026-10-20（周二）10:00" in user
-    assert "引擎或路噪（车、地铁、飞机等交通工具）（engine）18 分钟" in place.sound_block({"covered": 30, "engine": 18, "music": 0})
+    assert "（引擎或路噪，车、地铁、飞机都算）（vehicle）18 分钟" in place.sound_block({"covered": 30, "vehicle": 18, "music": 0})
 
 
 class Model:

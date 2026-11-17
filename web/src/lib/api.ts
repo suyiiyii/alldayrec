@@ -62,7 +62,7 @@ export interface At {
   at: string | null;
 }
 export type PlaceLabel = "home" | "office" | "car" | "train" | "restaurant" | "outdoors" | "shop" | "other";
-export type SoundEvent = "engine" | "music" | "speech" | "quiet";
+export type SoundEvent = "vehicle" | "music" | "speech" | "quiet";
 export interface Place {
   label: PlaceLabel | null;
   detail?: string; // the more exact place a sentence named, "" when none did

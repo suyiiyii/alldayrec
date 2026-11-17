@@ -273,7 +273,7 @@
         "other": "其他"
       },
       "sound": {
-        "engine": "引擎或路噪 {n} 分钟",
+        "vehicle": "交通工具行驶声 {n} 分钟",
         "music": "音乐 {n} 分钟",
         "speech": "讲话 {n} 分钟",
         "quiet": "安静 {n} 分钟"

@@ -273,7 +273,7 @@
         "other": "Elsewhere"
       },
       "sound": {
-        "engine": "Engine or road noise {n} min",
+        "vehicle": "Vehicle noise {n} min",
         "music": "Music {n} min",
         "speech": "Speech {n} min",
         "quiet": "Quiet {n} min"
