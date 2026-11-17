@@ -282,8 +282,9 @@ def best_ms(f, *a) -> tuple[float, object]:
 
 
 def test_big_store_fast(store):
-    """A month of rows (51 840): a day a month ago, its list and its bar, and a call of the sound filter, each under
-    100 ms (the queries bounded on both sides of the index; the filter looking at SCAN conversations a call)."""
+    """A month of rows (51 840): a day a month ago's list and a call of the sound filter under 100 ms, that day's bar
+    (3 devices) under 200 (about 50 ms on a laptop, twice that on CI; 4.6 s before): the queries bounded on both sides
+    of the index, the filter looking at SCAN conversations a call."""
     first, n = big_store()
     assert n == 51_840
     month_ago = db.conversations(first, (dt.date.fromisoformat(first) + dt.timedelta(days=1)).isoformat())
@@ -300,4 +301,4 @@ def test_big_store_fast(store):
         assert got == []
         calls += 1
     assert calls == 1200 // sound_events.SCAN + 1, "the last call: none left"
-    assert all(v[0] < 100 for v in took.values()), {k: round(v[0], 1) for k, v in took.items()}
+    assert all(v[0] < (200 if k.startswith("bar") else 100) for k, v in took.items()), {k: round(v[0], 1) for k, v in took.items()}

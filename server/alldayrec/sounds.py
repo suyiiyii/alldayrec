@@ -114,9 +114,9 @@ def write(c, device: str, name: str, r: tuple, gaps=(), gain_db: float = 0.0):
               (device, model_id(name), *r, json.dumps(list(gaps)), gain_db, int(time.time() * 1000)))
 
 
-def minute_rows(device: str, name: str, a: int, b: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """minutes() as arrays: the minutes in order, their frames, each class's mean (minutes x classes) and its frames
-    at HIT or more; a minute two rows share by their frames."""
+def minute_rows(device: str, name: str, a: int, b: int, cols: list[int] | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """minutes() as arrays: the minutes in order, their frames, each class's mean (minutes x classes; cols: those
+    classes only, in that order) and its frames at HIT or more; a minute two rows share by their frames."""
     c = MODELS[name]["classes"]
     x = [np.frombuffer(zlib.decompress(blob), minute_type(c)) for (blob,) in db.conn().execute(
         f"SELECT minutes FROM sounds WHERE device = ? AND model = ? AND {SPAN}", (device, model_id(name), *span_args(a, b)))]
@@ -124,12 +124,13 @@ def minute_rows(device: str, name: str, a: int, b: int) -> tuple[np.ndarray, np.
     x = x[(x["minute"] >= a // 60000) & (x["minute"] <= (b - 1) // 60000) & (x["frames"] > 0)]
     x = x[np.argsort(x["minute"], kind="stable")]
     m, at = np.unique(x["minute"], return_index=True)
+    cols = slice(None) if cols is None else cols
     if not len(m):
-        return m, np.zeros(0, np.int64), np.zeros((0, c)), np.zeros((0, c), np.int64)
+        return m, np.zeros(0, np.int64), np.zeros((0, c))[:, cols], np.zeros((0, c), np.int64)[:, cols]
     f = x["frames"].astype(np.int64)
     n = np.add.reduceat(f, at)
-    mean = np.add.reduceat(x["mean"].astype(np.float64) * f[:, None], at, axis=0) / n[:, None]
-    return m, n, mean, np.add.reduceat(x["hits"].astype(np.int64), at, axis=0)
+    mean = np.add.reduceat(x["mean"][:, cols].astype(np.float64) * f[:, None], at, axis=0) / n[:, None]
+    return m, n, mean, np.add.reduceat(x["hits"][:, cols].astype(np.int64), at, axis=0)
 
 
 def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:

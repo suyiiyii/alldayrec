@@ -63,9 +63,9 @@ VEHICLE_RUN = 3  # minutes in a row
 # A conversation's tags: an event of at least TAG_MIN minutes and TAG_SHARE of its minutes with scores, most first, at
 # most TAGS; speech is not one (every conversation has it); quiet over half of them is 大半时间安静 (mostly)
 TAG_MIN, TAG_SHARE, TAGS, MOSTLY = 2, 0.1, 3, 0.5
-# the conversations a sound search looks at per call (each one's rows decoded, about 0.5 ms): a call stays under 100 ms
-# on a month of rows (test_big_store_fast) and the DB threads free; the caller goes on from where it stopped
-SCAN = 100
+# the conversations a sound search looks at per call (each one's rows decoded, about 0.4 ms): a call stays well under
+# 100 ms on a month of rows (test_big_store_fast), on CI too, and the DB threads free; the caller goes on from where it stopped
+SCAN = 50
 
 
 def model() -> str | None:
@@ -86,7 +86,7 @@ def ms(t: str) -> int:
 def levels(device: str, name: str, a: int, b: int) -> dict[int, tuple[float, int, int, int]]:
     """Unix minute -> (level dBFS, frames, frames under the quiet cut, the cut) over [a, b): the frames by their middle,
     none in a row's gaps or at the -127 floor; the cut QUIET_DB, QUIET_DB_RAW where a row of it had no calibration."""
-    out = {}
+    mids, lvs, cuts = [], [], []
     for s, e, hop, win, n, lv, gaps, g in db.conn().execute(
             f"SELECT start_ms, end_ms, hop_ms, window_ms, n, db, gaps, gain_db FROM sounds WHERE device = ? AND model = ? AND {sounds.SPAN}",
             (device, sound.model_id(name), *sounds.span_args(a, b))):
@@ -96,13 +96,17 @@ def levels(device: str, name: str, a: int, b: int) -> dict[int, tuple[float, int
         keep = (lv > -127) & (mid >= a) & (mid < b)
         for x, y in json.loads(gaps):
             keep &= (mid < x) | (mid >= y)
-        cut = QUIET_DB if g else QUIET_DB_RAW  # shortcut: gain_db 0 reads as uncalibrated, a gain registered as exactly 0 dB too
-        ms_, k = np.unique(mid[keep] // 60000, return_inverse=True)
-        p, c, q = np.bincount(k, 10 ** (lv[keep] / 10), len(ms_)), np.bincount(k, None, len(ms_)), np.bincount(k, lv[keep] < cut, len(ms_))
-        for m, p1, n1, q1 in zip(ms_.tolist(), p.tolist(), c.tolist(), q.tolist()):
-            p0, n0, q0, c0 = out.get(m, (0.0, 0, 0, QUIET_DB))
-            out[m] = (p0 + p1, n0 + int(n1), q0 + int(q1), min(c0, cut))
-    return {m: (10 * np.log10(p / n), n, q, cut) for m, (p, n, q, cut) in out.items()}
+        mids.append(mid[keep])
+        lvs.append(lv[keep])
+        cuts.append(np.full(int(keep.sum()), QUIET_DB if g else QUIET_DB_RAW))  # shortcut: gain_db 0 reads as uncalibrated, a gain registered as exactly 0 dB too
+    if not mids:
+        return {}
+    lv, cut = np.concatenate(lvs), np.concatenate(cuts)
+    m, k = np.unique(np.concatenate(mids) // 60000, return_inverse=True)
+    p, n, q = np.bincount(k, 10 ** (lv / 10), len(m)), np.bincount(k, None, len(m)), np.bincount(k, lv < cut, len(m))
+    c = np.full(len(m), QUIET_DB)
+    np.minimum.at(c, k, cut)
+    return {x: (10 * np.log10(p1 / n1), int(n1), int(q1), int(c1)) for x, p1, n1, q1, c1 in zip(m.tolist(), p.tolist(), n.tolist(), q.tolist(), c.tolist())}
 
 
 def minutes(device: str, a: int, b: int) -> dict[int, dict[str, float]]:
@@ -111,10 +115,12 @@ def minutes(device: str, a: int, b: int) -> dict[int, dict[str, float]]:
     if not (name := model()):
         return {}
     pad = VEHICLE_RUN * 60000  # a ride across a or b still counts its whole run
-    (ms_, frames, mean, hits), lv, th = sounds.minute_rows(device, name, a - pad, b + pad), levels(device, name, a - pad, b + pad), THRESH[name]
+    cols = {e: CLASSES[name][e] for e in ("speech", "music", "vehicle")}
+    at = {e: np.arange(len(c)) + sum(len(x) for x in list(cols.values())[:i]) for i, (e, c) in enumerate(cols.items())}
+    (ms_, frames, mean, hits), lv, th = sounds.minute_rows(device, name, a - pad, b + pad, sum(cols.values(), [])), levels(device, name, a - pad, b + pad), THRESH[name]
     row = {m: i for i, m in enumerate(ms_.tolist())}
-    on = {e: (mean[:, CLASSES[name][e]].max(1) >= th[e]).tolist() for e in ("speech", "music", "vehicle")} if len(ms_) else {}
-    conf = {e: (hits[:, CLASSES[name][e]].max(1) / frames).tolist() for e in on}
+    on = {e: (mean[:, at[e]].max(1) >= th[e]).tolist() for e in cols} if len(ms_) else {}
+    conf = {e: (hits[:, at[e]].max(1) / frames).tolist() for e in on}
     out = {}
     for m, (level, n, below, cut) in sorted(lv.items()):
         if (i := row.get(m)) is None:
@@ -136,15 +142,17 @@ def minutes(device: str, a: int, b: int) -> dict[int, dict[str, float]]:
     return {m: ev for m, ev in out.items() if a // 60000 <= m <= (b - 1) // 60000}
 
 
-def wrong_ids(device: str, a: int, b: int) -> dict[str, int]:
+def marks(device: str, a: int, b: int) -> list[tuple]:
+    """The owner's 不对 on device over [a, b): (id, event, start_ms, end_ms), oldest first."""
+    return db.conn().execute("SELECT id, event, start_ms, end_ms FROM sound_wrong WHERE device = ? AND start_ms < ? AND end_ms > ? ORDER BY id",
+                             (device, b, a)).fetchall()
+
+
+def wrong_ids(device: str, a: int, b: int, ms_: list[tuple] | None = None) -> dict[str, int]:
     """event -> the owner's 不对 (sound_wrong id; the newest of several) on device covering more than half of [a, b):
-    still said of a conversation grown by late audio or merged since, or of the bar's runs cut anew; any model."""
-    out = {}
-    for i, e, s, t in db.conn().execute("SELECT id, event, start_ms, end_ms FROM sound_wrong WHERE device = ? AND start_ms < ? AND end_ms > ? ORDER BY id",
-                                        (device, b, a)):
-        if 2 * (min(t, b) - max(s, a)) > b - a:
-            out[e] = i
-    return out
+    still said of a conversation grown by late audio or merged since, or of the bar's runs cut anew; any model. ms_:
+    marks() over [a, b) or more, read already."""
+    return {e: i for i, e, s, t in (marks(device, a, b) if ms_ is None else ms_) if 2 * (min(t, b) - max(s, a)) > b - a}
 
 
 def tags(c: dict) -> dict | None:
@@ -191,10 +199,11 @@ def runs(device: str, a: int, b: int) -> list[dict]:
             out[-1]["_c"].append(mins[m])
         else:
             out.append({"from": m * 60000, "to": (m + 1) * 60000, "events": {}, "conv": cid, "_k": key, "_c": [mins[m]]})
+    ws = marks(device, a, b)
     for r in out:
         cs, _ = r.pop("_c"), r.pop("_k")
         r["events"] = {e: round(sum(x[e] for x in cs) / len(cs), 2) for e in cs[0]}
-        r["wrong"] = wrong_ids(device, r["from"], r["to"])
+        r["wrong"] = wrong_ids(device, r["from"], r["to"], ws)
     return out
 
 
