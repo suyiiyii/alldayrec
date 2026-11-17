@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
     at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
     PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
+CREATE TABLE IF NOT EXISTS sound_wrong (        -- sound_events.py: the owner's 不对 on a sound event (event) of [start_ms,
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- end_ms) of device (a conversation's tag: conv), as the model (its id,
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- sounds.model) said it; at: when. For
+    event TEXT NOT NULL, model TEXT NOT NULL, conv TEXT);  -- the gold labels later; a row dropped is the undo
 CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
     part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s) or part, unix ms; part: of one split_speakers cut (1 on,

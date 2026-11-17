@@ -42,6 +42,14 @@ log = logging.getLogger("live")
 K, HIT = 10, 0.2  # each frame's top K classes; a minute counts the frames at HIT or more per class
 TOL_MS = 500  # holes this close are read together, a gap with no piece this short is inside a row (never coverage)
 CHUNK_MS = 300_000
+# a row is one part at most (parts() never makes a longer one; write() refuses one): so a row over [a, b) has end_ms
+# under b + MAX_ROW_MS, the upper bound every range query sets on the (device, model, end_ms) index (SPAN)
+MAX_ROW_MS = CHUNK_MS
+SPAN = "end_ms > ? AND end_ms < ? AND start_ms < ?"
+
+
+def span_args(a: int, b: int) -> tuple:
+    return a, b + MAX_ROW_MS, b
 BATCH_MS = 6 * 3600_000  # todo(): a device's pieces starting in this much time at once
 SOUND_EVERY_S = float(os.environ.get("SOUND_EVERY_S", "60"))
 SOUND_SETTLE_S = float(os.environ.get("SOUND_SETTLE_S", "120"))
@@ -99,23 +107,37 @@ def row(name: str, start_ms: int, x: np.ndarray, v: np.ndarray) -> tuple:
 def write(c, device: str, name: str, r: tuple, gaps=(), gain_db: float = 0.0):
     """gaps: what of the row's [start_ms, end_ms) had no decoded audio (zeros to the model): not covered. gain_db: the
     device's calibration offset its audio had (gain.py; none: 0)."""
+    if r[1] - r[0] > MAX_ROW_MS:
+        raise ValueError(f"a sounds row of {r[1] - r[0]} ms: at most MAX_ROW_MS ({MAX_ROW_MS})")
     c.execute("INSERT OR REPLACE INTO sounds (device, model, start_ms, end_ms, hop_ms, window_ms, n, db, top, minutes, gaps, gain_db, at) "
               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               (device, model_id(name), *r, json.dumps(list(gaps)), gain_db, int(time.time() * 1000)))
 
 
+def minute_rows(device: str, name: str, a: int, b: int, cols: list[int] | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """minutes() as arrays: the minutes in order, their frames, each class's mean (minutes x classes; cols: those
+    classes only, in that order) and its frames at HIT or more; a minute two rows share by their frames."""
+    c = MODELS[name]["classes"]
+    x = [np.frombuffer(zlib.decompress(blob), minute_type(c)) for (blob,) in db.conn().execute(
+        f"SELECT minutes FROM sounds WHERE device = ? AND model = ? AND {SPAN}", (device, model_id(name), *span_args(a, b)))]
+    x = np.concatenate(x) if x else np.zeros(0, minute_type(c))
+    x = x[(x["minute"] >= a // 60000) & (x["minute"] <= (b - 1) // 60000) & (x["frames"] > 0)]
+    x = x[np.argsort(x["minute"], kind="stable")]
+    m, at = np.unique(x["minute"], return_index=True)
+    cols = slice(None) if cols is None else cols
+    if not len(m):
+        return m, np.zeros(0, np.int64), np.zeros((0, c))[:, cols], np.zeros((0, c), np.int64)[:, cols]
+    f = x["frames"].astype(np.int64)
+    n = np.add.reduceat(f, at)
+    mean = np.add.reduceat(x["mean"][:, cols].astype(np.float64) * f[:, None], at, axis=0) / n[:, None]
+    return m, n, mean, np.add.reduceat(x["hits"][:, cols].astype(np.int64), at, axis=0)
+
+
 def minutes(device: str, name: str, a: int, b: int) -> dict[int, tuple]:
     """Unix minute -> (frames, mean of each class, frames at HIT or more) over [a, b): the rows' minutes, a minute two
     rows share by their frames."""
-    c, out = MODELS[name]["classes"], {}
-    for (blob,) in db.conn().execute("SELECT minutes FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
-                                     (device, model_id(name), a, b)):
-        for m in np.frombuffer(zlib.decompress(blob), minute_type(c)):
-            if a // 60000 <= m["minute"] <= (b - 1) // 60000:
-                n0, s0, h0 = out.get(int(m["minute"]), (0, 0.0, 0))
-                n = n0 + int(m["frames"])
-                out[int(m["minute"])] = (n, (s0 * n0 + m["mean"].astype(np.float64) * int(m["frames"])) / n, h0 + m["hits"].astype(np.int64))
-    return out
+    m, n, mean, hits = minute_rows(device, name, a, b)
+    return {int(k): (int(n[i]), mean[i], hits[i]) for i, k in enumerate(m)}
 
 
 BG_GATE = os.environ.get("BG_GATE", "0") == "1"
@@ -128,8 +150,8 @@ def music_max(device: str | None, a: int, b: int) -> float | None:
     without Music in it: 0); None when no frame there has one."""
     out, by = None, "device = ? AND " if device else ""  # with the device: on the sounds_end index
     for s, e, hop, n, top in db.conn().execute(
-            f"SELECT start_ms, end_ms, hop_ms, n, top FROM sounds WHERE {by}model = ? AND end_ms > ? AND start_ms < ? AND top IS NOT NULL",
-            (*([device] if device else []), model_id("mn10_as"), a, b)):
+            f"SELECT start_ms, end_ms, hop_ms, n, top FROM sounds WHERE {by}model = ? AND {SPAN} AND top IS NOT NULL",
+            (*([device] if device else []), model_id("mn10_as"), *span_args(a, b))):
         t = np.frombuffer(zlib.decompress(top), TOP).reshape(n, K)
         for i in range(n):
             if s + i * hop < b and a < (e if i == n - 1 else s + (i + 1) * hop):  # the last frame runs to the row's end
@@ -167,8 +189,8 @@ def verified(used: str | None) -> bool:
 
 def covered(device: str, name: str, a: int, b: int) -> list:
     """What of [a, b) (and about) the model has scores of decoded audio for: its rows less their gaps."""
-    return union([h for s, e, g in db.conn().execute("SELECT start_ms, end_ms, gaps FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
-                                                     (device, model_id(name), a, b)) for h in subtract([[s, e]], json.loads(g))])
+    return union([h for s, e, g in db.conn().execute(f"SELECT start_ms, end_ms, gaps FROM sounds WHERE device = ? AND model = ? AND {SPAN}",
+                                                     (device, model_id(name), *span_args(a, b))) for h in subtract([[s, e]], json.loads(g))])
 
 
 def span(start_ms: int, seconds: float) -> list:

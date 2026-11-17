@@ -3,9 +3,11 @@ import { computed } from "vue";
 import { hhmm, MOSTLY_MEDIA, type Conversation } from "../lib/api";
 import { t } from "../i18n";
 import { labelText, speakerList } from "../lib/speakers";
+import SoundTags from "./SoundTags.vue";
 
 // one conversation in a list: a card on a time line down the left (a grey dot: person colours are for avatars). Slim:
-// its start and its people, the title, the gist; the end, minutes, todos and tags are on the conversation page
+// its start and its people, the title, the gist, its sound tags (SoundTags); the end, minutes, todos and tags are on
+// the conversation page
 const { c } = defineProps<{ c: Conversation }>();
 const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
 </script>
@@ -36,6 +38,7 @@ const media = computed(() => (c.summary?.media_share ?? 0) >= MOSTLY_MEDIA);
       <div v-if="!media && c.summary?.summary" class="gist">
         {{ labelText(c.summary.summary, c.participants) }}
       </div>
+      <SoundTags v-if="c.sounds" :s="c.sounds" />
     </RouterLink>
   </div>
 </template>

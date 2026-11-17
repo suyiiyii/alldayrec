@@ -28,4 +28,6 @@ description: "AllDayRec 远程 MCP 端点 POST /mcp 的参考：认证、协议�
 
 `grep` 和 `conversation` 另外返回 `structuredContent`（`outputSchema` 见 `tools/list`）：`{"evidence": [...]}`，每条证据是一句原话的 `conversation`（对话 id）、`sentence`（句子 id）、`at`（开始时间，到秒）、`speaker`、`quote`；`conversation` 的证据还带 `kind`（`todo` / `decision`）和 `text`（那条待办或决定）。摘要里的原话不是它引用的那句（或接着的两句）说的时，`sentence`、`at`、`speaker` 是 `null`。分页时每一页都带全部证据。
 
+`sounds` 工具和 `search` 的 `sound` 参数只在这个租户开了[环境声音](./configuration.md#可选-环境声音)时出现在 `tools/list` 里；没开时列表、参数和每个工具的返回都和以前一样。开了以后，`day`、`search`、`conversation` 返回的每段对话下面多一行「环境声音（模型从声音猜的，可能不对）」，列出音乐、交通工具上、安静各多少分钟（规则见[数据](./data.md#声音事件-sound-events)）。声音事件只说听到了什么，不说在哪里。
+
 <!--@include: ../parts/mcp-tools.md-->

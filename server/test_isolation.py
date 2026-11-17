@@ -29,6 +29,7 @@ from alldayrec import monitor
 from alldayrec import perf
 from alldayrec import pipeline_state
 from alldayrec import server
+from alldayrec import sounds
 from alldayrec import summary
 from alldayrec import tenant
 from alldayrec import ws
@@ -81,6 +82,10 @@ def seed(t: tenant.Tenant):
                                 {"src": "app", "seq": 3, "at": AT, "data": {"kind": "mic_lost", "reason": mark}}])  # GET /api/phone-spans
         db.add_device_status(DEV, AT, {"battery": 50, "note": mark})
         gain.put(DEV, 0, 3.0, note=mark)  # GET /api/device-gain; /api/audio, /api/listen: each its own offset
+        with db.tx() as c:  # a quiet minute of a's own (/api/sounds/day, a conversation's tags) and a 不对 on it
+            sounds.write(c, DEV, "mn10_as", sounds.row("mn10_as", MS, np.full(60 * SR, 5, np.int16), np.full((6, 527), 0.01, np.float32)), (), 3.0)
+            c.execute("INSERT INTO sound_wrong (at, device, start_ms, end_ms, event, model, conv) VALUES (?, ?, ?, ?, 'quiet', 'mn10_as@x', ?)",
+                      (AT, DEV, MS, MS + 60_000, mark))
         db.add_call("final", f"engine-{mark}", DEV, 100)
         db.add_balance("stepfun", 1.0)
         audio.save(DEV, MS, OGG, "audio/ogg")
@@ -88,6 +93,7 @@ def seed(t: tenant.Tenant):
         (t.data / "voices" / "clips" / f"{mark}.ogg").write_bytes(OGG)
     tenant.call(t, store)
     t.events.append({"type": "event", "at": AT, "kind": "info", "text": mark})
+    t.sound = True  # SOUND_MODEL: the fixture two
     t.devices[DEV] = pipeline_state.PipelineState(
         conversation={"start": f"{TODAY}T11:00:00.000", "end": f"{TODAY}T11:01:00.000", "sentences": 1, "speech_s": 30,
                       "device": DEV, "note": mark},
@@ -133,6 +139,10 @@ REQUESTS = {
     ("GET", "/api/days"): ("GET", "/api/days", {}),
     ("GET", "/api/calendar"): ("GET", "/api/calendar", {}),
     ("GET", "/api/search"): ("GET", "/api/search", dict(params={"q": "说的话"})),
+    ("GET", "/api/sounds/day"): ("GET", "/api/sounds/day", dict(params={"date": TODAY})),
+    ("POST", "/api/sounds/wrong"): ("POST", "/api/sounds/wrong", dict(json={"device": DEV, "start_ms": MS, "end_ms": MS + 60_000, "event": "quiet", "conv": "MARKa"})),
+    ("DELETE", "/api/sounds/wrong/{wrong_id}"): ("DELETE", "/api/sounds/wrong/999", {}),  # none of a's: 404
+    ("GET", "/api/sounds/wrong"): ("GET", "/api/sounds/wrong", {}),
     ("POST", "/api/ask"): ("POST", "/api/ask", dict(json={"q": "说过什么？"})),
     ("POST", "/api/ask/live/{device}"): ("POST", f"/api/ask/live/{DEV}", dict(json={"start": MS, "end": MS + 2000})),
     ("POST", "/api/ask/voice"): ("POST", "/api/ask/voice", dict(content=OGG, headers={"content-type": "audio/ogg"})),
@@ -232,6 +242,7 @@ def two(tmp_path, monkeypatch):
         seed(t)
     monkeypatch.setattr(core, "TENANTS", [a, b])
     monkeypatch.setitem(core.state, "embed", lambda x: VEC)
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")  # every tenant's sound events on (seed)
     return a, b
 
 
@@ -435,12 +446,13 @@ def test_nothing_per_person_in_a_module():
     """The modules the server runs keep no mutable state at module level but these (none of them a person's): a cache
     or a dict added there would be shared by every tenant."""
     allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS", "refused_at", "REJECTED"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
-               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST"},
+               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST", "SOUND_WORDS"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
                "music": {"@cache _yamnet"},  # the music model, loaded once for everyone like the VAD
                "sound": {"MODELS", "@cache _session", "@cache _remote"},  # the scene models' settings and sessions, the service's client: everyone's
+               "sound_events": {"CLASSES", "THRESH"},  # each model's AudioSet classes of an event and its thresholds, read only
                "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)
                "compute": {"CALLS"}, "infer_server": {"state"}}  # calls to the inference service by op and result; its model and token

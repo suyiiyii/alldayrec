@@ -216,7 +216,26 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
+| `GET` | db.search; `before` is the start of the last one already shown. sound (music, vehicle, quiet): only those with that sound tag (sound_events.search; the tenant's sound off: ignored). | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer)<br>`sound?` (query, string) |
+
+### `/api/sounds/day`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The day's sound events by device, as runs of minutes (sound_events.day): [] while the tenant's sound is off. | `date` (query, string) |
+
+### `/api/sounds/wrong`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Every 不对 on a sound event, oldest first (the export for the gold labels). | — |
+| `POST` | 不对 on a sound event: {device, start_ms, end_ms, event, conv?} kept with its model (sound_events.wrong): {id}. | body: JSON object |
+
+### `/api/sounds/wrong/{wrong_id}`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `DELETE` | Take a 不对 back (撤销): its row deleted. | `wrong_id` (path, integer) |
 
 ### `/api/ask`
 

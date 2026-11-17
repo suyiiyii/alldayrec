@@ -67,6 +67,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
 | `walls` | Where long conversations were split (one row per device and time): late audio never merges the two sides back (since v0.5.0) |
 | `sounds` | Environmental sound scores (only with [environmental sound](./configuration.md#optional-environmental-sound) on): one row per device, model and stretch of decoded audio, see [Environmental sound](#environmental-sound-sounds) below |
+| `sound_wrong` | 「不对」 (wrong) marks on sound tags: the device, start and end ms, the event, the model it came from, the conversation id (none for a stretch of the sound bar outside conversations); see [Sound events](#sound-events-sound-events) below |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |
 | `stars` | Starred sentences: the sentence id, device and start, its conversation (only stars from before this change have one; the rest are looked up when read, as for reports), when it was starred (since v0.3.0) |
@@ -118,3 +119,35 @@ The key is (`device`, `model`, `start_ms`). `model` is the model's name and the 
 | `at` | When the row was written |
 
 Scoring a stretch again replaces its row. A row covers only decoded audio: it ends at a piece that will not decode or decodes short, which gets no row, so no row means not scored yet, or not successfully. A gap of at most 0.5 s with no piece between two pieces goes into the same row and into its `gaps`. What is scored = each row's `start_ms`–`end_ms` less its `gaps` (the trim gate and the scoring loop both go by this, to the millisecond). Whether a piece decoded in full is checked against `pieces.samples`, its sample count at upload, exactly: one sample short and its last millisecond is not covered. Older pieces have no `samples`, only `seconds` (to the millisecond), so a decode up to 1 ms short may go unnoticed there. A piece that comes into a gap later gets a row of its own, the first row never deleted, so a minute's frames may come from two rows. Measured on real recordings, an hour of audio takes about 80 KB for `mn10_as` and 250 KB for `yamnet` (60 KB after 30 days).
+
+## Sound events (sound_events)
+
+For a tenant with environmental sound on (`SOUND_MODEL` plus `"sound": true`), the web pages and MCP make a few sound events from the scores in `sounds`. They are not stored: each is made from the scores when asked (`sound_events.py`), from the model `SOUND_EVENTS_MODEL` names (default: the first of `SOUND_MODEL`). With sound off nothing is made or shown, and every API answers as before.
+
+Only the four the evaluation found reliable, per minute:
+
+| Event | Rule (`mn10_as` / `yamnet`) |
+|---|---|
+| Speech `speech` | the minute's highest mean score of a speech class (Speech, the speech kinds, Conversation) is 0.3 / 0.2 or more, and the minute is not quiet |
+| Music `music` | the highest mean score of a music, singing or instrument class is 0.3 / 0.1 or more |
+| In a vehicle `vehicle` | the highest mean score of a vehicle, engine, traffic, rail or aircraft class is 0.3 / 0.2 or more, for at least 3 minutes in a row (a car passing by is not a ride). A car, a bus, a subway and a plane are not told apart |
+| Quiet `quiet` | the minute's level (the mean power of its frames) is under −55 dBFS (−60 uncalibrated: `gain_db` 0, no device gain registered or one of exactly 0 dB), with no music |
+
+- The thresholds were set on a set of hand-labelled 10 s windows (84, calibrated, provisional labels left out): speech at 0.3, quiet minutes left out, found 24 of the 26 with speech, and 24 of the 40 it named had speech (videos and calls on a speaker count as speech too); music at 0.3 found 12 of 13, and 12 of the 13 it named had music; vehicle at 0.3 found 3 of 4, 3 of 6 named, hence the 3 minutes in a row; quiet found 13 of 17, 13 of 16 named. The sample is small and `yamnet`'s are for comparison; they are to be set again on more data.
+- Media played aloud (TV, videos, calls on a speaker), typing, footsteps, clothes rubbing, wind, crowds, hum, dishes and turn signals are not told reliably and never shown.
+- Frames left out: a row's `gaps`, and frames at −127 dBFS (digital silence: the microphone sent nothing). A minute with no frame left is no data, never quiet.
+- Confidence `conf` (0–1): the share of the minute's frames where the event's class scored 0.2 or more (quiet: where the level was under the cut). `yamnet`'s music threshold 0.1 is under 0.2, so a minute of its music can have `conf` 0. The pages word every event as 「可能」 (maybe).
+- A conversation's sound tags: the minutes of each event over its device and its start to end; music, vehicle and quiet with at least 2 minutes and at least 10% of its minutes with scores, most first, at most 3; quiet over half of them reads 「大半时间安静」 (mostly quiet). The minute at each end counts whole once a frame of it falls in the conversation. Speech is not a tag. An old conversation with no device has none.
+- `GET /api/sounds/day?date=` gives each device's minutes of the day as runs (the same events in the same conversation make one run); time with no scores has none. `GET /api/search?sound=music|vehicle|quiet` returns only the conversations with that tag. It looks at 50 conversations a call at most: when that leaves fewer than `limit` found, the header `X-Searched-To` says where it stopped, the `before` to go on with (the web pages go on by themselves); any other value is a 400.
+
+`sound_wrong`: one row for each 「不对」 (wrong) tapped on a tag or on the sound bar, to grow the hand labels later.
+
+| Column | Content |
+|---|---|
+| `id`, `at` | Its id, when it was tapped |
+| `device`, `start_ms`, `end_ms` | Which stretch of which device (a conversation's tag: the conversation's start and end; the bar: that run) |
+| `event` | Which event is wrong (`speech`, `music`, `vehicle`, `quiet`) |
+| `model` | The model it came from (name and the first 12 hex digits of its file's sha256) |
+| `conv` | Its conversation id, empty when there was none |
+
+A 「不对」 holds for a stretch it covers more than half of: a conversation later grown by late audio or merged with another, or the bar's runs cut anew, still shows it. It holds whatever the model: after a new model file (another sha; the tags and the bar then use the new model's scores only, once they are made) too. Tapping 「撤销」 (undo) deletes the row. Export: `GET /api/sounds/wrong` (JSON, by id), or `sqlite3 live.db "SELECT * FROM sound_wrong"`.

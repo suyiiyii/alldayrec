@@ -1,4 +1,5 @@
 import { i18n, t } from "../i18n.ts";
+import type { ConvSounds } from "./sounds.ts";
 
 export interface Row {
   id: string;
@@ -104,6 +105,7 @@ export interface Conversation {
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
   standby?: string[]; // other recorders that stood by in its time (same place): their audio of it is kept
+  sounds?: ConvSounds; // its sound tags (lib/sounds.ts); none while the tenant's sound is off, or it has none
 }
 
 export interface LiveTopic {
@@ -285,6 +287,7 @@ export interface Upgrade {
 
 export interface Status {
   balance?: Balance | null; // StepFun's prepaid account
+  sound_events?: true; // the tenant's sound is on: sound tags, bars and the sound filter (lib/sounds.ts)
   device?: string | null;
   behind_s?: number | null;
   queued?: number; // uploaded pieces the server has not fed yet, all devices'
@@ -456,6 +459,11 @@ export class ApiError extends Error {
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
 
 export async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await request<T>(path, init))[0];
+}
+
+// call(), with the response's headers (a list that says in one where it stopped)
+async function request<T>(path: string, init?: RequestInit): Promise<[T, Headers]> {
   let r: Response;
   try {
     r = await fetch(path, init);
@@ -463,7 +471,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(t("err.network"), `${path}: ${e}`);
   }
   const j = await r.json().catch(() => ({}));
-  if (r.ok) return j;
+  if (r.ok) return [j, r.headers];
   const raw = typeof j.detail === "string" ? j.detail : "";
   const code = /^\[([a-z_]+)\] /.exec(raw)?.[1] ?? "";
   const said = code ? raw.slice(code.length + 3) : raw;
@@ -486,6 +494,11 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const q = new URLSearchParams(params).toString();
   return call<T>(path + (q ? "?" + q : ""));
+}
+
+export function getWithHeaders<T>(path: string, params: Record<string, string> = {}): Promise<[T, Headers]> {
+  const q = new URLSearchParams(params).toString();
+  return request<T>(path + (q ? "?" + q : ""));
 }
 
 export function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {

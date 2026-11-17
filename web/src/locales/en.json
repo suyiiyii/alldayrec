@@ -1129,5 +1129,34 @@
     "empty": "No terms yet.",
     "names": "Names added for you",
     "namesSub": "People you named on the People page are added by themselves."
+  },
+  "sound": {
+    "title": "Ambient sound",
+    "hint": "Guessed by a model from the sound, may be wrong; tap a stretch for details",
+    "tag": {
+      "music": "🎵 Maybe music {n} min",
+      "vehicle": "🚗 Maybe in a vehicle {n} min",
+      "quiet": "🤫 Maybe quiet {n} min"
+    },
+    "mostlyQuiet": "🤫 Maybe mostly quiet",
+    "ev": {
+      "speech": "Speech",
+      "music": "Music",
+      "vehicle": "Vehicle",
+      "quiet": "Quiet"
+    },
+    "filter": {
+      "music": "🎵 Music",
+      "vehicle": "🚗 In a vehicle",
+      "quiet": "🤫 Quiet"
+    },
+    "maybe": "Maybe: ",
+    "nothing": "Sound, but none of these",
+    "wrong": "Wrong",
+    "wrongLabel": "{what}: wrong",
+    "undo": "Undo “wrong”",
+    "marked": "Noted: not “{what}” here",
+    "open": "Open the conversation",
+    "play": "Play this minute"
   }
 }

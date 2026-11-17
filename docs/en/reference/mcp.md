@@ -28,4 +28,6 @@ Each request writes one line to the server log: the method, the tool, how many c
 
 `grep` and `conversation` also return `structuredContent` (its `outputSchema` is in `tools/list`): `{"evidence": [...]}`, each piece one sentence: `conversation` (its id), `sentence` (the sentence id), `at` (its start, to the second), `speaker`, `quote`; `conversation`'s also carry `kind` (`todo` / `decision`) and `text` (that todo or decision). When a summary's quote is not said in the sentence it cites (or the two after it), `sentence`, `at` and `speaker` are `null`. Every page carries all the evidence.
 
+The `sounds` tool and `search`'s `sound` argument are in `tools/list` only when the tenant has [environmental sound](./configuration.md) on; with it off, the list, the arguments and every tool's answer are as before. With it on, each conversation that `day`, `search` and `conversation` return gets one more line, 「环境声音（模型从声音猜的，可能不对）」, with the minutes of music, of being in a vehicle and of quiet (the rules: [data](./data.md)). Sound events say what was heard, never where.
+
 <!--@include: ../../parts/mcp-tools.md-->

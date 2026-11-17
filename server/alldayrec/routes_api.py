@@ -22,6 +22,7 @@ from alldayrec import local_asr
 from alldayrec import mcp_server
 from alldayrec import mcp_links
 from alldayrec import qwen_stream
+from alldayrec import sound_events
 from alldayrec import split
 from alldayrec import tenant
 from alldayrec import threads
@@ -100,8 +101,9 @@ async def sentences(date: str | None = None):
 async def conversations(date: str | None = None):
     day = dt.date.fromisoformat(date) if date else dt.date.today()
     closed = db.conversations(day.isoformat(), (day + dt.timedelta(days=1)).isoformat())
-    return closed + [{**st.conversation, "state": "open"} for st in T().devices.values()
-                     if st.conversation and st.conversation["start"][:10] == day.isoformat()]
+    return await anyio.to_thread.run_sync(sound_events.with_tags, closed + [
+        {**st.conversation, "state": "open"} for st in T().devices.values() if st.conversation and st.conversation["start"][:10] == day.isoformat()],
+        limiter=threads.DB)
 
 
 @router.get("/api/days")
@@ -123,9 +125,57 @@ async def calendar():
 
 
 @router.get("/api/search")
-async def search(q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30):
-    """db.search; `before` is the start of the last one already shown."""
-    return db.search(q, tag, who, after, before, limit)
+async def search(response: Response, q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30,
+                 sound: str = ""):
+    """db.search; `before` is the start of the last one already shown. sound (music, vehicle, quiet): only those with
+    that sound tag (sound_events.search; the tenant's sound off: ignored). Looking at only so many conversations per
+    call, it may stop before `limit`: then the header X-Searched-To is where it stopped, the `before` to go on with."""
+    if sound and sound_events.model():
+        if sound not in ("music", "vehicle", "quiet"):
+            raise HTTPException(400, "sound is music, vehicle or quiet")
+        cs, to = await anyio.to_thread.run_sync(sound_events.search, sound, q, tag, who, after, before, limit, limiter=threads.DB)
+        if to:
+            response.headers["X-Searched-To"] = to
+        return cs
+    return await anyio.to_thread.run_sync(sound_events.with_tags, db.search(q, tag, who, after, before, limit), limiter=threads.DB)
+
+
+@router.get("/api/sounds/day")
+async def sounds_day(date: str):
+    """The day's sound events by device, as runs of minutes (sound_events.day): [] while the tenant's sound is off."""
+    try:
+        dt.date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(400, "date is YYYY-MM-DD") from None
+    return await anyio.to_thread.run_sync(sound_events.day, date, limiter=threads.DB)
+
+
+@router.post("/api/sounds/wrong")
+async def sound_wrong(body: dict):
+    """不对 on a sound event: {device, start_ms, end_ms, event, conv?} kept with its model (sound_events.wrong): {id}."""
+    if not sound_events.model():
+        raise HTTPException(404, "[no_sound] 环境声音没有打开")
+    a, b = body.get("start_ms"), body.get("end_ms")
+    if body.get("event") not in sound_events.EVENTS or not isinstance(body.get("device"), str) or not all(
+            isinstance(x, int) and not isinstance(x, bool) for x in (a, b)) or a >= b:
+        raise HTTPException(400, "device, start_ms < end_ms (unix ms) and event, one of " + ", ".join(sound_events.EVENTS))
+    conv = body.get("conv") if isinstance(body.get("conv"), str) else None
+    return {"id": sound_events.wrong(body["device"], a, b, body["event"], conv)}
+
+
+@router.delete("/api/sounds/wrong/{wrong_id}")
+async def sound_wrong_undo(wrong_id: int):
+    """Take a 不对 back (撤销): its row deleted."""
+    with db.tx() as c:
+        if not c.execute("DELETE FROM sound_wrong WHERE id = ?", (wrong_id,)).rowcount:
+            raise HTTPException(404, "no such mark")
+    return {"ok": True}
+
+
+@router.get("/api/sounds/wrong")
+async def sound_wrongs():
+    """Every 不对 on a sound event, oldest first (the export for the gold labels)."""
+    return sound_events.wrongs()
 
 
 @router.post("/api/ask")
@@ -517,8 +567,9 @@ async def conversation(conv_id: str):
         auto = db.auto_marks()
         s["todos"] = [{**t, "id": i, "mark": closed.get(i), **{k: v[k] for v in [db.todo_view(c, s, i, t, closed, {}, auto)] for k in ("done_hint", "auto")}}
                       for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
+    tags = await anyio.to_thread.run_sync(sound_events.tags, c, limiter=threads.DB)
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
-            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"])}
+            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"]), **({"sounds": tags} if tags else {})}
 
 
 @router.post("/api/conversation/{conv_id}/feedback")

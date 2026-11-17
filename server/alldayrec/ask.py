@@ -85,8 +85,12 @@ def _next_day(date: str) -> str:
 
 
 def t_search(q="", after="", before="", who="", tag="", limit=20):
-    return [{**_brief(c), "summary": ((c["summary"] or {}).get("summary") or "")[:160], "tags": (c["summary"] or {}).get("tags")}
-            for c in db.search(q, tag, who, after, before, min(int(limit), 40))]
+    return briefs(db.search(q, tag, who, after, before, min(int(limit), 40)))
+
+
+def briefs(cs: list[dict]) -> list[dict]:
+    """Search results as the tools give them: the brief, the summary's first 160 characters, the tags."""
+    return [{**_brief(c), "summary": ((c["summary"] or {}).get("summary") or "")[:160], "tags": (c["summary"] or {}).get("tags")} for c in cs]
 
 
 def t_day(date):
