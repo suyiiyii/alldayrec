@@ -32,6 +32,18 @@ Every ASR and LLM call is logged in the `calls` table with only its duration, re
 
 An AI connection secret is returned only at creation; the database keeps its hash and a short prefix. Server access logging is disabled, and performance records use `/mcp`. Reverse-proxy access logs contain the full URL: disable or redact those logs. With Cloudflare Tunnel, public TLS terminates at Cloudflare and traffic crosses its network.
 
+## People profiles
+
+The 「AI 档案」 (AI profile) on a person's page is written by the LLM from your conversations with someone: who they are, what they said themselves, what they are busy with, what others say about them, and what is still open. Every line cites where it came from, down to the sentence in that conversation.
+
+- **What is kept**: the `profiles` table of `live.db`, one row a person: each line of the profile, the conversations and times it cites, and the model and usage that made it. With `persona_v2` on, it also keeps a hash (not the content) of each conversation it cites, to tell whether the profile still holds.
+- **What goes out**: the evidence goes to the LLM at `LLM_BASE_URL` when a profile is made. By default these are the summaries of the conversations and the person's points in them; with `persona_v2` on for the tenant (see [Configuration](../reference/configuration.md#tenants-json)), it is **the person's own sentences** instead (at most 8 from each of the 40 latest conversations), the sentences of your to-dos to them, and the few sentences around each time someone else said their name.
+- **When**: when you tap 「生成」 (Make) on the person's page; after that, again each time a conversation with them gets its summary.
+- **Of whom**: with `persona_v2` on, only of people you named; an anonymous S label gets none. A conversation where their label is a few seconds of fragments, or a crowded one where their label took most of the speech, gives no evidence, and neither do words said to an AI, media played aloud, or dictation.
+- **What is never written**: the prompt forbids inferring or writing health, sexual orientation, religion, political views, ethnicity, criminal records or financial details; what others say about someone is never written as that person's own view; with under 5 days of evidence, no character traits or habits.
+- **Who sees it**: only the tenant itself (the web and API token). After a rename, merge or split of speakers, the old profile is void and no longer shown, and the next one is made from the new labels.
+- **How to delete**: one person's: `sqlite3 live.db "DELETE FROM profiles WHERE name = '<name>'"`; all: `DELETE FROM profiles`. A deleted profile is not made again until you tap 「生成」 (Make).
+
 ## Environmental sound
 
 Off by default. Once on ([configuration](../reference/configuration.md#optional-environmental-sound): `SOUND_MODEL`, plus the tenant's `"sound": true`), the server scores all of the audio for environmental sound: one frame every 10 s (or every 0.48 s), how much it sounds like each class (a car, music, cooking, a TV, running water…), and its level, kept in the `sounds` table of `live.db`. It scores all of the audio, the stretches where no one speaks too, so it tells where you were and what you were doing more fully than the transcript does.
