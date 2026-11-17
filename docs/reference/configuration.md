@@ -24,6 +24,7 @@ type: reference
 | `sound` | 可选，默认 `false`。`true`：设了 `SOUND_MODEL` 时给这个人的录音自动算环境声音（见下面的[环境声音](#可选-环境声音)）。写没写都一样：设了 `SOUND_MODEL`，修剪就要等环境声音算完 |
 | `seg_emb` | 可选，默认 `false`。`true`：定稿时每个识别分段算出的声纹（ReDimNet2，fp16）存进这个人 `live.db` 的 `seg_emb` 表，不多做任何计算，也不改识别结果。存的是佩戴者附近所有人的声纹，见[隐私](../explanation/privacy.md)。每天约 3 千个分段时约 1.1 MB/天（每个向量 384 字节） |
 | `persona_v2` | 可选，默认 `false`。`true`：人物档案改用这个人自己说的原句当证据，不再用摘要要点；只给命名过的人写，碎片、人多场景里吸走大部分说话的标签、对 AI 说的话、外放媒体和口述都不当证据；改了标签以后旧档案作废。见[隐私](../explanation/privacy.md#人物档案)。`false` 时和以前完全一样。每次生成最多约 2 万个输入 token |
+| `place` | 可选，默认 `false`。`true`：每段对话写完摘要后，再单独调用一次大模型（`calls` 里记作 `place`），根据转写、这段的环境声音和时间推断「可能在哪里」，附上依据（哪句话、哪类声音），存进摘要的 `place` 字段，显示在对话页摘要顶部；没把握时不显示，医院、宗教场所、警局法院这类敏感场所不推断。摘要的其他字段一个不改，人物档案不受影响。见[隐私](../explanation/privacy.md#可能在哪里)。`false` 时和以前完全一样。每段约 6 千个输入 token（主要是转写） |
 
 - 位置：`DATA_DIR/tenants.json`（见下面的 `DATA_DIR`）。Docker 镜像里 `DATA_DIR` 是 `/data`，也就是宿主机的 `data/tenants.json`。
 - 文件不存在时，服务器第一次启动会生成一个：一个租户 `main`，随机 token，目录是 `DATA_DIR/main` 和 `DATA_DIR/main/recordings`，并在日志里写出登录链接 `http://127.0.0.1:<PORT>/connect?token=<token>`。

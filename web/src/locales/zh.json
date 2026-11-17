@@ -258,6 +258,28 @@
     "transcript": "原文",
     "sentences": "{n} 句",
     "tooShort": "语音不足 60 秒，没有生成摘要",
+    "place": {
+      "maybe": "可能在：{place}",
+      "you": "你说",
+      "said": "{who}说",
+      "labels": {
+        "home": "家",
+        "office": "实验室或办公室",
+        "car": "车上",
+        "train": "地铁或高铁",
+        "restaurant": "餐厅",
+        "outdoors": "户外",
+        "shop": "商店",
+        "other": "其他"
+      },
+      "sound": {
+        "vehicle": "交通工具行驶声 {n} 分钟",
+        "music": "音乐 {n} 分钟",
+        "speech": "讲话 {n} 分钟",
+        "quiet": "安静 {n} 分钟"
+      },
+      "hint": "AI 根据原句和环境声音推断，可能不对"
+    },
     "todos": "待办",
     "aiRequests": "让 AI 做的事 · {n} 条",
     "decisions": "决定",

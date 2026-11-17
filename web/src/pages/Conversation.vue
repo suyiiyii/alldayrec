@@ -121,6 +121,7 @@ function flipAll(p: string, n: number) {
 }
 // what the model wrote, its S<n> as the header says them
 const said = (x: string) => labelText(x, c.value?.participants);
+const clip = (x: string) => (x.length > 16 ? x.slice(0, 15) + "…" : x); // a place's quote: one line with its time at 390 px
 
 // the tabs
 type Tab = "summary" | "transcript";
@@ -499,6 +500,30 @@ function edit(label: string) {
           }}
         </button>
         <template v-if="s?.status === 'done'">
+          <section v-if="s.place?.label" class="card place">
+            <div class="where">
+              <Icon name="map-pin" :size="16" />{{
+                t("conv.place.maybe", {
+                  place:
+                    t(`conv.place.labels.${s.place.label}`) +
+                    (s.place.detail ? ` · ${s.place.detail}` : ""),
+                })
+              }}
+            </div>
+            <ul class="why">
+              <li v-for="(e, i) in s.place.evidence" :key="i">
+                <template v-if="e.kind === 'sound'">{{
+                  t(`conv.place.sound.${e.event}`, { n: e.minutes })
+                }}</template>
+                <template v-else
+                  >{{
+                    e.who === "我" ? t("conv.place.you") : t("conv.place.said", { who: speakerLabel(e.who) })
+                  }}「{{ clip(said(e.text)) }}」<QuoteAt :at="e.at" :c="c" @jump="jump"
+                /></template>
+              </li>
+            </ul>
+            <div class="hint">{{ t("conv.place.hint") }}</div>
+          </section>
           <div v-if="s.summary" class="card summary">{{ said(s.summary) }}</div>
           <div v-else-if="!s.model" class="card muted">{{ t("conv.tooShort") }}</div>
           <section v-if="s.topics?.length" class="card">
@@ -854,6 +879,24 @@ button.person,
 }
 .card h3 {
   margin: 0 0 var(--space-2);
+}
+.place .where {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 500;
+}
+.place .hint {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.place .why {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
 .summary {
   font-size: var(--fs-md);
