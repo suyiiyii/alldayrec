@@ -235,7 +235,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `DELETE` | （无说明） | `wrong_id` (path, integer) |
+| `DELETE` | Take a 不对 back (撤销): its row deleted. | `wrong_id` (path, integer) |
 
 ### `/api/ask`
 

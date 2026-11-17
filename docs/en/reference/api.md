@@ -235,7 +235,7 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `DELETE` | (no docstring) | `wrong_id` (path, integer) |
+| `DELETE` | Take a 不对 back (撤销): its row deleted. | `wrong_id` (path, integer) |
 
 ### `/api/ask`
 

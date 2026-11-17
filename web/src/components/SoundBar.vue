@@ -24,6 +24,7 @@ const router = useRouter();
 const days = ref<SoundDay[]>([]);
 const picked = ref<{ device: string; run: SoundRun; at: number } | null>(null);
 const audio = ref("");
+const busy = ref(false); // one 不对 at a time: a double tap would keep two rows, undoing only one
 onMounted(() =>
   get<SoundDay[]>("/api/sounds/day", { date: day }).then(
     (d) => (days.value = d),
@@ -67,12 +68,15 @@ const what = computed(() =>
   SOUND_EVENTS.filter((e) => picked.value && e in picked.value.run.events),
 );
 async function wrong(e: SoundEvent) {
+  if (busy.value) return;
+  busy.value = true;
   const p = picked.value!;
   try {
     p.run.wrong[e] = await markWrong(p.device, p.run.from, p.run.to, e, p.run.conv, p.run.wrong[e]);
   } catch (err) {
     toast((err as Error).message);
   }
+  busy.value = false;
 }
 function go() {
   const p = picked.value!;
@@ -154,7 +158,12 @@ function go() {
       <div class="evs">
         <span v-for="e in what" :key="e" class="snd" :class="{ off: picked.run.wrong[e] }">
           <span class="w">{{ t(`sound.ev.${e}`) }}</span>
-          <button class="btn-ghost no" :aria-pressed="!!picked.run.wrong[e]" @click="wrong(e)">
+          <button
+            class="btn-ghost no"
+            :aria-pressed="!!picked.run.wrong[e]"
+            :disabled="busy"
+            @click="wrong(e)"
+          >
             {{ picked.run.wrong[e] ? t("sound.undo") : t("sound.wrong") }}
           </button>
         </span>

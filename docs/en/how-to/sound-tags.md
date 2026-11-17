@@ -5,7 +5,7 @@ description: "With environmental sound on: read the sound tags on conversations 
 
 # How to read the sound tags
 
-For an account with [environmental sound](../reference/configuration.md#optional-environmental-sound) on, the server guesses a few things from the sound of the recordings: someone speaking, music, being in a car (or another vehicle), quiet. A model guesses them and can be wrong, so the pages word each one 「可能」 (maybe). They say what was heard, never where you were. For an account without environmental sound, none of this shows.
+For an account with [environmental sound](../reference/configuration.md#optional-environmental-sound) on, the server guesses a few things from the sound of the recordings: someone speaking, music, being in a vehicle (a car, a subway and a plane are not told apart), quiet. A model guesses them and can be wrong, so the pages word each one 「可能」 (maybe). They say what was heard, never where you were. For an account without environmental sound, none of this shows.
 
 ## A conversation's sound
 
