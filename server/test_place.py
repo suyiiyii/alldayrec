@@ -60,6 +60,13 @@ def test_checked_keeps_only_what_holds():
         got = place.checked({"label": "其他", "detail": "", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
                             [dict(r[0], text=text)], {}, None)
         assert got == {"label": None}, ("in the sentence alone", text, got)
+    # 道观, not 观: 参观 and 观众 are no temple
+    for text, detail in (("我们在参观新校区的展厅", "展厅"), ("观众好多，现场挺热闹", "现场")):
+        got = place.checked({"label": "其他", "detail": detail, "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                            [dict(r[0], text=text)], {}, None)
+        assert got["label"] == "other" and got["detail"] == detail, (text, got)
+    assert place.checked({"label": "其他", "detail": "道观", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                         [dict(r[0], text="山上那个道观挺安静")], {}, None) == {"label": None}
     # one trailing 上/里 at most, and two characters left: 海边 is not 海 of 上海
     sea = [dict(r[0], text="我们在上海呢，挺热的")]
     assert place.checked({"label": "户外", "detail": "海边", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},

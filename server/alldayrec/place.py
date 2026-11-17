@@ -33,10 +33,10 @@ LABELS = {"家": "home", "实验室或办公室": "office", "车上": "car", "�
 SOUNDS = {"vehicle": "交通工具的行驶声（引擎或路噪，车、地铁、飞机都算）", "music": "音乐", "quiet": "安静"}  # sound_events.tags' events
 # where no place is written down: in the detail, or in a cited sentence (then no place at all). Stems, not whole names,
 # since names vary (社区卫生服务中心, 村卫生室, 中医馆, 病房, 体检中心, 疾控中心, 教会): conservative on purpose, so a stem
-# also hides unrelated words (药 in 火药, 卫生 in 卫生间, 警 in 警告, 观 in 参观, 精神 in 精神不错, 佛 in 佛系) and
+# also hides unrelated words (药 in 火药, 卫生 in 卫生间, 警 in 警告, 精神 in 精神不错, 佛 in 佛系) and
 # with them a place that was fine; the owner may relax it later.
 SENSITIVE = ("医", "诊", "药", "病", "卫生", "疾控", "体检", "康复", "疗养", "殡",  # medical, funeral
-             "寺", "庙", "庵", "观", "教堂", "教会", "清真", "礼拜", "基督", "佛",  # religious
+             "寺", "庙", "庵", "道观", "教堂", "教会", "清真", "礼拜", "基督", "佛",  # religious
              "集会", "游行", "示威", "抗议",  # political gatherings
              "派出所", "公安", "警", "法院", "检察", "监狱", "看守",  # police, courts, prisons
              "戒毒", "戒酒", "戒断", "心理", "精神", "计生", "妇幼", "妇产", "产科", "疫苗", "接种",  # rehab, mental, maternity
