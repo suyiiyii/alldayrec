@@ -22,7 +22,7 @@ There is no account to sign up for. Web/API access uses the tokens in `tenants.j
 |---|---|---|
 | Audio pieces | The ASR service you pick in `ENGINE` (and `DRAFT_ENGINE`, `ENGINE_FALLBACK`) | Every transcription. A layer set to `local` sends nothing |
 | A question said aloud (「问 AI」 (Ask AI), hold to talk) | Alibaba Bailian's streaming speech recognition, only when one of `ENGINE`, `DRAFT_ENGINE`, `ENGINE_FALLBACK` is already `qwen` or `qwen-stream`; otherwise the service of the row above | As it is said; when the streaming recognition fails, the whole of it goes to the service of the row above |
-| Transcript text | The LLM service that `LLM_BASE_URL` points at | When it writes summaries, name hints, people cards, the daily recap and the live analysis, and when it answers 「问 AI」 (Ask AI). A conversation with under 60 seconds of speech gets no summary, unless 「立即总结」 (Summarize now) was tapped while it was going on |
+| Transcript text | The LLM service that `LLM_BASE_URL` points at | When it writes summaries, name hints, people cards, the daily recap, the live analysis and place guesses (tenant `place` on), and when it answers 「问 AI」 (Ask AI). A conversation with under 60 seconds of speech gets no summary, unless 「立即总结」 (Summarize now) was tapped while it was going on |
 | The transcripts and summaries your AI agent looks up | The vendor behind your own AI agent | Once you connect it over [MCP](../how-to/connect-mcp.md), each time the agent calls a tool |
 | Metrics (`lr_*`, no content) | `VM_INGEST_URL` | Once a minute, only when that variable is set |
 
@@ -67,6 +67,16 @@ Off by default. Once on ([configuration](../reference/configuration.md#optional-
 - Sound events (the sound tags on conversations, the timeline's sound bar, the sound filter, the ambient sound in MCP) are made from these scores each time they are asked for, and not stored apart. Only the tenant sees them: the pages and MCP need its token or one of its AI connection links, and an agent connected over MCP reads them (and sends them on to the model provider it uses). They say what was heard (speech, music, in a vehicle, quiet), never where, and they can be wrong, so the pages word each one 「可能」 (maybe).
 - A 「不对」 (wrong) tapped on a tag or on the sound bar goes into the `sound_wrong` table of `live.db`: which stretch of which device, which event, the model it came from and its conversation id, no audio and no words. Only the tenant sees it (exported by `GET /api/sounds/wrong`), to improve the thresholds later. 「撤销」 (undo) deletes that row; to delete them all, `sqlite3 live.db "DELETE FROM sound_wrong"`.
 - To get rid of them: turn `SOUND_MODEL` or the tenant's `"sound"` off, then delete the rows, for example `sqlite3 live.db "DELETE FROM sounds"` (one device: add `WHERE device = '<device>'`). What you delete can only be scored again from the recordings with the backfill command; what trimming has already dropped cannot. With only the tenant's `"sound"` off and `SOUND_MODEL` still set, that tenant's trims still wait for scores: trim with `--allow-unscened`.
+
+## Where you probably were
+
+Off by default. With the tenant's `"place": true` (see [Configuration](../reference/configuration.md#tenants-json)), after each conversation's summary is written the server makes one more LLM call that guesses where you probably were while recording it (home, lab or office, in a car, metro or train, restaurant, outdoors, shop, elsewhere, plus the more exact place a sentence named), and states its evidence: which sentences, which environmental sound, for how many minutes. This is semi-sensitive: one guess is only a guess, many of them are where you go.
+
+- **What goes out**: the conversation's transcript (with media played aloud and speech to an AI marked), the minutes of each environmental sound and the time, to the LLM service at `LLM_BASE_URL`: the same transcript the summary sends. A conversation with under 60 s of speech, whose summary made no LLM call, gets no guess.
+- **Where it is kept**: only in the tenant's `live.db`, table `summaries`, as the summary JSON's `place` field; the evidence holds the sentences' times and words (already in the transcript). Not in the metrics; the `calls` table keeps the call's time and token counts only.
+- **Who sees it**: the top of the conversation's summary; the conversation APIs that return summaries (`GET /api/conversations`, `GET /api/conversation/{id}` and the like) carry it too, to clients with the tenant's token only. It is not in people profiles, daily recaps, Ask AI or the MCP tools' output. When the model is unsure, or its evidence does not match the transcript, no place is kept and the page shows nothing.
+- **Turning it off**: remove the tenant's `"place"` (or set it to `false`) and restart: new summaries get no place; existing ones keep theirs. Regenerating a summary drops its old place.
+- **Deleting it**: with `"place"` off, remove the field from every summary, for example `sqlite3 live.db "UPDATE summaries SET body = json_remove(body, '$.place') WHERE json_extract(body, '$.place') IS NOT NULL"`.
 
 ## Why keep the original audio
 

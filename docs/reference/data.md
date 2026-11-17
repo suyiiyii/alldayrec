@@ -103,6 +103,15 @@ uv run python -m alldayrec.resummarize --days 30 --delay 5
 
 已有日回顾不会自动更新；其待办优先按固定 ID 读取当前内容和标记，旧格式按原文字段核对，找不到的只展示文字，避免旧回顾标记到另一件事。回填后建议对受影响且已存在回顾的日期逐日调用 `POST /api/recap/{YYYY-MM-DD}`（`recap_redo`），更新要点与待办引用；每个有摘要的日期额外 1 次模型调用，30 天最多 30 次。100 段通常需要 100 次摘要调用；每段最多尝试 4 次，因此最多 400 次。缺少姓名提示时每段可能再有 1 次 hints，已有档案的具名参与人还会各触发 1 次 profile；这些与回顾不包含在 100 次里。实际调用数由脚本的 ledger 统计；金额取决于配置模型和输入长度。
 
+租户开了 `place`（见[配置](./configuration.md#tenants-json)）以后，之前写好的摘要没有地点。只补地点、不重写摘要，在服务端的 `server/` 目录中运行（用实例自己的 `.env` 里的大模型配置）：
+
+```sh
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --dry-run   # 只打印段数和估算的输入 token
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7
+```
+
+只处理含今天共 N 天里开始、摘要已调用过大模型、还没有 `place` 的对话，一段接一段；只在摘要的 JSON 里加 `place` 一个字段，标题、待办和标记、人物档案都不动。补的时候某段摘要被重写了，这段就跳过，由重写后的摘要自己推断。租户没开 `place` 时直接退出。
+
 ## 环境声音 sounds
 
 主键是（`device`、`model`、`start_ms`）。`model` 是模型名加模型文件 sha256 的前 12 位（例如 `mn10_as@58d4c290739e`），换了模型文件就是另一个模型，旧的行原样留着。每一行是一段解出来的连续音频，最长 300 秒：

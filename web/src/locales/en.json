@@ -258,6 +258,28 @@
     "transcript": "Transcript",
     "sentences": "{n} sentence | {n} sentences",
     "tooShort": "Less than 60 s of speech, so no summary",
+    "place": {
+      "maybe": "Probably at: {place}",
+      "you": "You said",
+      "said": "{who} said",
+      "labels": {
+        "home": "Home",
+        "office": "Lab or office",
+        "car": "In a car",
+        "train": "Metro or train",
+        "restaurant": "Restaurant",
+        "outdoors": "Outdoors",
+        "shop": "Shop",
+        "other": "Elsewhere"
+      },
+      "sound": {
+        "engine": "Engine or road noise {n} min",
+        "music": "Music {n} min",
+        "speech": "Speech {n} min",
+        "quiet": "Quiet {n} min"
+      },
+      "hint": "Guessed by AI from the sentences and the sound around; may be wrong"
+    },
     "todos": "To-dos",
     "aiRequests": "Tasks for the AI · {n}",
     "decisions": "Decisions",

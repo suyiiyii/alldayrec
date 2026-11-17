@@ -103,6 +103,15 @@ A successful old summary stays visible until success and survives model failure.
 
 Existing daily recaps stay unchanged. On read, pinned IDs resolve to the current action and mark; older unpinned entries are matched by text/recipient/due. Missing actions are displayed without a mark control so a stale recap cannot mark another action. After backfill, regenerate affected dates with existing recaps via `POST /api/recap/{YYYY-MM-DD}` (`recap_redo`) to refresh highlights and todo references. This adds one model call per date with summaries, at most 30 calls for 30 days. For 100 conversations, expect 100 summary calls, up to 400 with all four attempts. Missing name hints can add one hints call per conversation, and each named participant with an existing profile triggers a profile call. Recaps, hints and profiles are additional to the 100. The script reports actual ledger counts; money depends on the configured model and input length.
 
+Once a tenant turns `place` on (see [Configuration](./configuration.md#tenants-json)), the summaries written before have no place. To add only the place, without rewriting the summaries, run from the server checkout's `server/` directory (with the instance's own `.env` for the LLM):
+
+```sh
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --dry-run   # only the count and the estimated input tokens
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7
+```
+
+It takes the conversations started in the last N days (today included) whose summary made an LLM call and has no `place` yet, one at a time, and adds that one field to the summary JSON: titles, todos and their marks, and people profiles stay as they are. A summary rewritten meanwhile is skipped; the new one makes its own. It exits when the tenant has `place` off.
+
 ## Environmental sound (sounds)
 
 The key is (`device`, `model`, `start_ms`). `model` is the model's name and the first 12 hex digits of its file's sha256 (for example `mn10_as@58d4c290739e`): another model file is another model, and the old rows stay as they are. Each row is one stretch of decoded audio, at most 300 s:

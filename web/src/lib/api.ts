@@ -61,6 +61,17 @@ export type Mark = "done" | "wrong";
 export interface At {
   at: string | null;
 }
+export type PlaceLabel = "home" | "office" | "car" | "train" | "restaurant" | "outdoors" | "shop" | "other";
+export type SoundEvent = "engine" | "music" | "speech" | "quiet";
+export interface Place {
+  label: PlaceLabel | null;
+  detail?: string; // the more exact place a sentence named, "" when none did
+  confidence?: "high" | "medium";
+  evidence?: (
+    | { kind: "line"; at: string; who?: string | null; text: string } // a sentence (its start), not media or AI speech
+    | { kind: "sound"; event: SoundEvent; minutes: number } // minutes as the sound layer measured them
+  )[];
+}
 export interface Summary {
   conversation: string;
   status: "pending" | "done" | "failed";
@@ -88,6 +99,7 @@ export interface Summary {
   ai_spans?: Span[];
   media_spans?: Span[]; // media played aloud (video, TV, music): greyed and folded
   media_share?: number; // of the speech, the part in media_spans
+  place?: Place; // tenant "place": where I probably was (server place.py); label null: unsure, nothing shown
   decisions?: (At & { text: string; quote?: string; unsupported?: boolean })[];
   model?: string | null;
   via?: "live"; // written by the conversation's live agent at its close

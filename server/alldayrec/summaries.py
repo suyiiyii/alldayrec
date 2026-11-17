@@ -10,6 +10,7 @@ from alldayrec import db
 from alldayrec import hints
 from alldayrec import live
 from alldayrec import late_store
+from alldayrec import place
 from alldayrec import recap
 from alldayrec import split
 from alldayrec import speakers
@@ -107,6 +108,7 @@ async def summarize_loop():
                 await name_hints(c, media)
             if res["status"] == "done":
                 await resolve_todos(c)
+                await place.place(c)  # tenant "place" only: one more call, only summary.place written
             if res["status"] == "done":  # a profile kept up to date once it exists
                 for p in c.get("participants") or []:
                     if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
