@@ -245,7 +245,8 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
         starts = {r["id"]: r["start"] for r in rows}  # a star (its id: the sentence's) goes to its sentence's part
         for sid, in t.execute("SELECT id FROM stars WHERE conv = ?", (cid,)).fetchall():
             t.execute("UPDATE stars SET conv = ? WHERE id = ?", (where(starts.get(sid)), sid))
-        db.put_summary({**s, "status": "pending", "error": None, "todos": todos[0]}, t)
+        # its place was the whole conversation's: not shown again if the part's summary fails and the old one stays
+        db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None, "todos": todos[0]}, t)
         for pid, ts in zip(ids[1:], todos[1:]):
             # its version too: a part whose summary keeps failing is kept "done" with these todos (due_todos reads them)
             db.put_summary({"conversation": pid, "status": "pending", "prompt_version": s.get("prompt_version"), "todos": ts}, t)

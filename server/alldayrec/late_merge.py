@@ -352,7 +352,8 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                 changed.append(early)
         for c in changed:
             s = db.summary(c["id"]) or {"conversation": c["id"]}
-            db.put_summary({**s, "status": "pending", "error": None}, t)
+            # its place was made from fewer rows: not shown again if the new summary fails and the old one stays
+            db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None}, t)
             key = f"conversation_revision:{c['id']}"
             db.put_kv(key, (db.kv(key) or 0) + 1, t)
             db.put_kv(f"late_summary:{c['id']}", True, t)

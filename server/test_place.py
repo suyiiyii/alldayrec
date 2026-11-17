@@ -7,12 +7,14 @@ from alldayrec import core, db, place, profiles, sound_events, summaries, summar
 
 CID = "c20261020100000"
 START = "2026-10-20T10:00:00.000"
-TEXTS = [("我", "上高速了，前面收费站"), ("S1", "导航说还有二十公里"), ("S2", "欢迎来到海边乐园"), ("我", "帮我查一下明天的会"), ("S1", "嗯，好。")]
+TEXTS = [("我", "上高速了，前面收费站"), ("S1", "导航说还有二十公里"), ("S2", "欢迎来到海边乐园"), ("我", "帮我查一下明天的会"), ("S1", "嗯，好。"),
+         ("S2", "回家吧回家吧，回到温暖的家"), ("我", "我到家了，记一下")]
+MUSIC, DICTATED = 5, 6
 
 
 def rows():
-    return [dict(id=f"r{i}", start=f"2026-10-20T10:00:{i:02}.000", end=f"2026-10-20T10:00:{i:02}.900", speaker=w, text=x, source="mic")
-            for i, (w, x) in enumerate(TEXTS)]
+    return [dict(id=f"r{i}", start=f"2026-10-20T10:00:{i:02}.000", end=f"2026-10-20T10:00:{i:02}.900", speaker=w, text=x, source="mic",
+                 music=i == MUSIC, dictation="notes" if i == DICTATED else None) for i, (w, x) in enumerate(TEXTS)]
 
 
 SPANS = {"media_spans": [{"from": "2026-10-20T10:00:02.000", "to": "2026-10-20T10:00:02.000"}],
@@ -27,6 +29,7 @@ def test_checked_keeps_only_what_holds():
         {"kind": "line", "at": "10:00:03"},  # said to an AI
         {"kind": "line", "at": "10:09:99"}, "x",  # no such line, not an object
         {"kind": "line", "at": "10:00:04"},  # 嗯，好。: says nothing of a place
+        {"kind": "line", "at": "10:00:05"}, {"kind": "line", "at": "10:00:06"},  # a song's words, a dictation
         {"kind": "sound", "event": "vehicle"}, {"kind": "sound", "event": "music"},  # music: no minutes measured
         {"kind": "sound", "event": "typing"},  # not an event the layer gives
         {"kind": "line", "at": "10:00:01"}]}, r, SPANS, {"covered": 20, "vehicle": 18.4, "speech": 5})
@@ -36,6 +39,22 @@ def test_checked_keeps_only_what_holds():
         {"kind": "line", "at": r[1]["start"], "who": "S1", "text": "导航说还有二十公里"}]}, got
     assert place.checked({"label": "车上", "detail": "空", "confidence": "medium", "evidence": [{"kind": "line", "at": "10:00:00"}]},
                          r, SPANS, None)["detail"] == ""  # "空": the model's way of writing none
+    # a detail is kept only from a kept sentence: not a name only a video said, not one in no sentence at all
+    for detail in ("海边乐园", "温泉酒店", "家"):
+        got = place.checked({"label": "其他", "detail": detail, "confidence": "high", "evidence": [
+            {"kind": "line", "at": "10:00:00"}, {"kind": "line", "at": "10:00:02"}]}, r, SPANS, None)
+        assert got["label"] == "other" and got["detail"] == "" and len(got["evidence"]) == 1, (detail, got)
+    # a sensitive place: none shown, whether in the detail (even one no sentence says) or in a cited sentence
+    med = [*r, dict(r[0], id="r9", start="2026-10-20T10:00:09.000", text="门诊三楼人好多，等叫号")]
+    for res in ({"label": "其他", "detail": "妇产医院", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                {"label": "其他", "detail": "", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:09"}]},
+                {"label": "其他", "detail": "Church", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}):
+        assert place.checked(res, med, SPANS, None) == {"label": None}, res
+    assert "医院" not in place.SYSTEM.split("敏感场所")[0], "no medical place as an example of a detail"
+    # a reply of the wrong shape: nothing that holds, no error
+    for bad in ({"label": "车上", "confidence": "high", "evidence": 5},
+                {"label": "车上", "confidence": "high", "evidence": [{"kind": "line", "at": ["10:00:00"]}, {"kind": "sound", "event": ["vehicle"]}]}):
+        assert place.checked(bad, r, SPANS, {"covered": 20, "vehicle": 18}) == {"label": None}
     # unsure, low, an unknown label, or nothing that holds: no place shown
     for res in ({"label": "不确定", "confidence": "low", "evidence": []},
                 {"label": "车上", "confidence": "low", "evidence": [{"kind": "line", "at": "10:00:00"}]},
@@ -52,7 +71,8 @@ def test_prompt_marks_media_and_ai_lines(tmp_path):
     conv = {"start": START, "end": "2026-10-20T10:00:03.900"}
     user = place.prompt(conv, rows(), SPANS, None)[1]["content"]
     assert "[10:00:02] S2（外放）: 欢迎来到海边乐园" in user and "[10:00:03] 我（对AI）: 帮我查一下明天的会" in user
-    assert "[10:00:00] 我: 上高速了" in user and "没有环境声音数据" in user and "2026-10-20（周二）10:00" in user
+    assert "[10:00:05] S2（歌词）: 回家吧" in user and "[10:00:06] 我（口述）: 我到家了" in user
+    assert "[10:00:00] 我: 上高速了" in user and "没有可用的环境声音" in user and "2026-10-20（周二）10:00" in user
     assert "（引擎或路噪，车、地铁、飞机都算）（vehicle）18 分钟" in place.sound_block({"covered": 30, "vehicle": 18, "music": 0})
 
 
@@ -139,12 +159,12 @@ def test_not_kept_on_a_replaced_summary(model):
 def test_events_from_the_sound_layer(monkeypatch):
     asked = []
 
-    def minutes(device, a, b):
-        asked.append((device, a, b))
-        return {1: {"vehicle": 0.8, "speech": 0.5}, 2: {"vehicle": 0.9}, 3: {"quiet": 1.0}, 4: {}}
-    monkeypatch.setattr(sound_events, "minutes", minutes)
+    def tags(c):
+        asked.append(c)
+        return {"covered": 30, "events": [{"event": "vehicle", "minutes": 18, "conf": 0.8}, {"event": "music", "minutes": 6, "conf": 0.5, "wrong": 7}]}
+    monkeypatch.setattr(sound_events, "tags", tags)
     conv = {"device": "mic", "start": START, "end": "2026-10-20T10:00:03.900"}
-    assert place.events_of(conv) == {"covered": 4, "vehicle": 2, "music": 0, "speech": 1, "quiet": 1}
-    assert asked == [("mic", sound_events.ms(START), sound_events.ms(conv["end"]) + 1000)]  # the span its tags take
-    monkeypatch.setattr(sound_events, "minutes", lambda *a: {})  # off, or no scores
-    assert place.events_of(conv) is None and place.events_of({**conv, "device": None}) is None
+    assert place.events_of(conv) == {"covered": 30, "vehicle": 18}, "the page's tags, not music the owner said 不对 of"
+    assert asked == [conv]
+    monkeypatch.setattr(sound_events, "tags", lambda c: None)  # off, no scores or no tag
+    assert place.events_of(conv) is None
