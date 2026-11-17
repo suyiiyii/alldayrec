@@ -17,6 +17,7 @@ import { t } from "../i18n";
 import {
   errorTitle,
   get,
+  getWithHeaders,
   isFragment,
   micGap,
   post,
@@ -183,14 +184,25 @@ function talkFailed(why: string, mic: boolean) {
   if (mic) talk.value = false; // for now, not kept: the next time may have it
 }
 
-const search = (before: string) =>
-  get<Conversation[]>("/api/search", {
-    q: q.value,
-    tag: tag.value,
-    ...(sound.value && { sound: sound.value }),
-    before: before || (day.value ? shiftDay(day.value, 1) + "T00:00:00" : ""),
-    limit: String(PAGE),
-  });
+// a page; the sound filter looks at so many conversations a call and says where it stopped (X-Searched-To): on from
+// there till the page is full or nothing is left
+async function search(before: string) {
+  const out: Conversation[] = [];
+  let b = before || (day.value ? shiftDay(day.value, 1) + "T00:00:00" : "");
+  for (;;) {
+    const [cs, h] = await getWithHeaders<Conversation[]>("/api/search", {
+      q: q.value,
+      tag: tag.value,
+      ...(sound.value && { sound: sound.value }),
+      before: b,
+      limit: String(PAGE - out.length),
+    });
+    out.push(...cs);
+    const to = h.get("X-Searched-To");
+    if (!to || out.length >= PAGE) return out;
+    b = to;
+  }
+}
 // the filters into the URL, which loads the list (below)
 const sync = () =>
   router.replace({

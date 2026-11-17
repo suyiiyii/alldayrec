@@ -125,11 +125,18 @@ async def calendar():
 
 
 @router.get("/api/search")
-async def search(q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30, sound: str = ""):
+async def search(response: Response, q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30,
+                 sound: str = ""):
     """db.search; `before` is the start of the last one already shown. sound (music, vehicle, quiet): only those with
-    that sound tag (sound_events.search; the tenant's sound off: ignored)."""
+    that sound tag (sound_events.search; the tenant's sound off: ignored). Looking at only so many conversations per
+    call, it may stop before `limit`: then the header X-Searched-To is where it stopped, the `before` to go on with."""
     if sound and sound_events.model():
-        return await anyio.to_thread.run_sync(sound_events.search, sound, q, tag, who, after, before, limit, limiter=threads.DB)
+        if sound not in ("music", "vehicle", "quiet"):
+            raise HTTPException(400, "sound is music, vehicle or quiet")
+        cs, to = await anyio.to_thread.run_sync(sound_events.search, sound, q, tag, who, after, before, limit, limiter=threads.DB)
+        if to:
+            response.headers["X-Searched-To"] = to
+        return cs
     return await anyio.to_thread.run_sync(sound_events.with_tags, db.search(q, tag, who, after, before, limit), limiter=threads.DB)
 
 
@@ -158,6 +165,7 @@ async def sound_wrong(body: dict):
 
 @router.delete("/api/sounds/wrong/{wrong_id}")
 async def sound_wrong_undo(wrong_id: int):
+    """Take a 不对 back (撤销): its row deleted."""
     with db.tx() as c:
         if not c.execute("DELETE FROM sound_wrong WHERE id = ?", (wrong_id,)).rowcount:
             raise HTTPException(404, "no such mark")

@@ -61,15 +61,17 @@ def brief(c: dict) -> str:
     """ask._brief as one line: id, time, who, title; its summary under it, and its sound tags (sound_events) when it
     has some."""
     return (f"- `{c['id']}` {c['start'][5:10]} {c['start'][11:16]}-{c['end']} {'、'.join(c['participants'])} "
-            f"**{c.get('title') or '（还没有摘要）'}**" + (f"\n  {c['summary']}" if c.get("summary") else "") + heard(c["id"]))
+            f"**{c.get('title') or '（还没有摘要）'}**" + (f"\n  {c['summary']}" if c.get("summary") else "") + heard(c["id"], c.get("sounds", ...)))
 
 
-SOUND_WORDS = {"speech": "有人说话", "music": "有音乐", "vehicle": "在车里或别的交通工具上", "quiet": "安静"}
+SOUND_WORDS = {"speech": "有人说话", "music": "有音乐", "vehicle": "在交通工具上", "quiet": "安静"}
 
 
-def heard(cid: str) -> str:
-    """A conversation's sound tags as a line under it; none while the tenant's sound is off, or it has none."""
-    s = sound_events.tags(db.conversation(cid) or {}) if sound_events.model() else None
+def heard(cid: str, s=...) -> str:
+    """A conversation's sound tags (s: its tags already made, sound_events.tags) as a line under it; none while the
+    tenant's sound is off, or it has none."""
+    if s is ...:
+        s = sound_events.tags(db.conversation(cid) or {}) if sound_events.model() else None
     if not s:
         return ""
     words = ["大半时间安静" if x.get("mostly") else f"{SOUND_WORDS[x['event']]} {x['minutes']} 分钟" for x in s["events"]]
@@ -104,8 +106,14 @@ def search(q: str = "", who: str = "", tag: str = "", after: str = "", before: s
     limit = max(1, min(int(limit), 40))
     if sound and sound not in SOUND_WORDS or sound == "speech":
         raise Bad("sound 只能是 music、vehicle 或 quiet")
-    cs = ask.t_search(q, day_of(after, "after") if after else "", day_of(before, "before") if before else "", who, tag, limit, sound)
-    more = f"（只列了最新的 {limit} 段；更早的：before 设成 {cs[-1]['start']} 再搜）" if len(cs) == limit else ""
+    after, before = day_of(after, "after") if after else "", day_of(before, "before") if before else ""
+    if sound:
+        found, to = sound_events.search(sound, q, tag, who, after, before, limit)
+        cs = [{**b, "sounds": c.get("sounds")} for b, c in zip(ask.briefs(found), found)]
+    else:
+        cs, to = ask.t_search(q, after, before, who, tag, limit), None
+    more = (f"（只列了最新的 {limit} 段；更早的：before 设成 {cs[-1]['start']} 再搜）" if len(cs) == limit else
+            f"（这次只查到 {to} 为止；更早的：before 设成 {to} 再搜）" if to else "")
     return f"# 搜到 {len(cs)} 段{more}\n" + "\n".join(brief(c) + (f"\n  标签：{'、'.join(c['tags'])}" if c.get("tags") else "") for c in cs)
 
 
@@ -277,13 +285,13 @@ TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [
      "搜不到不代表没说过：换同义词、同音字再搜。可按参与者 who、标签 tag、开始日期 after（含）/ before（不含）过滤。",
      {"q": S, "who": S, "tag": S, "after": DATE, "before": {"type": "string", "description": "YYYY-MM-DD，或上次结果末尾给的时间"},
       "limit": {"type": "integer", "description": "最多几段，默认 20，最多 40"},
-      "sound": {"enum": ["music", "vehicle", "quiet"], "description": "只要有这种环境声音的对话（模型从声音猜的，可能不对）：music 有音乐，vehicle 在车里或别的交通工具上，quiet 安静"}}, []),
+      "sound": {"enum": ["music", "vehicle", "quiet"], "description": "只要有这种环境声音的对话（模型从声音猜的，可能不对）：music 有音乐，vehicle 在交通工具上，quiet 安静"}}, []),
     (conversation, "一段对话的完整摘要：每个人说了什么、话题、待办（带原话）、让 AI 做的事、决定、标签；不带原文，原文用 transcript。", {"id": S}, ["id"]),
     (transcript, "一段对话的原文，每行「[时:分:秒] 说话人: 话」。", {"id": S}, ["id"]),
     (transcript_at, "某天一段时间里的原文，不管属于哪段对话；两台设备都录到时分开列。",
      {"date": DATE, "start": {"type": "string", "description": "HH:MM"}, "end": {"type": "string", "description": "HH:MM（含这一分钟）"}},
      ["date", "start", "end"]),
-    (sounds, "某天一段时间里每台设备的环境声音，按分钟连成段：有人说话、有音乐、在车里或别的交通工具上、安静，以及那会儿所在的对话 id。"
+    (sounds, "某天一段时间里每台设备的环境声音，按分钟连成段：有人说话、有音乐、在交通工具上、安静，以及那会儿所在的对话 id。"
      "是模型从声音猜的，可能不对；外放的视频和电话也算有人说话；分不出在哪里（地点从对话内容判断）。没列出的时间没有声音数据。",
      {"date": DATE, "start": {"type": "string", "description": "HH:MM，默认 00:00"}, "end": {"type": "string", "description": "HH:MM（含这一分钟），默认 23:59"}},
      ["date"]),

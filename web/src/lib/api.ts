@@ -459,6 +459,11 @@ export class ApiError extends Error {
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
 
 export async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await request<T>(path, init))[0];
+}
+
+// call(), with the response's headers (a list that says in one where it stopped)
+async function request<T>(path: string, init?: RequestInit): Promise<[T, Headers]> {
   let r: Response;
   try {
     r = await fetch(path, init);
@@ -466,7 +471,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(t("err.network"), `${path}: ${e}`);
   }
   const j = await r.json().catch(() => ({}));
-  if (r.ok) return j;
+  if (r.ok) return [j, r.headers];
   const raw = typeof j.detail === "string" ? j.detail : "";
   const code = /^\[([a-z_]+)\] /.exec(raw)?.[1] ?? "";
   const said = code ? raw.slice(code.length + 3) : raw;
@@ -489,6 +494,11 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const q = new URLSearchParams(params).toString();
   return call<T>(path + (q ? "?" + q : ""));
+}
+
+export function getWithHeaders<T>(path: string, params: Record<string, string> = {}): Promise<[T, Headers]> {
+  const q = new URLSearchParams(params).toString();
+  return request<T>(path + (q ? "?" + q : ""));
 }
 
 export function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {

@@ -10,7 +10,7 @@ A minute's events, from one model's scores (SOUND_EVENTS_MODEL, default the firs
 - quiet: the minute's level (the mean power of its frames; none in a row's gaps, none at the -127 floor: digital zeros,
   the microphone sent nothing) under QUIET_DB, with no music; speech is not said of a quiet minute.
 A minute with no frame left is no data, never quiet. Each event's conf: the share of the minute's frames that had it
-(a class at sounds.HIT or more; quiet: the frames under QUIET_DB).
+(a class at sounds.HIT or more; quiet: the frames under QUIET_DB); yamnet's music, on at 0.1 under HIT, can be 0.
 
 Left out, the scores do not tell them (the owner's labels, sound-bench v1): media (TV, a video, a call on speaker: all
 8 heard as speech), typing, footsteps, rubbing, wind, crowd, hum, dishes, turn signals.
@@ -63,6 +63,9 @@ VEHICLE_RUN = 3  # minutes in a row
 # A conversation's tags: an event of at least TAG_MIN minutes and TAG_SHARE of its minutes with scores, most first, at
 # most TAGS; speech is not one (every conversation has it); quiet over half of them is 大半时间安静 (mostly)
 TAG_MIN, TAG_SHARE, TAGS, MOSTLY = 2, 0.1, 3, 0.5
+# the conversations a sound search looks at per call (each one's rows decoded, about 0.5 ms): a call stays under 100 ms
+# on a month of rows (test_big_store_fast) and the DB threads free; the caller goes on from where it stopped
+SCAN = 100
 
 
 def model() -> str | None:
@@ -85,19 +88,20 @@ def levels(device: str, name: str, a: int, b: int) -> dict[int, tuple[float, int
     none in a row's gaps or at the -127 floor; the cut QUIET_DB, QUIET_DB_RAW where a row of it had no calibration."""
     out = {}
     for s, e, hop, win, n, lv, gaps, g in db.conn().execute(
-            "SELECT start_ms, end_ms, hop_ms, window_ms, n, db, gaps, gain_db FROM sounds WHERE device = ? AND model = ? AND end_ms > ? AND start_ms < ?",
-            (device, sound.model_id(name), a, b)):
+            f"SELECT start_ms, end_ms, hop_ms, window_ms, n, db, gaps, gain_db FROM sounds WHERE device = ? AND model = ? AND {sounds.SPAN}",
+            (device, sound.model_id(name), *sounds.span_args(a, b))):
         i = np.arange(n)
         mid = np.minimum(s + i * hop + np.minimum(win, e - s - i * hop) // 2, e - 1)
         lv = np.frombuffer(lv, np.int8).astype(np.float64)
         keep = (lv > -127) & (mid >= a) & (mid < b)
         for x, y in json.loads(gaps):
             keep &= (mid < x) | (mid >= y)
-        cut = QUIET_DB if g else QUIET_DB_RAW
-        for m in np.unique(mid[keep] // 60000):
-            sel = keep & (mid // 60000 == m)
-            p0, n0, q0, c0 = out.get(int(m), (0.0, 0, 0, QUIET_DB))
-            out[int(m)] = (p0 + float(np.sum(10 ** (lv[sel] / 10))), n0 + int(sel.sum()), q0 + int(np.sum(lv[sel] < cut)), min(c0, cut))
+        cut = QUIET_DB if g else QUIET_DB_RAW  # shortcut: gain_db 0 reads as uncalibrated, a gain registered as exactly 0 dB too
+        ms_, k = np.unique(mid[keep] // 60000, return_inverse=True)
+        p, c, q = np.bincount(k, 10 ** (lv[keep] / 10), len(ms_)), np.bincount(k, None, len(ms_)), np.bincount(k, lv[keep] < cut, len(ms_))
+        for m, p1, n1, q1 in zip(ms_.tolist(), p.tolist(), c.tolist(), q.tolist()):
+            p0, n0, q0, c0 = out.get(m, (0.0, 0, 0, QUIET_DB))
+            out[m] = (p0 + p1, n0 + int(n1), q0 + int(q1), min(c0, cut))
     return {m: (10 * np.log10(p / n), n, q, cut) for m, (p, n, q, cut) in out.items()}
 
 
@@ -107,17 +111,15 @@ def minutes(device: str, a: int, b: int) -> dict[int, dict[str, float]]:
     if not (name := model()):
         return {}
     pad = VEHICLE_RUN * 60000  # a ride across a or b still counts its whole run
-    scores, lv, th = sounds.minutes(device, name, a - pad, b + pad), levels(device, name, a - pad, b + pad), THRESH[name]
+    (ms_, frames, mean, hits), lv, th = sounds.minute_rows(device, name, a - pad, b + pad), levels(device, name, a - pad, b + pad), THRESH[name]
+    row = {m: i for i, m in enumerate(ms_.tolist())}
+    on = {e: (mean[:, CLASSES[name][e]].max(1) >= th[e]).tolist() for e in ("speech", "music", "vehicle")} if len(ms_) else {}
+    conf = {e: (hits[:, CLASSES[name][e]].max(1) / frames).tolist() for e in on}
     out = {}
     for m, (level, n, below, cut) in sorted(lv.items()):
-        frames, mean, hits = scores.get(m, (0, None, None))
-        if not frames:
+        if (i := row.get(m)) is None:
             continue
-        ev = {}
-        for e in ("speech", "music", "vehicle"):
-            c = CLASSES[name][e]
-            if float(np.max(mean[c])) >= th[e]:
-                ev[e] = round(float(np.max(hits[c])) / frames, 2)
+        ev = {e: round(conf[e][i], 2) for e in on if on[e][i]}
         if level < cut and "music" not in ev:
             ev.pop("speech", None)
             ev["quiet"] = round(below / n, 2)
@@ -135,8 +137,14 @@ def minutes(device: str, a: int, b: int) -> dict[int, dict[str, float]]:
 
 
 def wrong_ids(device: str, a: int, b: int) -> dict[str, int]:
-    """event -> the sound_wrong id said of exactly this span of device (the owner's 不对)."""
-    return {e: i for i, e in db.conn().execute("SELECT id, event FROM sound_wrong WHERE device = ? AND start_ms = ? AND end_ms = ?", (device, a, b))}
+    """event -> the owner's 不对 (sound_wrong id; the newest of several) on device covering more than half of [a, b):
+    still said of a conversation grown by late audio or merged since, or of the bar's runs cut anew; any model."""
+    out = {}
+    for i, e, s, t in db.conn().execute("SELECT id, event, start_ms, end_ms FROM sound_wrong WHERE device = ? AND start_ms < ? AND end_ms > ? ORDER BY id",
+                                        (device, b, a)):
+        if 2 * (min(t, b) - max(s, a)) > b - a:
+            out[e] = i
+    return out
 
 
 def tags(c: dict) -> dict | None:
@@ -194,8 +202,12 @@ def devices(a: int, b: int) -> list[str]:
     """Devices with rows of the events' model over [a, b)."""
     if not (name := model()):
         return []
-    return [d for (d,) in db.conn().execute("SELECT DISTINCT device FROM sounds WHERE model = ? AND end_ms > ? AND start_ms < ? ORDER BY device",
-                                            (sound.model_id(name), a, b))]
+    out, d, c = [], "", db.conn()
+    # the index's devices one seek each (not a scan of every row's entry), each looked up over [a, b) on it
+    while (d := c.execute("SELECT min(device) FROM sounds WHERE device > ?", (d,)).fetchone()[0]) is not None:
+        if c.execute(f"SELECT 1 FROM sounds WHERE device = ? AND model = ? AND {sounds.SPAN} LIMIT 1", (d, sound.model_id(name), *sounds.span_args(a, b))).fetchone():
+            out.append(d)
+    return out
 
 
 def day(date: str) -> list[dict]:
@@ -205,23 +217,31 @@ def day(date: str) -> list[dict]:
     return [{"device": x, "runs": r} for x in devices(a, b) if (r := runs(x, a, b))]
 
 
-def search(sound_: str, q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30) -> list[dict]:
+def search(sound_: str, q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30) -> tuple[list[dict], str | None]:
     """db.search's conversations that have the tag `sound_` (music, vehicle or quiet), newest first, each with its
-    sounds; off: db.search's, the filter ignored (as before it was one)."""
+    sounds, and where it stopped looking: having looked at SCAN of them before `limit` were found, the start of the
+    last one looked at (the next call's `before` for the rest), else None. Off: db.search's, the filter ignored (as
+    before it was one), and None."""
     if not (name := model()):
-        return db.search(q, tag, who, after, before, limit)
+        return db.search(q, tag, who, after, before, limit), None
     first = db.conn().execute("SELECT min(start_ms) FROM sounds WHERE model = ?", (sound.model_id(name),)).fetchone()[0]
     if first is None:
-        return []
+        return [], None
     after = max(after, dt.datetime.fromtimestamp(first / 1000 - 86400).isoformat(timespec="seconds"))  # none before the first scores
-    out, limit = [], limit if limit > 0 else 10 ** 9
-    while len(out) < limit:
-        cs = db.search(q, tag, who, after, before, 50)
-        out += [{**c, "sounds": s} for c in cs if (s := tags(c)) and any(x["event"] == sound_ for x in s["events"])]
-        if len(cs) < 50:
-            break
+    out, seen, limit = [], 0, limit if limit > 0 else 10 ** 9
+    while True:
+        cs = db.search(q, tag, who, after, before, n := min(50, SCAN - seen))
+        for c in cs:
+            if (s := tags(c)) and any(x["event"] == sound_ for x in s["events"]):
+                out.append({**c, "sounds": s})
+                if len(out) == limit:
+                    return out, None
+        seen += len(cs)
+        if len(cs) < n:
+            return out, None
         before = cs[-1]["start"]
-    return out[:limit]
+        if seen >= SCAN:
+            return out, before
 
 
 def wrong(device: str, a: int, b: int, event: str, conv: str | None) -> int:
