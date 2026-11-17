@@ -110,7 +110,7 @@ uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --dry-run   # �
 uv run python -m alldayrec.place backfill --tenant <ID> --days 7
 ```
 
-只处理含今天共 N 天里开始、摘要已调用过大模型、还没有 `place` 的对话，一段接一段；只在摘要的 JSON 里加 `place` 一个字段，标题、待办和标记、人物档案都不动。补的时候某段摘要被重写了，这段就跳过，由重写后的摘要自己推断。租户没开 `place` 时直接退出。
+只处理含今天共 N 天里开始、摘要已调用过大模型、还没有 `place` 的对话，一段接一段（有失败的退出码为 1，重跑接着补剩下的）；只在摘要的 JSON 里加 `place` 一个字段，标题、待办和标记、人物档案都不动。补的时候某段摘要被重写了，这段就跳过，由重写后的摘要自己推断。租户没开 `place` 时直接退出。
 
 ## 环境声音 sounds
 

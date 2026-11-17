@@ -42,8 +42,9 @@ def test_checked_keeps_only_what_holds():
                 {"label": "火星", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
                 {"label": "户外", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:02"}]},
                 {"label": "车上", "confidence": "high", "evidence": [{"kind": "sound", "event": "vehicle"}]},  # no sound data
+                {"label": "车上", "confidence": "high", "evidence": [{"kind": "sound", "event": "vehicle"}], "_ev": True},  # sound alone
                 ["not an object"]):
-        assert place.checked(res, r, SPANS, None) == {"label": None}, res
+        assert place.checked(res, r, SPANS, {"covered": 20, "vehicle": 18} if isinstance(res, dict) and res.get("_ev") else None) == {"label": None}, res
 
 
 def test_prompt_marks_media_and_ai_lines(tmp_path):

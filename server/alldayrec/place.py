@@ -4,7 +4,7 @@ goes into the summary as its `place`, nothing else of the summary changes (so pr
 status, model, ai_spans and media_spans, stays as it was). The sound models only say what was heard (DESIGN D10): the
 place is the model's call, and it must cite its evidence: a sentence (by its time) or a sound event (by its key). A
 cited sentence that is not in the transcript, or lies in the summary's media or AI spans (what a video or a dictation
-says is no place of the recorder's), is dropped; without a sentence or a sound left, or unsure, the place is
+says is no place of the recorder's), is dropped; without a sentence left (a sound only backs one up), or unsure, the place is
 {"label": null}: the page shows nothing.
 
     python -m alldayrec.place backfill --tenant ID [--days 7] [--dry-run]   # a place for the summaries without one
@@ -81,7 +81,7 @@ def prompt(conv: dict, rows: list[dict], s: dict, events: dict | None) -> list[d
 def checked(res, rows: list[dict], s: dict, events: dict | None) -> dict:
     """The reply as the stored place: a label key, the detail, the confidence and the evidence that holds (a sentence
     by its start, said by whom and its words; a sound event and its minutes as measured, not as the model wrote them);
-    {"label": None} when unsure, low, or nothing holds."""
+    {"label": None} when unsure, low, or no sentence holds (a sound backs a place up, never names it alone)."""
     res = res if isinstance(res, dict) else {}
     said = {r["start"][11:19]: r for r, k in lines(rows, s) if not k}
     ev = []
@@ -95,7 +95,7 @@ def checked(res, rows: list[dict], s: dict, events: dict | None) -> dict:
             ev.append({"kind": "sound", "event": x["event"], "minutes": round(events[x["event"]])})
     label = LABELS.get(res.get("label")) if isinstance(res.get("label"), str) else None
     confidence = res.get("confidence") if res.get("confidence") in ("high", "medium") else None
-    if not label or not confidence or not ev:
+    if not label or not confidence or not any(e["kind"] == "line" for e in ev):  # sound alone tells no car from a train
         return {"label": None}
     detail = res.get("detail").strip() if isinstance(res.get("detail"), str) else ""
     detail = "" if detail in ("空", "无", "null", "none", res["label"]) else detail  # the model's ways of writing nothing
@@ -164,8 +164,8 @@ def main():
     lo = (dt.date.today() - dt.timedelta(days=o.days - 1)).isoformat()
     todo = [c for c in db.conversations(lo, "9999") if due(c["summary"])]
     chars = sum(len(r.get("text") or "") + 14 for c in todo for r in conversation_rows(c))
-    # ~0.83 tokens a character of transcript and ~900 of instructions a call (measured on gpt-6-luna, 11-18)
-    print(json.dumps({"conversations": len(todo), "est_input_tokens": round(chars * 0.83 + 900 * len(todo))}), flush=True)
+    # ~0.83 tokens a character of transcript and ~1 600 of instructions a call (measured on gpt-6-luna, 11-18)
+    print(json.dumps({"conversations": len(todo), "est_input_tokens": round(chars * 0.83 + 1600 * len(todo))}), flush=True)
     if o.dry_run:
         return
     import anyio
@@ -177,7 +177,9 @@ def main():
             made += p is not None
             print(json.dumps({"conversation": c["id"], "label": (p or {}).get("label"), "kept": p is not None}), flush=True)
         print(json.dumps({"made": made, "of": len(todo)}), flush=True)
-    anyio.run(run)
+        return made
+    # a call that failed (logged) or a summary replaced meanwhile: exit 1, a rerun picks up what is left
+    sys.exit(0 if anyio.run(run) == len(todo) else 1)
 
 
 if __name__ == "__main__":

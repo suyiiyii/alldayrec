@@ -110,7 +110,7 @@ uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --dry-run   # o
 uv run python -m alldayrec.place backfill --tenant <ID> --days 7
 ```
 
-It takes the conversations started in the last N days (today included) whose summary made an LLM call and has no `place` yet, one at a time, and adds that one field to the summary JSON: titles, todos and their marks, and people profiles stay as they are. A summary rewritten meanwhile is skipped; the new one makes its own. It exits when the tenant has `place` off.
+It takes the conversations started in the last N days (today included) whose summary made an LLM call and has no `place` yet, one at a time (exit code 1 when any failed; a rerun does the rest), and adds that one field to the summary JSON: titles, todos and their marks, and people profiles stay as they are. A summary rewritten meanwhile is skipped; the new one makes its own. It exits when the tenant has `place` off.
 
 ## Environmental sound (sounds)
 
