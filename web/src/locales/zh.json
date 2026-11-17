@@ -1129,5 +1129,34 @@
     "empty": "还没有词。",
     "names": "自动加入的人名",
     "namesSub": "在人物页起过名字的人会自动加进来，不用再添加。"
+  },
+  "sound": {
+    "title": "环境声音",
+    "hint": "模型从声音猜的，可能不对；点一段看详情",
+    "tag": {
+      "music": "🎵 可能有背景音乐 {n} 分钟",
+      "vehicle": "🚗 可能在车里 {n} 分钟",
+      "quiet": "🤫 可能安静 {n} 分钟"
+    },
+    "mostlyQuiet": "🤫 可能大半时间安静",
+    "ev": {
+      "speech": "说话",
+      "music": "音乐",
+      "vehicle": "车里",
+      "quiet": "安静"
+    },
+    "filter": {
+      "music": "🎵 有音乐",
+      "vehicle": "🚗 在车里",
+      "quiet": "🤫 安静"
+    },
+    "maybe": "可能：",
+    "nothing": "听得到声音，但不是这几类",
+    "wrong": "不对",
+    "wrongLabel": "{what}不对",
+    "undo": "撤销「不对」",
+    "marked": "记下了：这里不是「{what}」",
+    "open": "看这段对话",
+    "play": "听这一分钟"
   }
 }

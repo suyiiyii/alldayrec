@@ -1,4 +1,5 @@
 import { i18n, t } from "../i18n.ts";
+import type { ConvSounds } from "./sounds.ts";
 
 export interface Row {
   id: string;
@@ -104,6 +105,7 @@ export interface Conversation {
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
   standby?: string[]; // other recorders that stood by in its time (same place): their audio of it is kept
+  sounds?: ConvSounds; // its sound tags (lib/sounds.ts); none while the tenant's sound is off, or it has none
 }
 
 export interface LiveTopic {
@@ -285,6 +287,7 @@ export interface Upgrade {
 
 export interface Status {
   balance?: Balance | null; // StepFun's prepaid account
+  sound_events?: true; // the tenant's sound is on: sound tags, bars and the sound filter (lib/sounds.ts)
   device?: string | null;
   behind_s?: number | null;
   queued?: number; // uploaded pieces the server has not fed yet, all devices'

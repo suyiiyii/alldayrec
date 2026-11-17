@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One conversation: its title, time and people, then two tabs. 摘要 (the default): how much recording it rests on, the
+// One conversation: its title, time and people, its tags and sound tags (SoundTags, each with 不对), then two tabs. 摘要 (the default): how much recording it rests on, the
 // summary (one sentence since prompt v11, the lead), topics with their points (a tap on a title folds it), todos,
 // decisions, each person's points, 让 AI 做的事 (folded under its heading); speaker labels in what the model wrote read
 // like the header's (labelText); ▶ on them plays about 10 s of the sentence they cite, its time opens 原文 there
@@ -28,6 +28,7 @@ import PlayerBar from "../components/PlayerBar.vue";
 import QuoteAt from "../components/QuoteAt.vue";
 import RowMenu from "../components/RowMenu.vue";
 import Scrubber, { type Stop } from "../components/Scrubber.vue";
+import SoundTags from "../components/SoundTags.vue";
 import SpeakerSheet from "../components/SpeakerSheet.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
@@ -383,6 +384,7 @@ function edit(label: string) {
           >{{ t }}</RouterLink
         >
       </div>
+      <SoundTags v-if="c.sounds" :s="c.sounds" :conv="c.id" editable />
 
       <section v-if="panel === 'sug' && sug" class="card panel sug">
         <div class="phead">

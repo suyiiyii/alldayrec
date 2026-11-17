@@ -10,6 +10,7 @@ import Icon from "../components/Icon.vue";
 import LiveCard from "../components/LiveCard.vue";
 import RecapCard from "../components/RecapCard.vue";
 import SelfVoice from "../components/SelfVoice.vue";
+import SoundBar from "../components/SoundBar.vue";
 import Skeleton from "../components/Skeleton.vue";
 import VoiceCheck from "../components/VoiceCheck.vue";
 import { t } from "../i18n";
@@ -29,19 +30,22 @@ import { hasNative, inApp, openNative, stage } from "../lib/app";
 import { calendar, dayLabel, loadCalendar, shiftDay, today } from "../lib/calendar";
 import { useHeaderFollow } from "../lib/headerFollow";
 import { useSocket, useWatch } from "../lib/socket";
+import { SOUND_EVENTS } from "../lib/sounds";
 import { toast } from "../lib/toast";
 
 // 时间线, the home page: every conversation newest first, by day, PAGE at a time as the end scrolls into view; words,
 // one tag filter it; ?day= starts it at the end of that day (older ones keep coming as it scrolls).
 // Pinned on top while it shows today unfiltered: the conversation going on (the live card) and what is due. Each past
 // day opens with its recap, yesterday's unfolded. Without words or a tag, a day's fragments (too little speech for a
-// summary) fold into one line under its recap, a tap shows them in their places. Until the first conversation, the
-// steps to it from where the user is (next) instead.
+// summary) fold into one line under its recap, a tap shows them in their places, and its sound bar (SoundBar) is
+// under the day's head. With the tenant's sound on (the status says so), 有音乐 / 在车里 / 安静 filter it too (?sound=).
+// Until the first conversation, the steps to it from where the user is (next) instead.
 const PAGE = 30;
 const route = useRoute(),
   router = useRouter();
 const q = ref(String(route.query.q ?? "")),
   tag = ref(String(route.query.tag ?? "")),
+  sound = ref(String(route.query.sound ?? "")),
   day = ref(String(route.query.day ?? ""));
 // the day of the topmost card on screen, shown by the picker
 const seen = ref(""),
@@ -64,7 +68,8 @@ const more = useTemplateRef<HTMLElement>("more"),
 let seq = 0;
 
 // today unfiltered: the pinned cards; no words or tag: the recaps
-const top = computed(() => !q.value && !tag.value && !day.value);
+const top = computed(() => !q.value && !tag.value && !sound.value && !day.value);
+const sounds = computed(() => !!status.value?.sound_events);
 const going = computed(() => !!status.value?.devices?.some((d) => d.recording && d.conversation));
 // a new user's next steps instead of the feed (lib/app.ts stage), until the first conversation; not while one goes on
 const next = computed(() =>
@@ -182,6 +187,7 @@ const search = (before: string) =>
   get<Conversation[]>("/api/search", {
     q: q.value,
     tag: tag.value,
+    ...(sound.value && { sound: sound.value }),
     before: before || (day.value ? shiftDay(day.value, 1) + "T00:00:00" : ""),
     limit: String(PAGE),
   });
@@ -191,6 +197,7 @@ const sync = () =>
     query: {
       ...(q.value && { q: q.value }),
       ...(tag.value && { tag: tag.value }),
+      ...(sound.value && { sound: sound.value }),
       ...(day.value && { day: day.value }),
     },
   });
@@ -250,7 +257,7 @@ const days = computed(() => {
 });
 // the days whose fragments are out; words or a tag: every result as found
 const unfolded = ref<Record<string, boolean>>({});
-const fold = computed(() => !q.value && !tag.value);
+const fold = computed(() => !q.value && !tag.value && !sound.value);
 const shown = (g: (typeof days.value)[number]) =>
   fold.value && !unfolded.value[g.day] ? g.convs.filter((c) => !isFragment(c)) : g.convs;
 // a day's conversations with, in their places, when the phone recording with its microphone heard nothing and why
@@ -268,7 +275,7 @@ const feed = (g: (typeof days.value)[number]) =>
 // each past day's recap, asked once as the day comes into the list (null: none, or still on its way); its silent
 // stretches too, today's again with each reload of the list
 watch(days, (ds) => {
-  if (q.value || tag.value) return;
+  if (q.value || tag.value || sound.value) return;
   for (const { day: d } of ds)
     if (d === today() || !(d in gaps.value))
       get<PhoneSpan[]>("/api/phone-spans", { since: d + "T00:00:00", until: shiftDay(d, 1) + "T00:00:00" })
@@ -288,17 +295,18 @@ watch(q, () => {
   clearTimeout(timer);
   timer = window.setTimeout(sync, 300);
 });
-watch([tag, day], sync);
+watch([tag, sound, day], sync);
 watch(day, () => window.scrollTo(0, 0));
 // the URL loads the list. The logo, the 时间线 tab, back and forward change it under this same page: the filters
 // follow it, the list from the top (back and forward: where the browser puts it back, after this)
 watch(
   () => route.query,
   (r) => {
-    const [q2, tag2, day2] = [r.q, r.tag, r.day].map((v) => String(v ?? ""));
-    if (q2 !== q.value || tag2 !== tag.value || day2 !== day.value) window.scrollTo(0, 0);
+    const [q2, tag2, sound2, day2] = [r.q, r.tag, r.sound, r.day].map((v) => String(v ?? ""));
+    if (q2 !== q.value || tag2 !== tag.value || sound2 !== sound.value || day2 !== day.value) window.scrollTo(0, 0);
     q.value = q2;
     tag.value = tag2;
+    sound.value = sound2;
     day.value = day2;
     void restart();
   },
@@ -467,6 +475,18 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           <button :disabled="!q || asking" @click="askAI(q)">{{ t("timeline.ask") }}</button>
         </div>
         <div class="tags">
+          <template v-if="sounds || sound">
+            <button
+              v-for="e in SOUND_EVENTS.filter((x) => x !== 'speech')"
+              :key="e"
+              class="tag"
+              :class="{ on: sound === e }"
+              :title="t('sound.hint')"
+              @click="sound = sound === e ? '' : e"
+            >
+              {{ t(`sound.filter.${e}`) }}
+            </button>
+          </template>
           <button
             v-for="[tg, n] in tags"
             :key="tg"
@@ -532,10 +552,11 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
           {{ dayLabel(g.day) }} <span class="n">{{ t("calendar.convs", g.convs.length) }}</span>
         </h2>
         <RecapCard
-          v-if="!q && !tag && recaps[g.day]"
+          v-if="!q && !tag && !sound && recaps[g.day]"
           :recap="recaps[g.day]!"
           :open="g.day === yesterday"
         />
+        <SoundBar v-if="sounds && fold" :key="g.day" :day="g.day" />
         <button
           v-if="fold && g.frags"
           class="frags"
@@ -553,7 +574,7 @@ useWatch(send, connected); // the live card's analysis runs while this page is i
         </template>
       </section>
       <template v-if="done && !items.length && !reply && !asking">
-        <div v-if="q || tag || day" class="empty">
+        <div v-if="q || tag || sound || day" class="empty">
           <Icon name="search" :size="48" />{{ t("timeline.noMatch") }}
         </div>
         <div v-else-if="!going" class="empty">
