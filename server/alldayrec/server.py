@@ -52,6 +52,7 @@ from alldayrec import routes_speakers
 from alldayrec import routes_upload
 from alldayrec import routes_voices
 from alldayrec import seal
+from alldayrec import sound_events
 from alldayrec import sounds
 from alldayrec import tenant
 from alldayrec import threads
@@ -224,6 +225,7 @@ def main():
     h.addFilter(TenantTag())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(tenant)s%(message)s", handlers=[h])
     sounds.check()  # SOUND_MODEL's names, and its SOUND_SINCE
+    sound_events.check()  # SOUND_EVENTS_MODEL one of them
     skip = compute.served()  # INFER_URL: the voiceprint, music, speaker-change and scene models are the service's, never here
     infer.fetch(skip=skip)  # a first start: the missing model files, downloaded
     infer.check(skip=skip)  # every model file there and the pinned one, before anything starts

@@ -16,6 +16,7 @@ import anyio.to_thread
 
 from alldayrec import db
 from alldayrec import local_asr
+from alldayrec import sound_events
 from alldayrec import summary
 from alldayrec import threads
 from alldayrec import ws
@@ -84,9 +85,10 @@ def _next_day(date: str) -> str:
     return (dt.date.fromisoformat(date[:10]) + dt.timedelta(days=1)).isoformat()
 
 
-def t_search(q="", after="", before="", who="", tag="", limit=20):
-    return [{**_brief(c), "summary": ((c["summary"] or {}).get("summary") or "")[:160], "tags": (c["summary"] or {}).get("tags")}
-            for c in db.search(q, tag, who, after, before, min(int(limit), 40))]
+def t_search(q="", after="", before="", who="", tag="", limit=20, sound=""):
+    """sound (MCP's search only): those with that sound tag (sound_events.search)."""
+    cs = sound_events.search(sound, q, tag, who, after, before, min(int(limit), 40)) if sound else db.search(q, tag, who, after, before, min(int(limit), 40))
+    return [{**_brief(c), "summary": ((c["summary"] or {}).get("summary") or "")[:160], "tags": (c["summary"] or {}).get("tags")} for c in cs]
 
 
 def t_day(date):

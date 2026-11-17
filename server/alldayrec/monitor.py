@@ -24,6 +24,7 @@ from alldayrec import db
 from alldayrec import late_store
 from alldayrec import device_pipeline
 from alldayrec import perf
+from alldayrec import sound_events
 from alldayrec import seal
 from alldayrec import stepfun_asr
 from alldayrec import tenant
@@ -132,7 +133,8 @@ def status() -> dict:
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
             "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,
-            "engine": asr.ENGINE, "draft_engine": asr.DRAFT_ENGINE, "fallback_engine": asr.ENGINE_FALLBACK or None}  # the pages word them
+            "engine": asr.ENGINE, "draft_engine": asr.DRAFT_ENGINE, "fallback_engine": asr.ENGINE_FALLBACK or None,  # the pages word them
+            **({"sound_events": True} if sound_events.model() else {})}  # the pages' sound tags, bar and filter (none while off)
 
 
 async def status_loop():
