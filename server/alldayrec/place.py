@@ -31,12 +31,17 @@ PROMPT_VERSION = 2  # 2: sensitive places, detail from a cited sentence, music a
 LABELS = {"家": "home", "实验室或办公室": "office", "车上": "car", "地铁或高铁": "train", "餐厅": "restaurant",
           "户外": "outdoors", "商店": "shop", "其他": "other"}
 SOUNDS = {"vehicle": "交通工具的行驶声（引擎或路噪，车、地铁、飞机都算）", "music": "音乐", "quiet": "安静"}  # sound_events.tags' events
-# where no place is written down: in the detail, or in a cited sentence (then no place at all); conservative by default
-SENSITIVE = ("医院", "医务", "诊所", "卫生院", "卫生所", "门诊", "急诊", "住院", "挂号", "药店", "药房", "牙科", "口腔科",
-             "妇产", "产科", "妇科", "男科", "心理", "精神科", "精神病", "咨询师", "寺", "庙", "教堂", "清真", "道观", "礼拜",
-             "佛堂", "集会", "游行", "示威", "抗议", "警局", "警察局", "派出所", "公安", "法院", "法庭", "检察院", "看守所",
-             "监狱", "戒毒", "戒酒", "戒断", "康复中心", "同志", "拉拉", "酷儿", "lgbt", "gay", "hospital", "clinic",
-             "pharmacy", "church", "mosque", "temple", "police", "court", "rehab")
+# where no place is written down: in the detail, or in a cited sentence (then no place at all). Stems, not whole names,
+# since names vary (社区卫生服务中心, 村卫生室, 中医馆, 病房, 体检中心, 疾控中心, 教会): conservative on purpose, so a stem
+# also hides unrelated words (药 in 火药, 卫生 in 卫生间, 警 in 警告, 观 in 参观, 精神 in 精神不错, 佛 in 佛系) and
+# with them a place that was fine; the owner may relax it later.
+SENSITIVE = ("医", "诊", "药", "病", "卫生", "疾控", "体检", "康复", "疗养", "殡",  # medical, funeral
+             "寺", "庙", "庵", "观", "教堂", "教会", "清真", "礼拜", "基督", "佛",  # religious
+             "集会", "游行", "示威", "抗议",  # political gatherings
+             "派出所", "公安", "警", "法院", "检察", "监狱", "看守",  # police, courts, prisons
+             "戒毒", "戒酒", "戒断", "心理", "精神", "计生", "妇幼", "妇产", "产科", "疫苗", "接种",  # rehab, mental, maternity
+             "同志", "拉拉", "酷儿", "lgbt", "gay",  # LGBTQ venues
+             "hospital", "clinic", "pharmacy", "church", "mosque", "temple", "synagogue", "police", "court", "rehab")
 EVIDENCE = 3
 MIN_CHARS = 4  # a shorter sentence (嗯。 OK。 好的) says nothing of a place
 DETAIL = 16  # characters of the detail kept (the prompt asks for 8 字)
@@ -86,9 +91,11 @@ def sensitive(text: str) -> bool:
 
 
 def grounded(detail: str, ev: list[dict]) -> bool:
-    """The detail is in a kept sentence (高速 of 上高速了; a trailing 上/里 of the model's 高速上 aside)."""
-    d = summary._plain(detail).rstrip("上里中内边")
-    return bool(d) and any(d in summary._plain(e["text"]) for e in ev if e["kind"] == "line")
+    """The detail is in a kept sentence, as written or without one trailing 上/里 (高速上 of 上高速了) when two
+    characters are left (海边 is never 海, which 上海 has)."""
+    d = summary._plain(detail)
+    ds = [d, d[:-1]] if d[-1:] in ("上", "里") and len(d) > 2 else [d]
+    return bool(d) and any(x in summary._plain(e["text"]) for x in ds for e in ev if e["kind"] == "line")
 
 
 def prompt(conv: dict, rows: list[dict], s: dict, events: dict | None) -> list[dict]:
@@ -152,10 +159,11 @@ def due(s: dict | None) -> bool:
 
 def keep(conv_id: str, made_from: dict, place: dict) -> bool:
     """The place into the summary it was made from, nothing else of it changed; not when that summary was replaced
-    meanwhile (a redo, a merge): the new one gets its own."""
+    meanwhile (a redo, a merge) or is pending again (a split, late audio: other rows): the new one gets its own."""
     with db.tx() as t:
         now = db.summary(conv_id)
-        if not now or now.get("created_at") != made_from.get("created_at") or db.resolve_conversation(conv_id) != conv_id:
+        if not now or now.get("status") != "done" or now.get("created_at") != made_from.get("created_at") \
+                or db.resolve_conversation(conv_id) != conv_id:
             return False
         db.put_summary({**now, "place": place}, t)
     return True

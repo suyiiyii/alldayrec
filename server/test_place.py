@@ -50,6 +50,20 @@ def test_checked_keeps_only_what_holds():
                 {"label": "其他", "detail": "", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:09"}]},
                 {"label": "其他", "detail": "Church", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}):
         assert place.checked(res, med, SPANS, None) == {"label": None}, res
+    # by stem: the names the review found shown with a list of whole names
+    for text, detail in (("我们到社区卫生服务中心了", "卫生服务中心"), ("到村卫生室了排队", "卫生室"), ("这家中医馆人好多", "中医馆"),
+                         ("在病房里陪床呢", "病房"), ("体检中心排队好久", "体检中心"), ("疾控中心打疫苗排队", "疾控中心"),
+                         ("我们在教会聚会", "教会")):
+        got = place.checked({"label": "其他", "detail": detail, "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                            [dict(r[0], text=text)], {}, None)
+        assert got == {"label": None}, (text, got)
+        got = place.checked({"label": "其他", "detail": "", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                            [dict(r[0], text=text)], {}, None)
+        assert got == {"label": None}, ("in the sentence alone", text, got)
+    # one trailing 上/里 at most, and two characters left: 海边 is not 海 of 上海
+    sea = [dict(r[0], text="我们在上海呢，挺热的")]
+    assert place.checked({"label": "户外", "detail": "海边", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                         sea, {}, None)["detail"] == ""
     assert "医院" not in place.SYSTEM.split("敏感场所")[0], "no medical place as an example of a detail"
     # a reply of the wrong shape: nothing that holds, no error
     for bad in ({"label": "车上", "confidence": "high", "evidence": 5},
@@ -154,6 +168,10 @@ def test_not_kept_on_a_replaced_summary(model):
     db.put_summary({**made_from, "title": "b", "created_at": "2026-10-20T11:05:00"})  # a redo meanwhile
     assert place.keep(CID, made_from, {"label": None}) is False and "place" not in db.summary(CID)
     assert place.keep(CID, db.summary(CID), {"label": None}) is True and db.summary(CID)["title"] == "b"
+    # pending again with its created_at (a split, late audio: split.py, late_merge.py): the old rows' place not kept
+    db.put_summary({k: v for k, v in db.summary(CID).items() if k != "place"} | {"status": "pending"})
+    made_from = {**db.summary(CID), "status": "done"}
+    assert place.keep(CID, made_from, {"label": "car"}) is False and "place" not in db.summary(CID)
 
 
 def test_events_from_the_sound_layer(monkeypatch):

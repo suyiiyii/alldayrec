@@ -214,7 +214,7 @@ def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
 
     counts = {x: db.conn().execute(f"SELECT count(*) FROM {x}").fetchone()[0] for x in TABLES}
     with db.tx() as t:  # its summary and the day's recap were done again since the split
-        db.put_summary({**db.summary(A), "status": "done"}, t)
+        db.put_summary({**db.summary(A), "status": "done", "place": {"label": "home"}}, t)
         db.put_kv("recap:2026-10-20", {**db.kv("recap:2026-10-20"), "stale": False}, t)
     recap_rev = db.kv("recap_revision:2026-10-20")
     T().undo.update(a=[{"conv": A}], b=[{"conv": P2}], c=[{"conv": "c20261020102000"}])
@@ -232,6 +232,7 @@ def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
     assert [tuple(r) for r in db.conn().execute("SELECT at FROM walls")] == [(iso(1200),)], "the third part's wall stays"
     s = db.summary(A)
     assert s["status"] == "pending" and db.todo_ids(A, s["todos"])[0] == tids[0] and len(s["todos"]) == 2
+    assert "place" not in s, "the early part's place: not shown again should the merged summary fail"
     assert {r["conv"] for r in db.conn().execute("SELECT conv FROM todo_marks")} == {A} and moved not in {
         r["id"] for r in db.conn().execute("SELECT id FROM todo_marks")}
     assert dict(db.conn().execute("SELECT id, conv FROM stars").fetchall()) == {"r30": A, "r630": A}

@@ -354,7 +354,9 @@ def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: l
                   for c in kept if c["id"] in grown]
         for c in merged:
             db.insert_conversation(t, {**c, "sentences": len(c["sentences"])})
-            db.put_summary({**(db.summary(c["id"]) or {"conversation": c["id"]}), "status": "pending", "error": None}, t)
+            # its place was the early part's (late_merge.merge kept it): not shown again if the new summary fails
+            s = db.summary(c["id"]) or {"conversation": c["id"]}
+            db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None}, t)
             rev = (db.kv(f"conversation_revision:{c['id']}") or 0) + 1
             db.put_kv(f"conversation_revision:{c['id']}", rev, t)
             for day in {c["start"][:10], c["end"][:10]}:
