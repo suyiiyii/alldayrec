@@ -111,7 +111,7 @@ async def summarize_loop():
                 for p in c.get("participants") or []:
                     if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
                         try:
-                            await make_profile(p)
+                            await make_profile(p, auto=True)
                         except Exception as e:
                             log.warning("profile %s failed: %r", p, e)
 

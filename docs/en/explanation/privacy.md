@@ -34,14 +34,28 @@ An AI connection secret is returned only at creation; the database keeps its has
 
 ## People profiles
 
-The 「AI 档案」 (AI profile) on a person's page is written by the LLM from your conversations with someone: who they are, what they said themselves, what they are busy with, what others say about them, and what is still open. Every line cites where it came from, down to the sentence in that conversation.
+The 「AI 档案」 (AI profile) on a person's page is written by the LLM from your conversations with someone: who they are, what is known about them, what they are busy with, what others say about them, and what is still open. Every line cites where it came from. The tenant's `persona_v2` (see [Configuration](../reference/configuration.md#tenants-json)) picks the evidence; the two cases are below.
 
-- **What is kept**: the `profiles` table of `live.db`, one row a person: each line of the profile, the conversations and times it cites, and the model and usage that made it. With `persona_v2` on, it also keeps a hash (not the content) of each conversation it cites, to tell whether the profile still holds.
-- **What goes out**: the evidence goes to the LLM at `LLM_BASE_URL` when a profile is made. By default these are the summaries of the conversations and the person's points in them; with `persona_v2` on for the tenant (see [Configuration](../reference/configuration.md#tenants-json)), it is **the person's own sentences** instead (at most 8 from each of the 40 latest conversations), the sentences of your to-dos to them, and the few sentences around each time someone else said their name.
-- **When**: when you tap 「生成」 (Make) on the person's page; after that, again each time a conversation with them gets its summary.
-- **Of whom**: with `persona_v2` on, only of people you named; an anonymous S label gets none. A conversation where their label is a few seconds of fragments, or a crowded one where their label took most of the speech, gives no evidence, and neither do words said to an AI, media played aloud, or dictation.
-- **What is never written**: the prompt forbids inferring or writing health, sexual orientation, religion, political views, ethnicity, criminal records or financial details; what others say about someone is never written as that person's own view; with under 5 days of evidence, no character traits or habits.
-- **Who sees it**: only the tenant itself (the web and API token). After a rename, merge or split of speakers, the old profile is void and no longer shown, and the next one is made from the new labels.
+**By default (`persona_v2` off)**
+
+- **What goes out**: when a profile is made, to the LLM at `LLM_BASE_URL`: the 40 latest conversations with the person, each with its title, summary (first 300 characters) and their points in it; their to-dos and yours to them (at most 30, with text and due date); and the sentences where someone else said their name or an alias (at most 30), each with the two sentences either side as transcribed, with speaker labels.
+- **What is kept**: the `profiles` table of `live.db`, one row a person: each line of the profile, the conversations it cites (for to-dos and mentions also the sentence's time), and the model and usage that made it. A cited conversation opens as the whole conversation; a to-do or mention, at that sentence.
+- **Rules**: the prompt asks for evidence numbers on each line, and a line citing none that was given is dropped. Nothing else: the prompt asks for facts such as family and habits, does not tell what they said from what others said, forbids no sensitive attributes and needs no number of days.
+- **After a rename**: the old profile stays shown; the next one made uses the new labels.
+
+**With `persona_v2` on**
+
+- **What goes out**: **the person's own sentences** instead: at most 8 from each of the 40 latest conversations that give evidence (skipped ones do not count, so this can reach far back); the sentences of your to-dos to them; and the sentences where someone else said their name (at most 30), with the two either side. No summaries or points.
+- **Of whom**: only of people you named; an anonymous S label gets none. A conversation whose summary is not done, or was done without a model, gives none; words said to an AI, media played aloud and dictation are no evidence, and a sentence of theirs under 1 second does not count. A conversation gives none of their sentences when: their speech in it is under 15 seconds (a fragment); it has 10 or more speakers and their label holds 70 % or more of the speech (a crowd's voices taken in; labels only in media, dictation or words to an AI not counted); or they have 5 or more sentences and 45 % or more of them are under 1 second (grown by short ones joined to them). 「我」 (me) is exempt from the last two. The sentences around a mention pass the same gates: none under 1 second, and none of theirs from a conversation skipped for them.
+- **Who said it**: decided by the code from what a line cites, not by the model. A line is theirs only when every sentence it cites is their own; citing anyone else's (a mention, or yours) at all makes it what others say. The same holds for who they are: one resting on others' words moves to what others say.
+- **What is never written**: the prompt forbids inferring or writing health, sexual orientation, religion, political views, ethnicity, criminal records or financial details, even when they said it themselves; this rests on the prompt alone, the code does not filter it. With under 5 days of evidence, no character traits or habits: the prompt asks so, and the code drops lines the model marks as a trait; one it does not mark gets through.
+- **What is kept**: as above, plus a hash (not the content) of each conversation it cites, to tell whether the profile still holds. A citation opens at the sentence.
+- **After a rename**: after a rename, merge or split of speakers or conversations, once a conversation it used changed, the old profile is void and no longer shown, and the next one is made from the new labels. With the flag turned off again, stored profiles are shown as they are.
+
+**Either way**
+
+- **When**: when you tap 「生成」 (Make) on the person's page; after that, again each time a conversation with them gets its summary (not for 「我」). With `persona_v2` on, such a refresh makes no call when the evidence is exactly as last time.
+- **Who sees it**: only the tenant itself (the web and API token).
 - **How to delete**: one person's: `sqlite3 live.db "DELETE FROM profiles WHERE name = '<name>'"`; all: `DELETE FROM profiles`. A deleted profile is not made again until you tap 「生成」 (Make).
 
 ## Environmental sound

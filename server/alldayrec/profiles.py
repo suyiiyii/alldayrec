@@ -88,7 +88,7 @@ SYSTEM_V2 = """你在为录音者（「我」）整理一个人（下面叫 TA�
  "mentions": [{"text": "别人说的关于 TA 的事：谁说的、说了什么", "src": ["E3"]}],
  "open": [{"text": "还没了结的事：TA 答应的、我答应 TA 的、约好的", "src": ["E4"]}]}
 规则：
-- facts 和 recent 只能根据 TA 原句写。别人（包括我）说 TA 的话只进 mentions，并写明是谁说的；不得把别人的转述写成 TA 本人的经历或观点。
+- who、facts 和 recent 只能根据 TA 原句写，src 里只放 TA 原句。别人（包括我）说 TA 的话只进 mentions，并写明是谁说的；不得把别人的转述写成 TA 本人的经历或观点。
 - facts 里性格、说话风格、作息习惯这类写 "kind": "trait"，其余写 "fact"。证据不到 5 天时不写 trait。
 - 不推断、不写敏感属性：健康和疾病、性取向、宗教、政治立场、民族、犯罪记录、收入存款负债等财务细节。TA 自己说到了也不写。
 指 TA 时写名字或 TA，不用他、她。每条都写依据的证据编号 src；不写证据里没有的内容。每类不超过 8 条，没有就给空数组。"""
@@ -133,7 +133,7 @@ def segment(name: str, rows: list[dict], s: dict) -> tuple[list[dict], str | Non
     if sum(map(_s, own)) < MIN_SPEECH_S:
         return [], "fragment"
     if name != "我":  # the wearer is near the mic: theirs is most of the speech, rightly
-        labels = {r.get("speaker") for r in rows if r.get("speaker")}
+        labels = {r.get("speaker") for r in rows if r.get("speaker") and heard(r, s)}  # not a TV's: their share is of ok
         if len(labels) >= CROWD and sum(map(_s, own)) / sum(map(_s, ok)) >= CROWD_SHARE:
             return [], "crowd"
         mine = [r for r in rows if r.get("speaker") == name]
@@ -179,11 +179,13 @@ def evidence_v2(name: str, convs: list[dict], mentions: list[dict], rows=lambda 
         n += 1
     for m in mentions:
         s = m.get("summary") or {}
-        hit = next((r for r in m["rows"] if r["start"] == m["at"]), None)
-        if not looked(s) or not hit or not heard(hit, s):
+        if not looked(s):
             continue
-        near = "\n".join(("  >> " if r["start"] == m["at"] else "     ") + f"{r.get('speaker') or 'S?'}: {r['text']}"
-                         for r in m["rows"] if heard(r, s))
+        theirs = {r["start"] for r in segment(name, m["conv_rows"], s)[0]}  # none where that conversation is skipped
+        rs = [r for r in m["rows"] if heard(r, s) and _s(r) >= MIN_ROW_S and (r.get("speaker") != name or r["start"] in theirs)]
+        if m["at"] not in {r["start"] for r in rs}:
+            continue
+        near = "\n".join(("  >> " if r["start"] == m["at"] else "     ") + f"{r.get('speaker') or 'S?'}: {r['text']}" for r in rs)
         add("mention", f"提及 {m['at'][:16].replace('T', ' ')}《{m.get('title') or ''}》：\n{near}", m["conv"], m["at"], m["at"], m.get("title"))
         used[m["conv"]] = sha(m["conv_rows"], s)
     lines.insert(1, f"证据覆盖 {len(days)} 天")
@@ -192,27 +194,42 @@ def evidence_v2(name: str, convs: list[dict], mentions: list[dict], rows=lambda 
 
 
 def check_v2(res: dict, ev: dict[str, dict], days: int) -> dict:
-    """check()'s, and who says it from what is cited, not from the model: by self when a line cites a sentence of the
-    person's own, else others. facts and recent are theirs only (a line citing none of their own is dropped: hearsay
-    is not their view), mentions others' only, open anyone's but hearsay; a trait goes with fewer than TRAIT_DAYS days."""
+    """check()'s, and who says it from what is cited, not from the model: by self only when every sentence a line cites
+    is the person's own; citing anyone else's at all (a mention, mine) makes it others'. who, facts and recent are
+    theirs only: one of others' goes to mentions (hearsay is not their view, nor a sentence of theirs cited beside it);
+    mentions are others' only, open anyone's but hearsay alone; a trait goes with fewer than TRAIT_DAYS days."""
     out = check({**res, "who": ""}, ev)
-    who_src = [e for e in res.get("who_src") or [] if isinstance(e, str) and e in ev]
-    out["who"] = str(res.get("who") or "") if who_src else ""
+    who = check({"facts": [{"text": res.get("who"), "src": res.get("who_src")}]}, ev)["facts"]  # [] when it cites none given
+    by = lambda x: "self" if all(s["kind"] == "self" for s in x["src"]) else "others"
+    own = bool(who) and by(who[0]) == "self"
+    out.update(who=who[0]["text"] if own else "", who_src=who[0]["src"] if own else [])
+    moved = [] if own else who
     kinds = {k: {str(x.get("text")): x.get("kind") for x in res.get(k) or [] if isinstance(x, dict)} for k in LISTS}
     for k in LISTS:
         lines = []
-        for x in out[k]:
-            x["by"] = "self" if any(s["kind"] == "self" for s in x["src"]) else "others"
-            if (k in ("facts", "recent") and x["by"] != "self") or (k == "mentions" and all(s["kind"] == "self" for s in x["src"])) \
-                    or (k == "open" and all(s["kind"] == "mention" for s in x["src"])):
-                continue
+        for x in out[k] + (moved if k == "mentions" else []):
+            x["by"] = by(x)
             if k == "facts" and kinds[k].get(x["text"]) == "trait":
                 if days < TRAIT_DAYS:
                     continue
                 x["kind"] = "trait"
+            if k in ("facts", "recent") and x["by"] != "self":
+                moved.append(x)
+                continue
+            if k == "mentions":
+                x["by"] = "others"
+                if all(s["kind"] == "self" for s in x["src"]):
+                    continue
+            if k == "open" and all(s["kind"] == "mention" for s in x["src"]):
+                continue
             lines.append(x)
         out[k] = lines
     return out
+
+
+def key(text: str, ev: dict[str, dict]) -> str:
+    """What the model is asked: the same again gets no call (an automatic refresh after a conversation that gave nothing)."""
+    return hashlib.sha256(json.dumps([SYSTEM_V2, summary.lang_line(), text, ev], ensure_ascii=False).encode()).hexdigest()[:16]
 
 
 async def profile_v2(name: str, text: str, ev: dict[str, dict], made: dict, upto: str | None) -> dict:
@@ -226,7 +243,7 @@ async def profile_v2(name: str, text: str, ev: dict[str, dict], made: dict, upto
     return {"name": name, "prompt_version": PROMPT_VERSION_V2, "at": dt.datetime.now().isoformat(timespec="seconds"),
             "model": raw.get("model"), "usage": raw.get("usage"), "upto": upto,
             "inputs": {"conversations": made["conversations"], "sentences": n("self"), "todos": n("me"), "mentions": n("mention")},
-            "used": made["used"], "days": made["days"], "skipped": made["skipped"],
+            "used": made["used"], "days": made["days"], "skipped": made["skipped"], "input": key(text, ev),
             **check_v2(res, ev, made["days"])}
 
 

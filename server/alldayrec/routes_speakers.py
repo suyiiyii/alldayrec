@@ -809,17 +809,22 @@ def profile_inputs(name: str) -> tuple[str, dict, dict, str | None]:
     return *profiles.evidence_v2(name, convs, ms, conversation_rows), convs[0]["start"]
 
 
-async def make_profile(name: str) -> dict:
+async def make_profile(name: str, auto: bool = False) -> dict:
     """The person's profile from their 40 latest conversations, their todos and mine to them, and 30 mentions.
     persona_v2: from what they said themselves in the 40 latest conversations that can tell (profiles.evidence_v2),
-    only of a named person, and no call when none can."""
+    only of a named person, and no call when none can; auto (a refresh after a summary): none either when the model
+    would be asked just what it was last time, the stored one kept up to the conversations as they are now."""
     if T().persona_v2:
         if speakers.ANON.fullmatch(name):  # an unnamed voice: nobody the owner named or confirmed
             raise HTTPException(400, "[not_named] 只给命名过的人写档案")
         text, ev, made, upto = await anyio.to_thread.run_sync(profile_inputs, name, limiter=threads.DB)
         if not any(e["kind"] == "self" for e in ev.values()):  # hearsay alone makes no profile
             raise HTTPException(422, f"[no_evidence] 还没有 {name} 自己说的、能当证据的原句")
-        pf = await profiles.profile_v2(name, text, ev, made, upto)
+        pf = db.profile(name)
+        if auto and pf and pf.get("input") == profiles.key(text, ev):
+            pf.update(upto=upto, used=made["used"], skipped=made["skipped"])
+        else:
+            pf = await profiles.profile_v2(name, text, ev, made, upto)
         db.put_profile(pf)
         return pf
     p = await person(name)

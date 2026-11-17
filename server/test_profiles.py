@@ -137,8 +137,8 @@ def test_v2_hearsay_is_never_their_own():
            "open": [{"text": "我要发合同", "src": ["E3"]}, {"text": "TA 周五回来再谈", "src": ["E1"]}, {"text": "TA 答应搬家后请客", "src": ["E2"]}]}
     got = profiles.check_v2(res, ev, days=4)
     assert got["who"] == "", "a who citing nothing given"
-    assert [(x["text"], x["by"]) for x in got["facts"]] == [("要去上海", "self")], "hearsay dropped; a trait needs 5 days"
-    assert got["recent"] == [] and [x["text"] for x in got["mentions"]] == ["李四说 TA 要搬家"]
+    assert [(x["text"], x["by"]) for x in got["facts"]] == [("要去上海", "self")], "hearsay moved; a trait needs 5 days"
+    assert got["recent"] == [] and [x["text"] for x in got["mentions"]] == ["李四说 TA 要搬家", "要搬家", "下个月搬家"]
     assert [(x["text"], x["by"]) for x in got["open"]] == [("我要发合同", "others"), ("TA 周五回来再谈", "self")], "hearsay is no promise"
     assert [x["kind"] for x in profiles.check_v2(res, ev, days=5)["facts"] if x["text"] == "做事稳妥"] == ["trait"]
 
@@ -175,3 +175,76 @@ def test_v2_no_call_without_evidence(monkeypatch):
     with pytest.raises(HTTPException) as e:
         anyio.run(make_profile, "张三")
     assert e.value.status_code == 422
+
+
+def test_v2_any_hearsay_cited_is_others():
+    ev = {"E1": {"conv": "c1", "at": "a", "start": "a", "title": None, "kind": "self"},
+          "E2": {"conv": "c5", "at": "b", "start": "b", "title": None, "kind": "mention"},
+          "E3": {"conv": "c1", "at": "c", "start": "a", "title": None, "kind": "me"}}
+    res = {"facts": [{"text": "李四说TA搬家", "kind": "fact", "src": ["E1", "E2"]}, {"text": "TA 内向", "kind": "trait", "src": ["E1", "E2"]}],
+           "recent": [{"text": "在找房子", "src": ["E2", "E1"]}],
+           "mentions": [{"text": "李四说 TA 要搬家", "src": ["E2", "E1"]}],
+           "open": [{"text": "搬家后请客", "src": ["E1", "E2"]}]}
+    got = profiles.check_v2(res, ev, days=4)
+    assert got["facts"] == [] and got["recent"] == [], "a line citing hearsay at all is not their own"
+    assert [(x["text"], x["by"]) for x in got["mentions"]] == [("李四说 TA 要搬家", "others"), ("李四说TA搬家", "others"), ("在找房子", "others")], \
+        "moved to what others say; a trait under 5 days nowhere"
+    assert [(x["text"], x["by"]) for x in got["open"]] == [("搬家后请客", "others")]
+    only = profiles.check_v2({"who": "李四的同事", "who_src": ["E2"]}, ev, days=4)
+    assert only["who"] == "" and [(x["text"], x["by"]) for x in only["mentions"]] == [("李四的同事", "others")], "a who on hearsay alone"
+    mixed = profiles.check_v2({"who": "同事", "who_src": ["E1", "E3"]}, ev, days=4)
+    assert mixed["who"] == "" and [x["text"] for x in mixed["mentions"]] == ["同事"], "a who citing me too"
+    own = profiles.check_v2({"who": "同事", "who_src": ["E1"]}, ev, days=4)
+    assert own["who"] == "同事" and [x["id"] for x in own["who_src"]] == ["E1"] and own["mentions"] == []
+
+
+def test_v2_mentions_skip_rows_the_gates_skip():
+    """A crowd where 张三's label took most of twelve voices: a mention there carries none of that label's rows, and a
+    mention under a second carries nothing."""
+    db.open_db(Path(tempfile.mkdtemp()) / "t.db")
+    tenant.T().persona_v2 = True
+    d = "2026-10-03T10:00:00.000"
+    rs = [row(d, i * 12, 9, "张三", f"第{i}号柜子里放的是螺丝") for i in range(8)] + \
+         [row(d, 100 + i * 3, 2, f"S{i}", "看看") for i in range(11)] + \
+         [row(d, 9.2, 0.6, "S3", "张三你来一下"), row(d, 33.5, 2, "S4", "张三过来看看这个")]
+    rs.sort(key=lambda r: r["start"])
+    with db.tx() as t:
+        db.insert_sentences(t, rs)
+        db.insert_conversation(t, {"id": "c3", "start": rs[0]["start"], "end": rs[-1]["end"], "device": "mic",
+                                   "participants": sorted({r["speaker"] for r in rs}), "sentences": len(rs), "speech_s": 90.0})
+        db.put_summary({"conversation": "c3", "status": "done", "model": "m", "title": "c3", "summary": "", "people": [],
+                        "ai_spans": [], "media_spans": [], "todos": []}, t)
+    text, ev, made, _ = profile_inputs("张三")
+    assert made["skipped"] == {"crowd": 1} and [e["kind"] for e in ev.values()] == ["mention"]
+    assert ">> S4: 张三过来看看这个" in text, "the mention itself stays"
+    assert "张三你来一下" not in text, "a mention under a second"
+    assert "螺丝" not in text and "张三: " not in text, "the crowd's label is no evidence, around a mention neither"
+
+
+def test_v2_a_tv_is_no_crowd():
+    d = "2026-10-03T10:00:00.000"
+    rs = [row(d, 0, 60, "张三", "我下周要去上海")] + [row(d, 70 + i * 3, 2, f"S{i}", "广告", music=True) for i in range(9)]
+    assert profiles.segment("张三", rs, {"ai_spans": [], "media_spans": []}) == (rs[:1], None), "labels of music played"
+    rs += [row(d, 100 + i * 3, 2, f"S{i + 9}", "看看") for i in range(9)]
+    assert profiles.segment("张三", rs, {"ai_spans": [], "media_spans": []})[1] == "crowd"
+
+
+def test_v2_refresh_asks_nothing_twice(monkeypatch):
+    v2_store()
+    asked = []
+
+    async def complete(messages, kind=None):
+        asked.append(messages)
+        return {"facts": [{"text": "要去上海出差", "src": ["E1"]}]}, {"model": "m"}
+    monkeypatch.setattr(summary, "complete", complete)
+    anyio.run(make_profile, "张三")
+    anyio.run(rename, "c4", {"from": "我", "to": "S9"})  # a row none of the evidence is
+    assert anyio.run(person, "张三")["profile"] is None
+    pf = anyio.run(lambda: make_profile("张三", auto=True))
+    assert len(asked) == 1 and pf["facts"][0]["text"] == "要去上海出差", "the same evidence: no call"
+    assert anyio.run(person, "张三")["profile"]["at"] == pf["at"], "and it stands on the conversations as they are"
+    anyio.run(make_profile, "张三")
+    assert len(asked) == 2, "a tap always asks"
+    anyio.run(rename, "c4", {"from": "张三", "to": "王五"})
+    anyio.run(lambda: make_profile("张三", auto=True))
+    assert len(asked) == 3, "evidence changed: asked again"
