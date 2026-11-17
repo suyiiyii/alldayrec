@@ -3,7 +3,7 @@ goes into the summary with nothing else of it changed, and with the flag off not
 import anyio
 import pytest
 
-from alldayrec import core, db, place, profiles, summaries, summary, tenant
+from alldayrec import core, db, place, profiles, sound_events, summaries, summary, tenant
 
 CID = "c20261020100000"
 START = "2026-10-20T10:00:00.000"
@@ -133,3 +133,17 @@ def test_not_kept_on_a_replaced_summary(model):
     db.put_summary({**made_from, "title": "b", "created_at": "2026-10-20T11:05:00"})  # a redo meanwhile
     assert place.keep(CID, made_from, {"label": None}) is False and "place" not in db.summary(CID)
     assert place.keep(CID, db.summary(CID), {"label": None}) is True and db.summary(CID)["title"] == "b"
+
+
+def test_events_from_the_sound_layer(monkeypatch):
+    asked = []
+
+    def minutes(device, a, b):
+        asked.append((device, a, b))
+        return {1: {"vehicle": 0.8, "speech": 0.5}, 2: {"vehicle": 0.9}, 3: {"quiet": 1.0}, 4: {}}
+    monkeypatch.setattr(sound_events, "minutes", minutes)
+    conv = {"device": "mic", "start": START, "end": "2026-10-20T10:00:03.900"}
+    assert place.events_of(conv) == {"covered": 4, "vehicle": 2, "music": 0, "speech": 1, "quiet": 1}
+    assert asked == [("mic", sound_events.ms(START), sound_events.ms(conv["end"]) + 1000)]  # the span its tags take
+    monkeypatch.setattr(sound_events, "minutes", lambda *a: {})  # off, or no scores
+    assert place.events_of(conv) is None and place.events_of({**conv, "device": None}) is None

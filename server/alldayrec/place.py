@@ -16,6 +16,7 @@ import logging
 import sys
 
 from alldayrec import db
+from alldayrec import sound_events
 from alldayrec import summary
 from alldayrec import tenant
 from alldayrec.core import conversation_rows
@@ -101,9 +102,12 @@ def checked(res, rows: list[dict], s: dict, events: dict | None) -> dict:
 
 
 def events_of(conv: dict) -> dict | None:
-    """The conversation's sound event minutes; None without sound data."""
-    # shortcut: none until the sound events layer (sound-events PR) lands; then its per-conversation durations go here
-    return None
+    """The conversation's sound: minutes with scores ("covered") and the minutes of each event, from the sound events
+    layer (sound_events.minutes, over the span its tags take); None while it is off or has no scores there."""
+    if not conv.get("device"):
+        return None
+    mins = sound_events.minutes(conv["device"], sound_events.ms(conv["start"]), sound_events.ms(conv["end"]) + 1000)
+    return {"covered": len(mins), **{e: sum(e in x for x in mins.values()) for e in SOUNDS}} if mins else None
 
 
 async def infer(conv: dict, rows: list[dict], s: dict) -> dict:
