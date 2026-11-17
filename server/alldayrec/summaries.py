@@ -108,7 +108,8 @@ async def summarize_loop():
                 await name_hints(c, media)
             if res["status"] == "done":
                 await resolve_todos(c)
-                await place.place(c)  # tenant "place" only: one more call, only summary.place written
+                if await place.place(c):  # tenant "place" only: one more call, only summary.place written
+                    await ws.broadcast({"type": "summary", **db.summary(c["id"])})  # the open page shows it
             if res["status"] == "done":  # a profile kept up to date once it exists
                 for p in c.get("participants") or []:
                     if p != "我" and not speakers.ANON.fullmatch(p) and db.profile(p):
