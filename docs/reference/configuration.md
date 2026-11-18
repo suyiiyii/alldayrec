@@ -22,8 +22,9 @@ type: reference
 | `recordings` | 录音目录 |
 | `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。在网页「我的」页切换语言（`PUT /api/lang`）之后，以切换的结果为准，记在这个人的数据库里，重启后也保留 |
 | `sound` | 可选，默认 `false`。`true`：设了 `SOUND_MODEL` 时给这个人的录音自动算环境声音（见下面的[环境声音](#可选-环境声音)）。写没写都一样：设了 `SOUND_MODEL`，修剪就要等环境声音算完 |
-| `seg_emb` | 可选，默认 `false`。`true`：定稿时每个识别分段算出的声纹（ReDimNet2，fp16）存进这个人 `live.db` 的 `seg_emb` 表，不多做任何计算，也不改识别结果。存的是佩戴者附近所有人的声纹，见[隐私](../explanation/privacy.md)。每天约 3 千个分段时约 1.1 MB/天（每个向量 384 字节） |
+| `seg_emb` | 可选，默认 `false`。`true`：定稿时每个识别分段算出的声纹（ReDimNet2，fp16）存进这个人 `live.db` 的 `seg_emb` 表，不多做任何计算，也不改识别结果。存的是佩戴者附近所有人的声纹，见[隐私](../explanation/privacy.md)。每天约 3 千个分段时约 1.1 MB/天（每个向量 384 字节）。只管存，不让 AI 助手读，那是 `voice_tools` |
 | `persona_v2` | 可选，默认 `false`。`true`：人物档案改用这个人自己说的原句当证据，不再用摘要要点；只给命名过的人写，碎片、人多场景里吸走大部分说话的标签、对 AI 说的话、外放媒体和口述都不当证据；改了标签以后旧档案作废。见[隐私](../explanation/privacy.md#人物档案)。`false` 时和以前完全一样。每次生成最多约 2 万个输入 token |
+| `voice_tools` | 可选，默认 `false`。`true`：接入的 AI 助手（MCP 的 `voiceprint`、`voice_compare`、`voice_nearest`，HTTP 的 `GET /api/voiceprint*`）可以读任意一句（或句里一段）的声纹，和别的句子、认出名字的人、「我」、对话里的标签比相似度，用来自己核对是谁说的。只读：`seg_emb` 存过的直接用，没存的从录音现算、算完不存，所以不开 `seg_emb` 也能用。现算一次最多 15 秒录音，整个进程同时只算一个，多的立刻返回「正在算别的声纹」；用推理服务（`INFER_URL`）时只试一次、最多 10 秒，推理服务出故障时直接报错，不影响定稿。`false` 时这些工具和接口都不存在。和 `seg_emb` 是两个独立的决定：`seg_emb` 管「把所有人的声纹存进库」，`voice_tools` 管「允许 AI 助手读声纹」。见[隐私](../explanation/privacy.md) |
 | `place` | 可选，默认 `false`。`true`：每段对话写完摘要后，再单独调用一次大模型（`calls` 里记作 `place`），根据转写、这段的环境声音和时间推断「可能在哪里」，附上依据（哪句话、哪类声音），存进摘要的 `place` 字段，显示在对话页摘要顶部；没把握时不显示，医院、宗教场所、警局法院这类敏感场所默认不推断（见下面的 `place_sensitive`）。摘要的其他字段一个不改，人物档案不受影响。见[隐私](../explanation/privacy.md#可能在哪里)。`false` 时和以前完全一样。每段约 6 千个输入 token（主要是转写） |
 | `place_sensitive` | 可选，默认 `false`。开了 `place` 时才有用。`true`：看病的地方、宗教场所、政治集会、警局法院、戒断机构、性少数相关场所也照常推断和显示，提示词去掉这类禁令（`prompt_version` 3），代码也不再按敏感词过滤；要有原句依据等其他规则不变。见[隐私](../explanation/privacy.md#可能在哪里)。`false` 时和没有这个开关完全一样 |
 
