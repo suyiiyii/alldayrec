@@ -261,8 +261,13 @@ def reports(limit: int = 30) -> str:
 # voice tools (tenant "voice_tools"): voice_tools.py's answers as text; the voiceprint itself only as structuredContent
 
 VOICE = ("voiceprint", "voice_compare", "voice_nearest")
-VOICE_HINT = (f"\n\n（相似度是余弦，1 最像。参考：同一个人的句子多在 {PEOPLE_MIN} 以上，不同的人多在 0.63 以下；"
-              "短于 1 秒的、外放的、几个人一起说的不可靠。声纹只是证据之一：结合说的内容、谁在回应谁、对话里还有谁来判断）")
+CAVEAT = "短于 1 秒的、外放的、几个人一起说的不可靠。声纹只是证据之一：结合说的内容、谁在回应谁、对话里还有谁来判断）"
+# the 0.7 / 0.63 are a cluster's mean against a person's samples (diarist.OWNER_MIN, PEOPLE_MIN); one sentence runs lower,
+# two sentences of one person can be 0.66 and a split cuts at 0.35: no line for those
+KNOWN_HINT = (f"\n\n（相似度是余弦，1 最像。参考：一个人的多句平均后和 TA 的声纹多在 {PEOPLE_MIN} 以上，别人多在 0.63 以下；"
+              "单独一句、一小段会更低，看排名和差距，不要只看绝对值。" + CAVEAT)
+PAIR_HINT = ("\n\n（相似度是余弦，1 最像。两句之间没有固定的界线，同一个人的两句也可能只有 0.6 上下："
+             "拿这段对话里确定是同一个人的一句当参照比。" + CAVEAT)
 SPAN = {"from_s": {"type": "number", "description": "只看这句里的一段：从第几秒起（不填从头）"},
         "to_s": {"type": "number", "description": "到第几秒（不填到句末，一段最多 15 秒、至少 0.5 秒）"}}
 REF = {"type": "string", "description": "句子：grep 结果里的句子 id，或「对话 id@时:分:秒」（transcript 每行开头的时间）"}
@@ -281,7 +286,8 @@ def whom(c: dict) -> str:
     if c["kind"] == "person":
         return f"{c['name']}（{'录音者本人' if c['name'] == '我' else '认出名字的人'}，{c['samples']} 个声纹样本里最近的" + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + "）"
     if c["kind"] == "label":
-        return f"{c['label']}（对话 `{c['conv']}` 里这个标签的声纹" + ("；这句就是它的来源之一，偏高" if c["in_it"] else "") + "）"
+        return f"{c['label']}（对话 `{c['conv']}` 里这个标签的声纹" + ("；这句就是它的来源之一，偏高" if c["in_it"]
+                else "；不知道这句是不是它的来源之一，可能偏高" if c["in_it"] is None else "") + "）"
     return "另一句 " + said(c)
 
 
@@ -301,7 +307,7 @@ def voice_compare(sentence: str, from_s: float | None = None, to_s: float | None
     w = c["with"]
     parts = "；".join(f"第 {p['from']:g}–{p['to']:g} 秒 {p['score']}" for p in c["parts"])
     return (f"# 相似度 {c['score']}\n- 这句：{said(c)}\n- 比的是：{whom(w)}" + (f"\n- 各段：{parts}（各段差得多，可能一句里有两个人）" if parts else "")
-            + VOICE_HINT)
+            + (PAIR_HINT if w["kind"] == "sentence" else KNOWN_HINT))
 
 
 def voice_nearest(sentence: str, from_s: float | None = None, to_s: float | None = None, n: int = 5) -> str:
@@ -309,7 +315,7 @@ def voice_nearest(sentence: str, from_s: float | None = None, to_s: float | None
     out = [f"# 最像的 {len(x['nearest'])} 个（共比了 {x['known']} 个：认出名字的人、「我」、这段对话的各个标签）", f"这句：{said(x)}"]
     out += [f"- {c['score']} {whom(c)}" for c in x["nearest"]] or ["- 还没有任何人的声纹可比"]
     out += [f"- 第 {p['from']:g}–{p['to']:g} 秒这段最像 {whom(p['best'])} {p['best']['score']}" for p in x["parts"] if p["best"]]
-    return "\n".join(out) + VOICE_HINT
+    return "\n".join(out) + KNOWN_HINT
 
 
 def mark_todo(id: str, text: str, mark: str) -> str:

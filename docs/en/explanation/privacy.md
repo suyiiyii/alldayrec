@@ -25,6 +25,7 @@ There is no account to sign up for. Web/API access uses the tokens in `tenants.j
 | A question said aloud (「问 AI」 (Ask AI), hold to talk) | Alibaba Bailian's streaming speech recognition, only when one of `ENGINE`, `DRAFT_ENGINE`, `ENGINE_FALLBACK` is already `qwen` or `qwen-stream`; otherwise the service of the row above | As it is said; when the streaming recognition fails, the whole of it goes to the service of the row above |
 | Transcript text | The LLM service that `LLM_BASE_URL` points at | When it writes summaries, name hints, people cards, the daily recap, the live analysis and place guesses (tenant `place` on), and when it answers 「问 AI」 (Ask AI). A conversation with under 60 seconds of speech gets no summary, unless 「立即总结」 (Summarize now) was tapped while it was going on |
 | The transcripts and summaries your AI agent looks up | The vendor behind your own AI agent | Once you connect it over [MCP](../how-to/connect-mcp.md), each time the agent calls a tool |
+| Voiceprint vectors and similarity scores (`voice_tools` on) | The vendor behind your own AI agent | When the agent calls `voiceprint`, `voice_compare`, `voice_nearest` |
 | Metrics (`lr_*`, no content) | `VM_INGEST_URL` | Once a minute, only when that variable is set |
 
 Each of these services has its own terms. To keep both the audio and the text on your own machines, use `ENGINE=local` and point `LLM_BASE_URL` at an OpenAI-compatible server you run yourself (vLLM, llama.cpp, Ollama); the model must handle tool calls and JSON output.

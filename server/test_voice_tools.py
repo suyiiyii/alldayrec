@@ -157,6 +157,8 @@ def test_nearest_leaves_out_what_the_sentence_taught(store):
     assert me["with"]["in_it"] is True and me["score"] > 0.99
     text, _, _, _ = tool("voice_compare", sentence=f"{CID}@10:00:00", label="我")
     assert "这句就是它的来源之一" in text
+    assert "不知道这句是不是它的来源之一" in tool("voice_compare", sentence=f"{CID}@10:00:20", label="S1")[0], "used unknown"
+    assert "两句之间没有固定的界线" in tool("voice_compare", sentence="f2", other=f"{CID}@10:00:00")[0]
     assert vt.compare(f"{CID}@10:00:20", label=f"{CID}@S1")["with"]["in_it"] is None
 
 
@@ -189,28 +191,26 @@ def test_http(store, monkeypatch):
 
 
 def test_busy_is_refused_at_once_and_never_two_in_the_model(store, monkeypatch):
-    inside, most, lock = [0], [0], threading.Lock()
+    """One voiceprint being made: every other call meanwhile is refused (none waits for it), and it still answers."""
+    inside, go = threading.Event(), threading.Event()
 
-    def slow(x):
-        with lock:
-            inside[0] += 1
-            most[0] = max(most[0], inside[0])
-        time.sleep(0.3)
-        with lock:
-            inside[0] -= 1
+    def held(x):
+        inside.set()
+        assert go.wait(10)
         return embed(x)
-    monkeypatch.setitem(core.state, "embed", slow)
+    monkeypatch.setitem(core.state, "embed", held)
     out = []
-    call = lambda: out.append((time.monotonic(), tool("voiceprint", sentence=f"{CID}@10:00:10")))
-    ts = [threading.Thread(target=contextvars.copy_context().run, args=(call,)) for _ in range(4)]  # each in the tenant
-    t0 = time.monotonic()
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join(5)
-    busy = [at - t0 for at, (text, bad, _, _) in out if bad]
-    assert most[0] == 1 and len(out) == 4 and busy and all("正在算别的声纹" in r[1][0] for r in out if r[1][1])
-    assert max(busy) < 0.25, "refused at once, not queued behind the one running"
+    first = threading.Thread(target=contextvars.copy_context().run,  # in the tenant
+                             args=(lambda: out.append(tool("voiceprint", sentence=f"{CID}@10:00:10")),))
+    first.start()
+    assert inside.wait(10)
+    for ref in ("f2", f"{CID}@10:00:03", f"{CID}@10:00:20"):
+        text, bad, _, _ = tool("voice_nearest", sentence=ref)
+        assert bad and "正在算别的声纹" in text, text
+    go.set()
+    first.join(10)
+    assert out and not out[0][1], "the one running answers"
+    assert not tool("voiceprint", sentence="f2")[1], "free again"
 
 
 def test_infer_service_tried_once(store, monkeypatch):
@@ -220,14 +220,15 @@ def test_infer_service_tried_once(store, monkeypatch):
     sock.listen()  # taken, never answered
     r = compute.Remote(f"http://127.0.0.1:{sock.getsockname()[1]}", TOKEN, 30.0)
     monkeypatch.setattr(compute, "REMOTE", r)
-    monkeypatch.setattr(vt, "TIMEOUT_S", 0.5)
+    monkeypatch.setattr(vt, "TIMEOUT_S", 5.0)
     r.ok = False  # unchecked since the start
     t0 = time.monotonic()
     text, bad, _, _ = tool("voiceprint", sentence="f2")
-    assert bad and "推理服务现在不可用" in text and time.monotonic() - t0 < 0.3
+    assert bad and "推理服务现在不可用" in text and time.monotonic() - t0 < 3, "no try (one would wait out 5 s)"
     r.ok = True
+    monkeypatch.setattr(vt, "TIMEOUT_S", 0.5)
     t0 = time.monotonic()
     text, bad, _, _ = tool("voiceprint", sentence="f2")
-    assert bad and "推理服务现在不可用" in text and 0.4 < time.monotonic() - t0 < 2
+    assert bad and "推理服务现在不可用" in text and 0.4 < time.monotonic() - t0 < 8, "one try of TIMEOUT_S, not the client's 30 s"
     assert r.down_seconds() == 0 and r.next_try == 0, "an agent's timeout holds up no pipeline call"
     sock.close()

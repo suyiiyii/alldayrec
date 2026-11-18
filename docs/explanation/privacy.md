@@ -25,6 +25,7 @@ AllDayRec 的出发点是：全天的录音是很私人的数据，应该放在�
 | 说出的问题（「问 AI」按住说话） | 阿里云百炼的流式语音识别，只在 `ENGINE`、`DRAFT_ENGINE`、`ENGINE_FALLBACK` 里已有 `qwen` 或 `qwen-stream` 时；否则是上面那一行的服务 | 边说边发；流式识别失败时整段再交给上面那一行的服务 |
 | 转写文字 | `LLM_BASE_URL` 指向的大模型服务 | 写摘要、名字提示、人物卡片、每日回顾、实时分析、推断地点（租户开了 `place`），以及回答「问 AI」时。说话不到 60 秒的对话不写摘要（进行中时点过「立即总结」的除外） |
 | 你的 AI 助手查到的转写和摘要 | 你自己的 AI 助手用的厂商 | 你用 [MCP](../how-to/connect-mcp.md) 接入之后，助手每次调用工具时 |
+| 声纹向量和相似度分数（`voice_tools` 开着时） | 你自己的 AI 助手用的厂商 | 助手调用 `voiceprint`、`voice_compare`、`voice_nearest` 时 |
 | 监控指标（`lr_*`，不含内容） | `VM_INGEST_URL` | 只有设了这个变量时，每分钟一次 |
 
 这些服务各有自己的条款。想做到音频和文字都不出自己的机器：用 `ENGINE=local`，再把 `LLM_BASE_URL` 指向你自己运行的 OpenAI 兼容服务（vLLM、llama.cpp、Ollama），模型要支持工具调用和 JSON 输出。
