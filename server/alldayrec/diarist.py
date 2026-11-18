@@ -142,20 +142,35 @@ class Diarist:
 
 
 GUARD = float(os.environ.get("DIAR_GUARD", "0.6"))  # an engine group whose long sentence is this far from the group's mean voiceprint is split
+# > 0: in place of GUARD, a sentence stays in its engine group only when its voiceprint is this close to the mean of the
+# group's other long sentences, else it is alone (a short one then joins the nearest voice, not its mates). #457, the
+# #419 GT at 0.5: one-person sentences cut 8.2% -> 7.4%, speaker changes found 0.50 -> 0.63. 0: GUARD
+AGREE = float(os.environ.get("DIAR_AGREE", "0"))
 
 
 def relabel(E: list, dur: list[float], bank: dict[str, np.ndarray], groups: list | None = None,
-            people: dict[str, np.ndarray] | None = None, th: float = TH, guard: float | None = GUARD) -> list[str]:
+            people: dict[str, np.ndarray] | None = None, th: float = TH, guard: float | None = GUARD,
+            agree: float = AGREE) -> list[str]:
     """Labels for a whole conversation at once, after it closed: the online labels of a sentence were fixed with only
     the sentences before it. E: unit voiceprints (None: too short to embed); dur: seconds; groups: per sentence a key
     the engine gives (its speaker id within one piece): sentences sharing one are clustered as one unit, their mean
-    voiceprint, so a turn's short sentences follow its long ones. Same rules as add(): 我 when a cluster of MIN_ME
-    sentences is OWNER_MIN close to the bank, a name PEOPLE_MIN close to a named voice (the closer wins), else S<n> in order of first
+    voiceprint, so a turn's short sentences follow its long ones (agree: only those whose voice agrees). Same rules as
+    add(): 我 when a cluster of MIN_ME sentences is OWNER_MIN close to the bank, a name PEOPLE_MIN close to a named voice (the closer wins), else S<n> in order of first
     appearance; a sentence in no cluster joins the nearest labelled centroid at JOIN, else S?."""
     from sklearn.cluster import AgglomerativeClustering
     bank_v = [_unit(v) for v in bank.values()]
     people = {k: _rows(v) for k, v in (people or {}).items()}
     keys = groups if groups is not None else list(range(len(E)))
+    if groups is not None and agree > 0:
+        keys, by = list(keys), {}
+        for i, k in enumerate(keys):
+            by.setdefault(k, []).append(i)
+        for m in by.values():
+            for i in m:
+                others = [E[j] for j in m if j != i and E[j] is not None and dur[j] >= MIN_DUR]
+                if E[i] is not None and others and float(E[i] @ _unit(np.mean(others, 0))) < agree:
+                    keys[i] = ("alone", i)
+        guard = None
     units: dict = {}
     for i, k in enumerate(keys):
         if E[i] is not None:
@@ -232,6 +247,13 @@ if __name__ == "__main__":
     assert {l for l, v in zip(lab, seq) if v is a}.isdisjoint({l for l, v in zip(lab, seq) if v is b}), lab
     mixed = relabel(E, [2.0] * len(E), {"dji-mac": noisy(me)}, groups=["one"] * len(E))  # an engine id over everyone
     assert mixed == lab, "a group whose voices disagree falls apart instead of making one speaker"
+    # an engine id over a's turn and b's quick short reply: b's mates' label by default, its own voice with agree
+    Eq, dq = E + [noisy(a), noisy(a), noisy(b)], [2.0] * len(E) + [2.0, 2.0, 0.6]
+    gq = [("alone", i) for i in range(len(E))] + [("p", 1)] * 3
+    a_lab, b_lab = (lab[next(i for i, v in enumerate(seq) if v is w)] for w in (a, b))
+    assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq)[-1] == a_lab != b_lab
+    assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq, agree=0.5)[-3:] == [a_lab, a_lab, b_lab]
+    assert relabel(Eq, dq, bank_q := {"dji-mac": noisy(me)}, gq, agree=0) == relabel(Eq, dq, bank_q, gq), "0: GUARD, as before"
     # someone who sounds like the owner on this recorder: their cluster passes the bank too; named, the closer voice wins
     f = _unit(0.76 * me + np.sqrt(1 - 0.76 ** 2) * b)
     seq2 = [me, f, f, me] * 8
