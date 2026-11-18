@@ -13,6 +13,7 @@ import types
 import anyio
 import numpy as np
 import pytest
+from onnxruntime.capi.onnxruntime_pybind11_state import InvalidArgument
 
 from alldayrec import audio
 from alldayrec import late
@@ -263,6 +264,63 @@ def test_remote_scene(scene_service, monkeypatch):
     assert r.next_try > time.monotonic() + 3, "the scene Remote waits"
     t = time.monotonic()
     assert compute.Remote(scene_service, TOKEN, 5.0).embed(x).shape == (compute.DIM,) and time.monotonic() - t < 2
+
+
+class Mn10Like:
+    """mn10_as.onnx's input limit without its file (CI): under 257 samples its mel's reflect pad fails."""
+    def run(self, _, feed):
+        if feed["wav"].shape[1] < 257:
+            raise InvalidArgument("Pad reflect: pre-pad (512) exceeds maximum allowed")
+        return [np.full((1, 527), np.abs(feed["wav"]).mean(), np.float32)]
+
+
+def mn10(monkeypatch):
+    """mn10_as through sound.scores: the real model when its file is here, else Mn10Like."""
+    sound._session.cache_clear()
+    if not (infer.DIR / infer.MN10).is_file():
+        monkeypatch.setattr(sound, "_session", lambda name: Mn10Like())
+
+
+@pytest.mark.parametrize("n", [1, 80, 256, 257, SR])
+def test_mn10_short_audio(scene_service, monkeypatch, n):
+    """A hole of a few ms (80 samples, 5 ms, once stopped a tenant's scene scores) gets its window's scores, here and
+    through the service (sound.scores pads it)."""
+    mn10(monkeypatch)
+    x = tone(5, 1)[:n]
+    assert sound.scores("mn10_as", x).shape == (1, 527)
+    monkeypatch.setitem(infer_server.state, "compute", types.SimpleNamespace(scene=sound.scores))  # compute.Local's
+    r = compute.Remote(scene_service, TOKEN, 5.0, scene=sound.files())
+    monkeypatch.setattr(r, "failed", lambda op, e: pytest.fail(f"{op}: {e!r}"))
+    assert np.allclose(r.scene("mn10_as", x), sound.scores("mn10_as", x), atol=1e-3)
+
+
+def test_remote_scene_bad_input(scene_service, monkeypatch):
+    """Samples the model will not take: a 422, not tried again and no failure of the service, the next call at once."""
+    def scene(name, x):
+        if len(x) < 257:
+            raise InvalidArgument("Pad reflect: pre-pad (512) exceeds maximum allowed")
+        return fake(name, x)
+    monkeypatch.setitem(infer_server.state, "compute", types.SimpleNamespace(scene=scene))
+    r = compute.Remote(scene_service, TOKEN, 5.0, scene=sound.files())
+    monkeypatch.setattr(r, "failed", lambda op, e: pytest.fail(f"{op} taken for the service failing: {e!r}"))
+    with pytest.raises(Exception, match="422"):
+        r.scene("mn10_as", np.zeros(80, np.int16))
+    assert r.down_since is None and r.scene("mn10_as", tone(5, 2)).shape == (1, 527)
+
+
+def test_hole_of_a_few_ms(on, monkeypatch):
+    """Live pieces 5 ms apart (one row, the 5 ms its gap), then a card's piece over the gap: a 5 ms hole, scored by
+    mn10_as itself (no stand-in for sound.scores) as a row of its own; nothing left."""
+    mn10(monkeypatch)
+    monkeypatch.setattr(sound, "scene", sound.scores)
+    t0 = dt.datetime.fromtimestamp(time.time() - 3 * 86400).replace(second=0, microsecond=0)
+    pieces(t0, (0, 1), (1.005, 1))
+    catch_up(["mn10_as"])
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 2005]]
+    pieces(t0, (0.5, 1))
+    assert catch_up(["mn10_as"]) == 1
+    assert [[a - ms(t0), b - ms(t0)] for a, b, _ in rows("mn10_as")] == [[0, 2005], [1000, 1005]]
+    assert not T().scene_retry.get((DEVICE, "mn10_as")) and catch_up(["mn10_as"]) == 0
 
 
 def test_gate_strict(tmp_path, monkeypatch):

@@ -5,7 +5,8 @@
 POST /embed, /music, /segment and /scene/<model> (one of SOUND_MODEL's, sound.py): the body is int16 little-endian 16 kHz
 samples (application/octet-stream), or float32 ones at int16's scale (F32, application/x-f32le: a device's calibrated
 audio, gain.py; finite, else 400), at most MAX_S s, /segment SEG_S, else 413, with "Authorization: Bearer
-$INFER_TOKEN"; the answer {"embedding": [192 floats]}, {"music": bool}, {"frames": [589 x 7 floats]} (pyannote's
+$INFER_TOKEN"; samples the model will not take (onnxruntime's InvalidArgument) 422, like 413 the call's, not the
+service's failure; the answer {"embedding": [192 floats]}, {"music": bool}, {"frames": [589 x 7 floats]} (pyannote's
 log-probabilities, transcript.segment) or {"shape": [frames, classes], "scores": base64 float16} (sound.encode; one
 call at a time, threads.SOUND).
 GET /health: {"ok": true}, with the token also its model files' sha256, compute.DIM, formats (the bodies it takes: the
@@ -30,6 +31,7 @@ import anyio.to_thread
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from onnxruntime.capi.onnxruntime_pybind11_state import InvalidArgument
 
 from alldayrec import compute
 from alldayrec import infer
@@ -73,6 +75,9 @@ async def run(op: str, request: Request, f, most: int = MAX_S, limiter=threads.I
     t = time.perf_counter()
     try:
         out = await anyio.to_thread.run_sync(f, x, limiter=limiter)
+    except InvalidArgument as e:  # the model will not take these samples: this call's, no try helps (not the service)
+        CALLS[op, "422"] += 1
+        return JSONResponse({"error": f"the model takes no such input: {str(e)[:300]}"}, 422)
     except Exception:
         CALLS[op, "500"] += 1
         raise
