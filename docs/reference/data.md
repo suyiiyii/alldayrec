@@ -112,6 +112,15 @@ uv run python -m alldayrec.place backfill --tenant <ID> --days 7
 
 只处理含今天共 N 天里开始、摘要已调用过大模型、还没有 `place` 的对话，一段接一段（有失败的退出码为 1，重跑接着补剩下的）；只在摘要的 JSON 里加 `place` 一个字段，标题、待办和标记、人物档案都不动。补的时候某段摘要被重写了，这段就跳过，由重写后的摘要自己推断。租户没开 `place` 时直接退出。
 
+开了 `place_sensitive` 以后，之前因为敏感场所被留空的地点可以单独重推（`--dry-run` 先看段数）：
+
+```sh
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --redo-sensitive --dry-run
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --redo-sensitive
+```
+
+库里不记留空的原因，所以按这个挑：地点为空、用的是默认提示词（`prompt_version` 2）、说给人听的原句里有敏感词表里的词。只是没把握、原句里恰好有这类词（比如「卫生间」）的也会重推一次；模型因敏感拒答、原句里却没有这类词的挑不到。重推后的是 3，不会再挑中。租户没开 `place_sensitive` 时直接退出。
+
 ## 环境声音 sounds
 
 主键是（`device`、`model`、`start_ms`）。`model` 是模型名加模型文件 sha256 的前 12 位（例如 `mn10_as@58d4c290739e`），换了模型文件就是另一个模型，旧的行原样留着。每一行是一段解出来的连续音频，最长 300 秒：

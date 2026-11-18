@@ -100,7 +100,8 @@ def test_prompt_marks_media_and_ai_lines(tmp_path):
 class Model:
     """The summary call, then the place call (and any other call the worker makes after a summary)."""
     def __init__(self):
-        self.kinds = []
+        self.kinds, self.system = [], []
+        self.place = {"label": "车上", "detail": "高速上", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
 
     async def chat(self, text, *args):
         return {"title": "开车去海边", "summary": "去海边", "todos": [], "media_spans": [{"from": "10:00:02", "to": "10:00:02"}],
@@ -109,7 +110,8 @@ class Model:
     async def complete(self, messages, timeout=300, kind="summary", **extra):
         self.kinds.append(kind)
         if kind == "place":
-            return {"label": "车上", "detail": "高速上", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}, {"model": "m"}
+            self.system.append(messages[0]["content"])
+            return self.place, {"model": "m"}
         return {}, {"model": "m"}
 
 
@@ -193,3 +195,77 @@ def test_events_from_the_sound_layer(monkeypatch):
     assert asked == [conv]
     monkeypatch.setattr(sound_events, "tags", lambda c: None)  # off, no scores or no tag
     assert place.events_of(conv) is None
+
+
+CLINIC = [("我们到社区卫生服务中心了", "社区卫生服务中心"), ("我们在教会聚会", "教会")]
+
+
+def test_sensitive_off_as_before(model):
+    """place_sensitive off (the default): the v2 prompt with its ban, and a sensitive place blanked, as before it existed."""
+    assert tenant.T().place_sensitive is False
+    assert place.OPEN != place.SYSTEM and "敏感场所" in place.SYSTEM and "敏感场所" not in place.OPEN
+    assert place.OPEN == place.SYSTEM.replace(next(x for x in place.SYSTEM.split("\n") if x.startswith("- 敏感场所")) + "\n", "")
+    tenant.T().place = True
+    model.place = {"label": "其他", "detail": "高速", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
+    summarize_once()
+    assert model.system == [place.SYSTEM + "\n" + summary.lang_line()]
+    assert db.summary(CID)["place"]["prompt_version"] == place.PROMPT_VERSION == 2
+    r = rows()
+    for text, detail in CLINIC:
+        res = {"label": "其他", "detail": detail, "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
+        assert place.checked(res, [dict(r[0], text=text)], {}, None) == {"label": None}
+
+
+def test_sensitive_on_shows_them(model):
+    tenant.T().place = tenant.T().place_sensitive = True
+    model.place = {"label": "其他", "detail": "教会", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
+    with db.tx() as t:  # the first sentence names the church
+        t.execute("UPDATE sentences SET text = '我们在教会聚会' WHERE start = ?", (rows()[0]["start"],))
+    summarize_once()
+    p = db.summary(CID)["place"]
+    assert model.system == [place.OPEN + "\n" + summary.lang_line()]
+    assert (p["label"], p["detail"], p["prompt_version"]) == ("other", "教会", place.OPEN_VERSION), p
+    r = rows()
+    for text, detail in CLINIC:
+        res = {"label": "其他", "detail": detail, "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
+        got = place.checked(res, [dict(r[0], text=text)], {}, None, open_=True)
+        assert got["label"] == "other" and got["detail"] == detail and got["evidence"][0]["text"] == text, got
+
+
+def test_sensitive_on_still_needs_a_sentence():
+    """Open, every other rule holds: no sentence said to people (a video's, a song's, a dictation, to an AI, none, a
+    sound alone): no place; a detail no kept sentence says: none."""
+    r = [*rows(), dict(rows()[0], id="r9", start="2026-10-20T10:00:09.000", text="我们到社区卫生服务中心了")]
+    spans = {"media_spans": [{"from": r[-1]["start"], "to": r[-1]["start"]}], "ai_spans": SPANS["ai_spans"]}
+    for at in ("10:00:09", "10:00:03", "10:00:05", "10:00:06", "10:09:99"):
+        res = {"label": "其他", "detail": "社区卫生服务中心", "confidence": "high", "evidence": [{"kind": "line", "at": at}]}
+        assert place.checked(res, r, spans, None, open_=True) == {"label": None}, at
+    assert place.checked({"label": "其他", "detail": "医院", "confidence": "high", "evidence": [{"kind": "sound", "event": "vehicle"}]},
+                         r, spans, {"covered": 20, "vehicle": 18}, open_=True) == {"label": None}
+    got = place.checked({"label": "其他", "detail": "妇产医院", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]},
+                        r, spans, None, open_=True)
+    assert got["label"] == "other" and got["detail"] == "", got
+
+
+def test_redo_only_the_blanked(model):
+    """--redo-sensitive: an empty v2 place with a sensitive stem in a sentence said to people, and nothing else."""
+    tenant.T().place = True
+    with db.tx() as t:
+        t.execute("UPDATE sentences SET text = '我们到社区卫生服务中心了' WHERE start = ?", (rows()[0]["start"],))
+    conv = db.conversation(CID)
+    base = {"conversation": CID, "status": "done", "model": "m", "title": "a", "created_at": "2026-10-20T11:00:00"}
+    empty = {"label": None, "prompt_version": 2, "model": "m", "at": "2026-10-20T11:01:00"}
+    assert place.blanked(conv, {**base, "place": empty})
+    for s in ({**base, "place": {**empty, "prompt_version": 3}},  # asked open already
+              {**base, "place": {**empty, "label": "other"}},  # a place shown
+              base,  # none yet: the plain backfill's
+              {**base, "status": "pending", "place": empty},
+              {**base, "place": empty, "media_spans": [{"from": rows()[0]["start"], "to": rows()[0]["start"]}]}):  # a video said it
+        assert not place.blanked(conv, s), s
+    db.put_summary({**base, "place": empty})
+    assert anyio.run(place.place, conv) is None, "not due: it has a place"
+    tenant.T().place_sensitive = True
+    model.place = {"label": "其他", "detail": "社区卫生服务中心", "confidence": "high", "evidence": [{"kind": "line", "at": "10:00:00"}]}
+    p = anyio.run(place.place, conv, True)
+    assert p["detail"] == "社区卫生服务中心" and p["prompt_version"] == 3 and db.summary(CID)["place"] == p and db.summary(CID)["title"] == "a"
+    assert anyio.run(place.place, conv, True) is None and len(model.system) == 1, "v3 now: never again"

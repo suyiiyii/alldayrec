@@ -112,6 +112,15 @@ uv run python -m alldayrec.place backfill --tenant <ID> --days 7
 
 It takes the conversations started in the last N days (today included) whose summary made an LLM call and has no `place` yet, one at a time (exit code 1 when any failed; a rerun does the rest), and adds that one field to the summary JSON: titles, todos and their marks, and people profiles stay as they are. A summary rewritten meanwhile is skipped; the new one makes its own. It exits when the tenant has `place` off.
 
+With `place_sensitive` turned on later, the places left empty as sensitive can be guessed again on their own (`--dry-run` first for the count):
+
+```sh
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --redo-sensitive --dry-run
+uv run python -m alldayrec.place backfill --tenant <ID> --days 7 --redo-sensitive
+```
+
+The store keeps no reason for an empty place, so it picks: an empty place from the default prompt (`prompt_version` 2) whose sentences said to people have a word of the sensitive list. An unsure one that happens to have such a word (卫生间, a restroom) is asked again too; a refusal with no such word in its sentences is not picked. A redone place is version 3 and never picked again. It exits when the tenant has `place_sensitive` off.
+
 ## Environmental sound (sounds)
 
 The key is (`device`, `model`, `start_ms`). `model` is the model's name and the first 12 hex digits of its file's sha256 (for example `mn10_as@58d4c290739e`): another model file is another model, and the old rows stay as they are. Each row is one stretch of decoded audio, at most 300 s:
