@@ -72,8 +72,25 @@ const c = ref<
   missing = ref(false), // the server says there is none (404); not a load that failed
   failed = ref<{ msg: string; title: string } | null>(null); // the first load failed: the page has nothing to show
 const s = computed(() => c.value?.summary ?? null);
-const media = (r: Row) => inSpans(r, s.value?.media_spans);
-const segs = computed(() => fold(c.value?.rows ?? [], media));
+// tenant media_view: a run played aloud (外放) or broadcast (广播/提示音) folded whatever its length, with 改回现场;
+// else media rows as before
+const view = computed(() => !!c.value?.media_view);
+const kind = (r: Row) =>
+  inSpans(r, s.value?.media_spans) ? "media" : view.value && inSpans(r, s.value?.broadcast_spans) ? "broadcast" : false;
+const media = (r: Row) => !!kind(r);
+const segs = computed(() => (view.value ? fold(c.value?.rows ?? [], kind, 1) : fold(c.value?.rows ?? [], media)));
+async function toLive(rows: Row[]) {
+  try {
+    await post(`/api/conversation/${encodeURIComponent(props.id)}/live`, {
+      from: rows[0].start,
+      to: rows.at(-1)!.start,
+    });
+    toast(t("conv.toLive"));
+    await reload();
+  } catch (e) {
+    toast((e as Error).message);
+  }
+}
 
 // a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
 async function load() {
@@ -685,7 +702,16 @@ function edit(label: string) {
               :menu="press"
               :who="edit"
             />
-            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" :who="edit" />
+            <MediaFold
+              v-else
+              :rows="g.rows"
+              :kind="g.kind"
+              :live="view ? toLive : undefined"
+              :hit="hit"
+              :seek="seekRow"
+              :menu="press"
+              :who="edit"
+            />
           </template>
           <Scrubber
             :stops="scrubStops"

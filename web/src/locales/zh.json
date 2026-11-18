@@ -196,6 +196,7 @@
     "otherListen": "听 {d} 录的",
     "other": "{d} 也录到了这段",
     "regenerating": "摘要重新生成中",
+    "toLive": "已改回现场",
     "made": "AI 摘要 · {at}，由 {model} 生成",
     "madeLive": "AI 摘要 · {at}，由 {model} 生成，会中实时分析写的",
     "noteThanks": "收到，会用来改进",
@@ -498,7 +499,10 @@
     "history": "导入记录"
   },
   "mediaFold": {
-    "line": "媒体 {from}–{to} · {n} 句"
+    "line": "媒体 {from}–{to} · {n} 句",
+    "media": "外放 {from}–{to} · {n} 句",
+    "broadcast": "广播/提示音 {from}–{to} · {n} 句",
+    "live": "改回现场"
   },
   "monthGrid": {
     "min": "{n} 分"

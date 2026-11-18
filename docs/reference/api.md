@@ -338,6 +338,12 @@ type: reference
 |---|---|---|
 | `GET` | （无说明） | `conv_id` (path, string) |
 
+### `/api/conversation/{conv_id}/live`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | 改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the summary's spans, and out of a redo's (summary.keep_live). | `conv_id` (path, string)<br>body: JSON object |
+
 ### `/api/conversation/{conv_id}/feedback`
 
 | 方法 | 说明 | 参数 |

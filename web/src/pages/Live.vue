@@ -176,7 +176,8 @@ const stops = computed<Stop[]>(() => {
 // the closed conversation a row is in (none while its conversation goes on)
 const owner = computed(() => ownerOf(convs.value)); // its device's, or one with no device
 const convOf = (r: Row) => owner.value(r);
-const mediaOf = (r: Row) => inSpans(r, convOf(r)?.summary?.media_spans);
+const mediaOf = (r: Row) =>
+  inSpans(r, convOf(r)?.summary?.media_spans) || inSpans(r, convOf(r)?.summary?.broadcast_spans);
 // a long press on a row: copied or reported; a final row starred; its speaker fixed once its conversation has closed (RowMenu). A tap
 // on its speaker, by the same rule: their sheet (SpeakerSheet), as on the conversation page
 const rowMenu = useTemplateRef("rowMenu");

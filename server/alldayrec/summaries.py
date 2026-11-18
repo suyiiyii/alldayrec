@@ -87,7 +87,9 @@ async def summarize_loop():
                 continue
             old = db.summary(c["id"])
             rows = conversation_rows(c)
-            media = summary.media_labels(rows, res.get("media_spans") or [])
+            if res["status"] == "done" and old and old.get("live_spans"):  # 改回现场 stands over a redo
+                res = summary.keep_live(res, old["live_spans"], rows)
+            media = summary.media_labels(rows, summary.not_live(res))
             if res["status"] == "failed" and old and (old["status"] == "done" or old.get("title") or old.get("todos")):
                 with db.tx() as t:
                     db.put_summary({**old, "status": "done", "error": f"[resummarize_failed] {res['error']}"[:300]}, t)
@@ -99,7 +101,7 @@ async def summarize_loop():
                     res["todos"] = db.preserve_todos(c["id"], (old or {}).get("todos") or [], res.get("todos") or [], t)
                 db.put_summary(res, t)
                 late_store.summary_done(c["id"], t)
-            if media != summary.media_labels(rows, (old or {}).get("media_spans") or []):
+            if media != summary.media_labels(rows, summary.not_live(old)):
                 T().speakers["at"] = 0.0  # media eligibility changed; voiceprints and the pending self card stay intact
             ws.note(f"对话 {c['start'][11:19]} 的摘要" + (f"：{res['title']}" if res["status"] == "done" else f"生成失败：{res['error']}"),
                  "state" if res["status"] == "done" else "error")

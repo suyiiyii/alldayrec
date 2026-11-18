@@ -24,7 +24,7 @@ ONE = {"id": "sample", "token": SECRET, "data": "data", "recordings": "recording
     *[json.dumps([{**ONE, field: value}]) for field in ONE for value in (None, True, 12, [], {})],
     *[json.dumps([{**ONE, "lang": value}]) for value in (True, 12, [], {}, "fr", SECRET)],
     json.dumps([{**ONE, "id": SECRET, "lang": "fr"}]),
-    *[json.dumps([{**ONE, key: value}]) for key in ("seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools") for value in (None, 1, "true", [], SECRET)],
+    *[json.dumps([{**ONE, key: value}]) for key in ("seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools", "media_view") for value in (None, 1, "true", [], SECRET)],
 ])
 def test_invalid_config_exits_cleanly(tmp_path, content):
     check_invalid_config(tmp_path, content)
@@ -49,7 +49,7 @@ def check_invalid_config(tmp_path, content, setup=""):
     assert "Traceback" not in output and SECRET not in output
     if setup:
         assert result.stderr == (f"{path}: JSON exceeds parser limits; expected a JSON array of objects "
-                                 "with string fields id, token, data, recordings, optional lang (zh or en), sound, seg_emb, persona_v2, place, place_sensitive and voice_tools (true or false)\n")
+                                 "with string fields id, token, data, recordings, optional lang (zh or en), sound, seg_emb, persona_v2, place, place_sensitive, voice_tools and media_view (true or false)\n")
     assert result.stdout == ""
     assert path.read_bytes() == original and path.stat().st_mode & 0o777 == 0o600
 
@@ -100,7 +100,7 @@ def test_valid_config_keeps_language_fallback(tmp_path, monkeypatch, lang):
         ONE["id"], SECRET, Path("data"), Path("recordings"), lang or "en")
 
 
-@pytest.mark.parametrize("key", ["seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools"])
+@pytest.mark.parametrize("key", ["seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools", "media_view"])
 @pytest.mark.parametrize("given, want", [(None, False), (False, False), (True, True)])
 def test_flags_are_off_unless_asked(tmp_path, key, given, want):
     path = tmp_path / "tenants.json"

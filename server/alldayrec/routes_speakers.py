@@ -164,10 +164,12 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
 
 def learnable(conv_id: str, to: str, hit: list[dict]) -> list[dict]:
     """The sentences of a label named `to` that teach the people bank: up to ENROLL of bank.LEARN_MIN_S or more. S<n>
-    means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank."""
+    means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank. Tenant
+    "media_view": none played aloud or broadcast (summary.not_live), the line's voice is not the person's."""
     if to == "我" or re.fullmatch(r"S\d+", to) or not state.get("embed"):
         return []
-    return sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
+    away = summary.not_live(db.summary(conv_id)) if T().media_view else []
+    return sorted(({**r, "conv": conv_id} for r in hit if not summary.in_media(r, away) and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
                   key=lambda r: r["start"])[:ENROLL]
 
 
@@ -402,7 +404,7 @@ def classified_voices(convs: dict | None = None) -> list[dict]:
     media = {}
     for cid in {v["conv"] for v in vs}:
         c = convs.get(cid)
-        if c and (spans := (c.get("summary") or {}).get("media_spans")):
+        if c and (spans := summary.not_live(c.get("summary"))):
             media[cid] = summary.media_labels(conversation_rows(c), spans)
     return [{**v, "media": v["label"] in media.get(v["conv"], ())} for v in vs]
 

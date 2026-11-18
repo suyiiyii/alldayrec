@@ -24,6 +24,7 @@ from alldayrec import mcp_links
 from alldayrec import qwen_stream
 from alldayrec import sound_events
 from alldayrec import split
+from alldayrec import summary
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec.core import conversation_rows, find_conversation, queue_summary, tag_counts
@@ -569,7 +570,27 @@ async def conversation(conv_id: str):
                       for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
     tags = await anyio.to_thread.run_sync(sound_events.tags, c, limiter=threads.DB)
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
-            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"]), **({"sounds": tags} if tags else {})}
+            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"]), **({"sounds": tags} if tags else {}),
+            **({"media_view": True} if T().media_view else {})}
+
+
+@router.post("/api/conversation/{conv_id}/live")
+async def mark_live(conv_id: str, body: dict):
+    """改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the
+    summary's spans, and out of a redo's (summary.keep_live). The summary as it is now."""
+    c = find_conversation(conv_id)
+    if not c:
+        raise HTTPException(404, "no such conversation")
+    a, b, s = body.get("from"), body.get("to"), db.summary(c["id"])
+    if not (isinstance(a, str) and isinstance(b, str) and a <= b):
+        raise HTTPException(400, "from <= to: the first and last row's start")
+    if not s or s.get("status") != "done":
+        raise HTTPException(409, "no summary yet")
+    rows = conversation_rows(c)
+    with db.tx() as t:
+        db.put_summary(summary.keep_live(s, (s.get("live_spans") or []) + [{"from": a, "to": b}], rows), t)
+    T().speakers["at"] = 0.0  # media labels may have changed: the voice cards again
+    return db.summary(c["id"])
 
 
 @router.post("/api/conversation/{conv_id}/feedback")

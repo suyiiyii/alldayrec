@@ -84,6 +84,14 @@ Off by default. With the tenant's `"place": true` (see [Configuration](../refere
 - **Turning it off**: remove the tenant's `"place"` (or set it to `false`) and restart: new summaries get no place; existing ones keep theirs. Regenerating a summary drops its old place; splitting a conversation or merging late audio into one drops it at once, so a rewrite that fails and keeps the old summary shows none.
 - **Deleting it**: with `"place"` off, remove the field from every summary, for example `sqlite3 live.db "UPDATE summaries SET body = json_remove(body, '$.place') WHERE json_extract(body, '$.place') IS NOT NULL"`.
 
+## Played aloud and broadcasts
+
+With the tenant's `"media_view": true`, the model call that writes a summary also tells media played aloud from broadcasts, prompts and music (the transcript sent is the same as before; no extra call).
+
+- **Where it is kept**: `media_spans` and `broadcast_spans` in the summary, each run by its first and last sentence's time; runs you marked 改回现场 (said here) in `live_spans`.
+- **What uses it**: sentences of either kind are no evidence for people profiles, give no name hints, and teach no one's voiceprint on a rename or a voice check; the transcripts your AI assistant reads mark them （外放） and （广播）. A broadcast such as a subway's next stop or navigation can back the place guess (with `place` on); a video or TV played aloud cannot.
+- **Turning it off**: remove `"media_view"` (or set it to `false`) and restart: new summaries use the former prompt and the conversation page folds 媒体 (media) as before; the fields already kept stay in their summaries.
+
 ## Why keep the original audio
 
 Some similar products delete the audio once it is transcribed. AllDayRec does the opposite: every line plays back, so a wrong transcript has the original to be checked against, and old days can be transcribed again when a better model comes along. The cost is disk space, and you have to keep these recordings safe yourself.

@@ -64,7 +64,7 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 | 对象 | 是什么 | 唯一键 | 存在哪 | 谁创建 | 谁修改 | 生命周期 |
 |---|---|---|---|---|---|---|
 | 实时分析 | 进行中对话的议题时间线，一个多轮对话的 Agent 维护 | 设备 | 进行中：`kv` 的 `live:<d>`；对话结束时：`timelines` | `device_pipeline.py` 的 `live_update`（`live.py`） | 每多 120 秒新语音重算一次（`LIVE_EVERY_S`） | 对话结束时存进 `timelines`，`kv` 清空 |
-| 总结 | 对话的标题、摘要、要点、待办、决定、标签 | `conversation` | `summaries`（`body` 是 JSON） | 对话关闭时写一行 `pending`（`commit`），总结 worker 生成（`summaries.py`） | 改名、改人、迟到合并后重写 | `pending` → `done` 或 `failed` |
+| 总结 | 对话的标题、摘要、要点、待办、决定、标签，以及哪些句子是对 AI 说的、外放的（`media_spans`）、广播和提示音（`broadcast_spans`，租户开了 `media_view`；用户「改回现场」的记在 `live_spans`，重新生成时保留） | `conversation` | `summaries`（`body` 是 JSON） | 对话关闭时写一行 `pending`（`commit`），总结 worker 生成（`summaries.py`） | 改名、改人、迟到合并后重写 | `pending` → `done` 或 `failed` |
 | 待办 | 总结里的一条待办 | 对话 `id` 加说出它的时刻，同一时刻第二条起加 `#2`、`#3`；重新生成后靠 `preserve_todos` 保住原 `id` | `summaries.body` 的 `todos`，没有单独的表 | 总结 | 重新生成总结 | 随总结 |
 | 待办标记 | 待办上的「完成」或「不对」 | 待办 `id` | `todo_marks` | 网页 | 删除这一行就是撤销 | — |
 | 自动标记 | 自动判定的完成、取消、可能不需要了、提示，带理由、原句和模型 | 待办 `id` | `todo_auto` | `todo_auto.py`（摘要之后、每天一次） | 撤销只填 `undone_at`，行不删；手动标记优先 | `undone_at` 为空才算数 |

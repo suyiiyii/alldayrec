@@ -196,6 +196,7 @@
     "otherListen": "Listen to {d}",
     "other": "{d} recorded this too",
     "regenerating": "Regenerating the summary",
+    "toLive": "Marked as said here",
     "made": "AI summary · {at}, by {model}",
     "madeLive": "AI summary · {at}, by {model}, written by the live analysis",
     "noteThanks": "Thanks, we'll use this to improve",
@@ -498,7 +499,10 @@
     "history": "Past imports"
   },
   "mediaFold": {
-    "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"
+    "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences",
+    "media": "Played aloud {from}–{to} · {n} sentence | Played aloud {from}–{to} · {n} sentences",
+    "broadcast": "Announcement/prompt {from}–{to} · {n} sentence | Announcement/prompt {from}–{to} · {n} sentences",
+    "live": "Said here"
   },
   "monthGrid": {
     "min": "{n}m"

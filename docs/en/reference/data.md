@@ -95,6 +95,8 @@ A prompt change leaves existing summaries intact; `summaries.prompt_version` rec
 uv run python -m alldayrec.resummarize --days 30 --dry-run
 uv run python -m alldayrec.resummarize --days 30 --limit 1
 uv run python -m alldayrec.resummarize --days 30 --delay 5
+# a tenant with media_view on: its summaries go to 19
+uv run python -m alldayrec.resummarize --days 7 --version 19 --dry-run
 ```
 
 The window includes today and the previous N−1 calendar dates in the command's timezone, based on conversation start. Only closed conversations with at least 60 seconds of speech are processed. Older, open, pending and current-version summaries are skipped, as are short conversations with a manually requested summary. Check one before expanding the run. A rerun skips completed upgrades. Each redo finishes before the next starts, with a default 5-second gap; HTTP and model 429s back off, up to `--max-delay` (600 seconds). A timeout (`--timeout`, default 1800 seconds) or uncertain HTTP result stops the run: check whether the server is still processing before restarting. Failures exit with code 1. Output counts completed/failed/skipped, processed conversations' todos and marked todos before/after, and model calls made meanwhile (including other background work).
