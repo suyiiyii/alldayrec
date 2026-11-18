@@ -5,13 +5,15 @@ not kept (seg_emb) is made from the audio and dropped.
 
 One made from the audio is one model call of at most MAX_S s of it, at most CALLS at once over the process; one more
 is refused at once (Refused, 503), never queued in the DB threads MCP runs in. On an infer service it is one try of
-TIMEOUT_S, none while the service fails: the pipelines' calls wait for it, an agent's must not.
+TIMEOUT_S, none while the service fails or for COOL_S after one failed: the pipelines' calls wait for it, an agent's
+must not.
 """
 import datetime as dt
 import json
 import logging
 import re
 import threading
+import time
 
 import numpy as np
 
@@ -31,6 +33,8 @@ MAX_S = 15.0  # of a sentence's audio one voiceprint takes, as label_voice and e
 MIN_S = 0.5   # a stretch asked for is at least this long (diarist.MIN_DUR: under 1 s a voiceprint is weak already)
 CALLS = threading.BoundedSemaphore(1)  # beside the pipelines' threads.INFER calls; a 15 s voiceprint is ~0.3 s of 4 cores
 TIMEOUT_S = 10.0  # an infer service's one try
+COOL_S = 30.0  # after a try failed: none for this long (the service may still be working on it: no pile of them there)
+cool_until = 0.0  # time.monotonic() before which none is tried
 TIME = re.compile(r"\d\d:\d\d:\d\d")
 
 
@@ -64,7 +68,7 @@ def sentence(ref: str) -> dict:
     """The row a reference names, with its rowid and its conversation (conv, None: in none closed): a sentence id
     (grep's: of one device only), or "<conversation id>@HH:MM:SS", a transcript line's time (its device's row starting
     in that second; the first of two)."""
-    ref = (ref or "").strip()
+    ref = str(ref or "").strip()
     if "@" in ref:
         cid, at = ref.split("@", 1)
         c = db.conversation(cid)
@@ -80,7 +84,7 @@ def sentence(ref: str) -> dict:
     else:
         rows = [dict(r) for r in db.conn().execute("SELECT rowid, * FROM sentences WHERE id = ?", (ref,))]
         if not rows:
-            raise Refused(f"没有这句：{ref!r}（照抄 grep 结果里的句子 id，或写「对话 id@时:分:秒」）", 404)
+            raise Refused(f"没有这句：{ref!r}（写成「对话 id@时:分:秒」：grep 每行的对话 id 和时间，或 transcript 每行开头的时间）", 404)
         if len({r["source"] for r in rows}) > 1:
             raise Refused("两台设备都有这个句子 id：改写成「对话 id@时:分:秒」")
     r = rows[0]
@@ -91,6 +95,9 @@ def sentence(ref: str) -> dict:
 def from_audio(r: dict, frm: float, to: float) -> np.ndarray:
     """The voiceprint of [frm, to] s into row r, decoded and embedded under the limits above (Refused when one
     cannot be had now)."""
+    global cool_until
+    if compute.REMOTE and time.monotonic() < cool_until:
+        raise Refused("推理服务刚才没有回应，过半分钟再试", 503)
     if not CALLS.acquire(blocking=False):
         raise Refused("正在算别的声纹，过几秒再试", 503)
     try:
@@ -106,6 +113,8 @@ def from_audio(r: dict, frm: float, to: float) -> np.ndarray:
                 return unit(compute.REMOTE.once("embed", x, compute.voiceprint, TIMEOUT_S))
             return unit(core.state["embed"](x))
         except Exception as e:  # the service down or slow, a wrong answer
+            if compute.REMOTE:
+                cool_until = time.monotonic() + COOL_S
             log.warning("voice tool: no voiceprint: %s", type(e).__name__)
             raise Refused("推理服务现在不可用，稍后再试", 503)
     finally:
@@ -135,6 +144,8 @@ def voiceprint(ref: str, frm: float | None = None, to: float | None = None) -> d
         to = min(long, frm + MAX_S) if to is None else float(to)
         if not (0 <= frm < to <= long + 0.05):
             raise Refused(f"from_s、to_s 是这句里的第几秒：0 ≤ from_s < to_s ≤ {long:.2f}（这句 {long:.2f} 秒）")
+        if long < MIN_S:
+            raise Refused(f"这句太短（{long:.2f} 秒），算不了声纹")
         if to - frm > MAX_S + 1e-9 or to - frm < MIN_S:
             raise Refused(f"一段要 {MIN_S}–{MAX_S:.0f} 秒，不是 {to - frm:.2f} 秒")
         e, source, span, parts = from_audio(r, frm, to), "audio", [round(frm, 2), round(to, 2)], []
@@ -143,21 +154,24 @@ def voiceprint(ref: str, frm: float | None = None, to: float | None = None) -> d
             "parts": parts if len(parts) > 1 else []}
 
 
-def people(row: int | None) -> dict[str, dict]:
+def people(row: int | None, conv: str | None = None) -> dict[str, dict]:
     """Every known voice by name: the people bank's samples (k x dim) and 我's voiceprint. A name whose ledger has
-    the sentence of rowid `row` (it taught that name) is made again without it (left_out); taught by it alone: left out."""
+    the sentence of rowid `row` (it taught that name) is made again without it (left_out); taught by it alone: E None.
+    我's centroids cannot be made again without one sentence: taught says one of them was learnt from conv (「这是我」,
+    kv me_centroids; one picked on the 「哪个是你？」 card is not said)."""
+    # shortcut: enrolled.row is a rowid, gone (or another row's) once its sentence is finalized again; the sentence is
+    # then not left out (scores high). Upgrade with sentences' explicit INTEGER PRIMARY KEY (db seg_emb's note)
     out = {name: {"E": _rows(E), "left_out": False} for name, (_, E) in db.people().items()}
     if row is not None:
         for (name,) in db.conn().execute("SELECT DISTINCT name FROM enrolled WHERE row = ?", (row,)).fetchall():
             rest = [(c, rw, n, db.vec(e)) for c, rw, n, e in db.conn().execute(
                 "SELECT conv, row, n, e FROM enrolled WHERE name = ? AND row IS NOT ?", (name, row))]
-            out.pop(name, None)
-            if rest:
-                out[name] = {"E": bank.samples(rest), "left_out": True}
+            out[name] = {"E": bank.samples(rest) if rest else None, "left_out": True}
     from alldayrec.routes_speakers import owner_bank
     me = T().owner if T().owner is not None else owner_bank()
     if me:
-        out["我"] = {"E": np.array([unit(v) for v in me.values()]), "left_out": False}
+        mine = {k for k, vs in (db.kv("me_centroids") or {}).items() if conv and f"{db.resolve_conversation(conv)}|我" in vs}
+        out["我"] = {"E": np.array([unit(v) for v in me.values()]), "left_out": False, "taught": bool(mine & set(me))}
     return out
 
 
@@ -182,6 +196,7 @@ def score(e: np.ndarray, E: np.ndarray) -> float:
 def compare(ref: str, frm=None, to=None, other: str = "", other_from=None, other_to=None, person: str = "", label: str = "") -> dict:
     """How close the sentence (or its stretch) is to exactly one of: another sentence (or a stretch of it), a known
     person, a label ("S1" of the sentence's conversation, or "<conversation id>@S1"); each kept part's too."""
+    other, person, label = (str(x or "") for x in (other, person, label))
     if sum(map(bool, (other, person, label))) != 1:
         raise Refused("other、person、label 三个里正好填一个")
     v = voiceprint(ref, frm, to)
@@ -189,10 +204,13 @@ def compare(ref: str, frm=None, to=None, other: str = "", other_from=None, other
         w = voiceprint(other, other_from, other_to)
         E, what = w["e"][None], {"kind": "sentence", "sentence": w["sentence"], "span": w["span"], "from": w["from"], "seconds": w["seconds"]}
     elif person:
-        ps = people(v["rowid"])
+        ps = people(v["rowid"], v["sentence"]["conv"])
         if person not in ps:
             raise Refused(f"没有「{person}」的声纹：认出名字的人在 names 里，没在人物页上命名过的人没有声纹", 404)
-        E, what = ps[person]["E"], {"kind": "person", "name": person, "samples": len(ps[person]["E"]), "left_out": ps[person]["left_out"]}
+        if ps[person]["E"] is None:
+            raise Refused(f"「{person}」的声纹只由这一句教出，去掉这句以后没法比", 404)
+        E, what = ps[person]["E"], {"kind": "person", "name": person, "samples": len(ps[person]["E"]),
+                                    "left_out": ps[person]["left_out"], "taught": ps[person].get("taught", False)}
     else:
         conv, lab = label.split("@", 1) if "@" in label else (v["sentence"]["conv"], label)
         ls = labels(conv, v["sentence"])
@@ -208,7 +226,8 @@ def nearest(ref: str, frm=None, to=None, n: int = 5) -> dict:
     first; each kept part's closest too."""
     n = max(1, min(int(n), 20))
     v = voiceprint(ref, frm, to)
-    cands = [({"kind": "person", "name": k, "samples": len(p["E"]), "left_out": p["left_out"]}, p["E"]) for k, p in people(v["rowid"]).items()]
+    cands = [({"kind": "person", "name": k, "samples": len(p["E"]), "left_out": p["left_out"], "taught": p.get("taught", False)}, p["E"])
+             for k, p in people(v["rowid"], v["sentence"]["conv"]).items() if p["E"] is not None]
     cands += [({"kind": "label", "conv": v["sentence"]["conv"], "label": k, "in_it": x["in_it"]}, x["E"]) for k, x in labels(v["sentence"]["conv"], v["sentence"]).items()]
     ranked = sorted(({**c, "score": score(v["e"], E)} for c, E in cands), key=lambda c: -c["score"])
     best = lambda e: max(({**c, "score": score(e, E)} for c, E in cands), key=lambda c: c["score"], default=None)

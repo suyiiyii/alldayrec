@@ -270,7 +270,8 @@ PAIR_HINT = ("\n\n（相似度是余弦，1 最像。两句之间没有固定的
              "拿这段对话里确定是同一个人的一句当参照比。" + CAVEAT)
 SPAN = {"from_s": {"type": "number", "description": "只看这句里的一段：从第几秒起（不填从头）"},
         "to_s": {"type": "number", "description": "到第几秒（不填到句末，一段最多 15 秒、至少 0.5 秒）"}}
-REF = {"type": "string", "description": "句子：grep 结果里的句子 id，或「对话 id@时:分:秒」（transcript 每行开头的时间）"}
+REF = {"type": "string", "description": "句子：「对话 id@时:分:秒」（grep 每行的对话 id 和时间，或 transcript 每行开头的时间）；"
+                                       "也可以是 grep 的 structuredContent 里 evidence 的 sentence"}
 
 
 def said(v: dict) -> str:
@@ -284,7 +285,8 @@ def said(v: dict) -> str:
 
 def whom(c: dict) -> str:
     if c["kind"] == "person":
-        return f"{c['name']}（{'录音者本人' if c['name'] == '我' else '认出名字的人'}，{c['samples']} 个声纹样本里最近的" + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + "）"
+        return (f"{c['name']}（{'录音者本人' if c['name'] == '我' else '认出名字的人'}，{c['samples']} 个声纹样本里最近的"
+                + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + ("；这段对话教过「我」，分数偏高" if c.get("taught") else "") + "）")
     if c["kind"] == "label":
         return f"{c['label']}（对话 `{c['conv']}` 里这个标签的声纹" + ("；这句就是它的来源之一，偏高" if c["in_it"]
                 else "；不知道这句是不是它的来源之一，可能偏高" if c["in_it"] is None else "") + "）"

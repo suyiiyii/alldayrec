@@ -221,14 +221,41 @@ def test_infer_service_tried_once(store, monkeypatch):
     r = compute.Remote(f"http://127.0.0.1:{sock.getsockname()[1]}", TOKEN, 30.0)
     monkeypatch.setattr(compute, "REMOTE", r)
     monkeypatch.setattr(vt, "TIMEOUT_S", 5.0)
+    monkeypatch.setattr(vt, "cool_until", 0.0)
     r.ok = False  # unchecked since the start
     t0 = time.monotonic()
     text, bad, _, _ = tool("voiceprint", sentence="f2")
     assert bad and "推理服务现在不可用" in text and time.monotonic() - t0 < 3, "no try (one would wait out 5 s)"
     r.ok = True
     monkeypatch.setattr(vt, "TIMEOUT_S", 0.5)
+    monkeypatch.setattr(vt, "cool_until", 0.0)  # the refusal above cools it down too
     t0 = time.monotonic()
     text, bad, _, _ = tool("voiceprint", sentence="f2")
     assert bad and "推理服务现在不可用" in text and 0.4 < time.monotonic() - t0 < 8, "one try of TIMEOUT_S, not the client's 30 s"
     assert r.down_seconds() == 0 and r.next_try == 0, "an agent's timeout holds up no pipeline call"
+    t0 = time.monotonic()
+    text, bad, _, _ = tool("voiceprint", sentence="f2")
+    assert bad and "过半分钟再试" in text and time.monotonic() - t0 < 0.3, "cooling down: no try, none left on the service"
     sock.close()
+
+
+def test_me_taught_by_the_conversation_and_odd_input(store):
+    """A 「这是我」 centroid learnt from the sentence's conversation is said (it cannot be left out); a name taught by
+    the sentence alone, a sentence too short, arguments not strings: each its own answer, never a server error."""
+    store["t"].owner = {"m": A, "me-1": A}
+    db.put_kv("me_centroids", {"me-1": [f"{CID}|我"]})
+    text, bad, _, _ = tool("voice_compare", sentence=f"{CID}@10:00:00", person="我")
+    assert not bad and "这段对话教过「我」" in text, text
+    assert "这段对话教过「我」" in tool("voice_nearest", sentence=f"{CID}@10:00:00")[0]
+    db.put_kv("me_centroids", {"me-2": [f"{CID}|我"]})  # a centroid since taken out of 我's voiceprint
+    assert "教过「我」" not in tool("voice_compare", sentence=f"{CID}@10:00:00", person="我")[0]
+    db.conn().execute("DELETE FROM enrolled WHERE row = 9999")  # 王五: s2's only
+    text, bad, _, _ = tool("voice_compare", sentence="f2", person="王五")
+    assert bad and "只由这一句教出" in text, text
+    assert "共比了 3 个" in tool("voice_nearest", sentence="f2")[0], "王五 not among them"
+    with db.tx() as c:
+        db.insert_sentences(c, [dict(id="f8", start=iso(15), end=iso(15.3), speaker="S1", text="嗯", source="mic")])
+    assert "这句太短（0.30 秒）" in tool("voiceprint", sentence="f8")[0]
+    for args in ({"sentence": 123}, {"sentence": "f2", "other": 123}, {"sentence": "f2", "person": 7}, {"sentence": "f2", "label": ["S1"]}):
+        status, out = m.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "voice_compare", "arguments": args}}, {})
+        assert status == 200 and out["result"]["isError"], (args, out)
