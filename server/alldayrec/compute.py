@@ -18,7 +18,8 @@ backend is only a blocking function.
   At start load() asks the service's /health (with the token) for its model files and DIM: other than this server's,
   every call fails as above until the service is fixed (each try asks again: no restart needed). The server stopping
   (STOP) ends a call waiting for the service with Stopping instead of waiting on to a SIGKILL. A 413 (samples over the
-  service's limit: no try can help) is no failure of the service: an error logged, the call raises.
+  service's limit) or a 422 (samples the model will not take): no try can help, no failure of the service: an error
+  logged, the call raises (a scene part then waits out its own backoff, sounds.py; the calls after it go on).
 """
 import logging
 import os
@@ -142,10 +143,10 @@ class Remote:
                 r.raise_for_status()
                 out = parse(r.json())
             except Exception as e:  # refused, a timeout, a 4xx / 5xx, another model, a wrong answer
-                if getattr(getattr(e, "response", None), "status_code", 0) == 413:  # this call's samples: no try helps
+                if (status := getattr(getattr(e, "response", None), "status_code", 0)) in (413, 422):  # this call's samples: no try helps
                     CALLS[op, "error"] += 1
-                    log.error("infer service %s: 413, %.1f s of samples over its limit; not tried again", op,
-                              len(x) / 16000)
+                    log.error("infer service %s: %d, %.3f s of samples %s; not tried again", op, status, len(x) / 16000,
+                              "over its limit" if status == 413 else "its model will not take")
                     raise
                 self.failed(op, e)
                 tries += 1

@@ -83,7 +83,7 @@ INFER_TOKEN=<the same token>
 
 `GET /health` needs no token; `GET /metrics` needs it and returns each computation's calls, compute seconds and audio seconds. For the variables, see [Configuration](../reference/configuration.md#other-environment-variables).
 
-A request takes at most 600 s of audio, and speaker-change frames (`/segment`) at most 10 s; over that the service answers 413. A 413 means the request itself is wrong and no retry can help, so the server neither waits nor tries again: it logs an error and the call fails.
+A request takes at most 600 s of audio, and speaker-change frames (`/segment`) at most 10 s; over that the service answers 413. Audio the model will not take (onnxruntime calls the input invalid) gets a 422. Both mean the request itself is wrong and no retry can help, so the server neither waits nor tries again: it logs an error, the call fails, and the calls after it go on.
 
 Upgrade the inference service and the server together, to the same version. The server wants exactly its own model files in `/health`, so when a version changes the models (adding speaker-change detection, for one), neither side upgraded first matches the other: every call waits until the other side is upgraded too. Uploads are taken meanwhile, and they catch up after the upgrade.
 

@@ -22,6 +22,7 @@ MODELS = {
     "mn10_as": dict(file=infer.MN10, classes=527, window=10 * SR, hop=10 * SR, keep_days=None),  # EfficientAT, 10 s windows
     "yamnet": dict(file=infer.YAMNET, classes=521, window=15360, hop=7680, keep_days=30),  # 0.96 s frames every 0.48 s
 }
+MN10_MIN = 400  # samples a mn10_as window is zero-padded to at least (one 25 ms STFT window): under 257 its reflect pad fails
 YAMNET_CALL = 125  # YAMNet frames per call (60 s): a 300 s call peaked 540 MB over the model, 60 s 135 MB (P0)
 
 
@@ -47,7 +48,7 @@ def files() -> dict:
 def windows(name: str, n: int) -> list[tuple[int, int]]:
     """(start, length) in samples of each frame the model gives for n samples. YAMNet: one every hop, as its own
     framing pads (features.py: 0.975 s at least, then whole hops). mn10_as: windows of 10 s; a last one shorter than
-    2 s goes into the one before (10-12 s), alone (all of n under 2 s) it is n."""
+    2 s goes into the one before (10-12 s), alone (all of n under 2 s) it is n (scores() pads it to MN10_MIN)."""
     m = MODELS[name]
     if name == "yamnet":
         return [(i * m["hop"], m["window"]) for i in range(1 + math.ceil(max(0, n - 15600) / m["hop"]))]
@@ -70,7 +71,9 @@ def scores(name: str, x: np.ndarray) -> np.ndarray:
         n = len(windows(name, len(x)))
         return np.concatenate([s.run(None, {"wav": f[a:a + step + 15600 - MODELS[name]["hop"]]})[0][:YAMNET_CALL]
                                for a in range(0, max(len(f), 1), step)])[:n]
-    return np.stack([s.run(None, {"wav": f[None, a:a + n]})[0].reshape(-1) for a, n in windows(name, len(x))])
+    # a window under MN10_MIN (a hole of a few ms) zero-padded, as YAMNet's own framing pads
+    return np.stack([s.run(None, {"wav": np.pad(f[a:a + n], (0, max(0, MN10_MIN - n)))[None]})[0].reshape(-1)
+                     for a, n in windows(name, len(x))])
 
 
 def parse(name: str, n: int):
