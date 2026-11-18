@@ -95,7 +95,25 @@ def test_marked_live_stands_over_a_redo(store, monkeypatch):
         anyio.run(run)
     s = db.summary(c["id"])
     assert s["media_spans"] == [{"from": rows[3]["start"], "to": rows[5]["start"]}] and s["live_spans"] == [
-        {"from": rows[0]["start"], "to": rows[2]["start"]}, {"from": rows[0]["start"], "to": rows[0]["start"]}], s
+        {"from": rows[0]["start"], "to": rows[2]["start"], "kind": "media"}, {"from": rows[0]["start"], "to": rows[0]["start"], "kind": "media"}], s
+
+
+def test_undo_puts_a_run_back_in_its_kind(store):
+    """恢复为外放 / 恢复为广播: the mark gone, its rows back in the spans they were in; one never made is a 404."""
+    c, rows = conversation()
+    db.put_summary({"conversation": c["id"], "status": "done", "model": "m", "media_spans": [{"from": rows[0]["start"], "to": rows[1]["start"]}],
+                    "broadcast_spans": [{"from": rows[3]["start"], "to": rows[4]["start"]}]})
+    before = db.summary(c["id"])
+    for x in (rows[0], rows[3]):
+        anyio.run(routes_api.mark_live, c["id"], {"from": x["start"], "to": x["start"]})
+    s = db.summary(c["id"])
+    assert [m["kind"] for m in s["live_spans"]] == ["media", "broadcast"] and s["media_share"] == round(2 / 6, 2)
+    for x in (rows[0], rows[3]):
+        s = anyio.run(routes_api.unmark_live, c["id"], {"from": x["start"], "to": x["start"]})
+    assert (s["media_spans"], s["broadcast_spans"], s["live_spans"], s["media_share"]) == (
+        before["media_spans"], before["broadcast_spans"], [], round(4 / 6, 2)), s
+    with pytest.raises(HTTPException):
+        anyio.run(routes_api.unmark_live, c["id"], {"from": rows[0]["start"], "to": rows[0]["start"]})
 
 
 @pytest.mark.parametrize("on", [False, True])

@@ -342,7 +342,8 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 
 | Method | Description | Parameters |
 |---|---|---|
-| `POST` | 改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the summary's spans, and out of a redo's (summary.keep_live). | `conv_id` (path, string)<br>body: JSON object |
+| `POST` | 改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind they were, for its undo. | `conv_id` (path, string)<br>body: JSON object |
+| `DELETE` | 恢复为外放: the mark from..to taken back, its rows played aloud (or broadcast) again (summary.unmark_live). | `conv_id` (path, string)<br>body: JSON object |
 
 ### `/api/conversation/{conv_id}/feedback`
 

@@ -102,7 +102,7 @@ export interface Summary {
   ai_spans?: Span[];
   media_spans?: Span[]; // media played aloud (video, TV, music): greyed and folded
   broadcast_spans?: Span[]; // tenant media_view: announcements, navigation, prompts, music (their own fold)
-  live_spans?: Span[]; // rows the user marked live (改回现场): out of the two above, and out of a redo's
+  live_spans?: (Span & { kind?: "media" | "broadcast" })[]; // rows marked live (改回现场): out of the two above and a redo's
   media_share?: number; // of the speech, the part in media_spans and broadcast_spans
   place?: Place; // tenant "place": where I probably was (server place.py); label null: unsure, nothing shown
   decisions?: (At & { text: string; quote?: string; unsupported?: boolean })[];

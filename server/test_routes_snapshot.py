@@ -84,6 +84,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("POST", "/api/terms", "term_set"),
     ("GET", "/api/conversation/{conv_id}", "conversation"),
     ("POST", "/api/conversation/{conv_id}/live", "mark_live"),
+    ("DELETE", "/api/conversation/{conv_id}/live", "unmark_live"),
     ("POST", "/api/conversation/{conv_id}/feedback", "add_feedback"),
     ("GET", "/api/feedback", "feedback"),
     ("POST", "/api/split", "split_backfill"),

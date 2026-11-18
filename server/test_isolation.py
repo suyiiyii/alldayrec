@@ -166,6 +166,7 @@ REQUESTS = {
     ("POST", "/api/conversation/{conv_id}/feedback"): ("POST", f"/api/conversation/{CID}/feedback", dict(json={"text": "不对"})),
     ("GET", "/api/feedback"): ("GET", "/api/feedback", {}),
     ("POST", "/api/conversation/{conv_id}/live"): ("POST", f"/api/conversation/{CID}/live", dict(json={"from": AT, "to": AT})),
+    ("DELETE", "/api/conversation/{conv_id}/live"): ("DELETE", f"/api/conversation/{CID}/live", dict(json={"from": AT, "to": AT})),
     ("POST", "/api/conversation/{conv_id}/summarize"): ("POST", f"/api/conversation/{CID}/summarize", {}),
     ("GET", "/api/names"): ("GET", "/api/names", {}),
     ("POST", "/api/conversation/{conv_id}/rename"): ("POST", f"/api/conversation/{CID}/rename", dict(json={"from": "S1", "to": "MARKa人"})),

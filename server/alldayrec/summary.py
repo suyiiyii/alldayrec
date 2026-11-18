@@ -533,6 +533,13 @@ def keep_live(s: dict, live: list[dict], rows: list[dict]) -> dict:
     return {**out, "media_share": media_share(rows, not_live(out))}
 
 
+def unmark_live(s: dict, mark: dict, rows: list[dict]) -> dict:
+    """改回现场 taken back (恢复为外放): the mark out of live_spans, its rows back in the spans of its kind."""
+    k = "broadcast_spans" if mark.get("kind") == "broadcast" else "media_spans"
+    back = {**s, k: (s.get(k) or []) + [{"from": mark["from"], "to": mark["to"]}]}
+    return keep_live(back, [x for x in s.get("live_spans") or [] if x != mark], rows)
+
+
 def media_labels(rows: list[dict], spans: list[dict]) -> set[str]:
     """Labels that speak mostly inside media: their voice is the media's, not a person's in the room."""
     by = {}

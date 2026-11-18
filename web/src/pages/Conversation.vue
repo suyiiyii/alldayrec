@@ -79,18 +79,19 @@ const kind = (r: Row) =>
   inSpans(r, s.value?.media_spans) ? "media" : view.value && inSpans(r, s.value?.broadcast_spans) ? "broadcast" : false;
 const media = (r: Row) => !!kind(r);
 const segs = computed(() => (view.value ? fold(c.value?.rows ?? [], kind, 1) : fold(c.value?.rows ?? [], media)));
-async function toLive(rows: Row[]) {
+// 改回现场 (on) or its undo, 恢复为外放 (off: DELETE the mark), from..to the run's first and last row
+async function setLive(from: string, to: string, on: boolean) {
   try {
-    await post(`/api/conversation/${encodeURIComponent(props.id)}/live`, {
-      from: rows[0].start,
-      to: rows.at(-1)!.start,
-    });
-    toast(t("conv.toLive"));
+    await post(`/api/conversation/${encodeURIComponent(props.id)}/live`, { from, to }, on ? "POST" : "DELETE");
+    toast(t(on ? "conv.toLive" : "conv.unLive"));
     await reload();
   } catch (e) {
     toast((e as Error).message);
   }
 }
+const toLive = (rows: Row[]) => setLive(rows[0].start, rows.at(-1)!.start, true);
+// a mark shows where its run was, at its first row, with its undo
+const markAt = (r: Row) => (view.value ? s.value?.live_spans?.find((x) => x.from === r.start) : undefined);
 
 // a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
 async function load() {
@@ -693,6 +694,12 @@ function edit(label: string) {
         </div>
         <div class="rows">
           <template v-for="g in segs" :key="g.k === 'row' ? g.r.id : g.key">
+            <div v-if="g.k === 'row' && markAt(g.r)" class="livemark">
+              <span>{{ t("mediaFold.marked") }}</span>
+              <button @click="setLive(markAt(g.r)!.from, markAt(g.r)!.to, false)">
+                {{ t(markAt(g.r)!.kind === "broadcast" ? "mediaFold.unBroadcast" : "mediaFold.unMedia") }}
+              </button>
+            </div>
             <TranscriptRow
               v-if="g.k === 'row'"
               :row="g.r"
@@ -735,6 +742,21 @@ function edit(label: string) {
 </template>
 
 <style scoped>
+.livemark {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  padding: var(--space-1) 0;
+}
+.livemark button {
+  font-size: var(--fs-sm);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+}
 main.playing {
   padding-bottom: 120px; /* the last sentence clears the player */
 }

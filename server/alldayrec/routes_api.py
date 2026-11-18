@@ -577,7 +577,18 @@ async def conversation(conv_id: str):
 @router.post("/api/conversation/{conv_id}/live")
 async def mark_live(conv_id: str, body: dict):
     """改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the
-    summary's spans, and out of a redo's (summary.keep_live). The summary as it is now."""
+    summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind they were, for its undo. The
+    summary as it is now."""
+    return await live_mark(conv_id, body, True)
+
+
+@router.delete("/api/conversation/{conv_id}/live")
+async def unmark_live(conv_id: str, body: dict):
+    """恢复为外放: the mark from..to taken back, its rows played aloud (or broadcast) again (summary.unmark_live)."""
+    return await live_mark(conv_id, body, False)
+
+
+async def live_mark(conv_id: str, body: dict, on: bool) -> dict:
     c = find_conversation(conv_id)
     if not c:
         raise HTTPException(404, "no such conversation")
@@ -587,8 +598,16 @@ async def mark_live(conv_id: str, body: dict):
     if not s or s.get("status") != "done":
         raise HTTPException(409, "no summary yet")
     rows = conversation_rows(c)
+    if on:
+        kind = "broadcast" if not summary.in_media({"start": a}, s.get("media_spans") or []) and summary.in_media(
+            {"start": a}, s.get("broadcast_spans") or []) else "media"
+        s = summary.keep_live(s, (s.get("live_spans") or []) + [{"from": a, "to": b, "kind": kind}], rows)
+    elif mark := next((x for x in s.get("live_spans") or [] if (x["from"], x["to"]) == (a, b)), None):
+        s = summary.unmark_live(s, mark, rows)
+    else:
+        raise HTTPException(404, "no such mark")
     with db.tx() as t:
-        db.put_summary(summary.keep_live(s, (s.get("live_spans") or []) + [{"from": a, "to": b}], rows), t)
+        db.put_summary(s, t)
     T().speakers["at"] = 0.0  # media labels may have changed: the voice cards again
     return db.summary(c["id"])
 

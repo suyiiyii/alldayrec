@@ -197,6 +197,7 @@
     "other": "{d} recorded this too",
     "regenerating": "Regenerating the summary",
     "toLive": "Marked as said here",
+    "unLive": "Put back",
     "made": "AI summary · {at}, by {model}",
     "madeLive": "AI summary · {at}, by {model}, written by the live analysis",
     "noteThanks": "Thanks, we'll use this to improve",
@@ -502,7 +503,10 @@
     "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences",
     "media": "Played aloud {from}–{to} · {n} sentence | Played aloud {from}–{to} · {n} sentences",
     "broadcast": "Announcement/prompt {from}–{to} · {n} sentence | Announcement/prompt {from}–{to} · {n} sentences",
-    "live": "Said here"
+    "live": "Said here",
+    "marked": "Marked as said here",
+    "unMedia": "Back to played aloud",
+    "unBroadcast": "Back to announcement/prompt"
   },
   "monthGrid": {
     "min": "{n}m"
