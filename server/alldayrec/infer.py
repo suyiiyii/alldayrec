@@ -22,6 +22,10 @@ from alldayrec.vad_postprocessor import StreamVadPostprocessor
 
 DIR = Path(os.environ.get("MODELS_DIR") or tenant.DATA_DIR / "models")
 THREADS = int(os.environ.get("INFER_THREADS", "4"))  # onnxruntime threads per voiceprint call (threads.INFER: calls at once)
+# extended skips onnxruntime's NCHWc conv layout: on some Intel CPUs (a Xeon 6975P-C CI runner) ReDimNet2 ran 5.6x faster
+# without it, on AMD (a Zen 3 desktop, EPYC 7302) 11-14 % slower; all stays the default
+GRAPH_OPT = {"all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+             "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED}[os.environ.get("INFER_GRAPH_OPT", "all")]
 # The VAD hears its stream lifted to a level: its features take a fixed global CMVN, so speech 6-10 dB below the
 # usual (a far lecture through a PA, a quieter speaker) had p > 0.5 on no frame at all and was never sent. Each frame is
 # lifted by what brings the 90th percentile of the last 10 s's frame levels to VAD_TARGET_DB, 0 to VAD_GAIN_MAX_DB;
@@ -107,6 +111,7 @@ def check(d: Path = DIR, skip=()):
 def session(name: str, threads: int) -> ort.InferenceSession:
     o = ort.SessionOptions()
     o.intra_op_num_threads, o.inter_op_num_threads = threads, 1
+    o.graph_optimization_level = GRAPH_OPT
     # No arena: it grows to the biggest calls (voiceprints of 15 s, 2 at once) and never gives back, 2.65 GB after 600 of
     # them; without it 0.6 GB idle, ~10 % slower (16-core desktop, the main instance's lengths). kSameAsRequested kept 3.5 GB.
     o.enable_cpu_mem_arena = False

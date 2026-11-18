@@ -35,14 +35,31 @@ jobs:
     env:
       PACK: https://github.com/suyiiyii/alldayrec/releases/download/eval-spk-v1/eval-spk-v1.tar.gz
       PACK_SHA256: 678ac6930e90d0d7eb83d14a2a921a0857a83c68e3231e9977b5d03ddedf2b4a
+      # without NCHWc convs: on a Xeon 6975P-C runner the eval took ~28 min with them, 14 s of speech 19.2 s -> 3.4 s (11-19)
+      INFER_GRAPH_OPT: extended
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - run: |  # the pack is Opus, decoded by ffmpeg
+      # the pack is Opus, decoded by ffmpeg. Its packages come from the Actions cache: an AWS-hosted runner's mirror took
+      # 9-14 min for them (11-18, two runs cancelled at 30 min); the index (apt-get update) is a few seconds there too.
+      - name: Cache ffmpeg's packages
+        id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/debs
+          key: ffmpeg-debs-ubuntu-24.04-v1  # shortcut: newer package versions still come from the mirror; bump v1 when they pile up
+      - run: |
           if command -v ffmpeg >/dev/null; then ffmpeg -version | head -1; exit 0; fi
-          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
+          mkdir -p ~/debs/partial
+          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3 -o Dir::Cache::Archives=$HOME/debs"
           $APT update && $APT install -yq --no-install-recommends ffmpeg
+          sudo chown -R "$USER" ~/debs
+      - if: steps.debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/debs
+          key: ffmpeg-debs-ubuntu-24.04-v1
       - run: pipx install uv
       - run: uv sync --locked
       - run: |  # the eval-spk-v1 release, pinned by its sha256
@@ -53,4 +70,5 @@ jobs:
           echo "MODELS_DIR=$RUNNER_TEMP/models" >> "$GITHUB_ENV"
           echo "DATA_DIR=$RUNNER_TEMP/data" >> "$GITHUB_ENV"
           for i in 1 2 3; do MODELS_DIR="$RUNNER_TEMP/models" DATA_DIR="$RUNNER_TEMP/data" uv run python -c "from alldayrec import infer; infer.fetch()" && exit 0; sleep 20; done; exit 1
+      - run: lscpu | grep -E '^(Model name|CPU\(s\))'  # which machine: the eval's time depends on it
       - run: uv run python -m alldayrec.speaker_eval run "$RUNNER_TEMP/eval-spk-v1" --summary "$GITHUB_STEP_SUMMARY"

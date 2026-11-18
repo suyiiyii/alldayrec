@@ -32,11 +32,26 @@ jobs:
       run:
         working-directory: server
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1; with actions/cache (MinIO) its only actions: a runner downloads every action its job names, skipped or not
-      - run: |  # the tests encode Opus and AAC pieces; the hosted mirror stalled twice for >10 min, so fail fast and retry
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1; with actions/cache (MinIO, ffmpeg) its only actions: a runner downloads every action its job names, skipped or not
+      # the tests encode Opus and AAC pieces; the hosted mirror stalled twice for >10 min, so fail fast and retry. ffmpeg's
+      # packages come from the Actions cache, the same key as speaker-eval.yml: an AWS-hosted mirror took 20 min (11-19).
+      - name: Cache ffmpeg's packages
+        id: debs
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/debs
+          key: ffmpeg-debs-ubuntu-24.04-v1  # shortcut: newer package versions still come from the mirror; bump v1 when they pile up
+      - run: |
           if command -v ffmpeg >/dev/null; then ffmpeg -version | head -1; exit 0; fi
-          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3"
+          mkdir -p ~/debs/partial
+          APT="sudo apt-get -q -o Acquire::http::Timeout=20 -o Acquire::Retries=3 -o Dir::Cache::Archives=$HOME/debs"
           $APT update && $APT install -yq --no-install-recommends ffmpeg
+          sudo chown -R "$USER" ~/debs
+      - if: steps.debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/debs
+          key: ffmpeg-debs-ubuntu-24.04-v1
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       # MinIO for test_store_s3.py (STORAGE=s3 on a real S3 protocol). The community edition is archived: no image on
       # Docker Hub any more (so no service container), no downloads at dl.min.io. Homebrew's bottle of its last release,
@@ -68,6 +83,7 @@ jobs:
         env:
           LR_S3_TEST: 1  # test_store_s3.py fails, never skips, without its MinIO
           TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          INFER_GRAPH_OPT: extended  # no NCHWc convs: they are many times slower on some Intel runners (infer.py, speaker-eval.yml)
           TEST_S3_ACCESS_KEY: minioadmin
           TEST_S3_SECRET_KEY: minioadmin
 
