@@ -26,10 +26,11 @@ from alldayrec.segmenter import SR
 log = logging.getLogger("live")
 
 
-ENGINE = os.environ.get("ENGINE") or "qwen"  # final layer's ASR provider (PROVIDERS): volc | qwen | stepfun | stepfun-sse | stepfun-file | local
+ENGINE = os.environ.get("ENGINE") or "qwen"  # final layer's ASR provider (PROVIDERS): volc | qwen | qwen-sync | stepfun | stepfun-sse | stepfun-file | local
 DRAFT_ENGINE = os.environ.get("DRAFT_ENGINE") or ENGINE  # draft layer's (stepfun-sse: fast, no speakers, drafts are replaced anyway;
                                                          # qwen-stream: one streaming session while a page watches, stream_loop)
-ENGINE_FALLBACK = os.environ.get("ENGINE_FALLBACK", "")  # a window the provider fails on (402, 451, 5xx, timeout) goes here; empty: none
+# a window the provider fails on (402, 451, 5xx, timeout) goes here; several, comma separated, in turn; empty: none
+ENGINE_FALLBACK = os.environ.get("ENGINE_FALLBACK", "")
 SQUEEZE_KEEP_S = float(os.environ.get("SQUEEZE_KEEP_S", "3"))  # VAD silences longer than this go to the engine cut to this; 0: whole
 HOTWORDS = os.environ.get("HOTWORDS", "1") != "0"  # 0: no engine gets the hotwords (the prompts still do)
 
@@ -102,7 +103,7 @@ async def engine_segs(x: np.ndarray, speech: list[tuple[float, float]], partial=
     in the calls table as `kind` (final, draft) of `device`, one cut off (the task cancelled) too, as CancelledError."""
     xs, spans = sent_audio(x, speech, device)
     why = None
-    for name in dict.fromkeys(filter(None, (engine, ENGINE_FALLBACK))):
+    for name in dict.fromkeys(filter(None, (engine, *ENGINE_FALLBACK.split(",")))):
         mark = lambda gs, name=name: squeeze.unsqueeze([{**g, "engine": name, **({"fallback": why} if why else {})} for g in gs], spans)
         t = time.perf_counter()
         try:
@@ -167,6 +168,12 @@ async def qwen(x: np.ndarray, partial=None) -> list[dict]:
     return await hinted("qwen", qwen_asr.BASE, lambda w: qwen_asr.transcribe(x, w), qwen_asr.HOTWORDS, qwen_asr.fits)
 
 
+async def qwen_sync(x: np.ndarray, partial=None) -> list[dict]:
+    """Bailian's synchronous Qwen-Audio 3.1 (qwen_asr.transcribe_sync): its sentences cut where it hears the speaker
+    change, without its ids (the diarist's labels alone), no partial answers."""
+    return await hinted("qwen-sync", qwen_asr.BASE, lambda w: qwen_asr.transcribe_sync(x, w), qwen_asr.HOTWORDS, qwen_asr.fits)
+
+
 async def local(x: np.ndarray, partial=None) -> list[dict]:
     """sherpa-onnx X-ASR in this process (local_asr): text and token times, sentences as stepfun-sse's, no speakers
     (the diarist's), no network, no partial answers."""
@@ -174,7 +181,7 @@ async def local(x: np.ndarray, partial=None) -> list[dict]:
 
 
 # provider(x: 16 kHz int16 PCM, partial=None) -> [{start_ms, end_ms, text, speaker?, words?}], times in x; async
-PROVIDERS = {"volc": volc, "qwen": qwen, "stepfun": stepfun, "stepfun-sse": stepfun_sse, "stepfun-file": stepfun_file, "local": local}
+PROVIDERS = {"volc": volc, "qwen": qwen, "qwen-sync": qwen_sync, "stepfun": stepfun, "stepfun-sse": stepfun_sse, "stepfun-file": stepfun_file, "local": local}
 
 
 async def upload(data: bytes, content_type: str) -> str:

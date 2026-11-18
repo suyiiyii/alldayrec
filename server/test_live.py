@@ -191,6 +191,10 @@ def test_engine_fallback(monkeypatch):
     monkeypatch.setattr(asr, "ENGINE_FALLBACK", "c")
     with pytest.raises(RuntimeError, match="a: .*402.*; c: .*402"):
         anyio.run(asr.engine_segs, x, [], None, "a")
+    calls.clear()
+    monkeypatch.setattr(asr, "ENGINE_FALLBACK", "c,b")  # several: in turn
+    segs = anyio.run(asr.engine_segs, x, [], None, "a")
+    assert calls == ["bad", "bad", "ok"] and segs[0]["engine"] == "b" and "a: " in segs[0]["fallback"] and "c: " in segs[0]["fallback"]
     monkeypatch.setattr(asr, "ENGINE_FALLBACK", "")
     calls.clear()
     with pytest.raises(RuntimeError):

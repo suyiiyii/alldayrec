@@ -8,10 +8,13 @@ through the proxy timed out for hours, and Bailian fetching from it took 2–5 s
 not for production (100 QPS of policies per account and model); a window it fails goes to ENGINE_FALLBACK like any
 other failure. The built-in sensitive-word masking (words turned into ***) is off.
 """
+import base64
 import io
+import itertools
 import json
 import os
 import time
+import urllib.error
 import wave
 
 import anyio
@@ -102,3 +105,40 @@ async def transcribe(x: np.ndarray, words=()) -> list[dict]:
             raise RuntimeError(f"qwen asr {o['task_status']}: {res.get('code') or o.get('code')} {res.get('message') or o.get('message')}"[:200])
         return sentences(json.loads((await net.request("GET", res["transcription_url"], 60)).content).get("transcripts", []))
     raise RuntimeError(f"qwen asr task {task} still running after {WAIT_S} s")
+
+
+# ENGINE=qwen-sync: the same family's synchronous model, one request a piece (<= 5 min, the docs' limit; CHUNK_S is 300 s)
+SYNC_MODEL = os.environ.get("QWEN_SYNC_MODEL") or "qwen-audio-3.1-asr-flash"
+SYNC_WAIT_S = 180
+
+
+def by_turns(sents: list[dict]) -> list[dict]:
+    """The sync model's sentences (its JSON) cut where their words' speaker ids change: a sentence may hold two."""
+    out = []
+    for s in sents:
+        runs = [list(r) for _, r in itertools.groupby(s.get("words") or [], key=lambda w: w.get("speaker_id"))]
+        out += [s] if len(runs) < 2 else [
+            {**s, "begin_time": r[0]["begin_time"], "end_time": r[-1]["end_time"], "speaker_id": r[0].get("speaker_id"), "words": r,
+             "text": "".join(w.get("text", "") + (w.get("punctuation") or "") for w in r)} for r in runs]
+    return out
+
+
+async def transcribe_sync(x: np.ndarray, words=()) -> list[dict]:
+    """x: 16 kHz int16 PCM, at most 5 min; words: hotwords. One synchronous request (base64 wav in the body): its
+    sentences with words, cut at its speaker changes (by_turns), without speaker ids; none for a piece it hears nothing
+    in. Raises on an HTTP error."""
+    body = {"model": SYNC_MODEL, "input": {"messages": [{"role": "user", "content": [
+        {"type": "input_audio", "input_audio": {"data": "data:audio/wav;base64," + base64.b64encode(wav(x)).decode()}}]}]},
+        "parameters": {"format": "wav", "sample_rate": "16000", "speaker_diarization_enabled": True,
+                       **({"vocabulary": dict.fromkeys(words, WEIGHT)} if words else {})}}
+    try:
+        r = await net.request("POST", f"{BASE}/services/aigc/multimodal-generation/generation", SYNC_WAIT_S, content=json.dumps(body).encode(),
+                              headers={"Authorization": f"Bearer {os.environ['DASHSCOPE_API_KEY']}", "Content-Type": "application/json",
+                                       "X-DashScope-SSE": "disable"})
+    except urllib.error.HTTPError as e:  # 11-18: a quiet piece is a 400 whose message says so, not a task code
+        if e.code == 400 and any(c in e.read().decode(errors="replace") for c in NOTHING_SAID):
+            return []
+        raise
+    # its ids hold within one request only, and a short turn's voiceprint can't tell whether an id is right: they only
+    # cut the sentences, who said each is the diarist's alone (no speaker: no engine groups at relabel)
+    return [{**g, "speaker": None} for g in sentences([{"sentences": by_turns((json.loads(r.content).get("output") or {}).get("sentences") or [])}])]

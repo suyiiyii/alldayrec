@@ -251,7 +251,7 @@ async def ask_voice_ws(ws: WebSocket):
     await ws.accept()
     cap = VOICE_MAX_S * audio.SR * 2
     pcm, said, out = bytearray(), [""], {}  # the sentences ended, then the one being said
-    streams = bool({asr.ENGINE, asr.DRAFT_ENGINE, asr.ENGINE_FALLBACK} & {"qwen", "qwen-stream"})
+    streams = bool({asr.ENGINE, asr.DRAFT_ENGINE, *asr.ENGINE_FALLBACK.split(",")} & {"qwen", "qwen-sync", "qwen-stream"})
     tx, rx = anyio.create_memory_object_stream(float("inf"))  # bounded by cap: what the page sends, to the stream
     done = anyio.Event()
     t = time.perf_counter()

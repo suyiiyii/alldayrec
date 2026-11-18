@@ -201,15 +201,16 @@ def main():
                     "INFER_TOKEN, INFER_HOST, INFER_PORT; --port is then its own)")  # never set here: __main__ takes it
     args = ap.parse_args()
     missing = []
-    engines = {e for e in (asr.ENGINE, asr.DRAFT_ENGINE, asr.ENGINE_FALLBACK) if e}
-    if engines - asr.PROVIDERS.keys() - {"qwen-stream"} or "qwen-stream" in (asr.ENGINE, asr.ENGINE_FALLBACK):
+    fallback = asr.ENGINE_FALLBACK.split(",")
+    engines = {e for e in (asr.ENGINE, asr.DRAFT_ENGINE, *fallback) if e}
+    if engines - asr.PROVIDERS.keys() - {"qwen-stream"} or "qwen-stream" in (asr.ENGINE, *fallback):
         raise SystemExit(f"ENGINE, DRAFT_ENGINE, ENGINE_FALLBACK must be one of {', '.join(asr.PROVIDERS)} (DRAFT_ENGINE also qwen-stream), "
                          f"not {', '.join(engines - asr.PROVIDERS.keys())}")
     if "volc" in engines and not os.environ.get("VOLC_ASR_KEY"):
         missing.append("VOLC_ASR_KEY")
     if engines & {"stepfun", "stepfun-sse"} and not os.environ.get("STEPFUN_API_KEY"):
         missing.append("STEPFUN_API_KEY")
-    if engines & {"qwen", "qwen-stream"} and not os.environ.get("DASHSCOPE_API_KEY"):
+    if engines & {"qwen", "qwen-sync", "qwen-stream"} and not os.environ.get("DASHSCOPE_API_KEY"):
         missing.append("DASHSCOPE_API_KEY")
     if file := engines & {"stepfun", "stepfun-file"}:  # diarize(): your own upload bridge and file-mode ASR service
         missing += [f"{k} (for {', '.join(sorted(file))})" for k in
