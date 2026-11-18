@@ -21,6 +21,9 @@ from summary points; off, profiles are made as before.
 evidence (place.py: one more model call a conversation); off, summaries are as before.
 "place_sensitive" (optional, false): with "place" on, true lets the place be a medical, religious, political, police or
 court, rehab or LGBTQ one too (place.py SENSITIVE); off, such a place is never written.
+"voice_tools" (optional, false): true lets an agent (MCP, the HTTP API) read any sentence's voiceprint and compare it
+with other sentences and the known people's (voice_tools.py): from seg_emb when kept, else from the audio. Off, those
+tools are not there. Each its own choice: one keeps everyone's voiceprints, the other lets agents read them.
 """
 import contextvars
 import hmac
@@ -63,6 +66,7 @@ class Tenant:
     persona_v2: bool = False  # tenants.json's "persona_v2": profiles from the person's own sentences (profiles.evidence_v2)
     place: bool = False  # tenants.json's "place": where the recorder probably was, in each summary (place.py)
     place_sensitive: bool = False  # tenants.json's "place_sensitive": sensitive places written too (place.py)
+    voice_tools: bool = False  # tenants.json's "voice_tools": agents may read and compare voiceprints (voice_tools.py)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
     events: list = field(default_factory=list)      # its system log, the last 300
@@ -132,7 +136,7 @@ def load(path: Path = FILE) -> list[Tenant]:
         raise SystemExit(f"{path}: no tenants file (DATA_DIR; see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
-    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en), sound, seg_emb, persona_v2, place and place_sensitive (true or false)'
+    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en), sound, seg_emb, persona_v2, place, place_sensitive and voice_tools (true or false)'
 
     def invalid(reason):
         # Never include configuration values or decoder excerpts: they may contain tokens.
@@ -162,12 +166,13 @@ def load(path: Path = FILE) -> list[Tenant]:
             invalid(f"entry {i}: lang (or UI_LANG) must be one of {', '.join(LANGS)}")
         if not isinstance(x.get("sound", False), bool):
             invalid(f"entry {i}: sound must be true or false")
-        for key in ("seg_emb", "persona_v2", "place", "place_sensitive"):
+        for key in ("seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools"):
             if not isinstance(x.get(key, False), bool):
                 invalid(f"entry {i}: {key} must be true or false")
     ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh",
                  sound=x.get("sound", False), seg_emb=x.get("seg_emb", False), persona_v2=x.get("persona_v2", False), place=x.get("place", False),
-                 place_sensitive=x.get("place_sensitive", False)) for x in config]
+                 place_sensitive=x.get("place_sensitive", False),
+                 voice_tools=x.get("voice_tools", False)) for x in config]
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")

@@ -154,6 +154,18 @@ class Remote:
             CALLS[op, "retried" if tries else "remote"] += 1
             return out
 
+    def once(self, op: str, x: np.ndarray, parse, timeout: float):
+        """One try of at most timeout s, none while the service fails or is unchecked (TimeoutError): for a call that
+        must not wait for the service (voice_tools, an agent's). Its failure raises and is no failure of the service
+        (failed(): the pipelines' calls would wait out a backoff for it)."""
+        if not self.ok or self.down_since is not None:
+            raise TimeoutError("infer service down")
+        body, kind = self._body(x)
+        r = self.http.post(f"{self.url}/{op}", content=body, headers={"Content-Type": kind}, timeout=timeout)
+        r.raise_for_status()
+        CALLS[op, "remote"] += 1
+        return parse(r.json())
+
     def _body(self, x: np.ndarray) -> tuple[bytes, str]:
         """x as the service takes it: int16 as before; float32 as f32le when its /health says it takes that, else
         rounded to int16 (gain.to16; an older service reads any body as int16), warned of once."""

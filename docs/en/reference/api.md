@@ -467,6 +467,24 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | `GET` | The card while it is up: the voice (conversation, label, when), the name it is asked about, the clip to hear. | — |
 | `POST` | yes: as a rename by hand (a, b: the label becomes 我 or the name; c: the name's sentences teach its samples); no: the voice kept apart from the name (c: back to a fresh S&lt;n> first), nothing learnt; later: the card away. | body: JSON object |
 
+### `/api/voiceprint`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | A sentence's voiceprint (voice_tools.voiceprint; sentence: its id, or &lt;conversation id>@HH:MM:SS; from_s / to_s: a stretch of it, from the audio): the one kept (seg_emb) or one made from the audio and not kept. 404 while the tenant's voice_tools is off. | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number) |
+
+### `/api/voiceprint/compare`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | The cosine of a sentence's voiceprint (or a stretch's) and exactly one of: other (a sentence), person (a known name or 我), label (S1 of its conversation, or &lt;conversation id>@S1); each kept part's too (voice_tools.compare). | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number)<br>`other?` (query, string)<br>`other_from_s?` (query, number)<br>`other_to_s?` (query, number)<br>`person?` (query, string)<br>`label?` (query, string) |
+
+### `/api/voiceprint/nearest`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | A sentence's voiceprint (or a stretch's) against every known person, 我 and its conversation's labels, the closest n first (voice_tools.nearest). | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number)<br>`n?` (query, integer) |
+
 ### `/api/audio`
 
 | Method | Description | Parameters |

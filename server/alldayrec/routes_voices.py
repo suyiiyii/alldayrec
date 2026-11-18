@@ -13,6 +13,7 @@ from alldayrec import routes_audio
 from alldayrec import selfvoice
 from alldayrec import sounds
 from alldayrec import threads
+from alldayrec import voice_tools
 from alldayrec import ws
 from alldayrec.core import all_conversations, conversation_rows, find_conversation, owner_npz, state
 from alldayrec.routes_speakers import enroll_soon, label_voice, learnable, owner_bank, rename, save_owner, self_voices, speaker_detach, speaker_groups, voice_of
@@ -297,3 +298,39 @@ async def check_answer(body: dict):
     db.put_kv("voicecheck", st)
     await ws.broadcast({"type": "voicecheck"})
     return {"ok": a != "stale", **learned}
+
+
+# voice tools (tenant "voice_tools", voice_tools.py): an agent's reads over HTTP, as MCP's voiceprint, voice_compare
+# and voice_nearest; the tenant's voice_tools off, none of them is there (404)
+
+async def voice_call(f, *args):
+    if not voice_tools.on():
+        raise HTTPException(404, "Not Found")
+    try:
+        return await anyio.to_thread.run_sync(f, *args, limiter=threads.DB)
+    except voice_tools.Refused as e:
+        raise HTTPException(e.status, str(e))
+
+
+@router.get("/api/voiceprint")
+async def voiceprint(sentence: str, from_s: float | None = None, to_s: float | None = None):
+    """A sentence's voiceprint (voice_tools.voiceprint; sentence: its id, or <conversation id>@HH:MM:SS; from_s / to_s:
+    a stretch of it, from the audio): the one kept (seg_emb) or one made from the audio and not kept. 404 while the
+    tenant's voice_tools is off."""
+    v = await voice_call(voice_tools.voiceprint, sentence, from_s, to_s)
+    return {**v, "model": voice_tools.model(), "e": v["e"].tolist(), "parts": [{**p, "e": p["e"].tolist()} for p in v["parts"]]}
+
+
+@router.get("/api/voiceprint/compare")
+async def voiceprint_compare(sentence: str, from_s: float | None = None, to_s: float | None = None, other: str = "",
+                             other_from_s: float | None = None, other_to_s: float | None = None, person: str = "", label: str = ""):
+    """The cosine of a sentence's voiceprint (or a stretch's) and exactly one of: other (a sentence), person (a known
+    name or 我), label (S1 of its conversation, or <conversation id>@S1); each kept part's too (voice_tools.compare)."""
+    return await voice_call(voice_tools.compare, sentence, from_s, to_s, other, other_from_s, other_to_s, person, label)
+
+
+@router.get("/api/voiceprint/nearest")
+async def voiceprint_nearest(sentence: str, from_s: float | None = None, to_s: float | None = None, n: int = 5):
+    """A sentence's voiceprint (or a stretch's) against every known person, 我 and its conversation's labels, the
+    closest n first (voice_tools.nearest)."""
+    return await voice_call(voice_tools.nearest, sentence, from_s, to_s, n)

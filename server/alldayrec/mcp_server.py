@@ -19,6 +19,8 @@ from alldayrec import ask
 from alldayrec import db
 from alldayrec import sound_events
 from alldayrec import summary
+from alldayrec import voice_tools
+from alldayrec.diarist import PEOPLE_MIN
 
 log = logging.getLogger("live")
 
@@ -256,6 +258,68 @@ def reports(limit: int = 30) -> str:
     return "\n".join(out)
 
 
+# voice tools (tenant "voice_tools"): voice_tools.py's answers as text; the voiceprint itself only as structuredContent
+
+VOICE = ("voiceprint", "voice_compare", "voice_nearest")
+CAVEAT = "短于 1 秒的、外放的、几个人一起说的不可靠。声纹只是证据之一：结合说的内容、谁在回应谁、对话里还有谁来判断）"
+# the 0.7 / 0.63 are a cluster's mean against a person's samples (diarist.OWNER_MIN, PEOPLE_MIN); one sentence runs lower,
+# two sentences of one person can be 0.66 and a split cuts at 0.35: no line for those
+KNOWN_HINT = (f"\n\n（相似度是余弦，1 最像。参考：一个人的多句平均后和 TA 的声纹多在 {PEOPLE_MIN} 以上，别人多在 0.63 以下；"
+              "单独一句、一小段会更低，看排名和差距，不要只看绝对值。" + CAVEAT)
+PAIR_HINT = ("\n\n（相似度是余弦，1 最像。两句之间没有固定的界线，同一个人的两句也可能只有 0.6 上下："
+             "拿这段对话里确定是同一个人的一句当参照比。" + CAVEAT)
+SPAN = {"from_s": {"type": "number", "description": "只看这句里的一段：从第几秒起（不填从头）"},
+        "to_s": {"type": "number", "description": "到第几秒（不填到句末，一段最多 15 秒、至少 0.5 秒）"}}
+REF = {"type": "string", "description": "句子：「对话 id@时:分:秒」（grep 每行的对话 id 和时间，或 transcript 每行开头的时间）；"
+                                       "也可以是 grep 的 structuredContent 里 evidence 的 sentence"}
+
+
+def said(v: dict) -> str:
+    """The sentence a voice tool looked at, its stretch and where its voiceprint came from, on one line."""
+    r = v["sentence"]
+    span = f"，第 {v['span'][0]:g}–{v['span'][1]:g} 秒" if v["from"] == "audio" and v["span"] != [0, v["seconds"]] else ""
+    how = "录音时存下的声纹" if v["from"] == "seg_emb" else "刚从录音算的声纹"
+    return (f"{r['start'][:10]} {r['start'][11:19]} {r.get('speaker') or 'S?'}（{v['seconds']:g} 秒{span}，{how}"
+            + ("，标成了音乐" if r.get("music") else "") + f"）`{r.get('conv') or '不在已结束的对话里'}`：{(r.get('text') or '')[:30]}")
+
+
+def whom(c: dict) -> str:
+    if c["kind"] == "person":
+        return (f"{c['name']}（{'录音者本人' if c['name'] == '我' else '认出名字的人'}，{c['samples']} 个声纹样本里最近的"
+                + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + ("；这段对话教过「我」，分数偏高" if c.get("taught") else "") + "）")
+    if c["kind"] == "label":
+        return f"{c['label']}（对话 `{c['conv']}` 里这个标签的声纹" + ("；这句就是它的来源之一，偏高" if c["in_it"]
+                else "；不知道这句是不是它的来源之一，可能偏高" if c["in_it"] is None else "") + "）"
+    return "另一句 " + said(c)
+
+
+def voiceprint(sentence: str, from_s: float | None = None, to_s: float | None = None) -> tuple[str, dict]:
+    v = voice_tools.voiceprint(sentence, from_s, to_s)
+    parts = "".join(f"\n- 第 {p['from']:g}–{p['to']:g} 秒一段" for p in v["parts"])
+    return (f"# 这句的声纹\n{said(v)}\n- 模型 {voice_tools.model()}，{len(v['e'])} 维，向量在 structuredContent 的 voiceprint.e 里"
+            + (f"\n- 存下的声纹分 {len(v['parts'])} 段（引擎在这句里分了段，或者这里切过换人）：{parts}" if v["parts"] else "")
+            + "\n比相似度用 voice_compare、voice_nearest，不用自己算。",
+            {"voiceprint": {"sentence": v["sentence"], "span": v["span"], "from": v["from"], "model": voice_tools.model(),
+                            "e": [round(float(x), 5) for x in v["e"]]}})
+
+
+def voice_compare(sentence: str, from_s: float | None = None, to_s: float | None = None, other: str = "",
+                  other_from_s: float | None = None, other_to_s: float | None = None, person: str = "", label: str = "") -> str:
+    c = voice_tools.compare(sentence, from_s, to_s, other, other_from_s, other_to_s, person, label)
+    w = c["with"]
+    parts = "；".join(f"第 {p['from']:g}–{p['to']:g} 秒 {p['score']}" for p in c["parts"])
+    return (f"# 相似度 {c['score']}\n- 这句：{said(c)}\n- 比的是：{whom(w)}" + (f"\n- 各段：{parts}（各段差得多，可能一句里有两个人）" if parts else "")
+            + (PAIR_HINT if w["kind"] == "sentence" else KNOWN_HINT))
+
+
+def voice_nearest(sentence: str, from_s: float | None = None, to_s: float | None = None, n: int = 5) -> str:
+    x = voice_tools.nearest(sentence, from_s, to_s, n)
+    out = [f"# 最像的 {len(x['nearest'])} 个（共比了 {x['known']} 个：认出名字的人、「我」、这段对话的各个标签）", f"这句：{said(x)}"]
+    out += [f"- {c['score']} {whom(c)}" for c in x["nearest"]] or ["- 还没有任何人的声纹可比"]
+    out += [f"- 第 {p['from']:g}–{p['to']:g} 秒这段最像 {whom(p['best'])} {p['best']['score']}" for p in x["parts"] if p["best"]]
+    return "\n".join(out) + KNOWN_HINT
+
+
 def mark_todo(id: str, text: str, mark: str) -> str:
     """The web page's 完成 / 不对 (db.mark_todos); once is enough."""
     if mark not in ("done", "wrong"):
@@ -307,6 +371,16 @@ TOOLS = {f.__name__: (f, desc, props, req) for f, desc, props, req in [
     (reports, "我在网页上对某一句点「上报问题」留下的记录，最新的在前：上报时间、我写的问题、那一句当时的样子（时间、说话人、原文、"
      "draft 初稿或 final 定稿、设备、转写引擎）和所在对话 id（对话还在进行，或这句不在任何对话里时没有）。用来分诊转写、说话人、断句的问题；对话 id 可再用 transcript 看上下文。",
      {"limit": {"type": "integer", "description": "最多几条，默认 30，最多 100"}}, []),
+    (voiceprint, "某一句（或句里的一段）说话人的声纹（192 维向量，在 structuredContent 里）：录音时存下的就直接给，没存的从录音现算，算完不存。"
+     "一般不用看向量本身，判断是谁用 voice_compare、voice_nearest。", {"sentence": REF, **SPAN}, ["sentence"]),
+    (voice_compare, "一句（或句里的一段）和下面之一的声纹相似度：另一句 other（也可以只取一段）、一个认出名字的人 person（或「我」）、"
+     "一个标签 label（这句所在对话的 S1 这种，或「对话 id@S1」）。存下的声纹分了段时也给每段的，各段差得多说明一句里可能有两个人。",
+     {"sentence": REF, **SPAN, "other": {**REF, "description": "另一句，写法同 sentence"},
+      "other_from_s": {"type": "number", "description": "另一句里从第几秒起"}, "other_to_s": {"type": "number", "description": "另一句里到第几秒"},
+      "person": {"type": "string", "description": "认出名字的人（names 里的），或「我」"},
+      "label": {"type": "string", "description": "这句所在对话里的标签，如 S1；别的对话的写「对话 id@S1」"}}, ["sentence"]),
+    (voice_nearest, "一句（或句里的一段）和所有认出名字的人、「我」、这句所在对话的各个标签比声纹，最像的在前。判断某句是谁说的先用它，再结合说的内容和上下文。",
+     {"sentence": REF, **SPAN, "n": {"type": "integer", "description": "列前几个，默认 5，最多 20"}}, ["sentence"]),
     (terms, "录音者的热词和术语表（人名、公司、产品、术语），加上认出名字的说话人，最近用到的在前。转写里和其中某个同音、近音的词多半就是它："
      "搜索、grep 时也用这里的写法再找一次。", {}, []),
 ]}
@@ -320,8 +394,11 @@ TOOL_LIST = READ_LIST + [
 
 
 def tool_list(write: bool) -> list:
-    """tools/list: the sound tool and search's sound only while the tenant's sound is on (off: as before there were any)."""
+    """tools/list: the sound tool and search's sound only while the tenant's sound is on, the voice tools only while
+    its voice_tools is (off: as before there were any)."""
     ts = TOOL_LIST if write else READ_LIST
+    if not voice_tools.on():
+        ts = [t for t in ts if t["name"] not in VOICE]
     if sound_events.model():
         return ts
     return [{**t, "inputSchema": {**t["inputSchema"], "properties": {k: v for k, v in t["inputSchema"]["properties"].items() if k != "sound"}}}
@@ -355,7 +432,7 @@ def call(name: str, args: dict) -> tuple[str, bool, dict | None]:
         out = TOOLS[name][0](**args)
         text, structured = out if isinstance(out, tuple) else (out, None)
         return paged(text, cursor), False, structured
-    except Bad as e:
+    except (Bad, voice_tools.Refused) as e:
         return str(e), True, None
     except (TypeError, ValueError) as e:  # a missing, unknown or malformed argument
         return f"参数不对：{e}"[:300], True, None
@@ -418,7 +495,8 @@ def handle(msg, headers, write: bool = True) -> tuple[int, dict | None]:
         if m != "tools/call":
             return err(404 if modern else 200, -32601, f"Method not found: {m}")
         tool, args = p.get("name"), p.get("arguments") or {}
-        if tool not in TOOLS and tool != "mark_todo" or tool == "sounds" and not sound_events.model() or not isinstance(args, dict):
+        if tool not in TOOLS and tool != "mark_todo" or tool == "sounds" and not sound_events.model() \
+                or tool in VOICE and not voice_tools.on() or not isinstance(args, dict):
             return err(200, -32602, f"Unknown tool: {tool}" if isinstance(args, dict) else "arguments must be an object")
         if tool == "mark_todo" and not write:
             text, bad, structured = "这个连接只读，不能标记待办：要标就在网页上点「完成」「不对」，或在设置页新建一个允许标记待办的连接", True, None

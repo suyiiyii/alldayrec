@@ -94,6 +94,7 @@ def seed(t: tenant.Tenant):
     tenant.call(t, store)
     t.events.append({"type": "event", "at": AT, "kind": "info", "text": mark})
     t.sound = True  # SOUND_MODEL: the fixture two
+    t.voice_tools = True
     t.devices[DEV] = pipeline_state.PipelineState(
         conversation={"start": f"{TODAY}T11:00:00.000", "end": f"{TODAY}T11:01:00.000", "sentences": 1, "speech_s": 30,
                       "device": DEV, "note": mark},
@@ -196,6 +197,9 @@ REQUESTS = {
     ("GET", "/api/stars"): ("GET", "/api/stars", {}),
     ("DELETE", "/api/sentences/{sid}/star"): ("DELETE", "/api/sentences/f1/star", {}),
     ("POST", "/api/sentences/{sid}/speaker"): ("POST", "/api/sentences/f1/speaker", dict(json={"conv": CID, "to": "我"})),
+    ("GET", "/api/voiceprint"): ("GET", "/api/voiceprint", dict(params={"sentence": "f1"})),  # its audio: a's recording
+    ("GET", "/api/voiceprint/compare"): ("GET", "/api/voiceprint/compare", dict(params={"sentence": "f1", "person": "MARKa人"})),
+    ("GET", "/api/voiceprint/nearest"): ("GET", "/api/voiceprint/nearest", dict(params={"sentence": "f1"})),  # a's people only
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/import": "page", "/speakers": "page",
@@ -446,7 +450,7 @@ def test_nothing_per_person_in_a_module():
     """The modules the server runs keep no mutable state at module level but these (none of them a person's): a cache
     or a dict added there would be shared by every tenant."""
     allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS", "refused_at", "REJECTED"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
-               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST", "SOUND_WORDS"},
+               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST", "SOUND_WORDS", "SPAN", "REF"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
