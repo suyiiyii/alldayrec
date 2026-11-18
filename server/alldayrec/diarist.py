@@ -143,8 +143,10 @@ class Diarist:
 
 GUARD = float(os.environ.get("DIAR_GUARD", "0.6"))  # an engine group whose long sentence is this far from the group's mean voiceprint is split
 # > 0: in place of GUARD, a sentence stays in its engine group only when its voiceprint is this close to the mean of the
-# group's other long sentences, else it is alone (a short one then joins the nearest voice, not its mates). #457, the
-# #419 GT at 0.5: one-person sentences cut 8.2% -> 7.4%, speaker changes found 0.50 -> 0.63. 0: GUARD
+# group's other long sentences, else it is alone (a short one then joins the nearest voice, not its mates, or is S?).
+# #457, the #419 GT at 0.5: speaker changes found 0.50 -> 0.62 at a live close (relabel_rows: one-person sentences cut
+# 6.8% -> 6.9%, no better), 0.50 -> 0.63 sentence by sentence (late.py: cut 8.2% -> 7.4%); S? rows 0.8% -> 2.5%; a group
+# spread evenly over three people can stay one label where the guard split it. 0: GUARD
 AGREE = float(os.environ.get("DIAR_AGREE", "0"))
 
 
@@ -245,15 +247,16 @@ if __name__ == "__main__":
     assert all(l == "我" for l, v in zip(lab, seq) if v is me), lab
     assert len({l for l, v in zip(lab, seq) if v is a}) == 1 and len({l for l, v in zip(lab, seq) if v is b}) == 1, lab
     assert {l for l, v in zip(lab, seq) if v is a}.isdisjoint({l for l, v in zip(lab, seq) if v is b}), lab
-    mixed = relabel(E, [2.0] * len(E), {"dji-mac": noisy(me)}, groups=["one"] * len(E))  # an engine id over everyone
+    mixed = relabel(E, [2.0] * len(E), {"dji-mac": noisy(me)}, groups=["one"] * len(E), agree=0)  # an engine id over everyone
     assert mixed == lab, "a group whose voices disagree falls apart instead of making one speaker"
     # an engine id over a's turn and b's quick short reply: b's mates' label by default, its own voice with agree
     Eq, dq = E + [noisy(a), noisy(a), noisy(b)], [2.0] * len(E) + [2.0, 2.0, 0.6]
     gq = [("alone", i) for i in range(len(E))] + [("p", 1)] * 3
     a_lab, b_lab = (lab[next(i for i, v in enumerate(seq) if v is w)] for w in (a, b))
-    assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq)[-1] == a_lab != b_lab
+    assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq, agree=0)[-1] == a_lab != b_lab
     assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq, agree=0.5)[-3:] == [a_lab, a_lab, b_lab]
-    assert relabel(Eq, dq, bank_q := {"dji-mac": noisy(me)}, gq, agree=0) == relabel(Eq, dq, bank_q, gq), "0: GUARD, as before"
+    assert relabel(Eq, dq, {"dji-mac": noisy(me)}, gq, guard=None, agree=0)[-3:] == [a_lab] * 3, "0: no sentence leaves its group"
+    assert relabel(E, [2.0] * len(E), {"dji-mac": noisy(me)}, groups=["one"] * len(E), agree=0.5) != lab, "agree: a group spread over three people stays partly together (#374 limit)"
     # someone who sounds like the owner on this recorder: their cluster passes the bank too; named, the closer voice wins
     f = _unit(0.76 * me + np.sqrt(1 - 0.76 ** 2) * b)
     seq2 = [me, f, f, me] * 8
