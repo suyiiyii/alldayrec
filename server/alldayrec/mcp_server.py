@@ -279,7 +279,7 @@ def said(v: dict) -> str:
 
 def whom(c: dict) -> str:
     if c["kind"] == "person":
-        return f"{c['name']}（认出名字的人，{c['samples']} 个声纹样本里最近的" + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + "）"
+        return f"{c['name']}（{'录音者本人' if c['name'] == '我' else '认出名字的人'}，{c['samples']} 个声纹样本里最近的" + ("；这句教过 TA，已去掉这句再比" if c["left_out"] else "") + "）"
     if c["kind"] == "label":
         return f"{c['label']}（对话 `{c['conv']}` 里这个标签的声纹" + ("；这句就是它的来源之一，偏高" if c["in_it"] else "") + "）"
     return "另一句 " + said(c)
