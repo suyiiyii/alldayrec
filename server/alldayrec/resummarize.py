@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from alldayrec.summary import MIN_SPEECH_S, PROMPT_VERSION
+from alldayrec.summary import MEDIA_VERSION, MIN_SPEECH_S, PROMPT_VERSION
 
 
 def client(url: str, token: str, delay: float = 5, max_delay: float = 600):
@@ -110,7 +110,8 @@ def main(argv: list[str] | None = None) -> dict:
     p.add_argument("--timeout", type=float, default=1800.0, help="seconds to wait for one redo (1800)")
     p.add_argument("--limit", type=int, default=0, help="redo at most N, the oldest first (0: all)")
     p.add_argument("--dry-run", action="store_true", help="list what would be redone, change nothing")
-    p.add_argument("--version", type=int, default=PROMPT_VERSION, help=f"the prompt version a summary must be on ({PROMPT_VERSION}; 19 with media_view on)")
+    p.add_argument("--version", type=int, default=PROMPT_VERSION, choices=(PROMPT_VERSION, MEDIA_VERSION),
+                   help=f"the prompt version a summary must be on ({PROMPT_VERSION}; {MEDIA_VERSION} with the tenant's media_view on)")
     a = p.parse_args(argv)
     if a.days < 1 or a.limit < 0 or a.delay < 0 or a.max_delay < max(a.delay, 1) or a.timeout <= 0:
         p.error("days/timeout must be positive, limit/delay nonnegative, max-delay >= max(delay, 1)")
@@ -129,6 +130,9 @@ def main(argv: list[str] | None = None) -> dict:
         else:
             todo.append(c)
     todo = todo[:a.limit or None]
+    # a tenant without media_view writes 18 again: one wasted redo, then a wait for 19 until --timeout
+    if a.version == MEDIA_VERSION and todo and not api("GET", f"/api/conversation/{todo[0]['id']}").get("media_view"):
+        sys.exit(f"--version {MEDIA_VERSION}: the tenant has \"media_view\" off, its summaries are written on {PROMPT_VERSION}")
     print(f"{len(convs)} conversations since {today - dt.timedelta(days=a.days - 1)}: {len(todo)} to redo to prompt v{a.version}, "
           f"skipped {json.dumps(skipped)}", flush=True)
     if a.dry_run:

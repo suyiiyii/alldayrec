@@ -169,6 +169,7 @@ def transcript(id: str) -> str:
 
 def transcript_at(date: str, start: str, end: str) -> str:
     """Every device's rows: two recorders in one room both have the minute, each under its own heading."""
+    # shortcut: no （外放）（广播） marks here (media_view): rows of several conversations; look each one's summary up to add them
     d = day_of(date)
     for t in (start, end):
         if not re.fullmatch(r"\d{1,2}:\d{2}", t):

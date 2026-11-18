@@ -3,6 +3,8 @@ import datetime as dt
 import io
 import urllib.error
 
+import pytest
+
 from alldayrec import resummarize as r
 
 
@@ -148,12 +150,20 @@ def test_version_flag_redoes_summaries_below_it(monkeypatch):
             posted.append(id)
             state[id] = conv(id, 19)
             return {"status": "pending"}
-        return state[id]
+        return {**state[id], "media_view": on}
 
+    on = True
     monkeypatch.setenv("LIVE_RECORD_URL", "http://localhost")
     monkeypatch.setenv("LIVE_RECORD_TOKEN", "test")
     monkeypatch.setattr(r, "client", lambda *args: api)
     monkeypatch.setattr(r.time, "sleep", lambda s: None)
     assert r.main(["--days", "1", "--dry-run"])["todo"] == 0, "18 is current without the flag"
+    on = False
+    with pytest.raises(SystemExit):  # a tenant with media_view off would write 18 again and wait for 19
+        r.main(["--days", "1", "--version", "19"])
+    with pytest.raises(SystemExit):
+        r.main(["--days", "1", "--version", "20"])
+    assert posted == []
+    on = True
     got = r.main(["--days", "1", "--version", "19"])
     assert posted == ["old"] and got["redone"] == 1, (posted, got)

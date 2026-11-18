@@ -89,7 +89,7 @@ Off by default. With the tenant's `"place": true` (see [Configuration](../refere
 With the tenant's `"media_view": true`, the model call that writes a summary also tells media played aloud from broadcasts, prompts and music (the transcript sent is the same as before; no extra call).
 
 - **Where it is kept**: `media_spans` and `broadcast_spans` in the summary, each run by its first and last sentence's time; runs you marked 改回现场 (said here) in `live_spans`.
-- **What uses it**: sentences of either kind are no evidence for people profiles, give no name hints, and teach no one's voiceprint on a rename or a voice check; the transcripts your AI assistant reads mark them （外放） and （广播）. A broadcast such as a subway's next stop or navigation can back the place guess (with `place` on); a video or TV played aloud cannot.
+- **What uses it**: sentences of either kind are no evidence for people profiles, give no name hints, and teach no one else's voiceprint on a rename or a voice check (renaming to 我 takes the label's voiceprint as a whole, not line by line; a label mostly in either kind is never a candidate for 我); the transcripts your AI assistant reads mark them （外放） and （广播）. A broadcast such as a subway's next stop or navigation can back the place guess (with `place` on); a video or TV played aloud cannot.
 - **Turning it off**: remove `"media_view"` (or set it to `false`) and restart: new summaries use the former prompt and the conversation page folds 媒体 (media) as before; the fields already kept stay in their summaries.
 
 ## Why keep the original audio

@@ -73,7 +73,7 @@ def test_marked_live_stands_over_a_redo(store, monkeypatch):
     db.put_summary({"conversation": c["id"], "status": "done", "model": "m", "media_spans": whole, "broadcast_spans": []})
     with pytest.raises(HTTPException):
         anyio.run(routes_api.mark_live, c["id"], {"from": rows[3]["start"]})
-    s = anyio.run(routes_api.mark_live, c["id"], {"from": rows[0]["start"], "to": rows[2]["start"]})
+    s = anyio.run(routes_api.mark_live, c["id"], {"from": rows[0]["start"], "to": rows[2]["start"], "kind": "media"})
     assert s["media_spans"] == [{"from": rows[3]["start"], "to": rows[5]["start"]}] and s["media_share"] == 0.5
 
     async def again(conv, tags):  # the model's redo: all media, as before the mark
@@ -88,24 +88,25 @@ def test_marked_live_stands_over_a_redo(store, monkeypatch):
     async def run():
         await routes_api.resummarize(c["id"])  # 重新生成, as a rename and the backfill ask: queue_summary(keep=True)
         # a mark while the redo is queued: the summary shown stays done, the mark is taken
-        assert (await routes_api.mark_live(c["id"], {"from": rows[0]["start"], "to": rows[0]["start"]}))["status"] == "done"
+        assert (await routes_api.mark_live(c["id"], {"from": rows[3]["start"], "to": rows[3]["start"], "kind": "media"}))["status"] == "done"
         await summaries.summarize_loop()
 
     with pytest.raises(Done):
         anyio.run(run)
     s = db.summary(c["id"])
-    assert s["media_spans"] == [{"from": rows[3]["start"], "to": rows[5]["start"]}] and s["live_spans"] == [
-        {"from": rows[0]["start"], "to": rows[2]["start"], "kind": "media"}, {"from": rows[0]["start"], "to": rows[0]["start"], "kind": "media"}], s
+    assert s["media_spans"] == [{"from": rows[4]["start"], "to": rows[5]["start"]}] and s["live_spans"] == [
+        {"from": rows[0]["start"], "to": rows[2]["start"], "kind": "media"}, {"from": rows[3]["start"], "to": rows[3]["start"], "kind": "media"}], s
 
 
 def test_undo_puts_a_run_back_in_its_kind(store):
     """恢复为外放 / 恢复为广播: the mark gone, its rows back in the spans they were in; one never made is a 404."""
+    store.media_view = True
     c, rows = conversation()
     db.put_summary({"conversation": c["id"], "status": "done", "model": "m", "media_spans": [{"from": rows[0]["start"], "to": rows[1]["start"]}],
                     "broadcast_spans": [{"from": rows[3]["start"], "to": rows[4]["start"]}]})
     before = db.summary(c["id"])
-    for x in (rows[0], rows[3]):
-        anyio.run(routes_api.mark_live, c["id"], {"from": x["start"], "to": x["start"]})
+    for x, k in ((rows[0], "media"), (rows[3], "broadcast")):
+        anyio.run(routes_api.mark_live, c["id"], {"from": x["start"], "to": x["start"], "kind": k})
     s = db.summary(c["id"])
     assert [m["kind"] for m in s["live_spans"]] == ["media", "broadcast"] and s["media_share"] == round(2 / 6, 2)
     for x in (rows[0], rows[3]):
@@ -138,3 +139,33 @@ def test_agent_transcript_marks_kinds(store, on):
     text = mcp_server.transcript(c["id"])
     assert ("S1（外放）: 合成句子0" in text and "S1（广播）: 合成句子1" in text and "S1: 合成句子2" in text) == on
     assert ("（外放）" in text) == on
+
+
+def test_off_summary_has_no_new_key(store):
+    """Off, a summary is v18's key for key: no broadcast_spans, from the model's reply or a short conversation's."""
+    c, rows = conversation()
+    s = summary.result(c, rows, {"title": "t", "summary": "s", "broadcast_spans": [{"from": hms(rows[0]), "to": hms(rows[0])}]}, {"model": "m"})
+    assert "broadcast_spans" not in s and s["prompt_version"] == summary.PROMPT_VERSION and s["media_share"] == 0.0
+    short = anyio.run(summary.summarize, {**c, "speech_s": 10}, rows)
+    assert "broadcast_spans" not in short
+    store.media_view = True
+    assert "broadcast_spans" in anyio.run(summary.summarize, {**c, "speech_s": 10}, rows)
+
+
+def test_marks_need_the_switch_and_a_run_of_their_kind(store):
+    """Off, 改回现场 is not there (404); on, a mark names its kind and two rows, the first in a span of that kind (400)."""
+    c, rows = conversation()
+    db.put_summary({"conversation": c["id"], "status": "done", "model": "m", "media_spans": [{"from": rows[0]["start"], "to": rows[1]["start"]}],
+                    "broadcast_spans": []})
+    body = {"from": rows[0]["start"], "to": rows[1]["start"], "kind": "media"}
+    for f in (routes_api.mark_live, routes_api.unmark_live):
+        with pytest.raises(HTTPException) as e:
+            anyio.run(f, c["id"], body)
+        assert e.value.status_code == 404
+    store.media_view = True
+    for bad in ({"kind": None}, {"kind": "broadcast"}, {"from": rows[3]["start"], "to": rows[3]["start"]}, {"to": "2026-01-01T00:00:00.000"}):
+        with pytest.raises(HTTPException) as e:
+            anyio.run(routes_api.mark_live, c["id"], {**body, **bad})
+        assert e.value.status_code == 400, bad
+    assert "live_spans" not in db.summary(c["id"]), "nothing written by a refused mark"
+    assert anyio.run(routes_api.mark_live, c["id"], body)["media_spans"] == []

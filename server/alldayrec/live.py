@@ -10,6 +10,8 @@ import json
 from alldayrec.summary import complete, faithful, instructions, lang_line, terms_line, transcript
 
 FIELDS = ("points", "decisions", "todos", "open_questions")
+# shortcut: music here is still 外放 (v18's wording) for the topic timeline; the closing summary takes media_view's
+# three kinds (instructions()). Say it in three kinds here too if live summaries put music in media_spans
 SYSTEM = """你在一段正在进行的对话现场（开会、讨论、聊天、日常生活都算），持续整理议题时间线，帮在场的我随时回顾刚才讲了什么。
 开始时你会先收到今天更早几段对话的总结，只作背景：帮你认出人、事和来龙去脉；时间线只写当前这段对话。
 之后每一轮收到当前的议题列表（#编号 [开始时间] 标题）和刚定稿的一段新转写，每行「[时间] 说话人: 文本」。「我」是录音者本人，S1、S2… 是其他人（同一个人可能被拆成多个标签），S? 是太短没认出来的句子。转写有错别字和同音误识别，按意图理解。

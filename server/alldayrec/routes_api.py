@@ -576,21 +576,21 @@ async def conversation(conv_id: str):
 
 @router.post("/api/conversation/{conv_id}/live")
 async def mark_live(conv_id: str, body: dict):
-    """改回现场: the rows from..to (their starts) were said in the room, not played aloud nor a broadcast: out of the
-    summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind they were, for its undo. The
-    summary as it is now."""
+    """改回现场 (tenant "media_view"): the rows from..to (two rows' starts) of kind media or broadcast were said in the
+    room: out of the summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind, for its undo.
+    The summary as it is now."""
     return await live_mark(conv_id, body, True)
 
 
 @router.delete("/api/conversation/{conv_id}/live")
 async def unmark_live(conv_id: str, body: dict):
-    """恢复为外放: the mark from..to taken back, its rows played aloud (or broadcast) again (summary.unmark_live)."""
+    """恢复为外放 (tenant "media_view"): the mark from..to taken back, its rows of its kind again (summary.unmark_live)."""
     return await live_mark(conv_id, body, False)
 
 
 async def live_mark(conv_id: str, body: dict, on: bool) -> dict:
     c = find_conversation(conv_id)
-    if not c:
+    if not c or not T().media_view:  # off: as if the route were not there
         raise HTTPException(404, "no such conversation")
     a, b, s = body.get("from"), body.get("to"), db.summary(c["id"])
     if not (isinstance(a, str) and isinstance(b, str) and a <= b):
@@ -599,8 +599,9 @@ async def live_mark(conv_id: str, body: dict, on: bool) -> dict:
         raise HTTPException(409, "no summary yet")
     rows = conversation_rows(c)
     if on:
-        kind = "broadcast" if not summary.in_media({"start": a}, s.get("media_spans") or []) and summary.in_media(
-            {"start": a}, s.get("broadcast_spans") or []) else "media"
+        kind, starts = body.get("kind"), {r["start"] for r in rows}
+        if kind not in ("media", "broadcast") or not {a, b} <= starts or not summary.in_media({"start": a}, s.get(kind + "_spans") or []):
+            raise HTTPException(400, "kind media or broadcast; from and to two rows' starts, from in a span of that kind")
         s = summary.keep_live(s, (s.get("live_spans") or []) + [{"from": a, "to": b, "kind": kind}], rows)
     elif mark := next((x for x in s.get("live_spans") or [] if (x["from"], x["to"]) == (a, b)), None):
         s = summary.unmark_live(s, mark, rows)

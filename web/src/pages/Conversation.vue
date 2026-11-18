@@ -79,18 +79,22 @@ const kind = (r: Row) =>
   inSpans(r, s.value?.media_spans) ? "media" : view.value && inSpans(r, s.value?.broadcast_spans) ? "broadcast" : false;
 const media = (r: Row) => !!kind(r);
 const segs = computed(() => (view.value ? fold(c.value?.rows ?? [], kind, 1) : fold(c.value?.rows ?? [], media)));
-// 改回现场 (on) or its undo, 恢复为外放 (off: DELETE the mark), from..to the run's first and last row
-async function setLive(from: string, to: string, on: boolean) {
+// 改回现场 (on: the run's kind, media or broadcast) or its undo, 恢复为外放 (off: DELETE the mark), from..to the run's
+// first and last row
+async function setLive(from: string, to: string, on?: string) {
   try {
-    await post(`/api/conversation/${encodeURIComponent(props.id)}/live`, { from, to }, on ? "POST" : "DELETE");
+    const path = `/api/conversation/${encodeURIComponent(props.id)}/live`;
+    await post(path, on ? { from, to, kind: on } : { from, to }, on ? "POST" : "DELETE");
     toast(t(on ? "conv.toLive" : "conv.unLive"));
     await reload();
   } catch (e) {
     toast((e as Error).message);
   }
 }
-const toLive = (rows: Row[]) => setLive(rows[0].start, rows.at(-1)!.start, true);
-// a mark shows where its run was, at its first row, with its undo
+const toLive = (rows: Row[], kind: string) => setLive(rows[0].start, rows.at(-1)!.start, kind);
+// a mark shows where its run was, at its first row, with its undo.
+// shortcut: found by its first row's exact start; a split, late merge or new transcript that moves it hides the undo
+// (the mark still holds over redos): match the nearest row if that happens
 const markAt = (r: Row) => (view.value ? s.value?.live_spans?.find((x) => x.from === r.start) : undefined);
 
 // a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
@@ -696,7 +700,7 @@ function edit(label: string) {
           <template v-for="g in segs" :key="g.k === 'row' ? g.r.id : g.key">
             <div v-if="g.k === 'row' && markAt(g.r)" class="livemark">
               <span>{{ t("mediaFold.marked") }}</span>
-              <button @click="setLive(markAt(g.r)!.from, markAt(g.r)!.to, false)">
+              <button @click="setLive(markAt(g.r)!.from, markAt(g.r)!.to)">
                 {{ t(markAt(g.r)!.kind === "broadcast" ? "mediaFold.unBroadcast" : "mediaFold.unMedia") }}
               </button>
             </div>
@@ -713,7 +717,7 @@ function edit(label: string) {
               v-else
               :rows="g.rows"
               :kind="g.kind"
-              :live="view ? toLive : undefined"
+              :live="view && g.kind ? (rows: Row[]) => toLive(rows, g.kind!) : undefined"
               :hit="hit"
               :seek="seekRow"
               :menu="press"

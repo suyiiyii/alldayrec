@@ -39,6 +39,8 @@ PROMPT_VERSION = 18  # 2: tags, 3: people, 4: speech to AI told apart from speec
                      # 17: the hotwords (terms and named people, db.hotwords): a near-homophone in the transcript spelt as listed
                      # 18: no done_hints and no open todos: the resolve pass after the summary does it (todo_auto.py)
 MEDIA_VERSION = 19  # tenant "media_view": 18 told in three kinds, media, broadcasts (broadcast_spans) and live (MEDIA_SYSTEM)
+# shortcut: one number above PROMPT_VERSION; a new default prompt (19) needs this one moved past it too
+assert MEDIA_VERSION > PROMPT_VERSION, "a media_view summary on the default prompt's number would count as current"
 # Who each line is said to, and media played aloud: shared with split.py, which must not take dictation to an AI for
 # a talk with someone
 AUDIENCE = """所有说话人（「我」、其他标签或姓名）都用同一标准区分听众，先分清再整理：
@@ -441,7 +443,7 @@ async def summarize(conv: dict, rows: list[dict], known_tags: list[str] = ()) ->
             "created_at": dt.datetime.now().isoformat(timespec="seconds"), "error": None}
     if conv.get("speech_s", 0) < MIN_SPEECH_S or not rows:
         first = next((r["text"] for r in rows if r.get("text")), "")
-        return {**base, "status": "done", "model": None, "title": first[:20], "summary": "", **{k: [] for k in LISTS}}
+        return {**base, "status": "done", "model": None, "title": first[:20], "summary": "", **{k: [] for k in lists()}}
     todos = todo_context(conv)
     # only a hint: the phone cannot tell its media from people talking over it, the model splits as media_spans says
     note = "".join(f"\n（手机报告：{x['from'][11:19]} 到 {x['to'][11:19]} 它在外放音乐或视频；这段里在场的人说的话照常算）" for x in played(conv, rows))
@@ -470,7 +472,7 @@ def typed(res: dict) -> tuple[dict, list[str]]:
     for k in ("title", "summary"):
         if not isinstance(out.get(k) or "", str):
             out[k], bad = "", [*bad, k]
-    for k in LISTS:
+    for k in lists():
         v = out.get(k) or []
         out[k] = [x for x in v if isinstance(x, str if k == "tags" else dict)] if isinstance(v, list) else []
         if k in ("todos", "decisions", "ai_requests"):  # each one a text, its other words text or null (todo_ids, due_todos)
@@ -492,11 +494,16 @@ def result(conv: dict, rows: list[dict], res: dict, raw: dict) -> dict:
     res = anchor(res, rows)
     return {"conversation": conv["id"], "prompt_version": version(), "created_at": dt.datetime.now().isoformat(timespec="seconds"),
             "error": None, "status": "done", "model": raw.get("model"), "usage": raw.get("usage"),
-            "media_share": media_share(rows, not_live(res)),
-            **{k: res.get(k) or ("" if k in ("title", "summary") else []) for k in ("title", "summary", *LISTS)}}
+            "media_share": media_share(rows, not_live({k: res.get(k) for k in lists()})),  # off: a stray broadcast_spans counts not
+            **{k: res.get(k) or ("" if k in ("title", "summary") else []) for k in ("title", "summary", *lists())}}
 
 
-LISTS = ("people", "tags", "topics", "todos", "decisions", "ai_requests", "ai_spans", "media_spans", "broadcast_spans")
+LISTS = ("people", "tags", "topics", "todos", "decisions", "ai_requests", "ai_spans", "media_spans")
+
+
+def lists() -> tuple[str, ...]:
+    """LISTS, and broadcast_spans with the tenant's "media_view" on: off, a summary is as before, key for key."""
+    return LISTS + ("broadcast_spans",) if T().media_view else LISTS
 
 
 def _speech(r: dict) -> float:
@@ -535,7 +542,7 @@ def keep_live(s: dict, live: list[dict], rows: list[dict]) -> dict:
 
 def unmark_live(s: dict, mark: dict, rows: list[dict]) -> dict:
     """改回现场 taken back (恢复为外放): the mark out of live_spans, its rows back in the spans of its kind."""
-    k = "broadcast_spans" if mark.get("kind") == "broadcast" else "media_spans"
+    k = mark["kind"] + "_spans"  # media or broadcast, checked when it was made (routes_api.live_mark)
     back = {**s, k: (s.get(k) or []) + [{"from": mark["from"], "to": mark["to"]}]}
     return keep_live(back, [x for x in s.get("live_spans") or [] if x != mark], rows)
 
