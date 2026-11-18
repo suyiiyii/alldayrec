@@ -1,12 +1,12 @@
 """Redo the summaries of the last days with the current prompt, through the running server's own path (POST
 /api/conversation/{id}/summarize, as 重新生成 does), one conversation at a time: the backfill after a prompt change.
 
-    cd server && uv run python -m alldayrec.resummarize [--days 30] [--delay 5] [--limit N] [--dry-run]
+    cd server && uv run python -m alldayrec.resummarize [--days 30] [--delay 5] [--limit N] [--version 19] [--dry-run]
 
 Run it on the server's host (the calls ledger it reads for 429s is by the server's clock). The token: LIVE_RECORD_TOKEN,
 else the first line on stdin (never an argument). --limit redoes only the first N (oldest first): one, a few, then all. A conversation started in the last
---days days (today included) is redone unless its summary is on summary.PROMPT_VERSION already (a second run resumes
-where the first stopped), is still pending, or has under MIN_SPEECH_S of speech (no model call: its title is its first
+--days days (today included) is redone unless its summary is on --version already (summary.PROMPT_VERSION; 19,
+summary.MEDIA_VERSION, with the tenant's "media_view" on; a second run resumes where the first stopped), is still pending, or has under MIN_SPEECH_S of speech (no model call: its title is its first
 sentence, and a redo would drop what 立即总结 wrote). Each redo is waited for (the server keeps the old summary until
 the new one is written, and keeps it when every try fails) before the next, then --delay seconds; a model 429 in the
 calls since (GET /api/calls) doubles the delay, up to --max-delay, and a redo that went through brings it back.
@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from alldayrec.summary import MIN_SPEECH_S, PROMPT_VERSION
+from alldayrec.summary import MEDIA_VERSION, MIN_SPEECH_S, PROMPT_VERSION
 
 
 def client(url: str, token: str, delay: float = 5, max_delay: float = 600):
@@ -56,7 +56,7 @@ def todos(s: dict) -> tuple[int, int]:
     return len(ts), sum(1 for t in ts if t.get("mark"))
 
 
-def due(c: dict) -> str | None:
+def due(c: dict, version: int = PROMPT_VERSION) -> str | None:
     """Why a conversation is left as it is, None when it is to be redone."""
     s = c.get("summary") or {}
     if c.get("state") != "closed":
@@ -65,7 +65,7 @@ def due(c: dict) -> str | None:
         return "short"
     if s.get("status") == "pending":
         return "pending"
-    if s.get("status") == "done" and (s.get("prompt_version") or 0) >= PROMPT_VERSION:
+    if s.get("status") == "done" and (s.get("prompt_version") or 0) >= version:
         return "current"
     return None
 
@@ -82,7 +82,7 @@ def calls(api, since: str) -> dict[str, dict]:
     return out
 
 
-def redo(api, c: dict, timeout: float, poll: float = 3.0) -> tuple[dict | None, bool]:
+def redo(api, c: dict, timeout: float, poll: float = 3.0, version: int = PROMPT_VERSION) -> tuple[dict | None, bool]:
     """POST the redo and wait: (the conversation as it is then, whether the model answered 429 meanwhile). The first is
     None when this attempt failed; uncertain completion at the timeout raises TimeoutError."""
     since = dt.datetime.now().isoformat(timespec="seconds")
@@ -97,7 +97,7 @@ def redo(api, c: dict, timeout: float, poll: float = 3.0) -> tuple[dict | None, 
         # POST resets a failed old row to pending; a failure observed here belongs to this retry.
         if s.get("error") or s.get("status") == "failed":
             return None, hit429
-        if s.get("status") == "done" and (s.get("prompt_version") or 0) >= PROMPT_VERSION:
+        if s.get("status") == "done" and (s.get("prompt_version") or 0) >= version:
             return x, hit429
     raise TimeoutError("summary still pending; stopping before another conversation is queued")
 
@@ -110,6 +110,8 @@ def main(argv: list[str] | None = None) -> dict:
     p.add_argument("--timeout", type=float, default=1800.0, help="seconds to wait for one redo (1800)")
     p.add_argument("--limit", type=int, default=0, help="redo at most N, the oldest first (0: all)")
     p.add_argument("--dry-run", action="store_true", help="list what would be redone, change nothing")
+    p.add_argument("--version", type=int, default=PROMPT_VERSION, choices=(PROMPT_VERSION, MEDIA_VERSION),
+                   help=f"the prompt version a summary must be on ({PROMPT_VERSION}; {MEDIA_VERSION} with the tenant's media_view on)")
     a = p.parse_args(argv)
     if a.days < 1 or a.limit < 0 or a.delay < 0 or a.max_delay < max(a.delay, 1) or a.timeout <= 0:
         p.error("days/timeout must be positive, limit/delay nonnegative, max-delay >= max(delay, 1)")
@@ -122,13 +124,16 @@ def main(argv: list[str] | None = None) -> dict:
     skipped = {}
     todo = []
     for c in convs:
-        why = due(c)
+        why = due(c, a.version)
         if why:
             skipped[why] = skipped.get(why, 0) + 1
         else:
             todo.append(c)
     todo = todo[:a.limit or None]
-    print(f"{len(convs)} conversations since {today - dt.timedelta(days=a.days - 1)}: {len(todo)} to redo to prompt v{PROMPT_VERSION}, "
+    # a tenant without media_view writes 18 again: one wasted redo, then a wait for 19 until --timeout
+    if a.version == MEDIA_VERSION and todo and not api("GET", f"/api/conversation/{todo[0]['id']}").get("media_view"):
+        sys.exit(f"--version {MEDIA_VERSION}: the tenant has \"media_view\" off, its summaries are written on {PROMPT_VERSION}")
+    print(f"{len(convs)} conversations since {today - dt.timedelta(days=a.days - 1)}: {len(todo)} to redo to prompt v{a.version}, "
           f"skipped {json.dumps(skipped)}", flush=True)
     if a.dry_run:
         for c in todo:
@@ -144,7 +149,7 @@ def main(argv: list[str] | None = None) -> dict:
         before = c
         try:
             before = api("GET", f"/api/conversation/{c['id']}")
-            after, hit429 = redo(api, c, a.timeout)
+            after, hit429 = redo(api, c, a.timeout, version=a.version)
         except OSError as e:  # acceptance/completion is unknown: stop to keep the run sequential
             after, hit429, stop = None, False, True
             print(f"  {c['id']}: {type(e).__name__}; stopping (completion unknown)", flush=True)
@@ -164,7 +169,7 @@ def main(argv: list[str] | None = None) -> dict:
             tot["redone"] += 1
             if m1 < m0:
                 tot["lost_marks"].append(c["id"])
-            print(f"{head} -> v{PROMPT_VERSION} {time.monotonic() - t:.0f} s  todos {n0}->{n1}  marked {m0}->{m1}  "
+            print(f"{head} -> v{a.version} {time.monotonic() - t:.0f} s  todos {n0}->{n1}  marked {m0}->{m1}  "
                   f"{(after['summary'].get('summary') or '')[:60]}", flush=True)
         else:
             tot["failed"] += 1

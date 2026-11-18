@@ -95,6 +95,8 @@ type: reference
 uv run python -m alldayrec.resummarize --days 30 --dry-run
 uv run python -m alldayrec.resummarize --days 30 --limit 1
 uv run python -m alldayrec.resummarize --days 30 --delay 5
+# 租户开了 media_view：它的摘要要到 19
+uv run python -m alldayrec.resummarize --days 7 --version 19 --dry-run
 ```
 
 范围按运行机器的日历日期，含今天共 N 天，只处理在范围内开始、已结束且说话至少 60 秒的对话；更早、仍进行中、pending 和已在当前提示词版本的跳过。先单段检查，再扩大范围；中断后重跑会跳过已完成的。单段不足 60 秒的「立即总结」保留。每段等待完成后再处理下一段，默认间隔 5 秒，`--max-delay` 默认 600 秒；HTTP 429 和模型 429 都退避。`--timeout` 默认 1800 秒，超时或 HTTP 结果不明时停止，先检查服务端是否仍在处理，再重跑。失败退出码为 1；输出完成、失败、跳过数量，已处理对话的待办与已标记数前后对比，以及期间的模型调用数（含其他后台任务）。

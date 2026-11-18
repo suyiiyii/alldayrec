@@ -338,6 +338,13 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 |---|---|---|
 | `GET` | (no docstring) | `conv_id` (path, string) |
 
+### `/api/conversation/{conv_id}/live`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `POST` | 改回现场 (tenant "media_view"): the rows from..to (two rows' starts) of kind media or broadcast were said in the room: out of the summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind, for its undo. | `conv_id` (path, string)<br>body: JSON object |
+| `DELETE` | 恢复为外放 (tenant "media_view"): the mark from..to taken back, its rows of its kind again (summary.unmark_live). | `conv_id` (path, string)<br>body: JSON object |
+
 ### `/api/conversation/{conv_id}/feedback`
 
 | Method | Description | Parameters |

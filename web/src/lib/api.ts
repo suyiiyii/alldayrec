@@ -28,23 +28,26 @@ export const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation i
 export const isFragment = (c: Conversation) =>
   (c.speech_s ?? Infinity) < MIN_SPEECH_S && (c.summary?.media_share ?? 0) < MOSTLY_MEDIA;
 
-// Rows in order, a run of FOLD or more media rows folded into one line; a shorter run stays, greyed
-export type Seg = { k: "row"; r: Row; media: boolean } | { k: "fold"; key: string; rows: Row[] };
+// Rows in order, a run of min or more rows of one kind (kind(r): true or its name, "media" or "broadcast") folded into
+// one line; a shorter run stays, greyed
+export type Seg = { k: "row"; r: Row; media: boolean } | { k: "fold"; key: string; rows: Row[]; kind?: string };
 const FOLD = 3;
-export function fold(rows: Row[], media: (r: Row) => boolean): Seg[] {
+export function fold(rows: Row[], kind: (r: Row) => boolean | string, min = FOLD): Seg[] {
   const out: Seg[] = [];
-  let run: Row[] = [];
+  let run: Row[] = [],
+    at: boolean | string = false;
   const flush = () => {
-    if (run.length >= FOLD) out.push({ k: "fold", key: "m" + run[0].id, rows: run });
+    if (run.length >= min)
+      out.push({ k: "fold", key: "m" + run[0].id, rows: run, kind: typeof at === "string" ? at : undefined });
     else out.push(...run.map((r) => ({ k: "row" as const, r, media: true })));
     run = [];
   };
   for (const r of rows) {
-    if (media(r)) run.push(r);
-    else {
-      flush();
-      out.push({ k: "row", r, media: false });
-    }
+    const k = kind(r);
+    if (k !== at) flush();
+    at = k;
+    if (k) run.push(r);
+    else out.push({ k: "row", r, media: false });
   }
   flush();
   return out;
@@ -98,7 +101,9 @@ export interface Summary {
   ai_requests?: (At & { text: string })[];
   ai_spans?: Span[];
   media_spans?: Span[]; // media played aloud (video, TV, music): greyed and folded
-  media_share?: number; // of the speech, the part in media_spans
+  broadcast_spans?: Span[]; // tenant media_view: announcements, navigation, prompts, music (their own fold)
+  live_spans?: (Span & { kind?: "media" | "broadcast" })[]; // rows marked live (改回现场): out of the two above and a redo's
+  media_share?: number; // of the speech, the part in media_spans and broadcast_spans
   place?: Place; // tenant "place": where I probably was (server place.py); label null: unsure, nothing shown
   decisions?: (At & { text: string; quote?: string; unsupported?: boolean })[];
   model?: string | null;
@@ -118,6 +123,7 @@ export interface Conversation {
   summary?: Summary | null;
   standby?: string[]; // other recorders that stood by in its time (same place): their audio of it is kept
   sounds?: ConvSounds; // its sound tags (lib/sounds.ts); none while the tenant's sound is off, or it has none
+  media_view?: boolean; // GET /api/conversation/{id}: the tenant tells media, broadcasts and live apart (each run folded)
 }
 
 export interface LiveTopic {

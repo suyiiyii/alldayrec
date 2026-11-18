@@ -21,6 +21,7 @@ from alldayrec import sound_events
 from alldayrec import summary
 from alldayrec import voice_tools
 from alldayrec.diarist import PEOPLE_MIN
+from alldayrec.tenant import T
 
 log = logging.getLogger("live")
 
@@ -163,11 +164,12 @@ def transcript(id: str) -> str:
     if not c:
         raise Bad("没有这段对话：id 照抄 day / search 结果里的")
     rows = db.sentences(c["start"], c["end"], inclusive=True, source=c.get("device"))
-    return f"# `{id}` 原文 {len(rows)} 句\n" + summary.transcript(rows)
+    return f"# `{id}` 原文 {len(rows)} 句\n" + summary.transcript(rows, T().media_view and db.summary(id))
 
 
 def transcript_at(date: str, start: str, end: str) -> str:
     """Every device's rows: two recorders in one room both have the minute, each under its own heading."""
+    # shortcut: no （外放）（广播） marks here (media_view): rows of several conversations; look each one's summary up to add them
     d = day_of(date)
     for t in (start, end):
         if not re.fullmatch(r"\d{1,2}:\d{2}", t):

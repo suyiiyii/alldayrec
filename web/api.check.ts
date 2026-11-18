@@ -1,7 +1,7 @@
 // node --experimental-strip-types web/api.check.ts: a failed call says its HTTP status, 0 when nothing answered. The
 // conversation page shows 找不到这段对话 on a 404 only; any other failure is a load to try again.
 import assert from "node:assert/strict";
-import { ApiError, beanBehind, card, caseText, get, holdLeft, micGap, type DeviceStatus } from "./src/lib/api.ts";
+import { ApiError, beanBehind, card, caseText, fold, get, holdLeft, micGap, type DeviceStatus, type Row } from "./src/lib/api.ts";
 import { i18n } from "./src/i18n.ts";
 
 async function failure(answer: () => Promise<Response>) {
@@ -68,3 +68,9 @@ assert.equal(micGap(gap), "14:05–14:32 手机没录到声音：通话中");
 assert.equal(micGap({ ...gap, reason: "other_app", to: null }, true), "14:05 起麦克风被其他 App 占用");
 assert.equal(micGap({ ...gap, reason: "new_one" }, true), "14:05–14:32 系统暂停了录音");
 assert.equal(micGap({ ...gap, reason: "interrupted" }, true), "14:05–14:32 通话中，或麦克风被其他 App 占用");
+// rows folded: media as before (a run of 3), or by kind (media_view: every run, a media run and a broadcast run apart)
+const rs = ["m", "m", "m", "", "b", "m"].map((k, i) => ({ id: i, start: String(i), end: String(i), text: k }) as unknown as Row);
+const media = (r: Row) => !!r.text;
+assert.deepEqual(fold(rs, media).map((g) => (g.k === "fold" ? `F${g.rows.length}` : g.media ? "g" : "r")), ["F3", "r", "g", "g"]);
+const kind = (r: Row) => (r.text === "m" ? "media" : r.text === "b" ? "broadcast" : false);
+assert.deepEqual(fold(rs, kind, 1).map((g) => (g.k === "fold" ? `${g.kind}${g.rows.length}` : "r")), ["media3", "r", "broadcast1", "media1"]);

@@ -109,7 +109,7 @@ def t_conversation(id, with_transcript=True):
     out = {**_brief(c), "summary": {k: s.get(k) for k in ("summary", "people", "tags", "topics", "todos", "decisions", "ai_requests")},
            "title": s.get("title")}
     if with_transcript:
-        t = summary.transcript(db.sentences(c["start"], c["end"], inclusive=True, source=c.get("device")))
+        t = summary.transcript(db.sentences(c["start"], c["end"], inclusive=True, source=c.get("device")), T().media_view and s)
         out["transcript"] = t[:TRANSCRIPT_CHARS] + (f"\n…（截断，共 {len(t)} 字）" if len(t) > TRANSCRIPT_CHARS else "")
     return out
 

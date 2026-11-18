@@ -116,13 +116,13 @@ def sha(rows: list[dict], s: dict | None) -> str:
     """What a conversation's evidence was made of: every row's words and label, its spans. A rename, merge, split or
     new transcript changes it, and with it the profile made from it is void."""
     x = [[r["start"], r["end"], r.get("speaker"), r.get("text"), r.get("music"), r.get("dictation")] for r in rows]
-    x.append([(s or {}).get(k) for k in ("status", "model", "ai_spans", "media_spans")])
+    x.append([(s or {}).get(k) for k in ("status", "model", "ai_spans", "media_spans")] + ([s["broadcast_spans"]] if (s or {}).get("broadcast_spans") else []))
     return hashlib.sha256(json.dumps(x, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
 def heard(r: dict, s: dict) -> bool:
     """A row a person said to people: not music, not dictated, not said to an AI (ai_spans: 口述), not played aloud."""
-    spans = (s.get("ai_spans") or []) + (s.get("media_spans") or [])
+    spans = (s.get("ai_spans") or []) + summary.not_live(s)
     return not r.get("music") and not r.get("dictation") and not summary.in_media(r, spans)
 
 

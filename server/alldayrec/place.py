@@ -85,6 +85,8 @@ def sound_block(events: dict | None) -> str:
 def lines(rows: list[dict], s: dict) -> list[tuple[dict, str | None]]:
     """Each row with text and what it is: 外放 (in media_spans), 对AI (in ai_spans), 歌词 (music), 口述 (dictated), or
     None: said to people (profiles.heard's rows), the only ones that can be evidence."""
+    # shortcut: a broadcast line (media_view) is shown unmarked, evidence like any said to people; mark it 广播 (still
+    # evidence) if the model should know it was an announcement
     spans = [(x, "外放") for x in s.get("media_spans") or []] + [(x, "对AI") for x in s.get("ai_spans") or []]
     return [(r, next((k for x, k in spans if x["from"] <= r["start"] <= x["to"]), None)
              or ("歌词" if r.get("music") else "口述" if r.get("dictation") else None)) for r in rows if r.get("text")]
