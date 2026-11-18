@@ -68,6 +68,7 @@ jobs:
         env:
           LR_S3_TEST: 1  # test_store_s3.py fails, never skips, without its MinIO
           TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          INFER_GRAPH_OPT: extended  # no NCHWc convs: they are many times slower on some Intel runners (infer.py, speaker-eval.yml)
           TEST_S3_ACCESS_KEY: minioadmin
           TEST_S3_SECRET_KEY: minioadmin
 
