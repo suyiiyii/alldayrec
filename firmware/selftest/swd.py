@@ -527,7 +527,12 @@ HFXO_AT = (1, 10, 100, 1000)  # ms after START, by the host's clock; not on the 
 USBREGSTATUS, MAINREGSTATUS = REGS["USBREGSTATUS"], REGS["MAINREGSTATUS"]
 HEADER = {**FICR, "RESETREAS": REGS["RESETREAS"], "MAINREGSTATUS": MAINREGSTATUS, "DCDCEN": REGS["DCDCEN"],
           "DCDCEN0": REGS["DCDCEN0"], "PSELRESET0": 0x10001200, "APPROTECT": 0x10001208, "NFCPINS": 0x1000120C,
-          "REGOUT0": 0x10001304, "HFCLKRUN": HFCLKRUN, "HFCLKSTAT": HFCLKSTAT}
+          "REGOUT0": 0x10001304, "HFCLKRUN": HFCLKRUN, "HFCLKSTAT": HFCLKSTAT,
+          "HFXODEBOUNCE": CLOCK + 0x528, "USBD_ENABLE": 0x40027500}
+# PS v1.5 p.69 / p.79 / p.85: the USB regulator (OUTPUTRDY) turns on only with USBD.ENABLE = 1 and VBUS; a halted blank
+# chip or bootloader has it 0, so OUTPUTRDY stays 0 then and only VBUSDETECT says anything
+OUTPUTRDY_NOTE = "OUTPUTRDY is 0 by the spec while USBD.ENABLE is 0 (a blank chip, or a halted bootloader): judge " \
+                 "VBUSDETECT only, not the USB regulator"
 
 
 def session(uid):
@@ -547,16 +552,18 @@ def halt(t):
     return was
 
 
-def restore(t, was, hfxo_was_on):
-    """Put the crystal and the core back as they were: the crystal stopped unless an app had it started"""
-    t.write32(HFCLKSTOP, 1)
-    t.write32(HFCLKSTARTED, 0)
-    if hfxo_was_on:
-        t.write32(HFCLKSTART, 1)
+def restore(t, was, hfxo_was_on=None):
+    """Put the core back as it was and, unless hfxo_was_on is None (not touched), the crystal: stopped unless an app
+    had it started"""
+    if hfxo_was_on is not None:
+        t.write32(HFCLKSTOP, 1)
+        t.write32(HFCLKSTARTED, 0)
+        if hfxo_was_on:
+            t.write32(HFCLKSTART, 1)
     if was.name in ("RUNNING", "SLEEPING"):
         t.resume()
-    return f"core {'resumed' if was.name in ('RUNNING', 'SLEEPING') else 'left halted'} (was {was.name}); crystal " \
-           f"{'started again, as the app had it' if hfxo_was_on else 'stopped'}"
+    return f"core {'resumed' if was.name in ('RUNNING', 'SLEEPING') else 'left halted'} (was {was.name})" + (
+        "" if hfxo_was_on is None else f"; crystal {'started again, as the app had it' if hfxo_was_on else 'stopped'}")
 
 
 def header(t):
@@ -565,7 +572,10 @@ def header(t):
     h["serial"] = f"{h['deviceid1']:08X}{h['deviceid0']:08X}"
     h["line"] = (f"nRF{h['part']:X} {variant} serial {h['serial']}; UICR REGOUT0 0x{h['REGOUT0']:08X} APPROTECT "
                  f"0x{h['APPROTECT']:08X} PSELRESET0 0x{h['PSELRESET0']:08X}; RESETREAS 0x{h['RESETREAS']:08X}, "
-                 f"MAINREGSTATUS {h['MAINREGSTATUS'] & 1}, DCDCEN/DCDCEN0 {h['DCDCEN'] & 1}/{h['DCDCEN0'] & 1}")
+                 f"MAINREGSTATUS {h['MAINREGSTATUS'] & 1}, DCDCEN/DCDCEN0 {h['DCDCEN'] & 1}/{h['DCDCEN0'] & 1}, "
+                 f"HFXODEBOUNCE 0x{h['HFXODEBOUNCE'] & 0xFF:02X}, USBD.ENABLE {h['USBD_ENABLE'] & 1}"
+                 + ("\nLOOK  DCDCEN0 = 1: REG0 is on its DCDC; on a board without L1 VDD cannot be trusted"
+                    if h["DCDCEN0"] & 1 else ""))
     return h
 
 
@@ -593,7 +603,7 @@ def hfxo_cycle(t, now=time.monotonic, sleep=time.sleep):
     return c
 
 
-def hfxo_rows(cycles):
+def hfxo_rows(cycles, debounce=0x10):
     ok = lambda b: "PASS" if b else "FAIL"
     on = lambda w: w & XTAL == XTAL
     up = [c for c in cycles if c["at"][1000]["EVT"] & 1 and on(c["at"][1000]["STAT"])]
@@ -602,7 +612,8 @@ def hfxo_rows(cycles):
     bad = [i + 1 for i, c in enumerate(cycles) if c not in up]
     rows = [("HFXO start (warm)", ok(len(up) == len(cycles)), f"{len(up)}/{len(cycles)} on the crystal by 1 s"
              + (f"; event first seen after {firsts[0]}-{firsts[-1]} ms, median {statistics.median(firsts)} ms (host "
-                "clock, one SWD read late at most; the chip's spec is well under 1 ms)" if firsts else "")
+                f"clock, one SWD read late at most; the spec: power-up 0.05-0.21 ms + debounce {debounce & 0xFF} x 16 us, "
+                "PS v1.5 p.87 / p.97 / p.100)" if firsts else "")
              + (f"; not started in cycle {', '.join(map(str, bad))}: check X2, its two load caps, XC1 / XC2" if bad else
                 "")),
             ("HFXO stop", ok(len(down) == len(cycles)), f"{len(down)}/{len(cycles)} back on HFINT (HFCLKSTAT SRC 0) "
@@ -628,15 +639,21 @@ def cmd_hfxo(uid, n, out_dir):
     need_probe(uid)
     with session(uid) as s:
         t = s.target
-        was = halt(t)
-        h = header(t)
-        hfxo_was_on = bool(h["HFCLKRUN"] & 1)
-        print(f"{h['line']}; core was {was.name}, HFCLKSTAT 0x{h['HFCLKSTAT']:05X}")
+        was, cycles, hfxo_was_on = halt(t), [], None
         try:
-            cycles = [hfxo_cycle(t) for _ in range(n)]
+            h = header(t)
+            hfxo_was_on = bool(h["HFCLKRUN"] & 1)
+            print(f"{h['line']}; core was {was.name}, HFCLKSTAT 0x{h['HFCLKSTAT']:05X}")
+            try:
+                for _ in range(n):
+                    cycles.append(hfxo_cycle(t))
+            except KeyboardInterrupt:  # the cycles done still count and are saved
+                print(f"stopped after {len(cycles)} of {n} cycles")
         finally:
             back = restore(t, was, hfxo_was_on)
-    rows = hfxo_rows(cycles)
+    if not cycles:
+        sys.exit(f"{back}; no cycle finished")
+    rows = hfxo_rows(cycles, h["HFXODEBOUNCE"])
     failed = table(rows)
     base = save(out_dir, "hfxo", h["serial"], {"header": h, "cycles": cycles, "rows": rows},
                 ["cycle", "first_ms"] + [f"{ms}ms_{k}" for ms in HFXO_AT for k in ("RUN", "EVT", "STAT")]
@@ -653,20 +670,16 @@ def watch_line(ms, usb, main):
 
 
 def watch_events(samples):
-    """The changes in [(ms, USBREGSTATUS, MAINREGSTATUS)]: [(ms, what)], and VBUSDETECT 0->1 to OUTPUTRDY in ms"""
-    ev, prev, rise, ready = [], None, None, []
+    """The changes in [(ms, USBREGSTATUS, MAINREGSTATUS)]: [(ms, what)]"""
+    ev, prev = [], None
     for ms, usb, main in samples:
         if prev is not None:
             for name, b, w in (("VBUSDETECT", 0, usb), ("OUTPUTRDY", 1, usb), ("MAINREGSTATUS", 0, main)):
                 old = (prev[1] if name != "MAINREGSTATUS" else prev[2]) >> b & 1
                 if w >> b & 1 != old:
                     ev.append((ms, f"{name} {old}->{w >> b & 1}"))
-            if usb & 1 and not prev[1] & 1:
-                rise = ms
-            if usb & 2 and not prev[1] & 2 and rise is not None:
-                ready.append(ms - rise)
         prev = (ms, usb, main)
-    return ev, ready
+    return ev
 
 
 def cmd_watch(uid, secs, every, out_dir):
@@ -675,11 +688,12 @@ def cmd_watch(uid, secs, every, out_dir):
     with session(uid) as s:
         t = s.target
         was = halt(t)
-        h = header(t)
-        print(f"{h['line']}; core was {was.name}. Reading USBREGSTATUS every {every * 1000:.0f} ms for {secs} s "
-              "(Ctrl-C ends it): step VBUS 0 -> 4.75 / 5.0 V -> 0 on the bench now")
-        t0, last = time.monotonic(), None
         try:
+            h = header(t)
+            print(f"{h['line']}; core was {was.name}. Reading USBREGSTATUS every {every * 1000:.0f} ms for {secs} s "
+                  "(Ctrl-C ends it): step VBUS 0 -> 4.75 / 5.0 V -> 0 on the bench now"
+                  + ("" if h["USBD_ENABLE"] & 1 else f"\n{OUTPUTRDY_NOTE}"))
+            t0, last = time.monotonic(), None
             while (el := time.monotonic() - t0) < secs:
                 usb, main = t.read32(USBREGSTATUS), t.read32(MAINREGSTATUS)
                 ms = round(el * 1000)
@@ -691,11 +705,10 @@ def cmd_watch(uid, secs, every, out_dir):
         except KeyboardInterrupt:
             pass
         finally:
-            back = restore(t, was, bool(h["HFCLKRUN"] & 1))
-    ev, ready = watch_events(samples)
-    print(f"\n{len(samples)} readings; changes: {'; '.join(f'{ms / 1000:.1f} s {w}' for ms, w in ev) or 'none'}"
-          + (f"; VBUSDETECT 0->1 to OUTPUTRDY: {', '.join(f'{x} ms' for x in ready)}" if ready else ""))
-    base = save(out_dir, "watch", h["serial"], {"header": h, "samples": samples, "changes": ev, "ready_ms": ready},
+            back = restore(t, was)  # the crystal was not touched
+    ev = watch_events(samples)
+    print(f"\n{len(samples)} readings; changes: {'; '.join(f'{ms / 1000:.1f} s {w}' for ms, w in ev) or 'none'}")
+    base = save(out_dir, "watch", h["serial"], {"header": h, "samples": samples, "changes": ev},
                 ["ms", "VBUSDETECT", "OUTPUTRDY", "MAINREGSTATUS"],
                 [[ms, usb & 1, usb >> 1 & 1, main & 1] for ms, usb, main in samples])
     print(f"{back}. Only what the chip reports, no verdict: compare it with the bench's VBUS steps. Saved {base}.json / "
@@ -857,11 +870,16 @@ def test():
 
     # watch: VBUS in at 1.0 s, the USB regulator ready 0.3 s later, out at 3.0 s
     samples = [(ms, (ms >= 1000 and ms < 3000) | (ms >= 1300 and ms < 3000) << 1, 0) for ms in range(0, 4000, 100)]
-    ev, ready = watch_events(samples)
-    assert ev == [(1000, "VBUSDETECT 0->1"), (1300, "OUTPUTRDY 0->1"), (3000, "VBUSDETECT 1->0"),
-                  (3000, "OUTPUTRDY 1->0")] and ready == [300], (ev, ready)
-    assert watch_events([(0, 0, 0), (100, 0, 0)]) == ([], [])
-    print("watch_events: ok")
+    assert watch_events(samples) == [(1000, "VBUSDETECT 0->1"), (1300, "OUTPUTRDY 0->1"), (3000, "VBUSDETECT 1->0"),
+                                     (3000, "OUTPUTRDY 1->0")], watch_events(samples)
+    assert watch_events([(0, 0, 0), (100, 0, 0)]) == []
+    chip = FakeChip(words={HEADER["DCDCEN0"]: 1, HEADER["variant"]: 0x41414630})
+    was = halt(chip)
+    h = header(chip)
+    assert "LOOK  DCDCEN0 = 1" in h["line"] and "USBD.ENABLE 0" in h["line"]
+    assert "crystal" not in restore(chip, was) and HFCLKSTOP not in chip.log  # watch: only the core put back
+    assert chip.get_state().name == "RUNNING"
+    print("watch_events, header, restore without the crystal: ok")
     return 0
 
 
@@ -880,6 +898,8 @@ if __name__ == "__main__":
     ap.add_argument("--fxx", action="store_true", help="uicr: build code F or later (APPROTECT 0x5A)")
     ap.add_argument("-o", help="uicr: the file to write")
     a = ap.parse_args()
+    if a.n < 1:
+        ap.error("-n: 1 or more")
     if a.action == "test":
         sys.exit(test())
     if a.action == "uicr":
