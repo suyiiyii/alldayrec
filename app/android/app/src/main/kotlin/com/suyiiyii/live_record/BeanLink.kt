@@ -152,8 +152,13 @@ internal class BeanDiscovery<T>(name: String, private val now: () -> Long,
     private var rollover = false
     private var lastFast: Long? = null
     private var reason = "ordinary"
-    private data class Registration(val id: String, val deadline: Long?)
+    /** System scan broadcasts (results or an error), the results in them (any bean: the filter is the bean service),
+     *  whether this bean was among them, and the age of its oldest result when delivered (now − ScanResult.timestampNanos). */
+    private class Heard { var callbacks = 0; var results = 0; var sawBean = false; var beanAgeMs: Long? = null }
+    private class Registration(val id: String, val deadline: Long?) { val heard = Heard() }
     @Volatile private var active: Registration? = null
+    /** Broadcasts for an ended (or expired) registration since the last report: never delivered, only counted. */
+    private var late = Heard()
 
     fun again(e: BeanSync.Again) { rollover = e.naturalRollover }
     private fun timing(fields: Map<String, Any?>) = beanTiming { report(fields) }
@@ -196,12 +201,22 @@ internal class BeanDiscovery<T>(name: String, private val now: () -> Long,
         catch (e: BeanScanWait.ScanFailure) { outcome = "scan_error"; throw e }
         finally {
             timing(mapOf("phase" to registration.id, "requestedMode" to if (mode == Mode.FAST) "LOW_LATENCY" else "LOW_POWER",
-                "reason" to reason, "budgetMs" to budget, "elapsedMs" to (now() - began), "outcome" to outcome))
+                "reason" to reason, "budgetMs" to budget, "elapsedMs" to (now() - began), "outcome" to outcome) +
+                synchronized(this) { val h = registration.heard; val l = late; late = Heard()
+                    mapOf("callbacks" to h.callbacks, "results" to h.results, "sawBean" to h.sawBean, "beanAgeMs" to h.beanAgeMs,
+                        "lateCallbacks" to l.callbacks, "lateResults" to l.results, "lateSawBean" to l.sawBean, "lateBeanAgeMs" to l.beanAgeMs) })
         }
     }
 
     @Synchronized fun accepts(id: String): Boolean =
         active?.let { it.id == id && (it.deadline == null || now() < it.deadline) } == true
+    /** A system scan callback for registration `id`, counted in the next phase report: under its own round while that
+     *  round accepts it, else as `late` (held back by the system and handed over after the round ended). */
+    @Synchronized fun heard(id: String, results: Int, beanAgeMs: Long?) {
+        val h = if (accepts(id)) active!!.heard else late
+        h.callbacks++; h.results += results
+        if (beanAgeMs != null) { h.sawBean = true; h.beanAgeMs = maxOf(h.beanAgeMs ?: beanAgeMs, beanAgeMs) }
+    }
     @Synchronized fun deliver(id: String, name: String, connectable: Boolean, value: T): Boolean =
         accepts(id) && wait.deliver(name, connectable, value)
     @Synchronized fun fail(id: String, error: Exception) { if (active?.id == id) wait.fail(error) }
@@ -384,10 +399,14 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
     internal fun scanResult(intent: Intent) {
         if (!on || prefs.getString("bleName", null) != name) return
         val id = intent.data?.schemeSpecificPart ?: return
+        val results = intent.getParcelableArrayListExtra<ScanResult>(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT).orEmpty()
+        beanTiming {
+            val at = SystemClock.elapsedRealtimeNanos()
+            discovery.heard(id, results.size, results.filter { beanAdv(it)?.first == name }.maxOfOrNull { (at - it.timestampNanos) / 1_000_000 })
+        }
         if (!discovery.accepts(id)) return
         val error = intent.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, 0)
         if (error != 0) { discovery.fail(id, Exception("scan failed: $error")); return }
-        val results = intent.getParcelableArrayListExtra<ScanResult>(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT).orEmpty()
         for (r in results) {
             val (n, flags) = beanAdv(r) ?: continue
             if (n != name || !on || prefs.getString("bleName", null) != name) continue

@@ -2,6 +2,7 @@ package com.suyiiyii.live_record
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -255,10 +256,20 @@ object DeviceLog {
         app(device, "connect", "连上：$s")
     }
 
-    /** The link went down (GATT status: 8 timeout, 19 the recorder ended it, 0 the phone did, 133 never came up). */
+    /** The link went down (GATT status: 8 timeout, 19 the recorder ended it, 0 the phone did, 133 never came up), with
+     *  what may keep the system from finding it again: screen off, idle, power saving, no battery exemption, the app's
+     *  standby bucket (UsageStatsManager: 10 active … 45 restricted). */
     fun disconnected(device: String, status: Int) {
         synchronized(steps) { steps.clear() }
-        app(device, "disconnect", "断开（status $status）", "warn")
+        if (!::file.isInitialized) return
+        // On the reconnect path (GATT callback, connect's finally): a failing system call only drops the fields.
+        val fields = try {
+            val pm = ctx.getSystemService(PowerManager::class.java)
+            mapOf("interactive" to pm.isInteractive, "deviceIdle" to pm.isDeviceIdleMode, "low_power" to pm.isPowerSaveMode,
+                "battery_exempt" to pm.isIgnoringBatteryOptimizations(ctx.packageName),
+                "standby_bucket" to ctx.getSystemService(UsageStatsManager::class.java).appStandbyBucket)
+        } catch (_: Exception) { emptyMap() }
+        app(device, "disconnect", "断开（status $status）", "warn", mapOf("status" to status) + fields)
     }
 
     //
