@@ -112,6 +112,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Timer? ticker;
   int ticks = 0;
   String version = '';
+  final updates = GlobalKey<UpdateBannerState>();  // 我的 › 检查更新 asks the banner
   // the WebViews' user agent: the system's with AllDayRecApp/<version> (android|ios), so a page knows it is in the app
   // (web lib/app.ts; iOS's WebView says nothing of it by itself); set before their first load (_loadWeb)
   String? ua;
@@ -439,7 +440,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       ),
       body: settings == null
           ? const Center(child: CircularProgressIndicator())
-          : Column(children: [const UpdateBanner(), Expanded(child: IndexedStack(index: page, children: [  // keeps the WebView alive across pages
+          : Column(children: [UpdateBanner(key: updates), Expanded(child: IndexedStack(index: page, children: [  // keeps the WebView alive across pages
               for (final (i, w) in webs.indexed)
                 w == null ? _Empty(onSetup: _openSettings) : Stack(children: [
                   WebViewWidget(controller: w),
@@ -483,6 +484,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       entry(Icons.settings_outlined, l.settings, _openSettings),
       entry(Icons.info_outline, l.about, () => showAboutDialog(context: context, applicationName: 'AllDayRec', applicationVersion: version),
           version),
+      entry(Icons.system_update_outlined, l.checkUpdate, () => updates.currentState?.checkNow(version)),
     ]);
   }
 
