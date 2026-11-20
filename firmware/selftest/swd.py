@@ -89,7 +89,7 @@ def pyocd(args, check=False):
 
 
 def commander(uid, connect, cmds):
-    return pyocd(["commander", "-u", uid, *TARGET, *NO_UNLOCK, "--connect", connect, "-c", *cmds])
+    return pyocd(["commander", "-u", uid, *TARGET, *NO_UNLOCK, "--connect", connect] + [a for c in cmds for a in ("-c", c)])  # pyOCD 0.45.1: one -c per command
 
 
 def reads(out):
