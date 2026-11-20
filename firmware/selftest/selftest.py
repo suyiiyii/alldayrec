@@ -121,6 +121,9 @@ def image_problem(board, uf2, dcdc_fitted):
 
 
 def flash(serial, board, uf2=None, dcdc_fitted=None):
+    if board == "n5s":  # shortcut: refuses R1's every UF2 flash; lift once R1's own bootloader (FW-1) is on its boards
+        sys.exit(f"not flashing {serial}: LR-N5-S (R1) over SWD only till its own bootloader (FW-1): the nice!nano "
+                 "bootloader's LED PWM drives P0.15, R1's buzzer, up to ~31 % (R1 r3.1 review p.10)")
     selftest, uf2 = not uf2, uf2 or f"{out_dir(board)}/zephyr/zephyr.uf2"
     if problem := image_problem(board, uf2, dcdc_fitted):
         sys.exit(f"not flashing {serial}: {problem}")
@@ -336,10 +339,12 @@ def check():
     global drive
     real, drive = drive, lambda s: (_ for _ in ()).throw(AssertionError("touched the board"))
     try:
-        flash("0123456789ABCDEF", "n5", n5, False)
-        raise AssertionError("flashed")
-    except SystemExit as e:
-        assert "not flashing" in str(e) and "no DCDC inductor" in str(e), e
+        for b, f, l1, why in [("n5", n5, False, "no DCDC inductor"), ("n5s", n5s, None, "FW-1")]:
+            try:
+                flash("0123456789ABCDEF", b, f, l1)
+                raise AssertionError("flashed")
+            except SystemExit as e:
+                assert "not flashing" in str(e) and why in str(e), e
     finally:
         drive = real
     # a board running another board's self-test: refused before dfu
@@ -640,8 +645,8 @@ if __name__ == "__main__":
                     "test, flash refuses an image that turns DCDC on")
     ap.add_argument("--dcdc", action="store_true", help="flash: this LR-N5 has its L1 (needed for an image that turns "
                     "DCDC on)")
-    ap.add_argument("--n5s", action="store_true", help="flash: LR-N5-S (R1): its recorder build only (lr.sh build n5s); "
-                    "no self-test of its own yet")
+    ap.add_argument("--n5s", action="store_true", help="flash: LR-N5-S (R1): refused till R1's own bootloader "
+                    "(FW-1), SWD only; then its recorder build only (lr.sh build n5s)")
     ap.add_argument("--n5", action="store_true", help="LR-N5 (build, flash, run): LR-N4's checks with its NAND in place "
                     "of the SD card")
     ap.add_argument("--flip", type=int, default=20, help="--p3, --n4, --n5: seconds to wait for the switch to be flipped "

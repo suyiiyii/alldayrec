@@ -21,7 +21,7 @@
 		/* SD_EN: the card's LDO enable (U3, 100k pull-down) */
 		sd-pwr-gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
 		/* CHRG: the charger's status (TP4054, open drain), read with the pull-up on for 50 us only (battery.c).
-		 * LR-N5 / LR-N5-S swap the two balls: lr_n5.overlay, applied after this one, sets both */
+		 * LR-N5 swaps the two balls: lr_n5.overlay, applied after this one, sets both (LR-N5-S: lr_n5s.overlay, CHRG again) */
 		chrg-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
 	};
 };

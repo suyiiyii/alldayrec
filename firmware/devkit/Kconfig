@@ -107,7 +107,7 @@ config LR_BUZZER_DUTY_MAX
         0 until a first article has measured its coil DCR and checked the cut-off (CHECKLIST-N5S A6)."
 
 config LR_SWITCH
-    bool "LR-P3's slide switch on P1.15 (closed to GND = on; LR-N5-S: switch-gpios): off stops recording and goes to System OFF (lr_switch.c)"
+    bool "LR-P3's slide switch on P1.15 (closed to GND = on): off stops recording and goes to System OFF (lr_switch.c)"
     depends on OMI_ENABLE_USB
     default n
     help

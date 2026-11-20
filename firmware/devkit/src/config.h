@@ -27,9 +27,6 @@
 #if DT_NODE_HAS_PROP(LR_USER, chrg_gpios)  // the charger's status pin (LR-N4's TP4054 CHRG): battery.c, lr_power.c
 #define CHRG_PIN LR_PIN(chrg_gpios)
 #endif
-#if DT_NODE_HAS_PROP(LR_USER, switch_gpios)  // LR-N5-S's side key (lr_n5s.overlay); the others' is P1.15 (lr_switch.c)
-#define SWITCH_PIN LR_PIN(switch_gpios)
-#endif
 #if DT_NODE_HAS_PROP(LR_USER, buz_gpios)  // LR-N5-S's buzzer (buzzer.c)
 #define BUZ_PIN LR_PIN(buz_gpios)
 #endif

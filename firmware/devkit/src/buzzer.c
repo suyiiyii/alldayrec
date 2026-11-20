@@ -16,6 +16,7 @@
 #include <hal/nrf_gpio.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 
 #include "buzzer_seq.h"
 #include "config.h"
@@ -42,14 +43,17 @@ static int buzzer_init(void)
 }
 SYS_INIT(buzzer_init, PRE_KERNEL_1, 0);
 
+static atomic_t busy;  // two callers at once would restart a playing sequence: more than 20 ms in a row
+
 int buzzer_segment(void)
 {
-    if (PWM->ENABLE) {
+    if (!atomic_cas(&busy, 0, 1)) {
         return -EBUSY;
     }
     int n = buz_fill(seq, CONFIG_LR_BUZZER_DUTY_MAX);
 
     if (!n) {
+        atomic_clear(&busy);
         return -EPERM;
     }
     PWM->SEQ[0].PTR = (uint32_t)seq;
@@ -69,6 +73,7 @@ int buzzer_segment(void)
         }
     }
     PWM->ENABLE = 0;
+    atomic_clear(&busy);
     return stopped ? 0 : -ETIMEDOUT;
 }
 

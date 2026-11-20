@@ -15,17 +15,12 @@
 #include <hal/nrf_power.h>
 #include <zephyr/kernel.h>
 
-#include "config.h"
 #include "led.h"
 #include "lr_log.h"
 #include "lr_power.h"
 #include "wdog_facade.h"
 
-#ifdef SWITCH_PIN
-#define SWITCH SWITCH_PIN  // LR-N5-S: its side key's ball (lr_n5s.overlay)
-#else
 #define SWITCH NRF_GPIO_PIN_MAP(1, 15)  // the other ProMicros leave it open: it would read off, hence the Kconfig
-#endif
 #define BOOT_MS 3000                    // a boot waits this long at most for the switch to settle
 #define VBUS_GONE 6                     // polls in a row without VBUS (0.3 s): the cable is out
 
