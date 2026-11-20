@@ -868,6 +868,16 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         with idle(device, True):
             await anyio.sleep(GONE_RETRY_S)
 
+    def unfed(x, s, end):
+        """(start time, samples) of x, s to end (unix ms), less what the queue reader has as late audio already, each
+        part's seconds added to spent (fed_s)."""
+        ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
+        for a, b in ranges:
+            y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
+            if len(y):
+                perf.add(spent, fed_s=len(y) / SR)
+                yield dt.datetime.fromtimestamp(a / 1000), y
+
     while True:
         if edge_s is None:
             T().read_to[device] = at  # the reader came back for more, so the piece it had is done
@@ -940,12 +950,8 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
                     s = p["start_ms"] + skip * 1000 / SR
                     skip += len(x)
                     end = p["start_ms"] + skip * 1000 / SR
-                    ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
-                    for a, b in ranges:
-                        y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
-                        if len(y):
-                            perf.add(spent, fed_s=len(y) / SR)
-                            yield dt.datetime.fromtimestamp(a / 1000), y
+                    for item in unfed(x, s, end):
+                        yield item
             at = p["start_ms"]
             continue
         try:
@@ -964,12 +970,8 @@ async def stream(device: str, after: dt.datetime | None, edge_s: float | None = 
         if got is not None:
             s, x = got
             end = s + len(x) * 1000 / SR
-            ranges = [[s, end]] if edge_s is not None else late_store.subtract([[s, end]], db.processed(device, round(s), round(end), "late"))
-            for a, b in ranges:
-                y = x[round((a - s) * SR / 1000):round((b - s) * SR / 1000)]
-                if len(y):
-                    perf.add(spent, fed_s=len(y) / SR)
-                    yield dt.datetime.fromtimestamp(a / 1000), y
+            for item in unfed(x, s, end):
+                yield item
 
 
 def cut(a: dt.datetime, b: dt.datetime, fmt: str, device: str | None = None, placed: dict | None = None) -> bytes | np.ndarray | None:

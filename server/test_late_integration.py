@@ -32,14 +32,18 @@ def test_streaming_chunk_upload_records_late_audio(store, monkeypatch):
 
 
 @pytest.mark.parametrize("long_file", [False, True])
-def test_stream_skips_committed_late_samples_on_both_decode_paths(store, monkeypatch, long_file):
+@pytest.mark.parametrize("edge", [False, True])
+def test_stream_skips_committed_late_samples_on_both_decode_paths(store, monkeypatch, long_file, edge):
+    """The queue reader skips the committed late second; an edge reader (edge_s) is handed all of it. fed_s counts
+    what was handed out."""
     monkeypatch.setattr(audio, "WHOLE_S", 1 if long_file else 300)
     x = np.arange(3 * audio.SR, dtype=np.int16)
     audio.save(D, ms(0), flac(x), "audio/flac")
     with db.tx() as t:
         db.record_processed(t, D, [[ms(1), ms(2)]], "late")
+    spent = {}
     async def consume():
-        stream = audio.stream(D, None)
+        stream = audio.stream(D, None, edge_s=1e10 if edge else None, spent=spent)  # 1e10 s: every piece is at the edge
         got = []
         try:
             with anyio.fail_after(3):
@@ -49,6 +53,11 @@ def test_stream_skips_committed_late_samples_on_both_decode_paths(store, monkeyp
                         break
         finally:
             await stream.aclose()
+        if edge:
+            np.testing.assert_array_equal(np.concatenate([y for _, y in got]), x)
+            assert round(got[0][0].timestamp() * 1000) == ms(0) and spent["fed_s"] == pytest.approx(3)
+            return
+        assert spent["fed_s"] == pytest.approx(2)
         assert [(round(at.timestamp()*1000), len(y)) for at, y in got] == [(ms(0), audio.SR), (ms(2), audio.SR)]
         np.testing.assert_array_equal(np.concatenate([y for _, y in got]), np.r_[x[:audio.SR], x[2*audio.SR:]])
     anyio.run(consume)
