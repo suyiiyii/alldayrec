@@ -881,7 +881,47 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get dontRemindVersion => '这个版本不再提示';
+  String get notToday => '今天不再提示';
+
+  @override
+  String get checkUpdate => '检查更新';
+
+  @override
+  String get update => '更新';
+
+  @override
+  String updateNewer(Object version, Object size, Object mine) {
+    return '有新版本 $version$size，当前是 $mine';
+  }
+
+  @override
+  String appUpToDate(Object version) {
+    return '已是最新版本 $version';
+  }
+
+  @override
+  String get updateUnauthorized => '服务器不认这次登录（401）：重新扫码登录后再试';
+
+  @override
+  String get updateNoApk => '服务器上还没有安卓安装包';
+
+  @override
+  String updateOffline(Object error) {
+    return '连不上服务器，检查网络后再试（$error）';
+  }
+
+  @override
+  String updateCheckFailed(Object error) {
+    return '检查失败：$error';
+  }
+
+  @override
+  String iosUpdateHow(Object version) {
+    return '当前版本 $version。iPhone 版通过 TestFlight 更新';
+  }
+
+  @override
+  String get openTestFlight => '打开 TestFlight';
 
   @override
   String get resume => '继续';

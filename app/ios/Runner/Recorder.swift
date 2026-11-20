@@ -41,6 +41,7 @@ enum Recorder {
       case "slices": slices(a); result(nil)
       case "status": result(status())
       case "version": result(DeviceLog.version)  // 我的 › 关于
+      case "testflight": UIApplication.shared.open(URL(string: "itms-beta://")!); result(nil)  // 我的 › 检查更新: the app iPhone builds come from
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message
         DeviceLog.app(DeviceLog.mine(), "app_error", "界面出错：\(a["type"] as? String ?? "?") \(a["stack"] as? String ?? "")", level: "error")
         result(nil)

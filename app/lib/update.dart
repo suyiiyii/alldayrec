@@ -1,7 +1,7 @@
 // The Android app's own updates: the server's /app.apk (server/apk.py reads its version) offered at the top of the home
 // page when its build number is higher than this build's, downloaded by the system's DownloadManager (MainActivity
 // "download": it carries on with the app closed and resumes after a drop) and handed to the system installer. Checked at
-// start and, back in front, once a day; iPhone builds are installed by hand.
+// start and, back in front, once a day, and at once from 我的 › 检查更新; iPhone builds come through TestFlight.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -23,13 +23,29 @@ Map? apkOffer(Object? latest, int mine, int dismissed) {
   return code is int && code > mine && code > dismissed ? latest as Map : null;
 }
 
+/// The build whose offer was closed [on] (a yyyy-mm-dd day), kept only that day: the next day it is offered again.
+int dismissedToday(int code, String? on, DateTime now) => on == day(now) ? code : 0;
+
+String day(DateTime t) => t.toIso8601String().substring(0, 10);
+
+enum UpdateCheck { newer, latest, signedOut, offline, unauthorized, noApk, failed }
+
+/// What 我的 › 检查更新 tells from /api/app/latest's status and (decoded) body.
+UpdateCheck checkResult(int status, Object? latest, int mine) => switch (status) {
+      200 when apkOffer(latest, mine, 0) != null => UpdateCheck.newer,
+      200 when latest is Map && latest['versionCode'] is int => UpdateCheck.latest,
+      401 => UpdateCheck.unauthorized,
+      404 => UpdateCheck.noApk,  // also a server without the route
+      _ => UpdateCheck.failed,
+    };
+
 class UpdateBanner extends StatefulWidget {
   const UpdateBanner({super.key});
   @override
-  State<UpdateBanner> createState() => _UpdateBannerState();
+  State<UpdateBanner> createState() => UpdateBannerState();
 }
 
-class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver {
+class UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver {
   Map? offer;
   double? progress;  // downloading: the share so far
   bool waiting = false;  // the download not going: no network yet, or a retry
@@ -41,7 +57,7 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _check();
+    if (Platform.isAndroid) _check();
   }
 
   @override
@@ -55,31 +71,84 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return watch?.cancel();
     if (offer != null) _watch();
-    if (DateTime.now().difference(checked).inHours >= 24) _check();
+    if (Platform.isAndroid && DateTime.now().difference(checked).inHours >= 24) _check();
   }
 
-  /// Quiet: no token, offline, a 401 or a server without the route only mean no offer (and another try next time in front).
-  Future<void> _check() async {
-    if (!Platform.isAndroid || progress != null) return;
+  /// The offer from the server's answer, its closing ignored when asked for [now]. What it found is for 我的 › 检查更新
+  /// only (with the error, when there was one): at start and back in front no token, offline, a 401 or a server
+  /// without the route only mean no offer (and another try next time in front).
+  Future<(UpdateCheck, Object?)> _check({bool now = false}) async {
+    if (progress != null) return (UpdateCheck.newer, null);  // its download going
     try {
       final s = await Settings.load();
-      if (s.token.isEmpty) return;
-      final res = await http.get(Uri.parse('${s.server}/api/app/latest'), headers: {'Authorization': 'Bearer ${s.token}'})
-          .timeout(const Duration(seconds: 30));
-      if (res.statusCode != 200 && res.statusCode != 404) return;  // 404: no APK on this server
-      checked = DateTime.now();
+      if (s.token.isEmpty) return (UpdateCheck.signedOut, null);
+      final http.Response res;
+      try {
+        res = await http.get(Uri.parse('${s.server}/api/app/latest'), headers: {'Authorization': 'Bearer ${s.token}'})
+            .timeout(const Duration(seconds: 30));
+      } catch (e) {
+        return (UpdateCheck.offline, e);
+      }
       final mine = await _ch.invokeMethod('app') as int;
-      final dismissed = (await SharedPreferences.getInstance()).getInt('apkDismissed') ?? 0;
-      final o = apkOffer(res.statusCode == 200 ? jsonDecode(res.body) : null, mine, dismissed);
+      final latest = res.statusCode == 200 ? jsonDecode(res.body) : null;
+      final r = checkResult(res.statusCode, latest, mine);
+      if (r == UpdateCheck.unauthorized || r == UpdateCheck.failed) return (r, 'HTTP ${res.statusCode}');
+      checked = DateTime.now();
+      final p = await SharedPreferences.getInstance();
+      final o = apkOffer(latest, mine, now ? 0 : dismissedToday(p.getInt('apkDismissed') ?? 0, p.getString('apkDismissedOn'), checked));
       if (o == null) _ch.invokeMethod('dropDownload').ignore();  // the download this build was installed from
-      if (!mounted) return;
-      setState(() => offer = o);
+      if (mounted) setState(() => offer = o);
       if (o != null) _watch();  // one left going when the app was closed
-    } catch (_) {}
+      return (r, null);
+    } catch (e) {
+      return (UpdateCheck.failed, e);
+    }
+  }
+
+  /// 我的 › 检查更新: this build's [version] and, on Android, the server's answer now; a newer one is offered in the
+  /// banner too and downloads from here as from there.
+  Future<void> checkNow(String version) async {
+    final l = AppLocalizations.of(context);
+    if (!Platform.isAndroid) {
+      return showDialog(context: context, builder: (c) => AlertDialog(
+            title: Text(l.checkUpdate),
+            content: Text(l.iosUpdateHow(version)),
+            actions: [
+              TextButton(onPressed: () => _ch.invokeMethod('testflight').ignore(), child: Text(l.openTestFlight)),
+              TextButton(onPressed: () => Navigator.pop(c), child: Text(l.ok)),
+            ],
+          ));
+    }
+    final found = _check(now: true);
+    return showDialog(context: context, builder: (c) => FutureBuilder(future: found, builder: (c, snap) {
+          final (r, e) = snap.data ?? (null, null);
+          final o = offer;
+          final size = o?['size'] as num? ?? 0;
+          return AlertDialog(
+            title: Text(l.checkUpdate),
+            content: Text(switch (r) {
+              null => l.askingServer,
+              UpdateCheck.newer => l.updateNewer('${o?['versionName']}', size > 0 ? l.appUpdateSize(_mb(size)) : '', version),
+              UpdateCheck.latest => l.appUpToDate(version),
+              UpdateCheck.signedOut => l.notSignedIn,
+              UpdateCheck.offline => l.updateOffline('$e'),
+              UpdateCheck.unauthorized => l.updateUnauthorized,
+              UpdateCheck.noApk => l.updateNoApk,
+              UpdateCheck.failed => l.updateCheckFailed('$e'),
+            }),
+            actions: [
+              if (r == UpdateCheck.newer && o != null && progress == null)
+                TextButton(onPressed: () { Navigator.pop(c); _download(); }, child: Text(l.update)),
+              TextButton(onPressed: () => Navigator.pop(c), child: Text(l.ok)),
+            ],
+          );
+        }));
   }
 
   Future<void> _dismiss() async {
-    (await SharedPreferences.getInstance()).setInt('apkDismissed', offer!['versionCode'] as int);
+    final p = await SharedPreferences.getInstance();
+    p.setString('apkDismissedOn', day(DateTime.now()));
+    p.setInt('apkDismissed', offer!['versionCode'] as int);
     _ch.invokeMethod('dropDownload').ignore();
     watch?.cancel();
     setState(() { offer = null; progress = null; });
@@ -141,7 +210,6 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
     final o = offer, p = progress;
     if (o == null) return const SizedBox.shrink();
     final t = Theme.of(context), cs = t.colorScheme, l = AppLocalizations.of(context);
-    String mb(num b) => (b / 1048576).toStringAsFixed(b < 10485760 ? 1 : 0);
     final size = o['size'] as num? ?? 0;
     return Material(
       color: cs.secondaryContainer,
@@ -156,8 +224,8 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text(p != null ? l.downloadingApp('${o['versionName']}', mb(p * size), mb(size))
-                      : l.appUpdate('${o['versionName']}', size > 0 ? l.appUpdateSize(mb(size)) : ''),
+                  Text(p != null ? l.downloadingApp('${o['versionName']}', _mb(p * size), _mb(size))
+                      : l.appUpdate('${o['versionName']}', size > 0 ? l.appUpdateSize(_mb(size)) : ''),
                       style: TextStyle(color: cs.onSecondaryContainer, fontWeight: FontWeight.w500)),
                   if (p != null) ...[
                     const SizedBox(height: 6),
@@ -168,10 +236,12 @@ class _UpdateBannerState extends State<UpdateBanner> with WidgetsBindingObserver
                 ]),
               ),
             ),
-            IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.dontRemindVersion, color: cs.onSecondaryContainer, onPressed: _dismiss),
+            IconButton(icon: const Icon(Icons.close_rounded), tooltip: l.notToday, color: cs.onSecondaryContainer, onPressed: _dismiss),
           ]),
         ),
       ),
     );
   }
 }
+
+String _mb(num b) => (b / 1048576).toStringAsFixed(b < 10485760 ? 1 : 0);
