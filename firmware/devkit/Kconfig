@@ -93,6 +93,19 @@ config LR_BATTERY_AIN0
     bool "Battery on AIN0 (LR-N4): P0.02 through a 1M / 1M divider, read x2, the charger's CHRG from the overlay (chrg-gpios); VDDH there is the system rail, USB's while plugged in"
     default n
 
+config LR_BUZZER
+    bool "LR-N5-S's buzzer on buz-gpios (P0.15): PWM segments of at most 20 ms that the PWM's own STOP ends (buzzer.c)"
+    default n
+
+config LR_BUZZER_DUTY_MAX
+    int "The buzzer's duty cap, permille: min(250, the hardware's CHECKLIST-N5S A6 formula at VSYS 5.5 V for the smallest coil DCR measured); 0: silent"
+    depends on LR_BUZZER
+    range 0 250
+    default 0
+    help
+        "First version, the safe tier only (FW-TODO-R31 FW-3): one duty for battery and USB alike, never above 25 %.
+        0 until a first article has measured its coil DCR and checked the cut-off (CHECKLIST-N5S A6)."
+
 config LR_SWITCH
     bool "LR-P3's slide switch on P1.15 (closed to GND = on): off stops recording and goes to System OFF (lr_switch.c)"
     depends on OMI_ENABLE_USB

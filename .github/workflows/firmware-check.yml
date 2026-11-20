@@ -35,12 +35,20 @@ jobs:
           cc -o $d/health_check test/health_check.c && $d/health_check  # the mic's HEALTH counts (src/mic_health.h)
           cc -o $d/mic_ring_check test/mic_ring_check.c && $d/mic_ring_check  # the mic's buffers left out are a gap in the frame numbers (src/mic_ring.h)
           cc -o $d/hpf_check test/hpf_check.c -lm && $d/hpf_check  # high-pass filter response and state (src/hpf.h)
+          cc -Wall -o $d/buzzer_check test/buzzer_check.c && $d/buzzer_check  # LR-N5-S's buzzer: <= 20 ms a segment, <= 25 % (src/buzzer_seq.h)
           mkdir -p $d/zephyr/settings $d/zephyr/drivers/clock_control $d/haly && touch $d/zephyr/settings/settings.h $d/zephyr/devicetree.h $d/hal/nrf_pdm.h $d/haly/nrfy_gpio.h
           touch $d/zephyr/device.h $d/zephyr/drivers/gpio.h $d/zephyr/drivers/clock_control/nrf_clock_control.h $d/nrfx_pdm.h
           cc -w -pthread -I$d -o $d/gain_check test/gain_check.c && $d/gain_check  # the mic's gain: at once, NVS after, a bad record, a GAIN during PDM init (src/mic_gain.c, src/mic.c)
           cc -w -I$d -o $d/raw_pcm_check test/raw_pcm_check.c && $d/raw_pcm_check  # E1's raw PCM: frames the mic ring or the host queue lost are a gap in seq (src/raw_pcm.c)
       - run: |  # DCDC is Kconfig's alone (SOC_DCDC_NRF52X*, lr_release.py's FIT): no code writes DCDCEN or DCDCEN0
           if git grep -n -i dcdcen -- '*.c' '*.h'; then echo "::error::set DCDC in Kconfig, not in code"; exit 1; fi
+      - run: |  # lr.sh flash / pkg n5s refuse before any USB or Bluetooth, with LR_LOG and the others renaming V too
+          for e in "" LR_LOG=1 LR_RAW_PCM=1 LR_DEBUG=1 LR_CARD_ON=1 "LR_LOG=1 LR_RAW_PCM=1 LR_DEBUG=1 LR_CARD_ON=1"; do
+            for c in flash pkg; do
+              if out=$(env $e bash lr.sh $c n5s 2>&1); then echo "::error::$e lr.sh $c n5s passed"; exit 1; fi
+              grep -q '^n5s: not through' <<<"$out" || { echo "::error::$e lr.sh $c n5s: $out"; exit 1; }
+            done
+          done
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
       - run: python3 lr_pcm.py --selftest  # E1's raw PCM frames (src/raw_pcm.c) and its before / after verdict
@@ -55,7 +63,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [n5, promicro-nand, selftest-n5, promicro-p3-rawpcm, n4-rawpcm, sdmod, expansion, promicro, promicro-p2,
+        variant: [n5, n5s, promicro-nand, selftest-n5, promicro-p3-rawpcm, n4-rawpcm, sdmod, expansion, promicro, promicro-p2,
                   promicro-p3, n4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -90,8 +98,16 @@ jobs:
         run: |
           c=build/lr-$VARIANT/zephyr/.config
           grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON)?|LR_MIC_GAIN)[= ]' "$c"
+          # the switch only where one is fitted; LR-N5-S's SW1 is a momentary key: off till its behaviour is decided
+          case "${VARIANT%-rawpcm}" in n4|n5|promicro-p3) sw=y ;; *) sw=n ;; esac
+          if [ $sw = y ]; then grep -qx CONFIG_LR_SWITCH=y "$c"; elif grep -q '^CONFIG_LR_SWITCH=y' "$c"; then exit 1; fi
           if [ "${VARIANT%-rawpcm}" = n4 ]; then  # what lr_release.py checks before an LR-N4 upload
             python3 -c 'import lr_release, sys; sys.exit(lr_release.unfit("n4", open(sys.argv[1]).read()) or None)' "$c"
+          elif [ "$VARIANT" = n5s ]; then  # LR-N5-S's first boards: LDOs, the buzzer silent by default
+            if grep -qE '^CONFIG_SOC_DCDC_NRF52X(_HV)?=y' "$c"; then exit 1; fi
+            grep -qx CONFIG_LR_BUZZER=y "$c"
+            grep -qx CONFIG_LR_BUZZER_DUTY_MAX=0 "$c"
+            grep -qx 'CONFIG_BT_DIS_MODEL="LR-N5S"' "$c"
           else  # DCDC on as before (main.c set DCDCEN and DCDCEN0 on every board till the SoC's init alone did), and
             # an LR-N4 check that refuses this build; one command a line: bash -e ignores a failure before && or after !
             grep -qx CONFIG_SOC_DCDC_NRF52X=y "$c"
@@ -110,7 +126,7 @@ jobs:
           python3 - "$f" "$VARIANT" <<'EOF'
           import sys; sys.path.insert(0, "firmware/selftest"); import selftest as s
           f, v = sys.argv[1:]
-          want = {"selftest-n5": "n5", "n5": "n5", "n4": "n4"}.get(v, None if v in ("sdmod", "expansion") else "promicro")
+          want = {"selftest-n5": "n5", "n5": "n5", "n5s": "n5s", "n4": "n4"}.get(v, None if v in ("sdmod", "expansion") else "promicro")
           takes = {b for b in s.MODELS for fitted in (True, None) if s.image_problem(b, f, fitted) is None}
           assert takes == ({want} if want else set()), (v, takes)
           no_l1 = s.image_problem("n5", f, False) if want == "n5" else None

@@ -120,7 +120,7 @@ void set_led_state()
     static unsigned n;
     int k = led_flashes(n++, lr_bond_count(), is_off || lr_paused(), !lr_store_err(), is_connected);
     for (int i = 0; i < k; i++, k_msleep(150)) {  // 30 ms flashes, 150 ms apart
-        set_led_blue(true);  // led2: P0.15, red on these boards
+        set_led_blue(true);  // led2: P0.15 (R1: P1.15), red on these boards
         k_msleep(30);
         set_led_blue(false);
     }
@@ -217,7 +217,7 @@ int main(void)
     }
 #endif
 #ifdef CONFIG_LR_ONE_LED
-    set_led_blue(true);  // led2: P0.15, lit 1 s as recording starts (LR-P3: switched on)
+    set_led_blue(true);  // led2: P0.15 (R1: P1.15), lit 1 s as recording starts (LR-P3: switched on)
     k_msleep(1000);
     set_led_blue(false);
 #endif

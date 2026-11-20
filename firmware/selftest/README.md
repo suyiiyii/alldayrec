@@ -16,7 +16,7 @@ python3 firmware/selftest/selftest.py check                   # 不接板子：�
   | ProMicro（不加板型参数） | ProMicro 自检；型号 LR-P1 / LR-P2 / LR-P3 / LR-PN 的录音固件；蓝牙中继（`firmware/hcirelay`，按 USB 名 `LR HCI relay` 认） | N4、N5 的自检和录音固件 |
   | `--n4` | N4 自检；LR-N4 录音固件，且符合 `lr_release.py` 的 FIT（开机不开 DCDC：N4 都没装 L1；开关断开 = 开；停泊不关机；麦克风增益 0x38），也就是 `lr.sh build n4` 编出来的 | 其余全部（包括缺 FIT 任何一项的手工构建） |
   | `--n5` | N5 自检（开机不开 DCDC，有没有 L1 都行）；LR-N5 录音固件：它开机就开 DCDC，**必须写明** `--dcdc`（L1 装了）才刷，`--no-dcdc`（没装 L1）或者不写都拒绝 | 其余全部 |
-  | `--n5s`（LR-N5-S，即 R1） | 暂时没有：它的引脚和 N5 不一样（P0.15 是蜂鸣器，N5 拿它当灯），N5 的固件会去驱动蜂鸣器 | 全部 |
+  | `--n5s`（LR-N5-S，即 R1） | **暂时全部拒绝**：R1 第一次刷机必须先换成 R1 专用的 bootloader（FW-1，还没做）。原版 nice!nano bootloader 拿 P0.15 当灯，用 PWM 驱动 R1 的蜂鸣器，最高约 31 %（R1 r3.1 复审 p.10），进 UF2 / DFU 就会响。FW-1 做好之前只能走 SWD 刷应用，不经 bootloader：应用链接在 0x26000，空片要先烧 S140 6.1.1 的 MBR+SoftDevice（不带 bootloader）再烧应用，这条路还没做；`swd.py flash` 烧的正是 nice!nano bootloader，R1 上也不能用。FW-1 之后只收它自己的录音固件（`lr.sh build n5s`，型号 LR-N5S，开机不开 DCDC） | 全部（FW-1 之后：其余全部，N5 的固件会去驱动蜂鸣器） |
 
   板子正在跑自检固件时，`flash` 先问它 `info`：它跑的是别的板子的自检（比如说的是 `--n5`，板子上跑的是 ProMicro 版），也拒绝。两边总有一边是错的，要人先核对板子；确认无误再双击 RST，从 UF2 盘刷。
 - **板子用 USB 序列号指定**：就是芯片的 DEVICEID，bootloader 和自检固件里都一样，`ioreg -p IOUSB -l -w0` 能看到。

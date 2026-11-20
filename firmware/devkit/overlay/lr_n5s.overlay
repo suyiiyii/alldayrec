@@ -1,0 +1,17 @@
+/* LR-N5-S (R1, the round board): LR-N5's pins (lr_n4.overlay, lr_n5.overlay, lr_nand.overlay) with its own balls
+ * on top, applied last. Every N5-S pin that differs from N5 is here and only here: the hardware's PINS-N5S.md (r3.1,
+ * 11-21); R1's new layout may move plain GPIOs again, and the layout finally chosen is the one that counts.
+ *   SW1 (momentary side key, low = pressed): P0.31 (ball A8), N5's CHRG ball; not read yet (lr.sh: no LR_SWITCH)
+ *   CHRG (TP4054): P0.13 (AD8)
+ *   LED_G (D1 yellow-green): P1.15 (A14), N5's switch ball; LED_R stays P1.13
+ *   BUZ: P0.15 (AD10), N5's LED_G ball, through C69 to Q2's gate: only buzzer.c's PWM drives it, held low otherwise
+ *   UART_TX: P0.17 (AD12), the debug port only; this firmware has no UART
+ * NAND /HOLD is tied to MEM_VDD and /WP to GND on the board: single-wire SPI only, as nand_card.c already is. */
+/ {
+	zephyr,user {
+		chrg-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+		buz-gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&led2 { gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>; };
