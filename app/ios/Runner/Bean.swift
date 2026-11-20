@@ -260,6 +260,9 @@ protocol BeanIo: AnyObject {
   /// prefs hold:<tag>, sent with every upload while set (Uploader); nil: let go.
   func hold(_ at: Int64?)
   func held() -> Int64?
+  /// prefs live:<tag>: where the latest live transfer began; the Uploader sends its pieces from there on ahead of a
+  /// backlog (what is said now first), the server not asked to wait (no hold: older audio after its finals goes late).
+  func liveFrom(_ at: Int64)
   /// The bean's last recording ended at `at` (wall ms) and all of it is up: the server is told (prefs end:<tag>, the
   /// Uploader sends it until the server takes it).
   func end(_ at: Int64)
@@ -1179,7 +1182,7 @@ final class BeanSync {
     let toc = Int(audio.first ?? 0)
     log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 开始：首单元 \(s.seq)（请求从 \(x.from) 起），Opus 配置 \(toc >> 3)",
         fields: ["file": x.file, "seq": s.seq, "from": x.from, "realtime": x.realtime, "toc": toc])
-    if x.live { state = ["code": "connected"] }
+    if x.live { state = ["code": "connected"]; io.liveFrom(files[x.file]!.at(s.seq) - BeanSync.holdMarginMs) }
   }
 
   private func complete(_ x: Xfer, _ result: Int, _ why: String = "") {

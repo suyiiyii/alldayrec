@@ -379,15 +379,18 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
         }
     }
 
-    /** A recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card). */
+    /** A recorder's pieces from its hold (a bean's: its live transfer) on go first: what is said now, ahead of a backlog
+     *  read off its card or left by an outage (11-20: after a Wi-Fi fast transfer the live page waited 4 min). */
     private fun files(): List<File> {
         val q = queue(dir)
-        val ahead = { f: File -> hold(deviceOf(f))?.let { startMs(f) >= it } ?: false }
+        val ahead = { f: File -> (hold(deviceOf(f)) ?: liveFrom(deviceOf(f)))?.let { startMs(f) >= it } ?: false }
         return q.filter(ahead) + q.filterNot(ahead)
     }
 
     /** Where the server's finalization waits for a recorder's backlog (BleLink.holdAhead), null: it does not. */
     private fun hold(device: String) = prefs.getLong("hold:$device", -1).takeIf { device.isNotEmpty() && it >= 0 }
+    /** Where a bean's latest live transfer began (BeanSync.Io.liveFrom), null: none yet. */
+    private fun liveFrom(device: String) = prefs.getLong("live:$device", -1).takeIf { device.isNotEmpty() && it >= 0 }
 
     /** Recorders whose last upload went with a hold: the server waits until an upload comes without it. At start, those
      *  with one in the prefs (the app may have gone between the upload and the let go). */
