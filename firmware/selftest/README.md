@@ -9,6 +9,16 @@ uv run firmware/selftest/selftest.py run SERIAL               # 跑全部检查�
 python3 firmware/selftest/selftest.py check                   # 不接板子：用录下的好、坏麦克风数据核对麦克风两项的判定
 ```
 
+- **`flash` 只刷对得上这块板的镜像**，不对就在碰板子之前退出（不进 bootloader、不拷文件）。镜像是什么，从它自己的构建目录读：`zephyr.uf2` 旁边的 `zephyr/.config`（录音固件看 `CONFIG_BT_DIS_MODEL`，自检固件看 USB 产品名 `LR selftest`；DCDC 看 `CONFIG_SOC_DCDC_NRF52X` / `_HV`）和上一级的 `CMakeCache.txt`（自检固件是 `--n4` 还是 `--n5` 编的）。所以 `--uf2` 必须给构建目录里的那个 `zephyr/zephyr.uf2`，拷到别处的 UF2 读不出来历，一律拒绝。
+
+  | 板子 | 能刷的 | 拒绝 |
+  |---|---|---|
+  | ProMicro（不加板型参数） | ProMicro 自检；型号 LR-P1 / LR-P2 / LR-P3 / LR-PN 的录音固件；蓝牙中继（`firmware/hcirelay`，按 USB 名 `LR HCI relay` 认） | N4、N5 的自检和录音固件 |
+  | `--n4` | N4 自检；LR-N4 录音固件，且开机不开 DCDC（N4 都没装 L1） | 其余全部 |
+  | `--n5` | N5 自检（开机不开 DCDC，有没有 L1 都行）；LR-N5 录音固件：它开机就开 DCDC，**必须写明** `--dcdc`（L1 装了）才刷，`--no-dcdc`（没装 L1）或者不写都拒绝 | 其余全部 |
+  | `--n5s`（LR-N5-S，即 R1） | 暂时没有：它的引脚和 N5 不一样（P0.15 是蜂鸣器，N5 拿它当灯），N5 的固件会去驱动蜂鸣器 | 全部 |
+
+  板子正在跑自检固件时，`flash` 先问它 `info`：它跑的是别的板子的自检（比如说的是 `--n5`，板子上跑的是 ProMicro 版），也拒绝。两边总有一边是错的，要人先核对板子；确认无误再双击 RST，从 UF2 盘刷。
 - **板子用 USB 序列号指定**：就是芯片的 DEVICEID，bootloader 和自检固件里都一样，`ioreg -p IOUSB -l -w0` 能看到。
 - **`flash` 不会做 1200 baud 触碰**：板子停在 bootloader 时，按序列号找到它的 UF2 盘直接拷；板子在跑自检固件时，先发 `dfu` 命令让它进 bootloader。都不满足（比如板子在跑别的固件）就退出，提示双击 RST。拷之前会当场再核对一次序列号，所以别的板子同时插着也不会刷错。
 - **第一次插上要允许**：新固件第一次出现在 Mac 上时，要在「允许配件连接」弹窗里点「允许」，否则 USB 设备停在 `!registered`，也没有串口。
@@ -140,6 +150,7 @@ uv run firmware/selftest/swd.py test                                            
 ```bash
 python3 firmware/selftest/selftest.py build --n5             # build-n5/zephyr/zephyr.uf2
 uv run firmware/selftest/selftest.py flash SERIAL --n5       # 拆光 Pico 的线、插 USB：板子停在 NICENANO 盘
+uv run firmware/selftest/selftest.py flash SERIAL --n5 --dcdc --uf2 firmware/devkit/build/lr-n5/zephyr/zephyr.uf2   # 录音固件：L1 装了才行
 uv run firmware/selftest/selftest.py run SERIAL --n5 [--no-dcdc] [--flip 20] [--cover 5]
 ```
 
