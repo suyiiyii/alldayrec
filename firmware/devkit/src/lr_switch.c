@@ -3,8 +3,10 @@
  * bounced on and off for seconds on 10-07, four boots in a row, two of them mounting the card. Off ends the open file,
  * drops the phone and restarts; a boot that finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at
  * once (CONFIG_LR_PARK: the park, lr_power.c), before the card or the radio, its BOOT the only record, and wakes when
- * the switch moves or USB comes (VBUS). On USB it stays up instead, not recording (the USB port still takes a
- * firmware), until the switch is on (restart, recording) or the cable goes (System OFF or the park).
+ * the switch moves or USB comes (VBUS). Switched off on USB it stays up instead, not recording (the USB port still
+ * takes a firmware), until the switch is on (restart, recording) or the cable goes (System OFF or the park).
+ * Switched on it records with or without VBUS: only the switch is watched, and on USB lr_power.c skips the low-battery
+ * cut; a wireless pad's VBUS coming and going does not stop it (VBUS_GONE matters only switched off).
  * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB), parked the POWER a 3
  * before it (its RESETREAS SREQ). */
 #include "lr_switch.h"
