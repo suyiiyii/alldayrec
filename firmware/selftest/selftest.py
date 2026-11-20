@@ -70,7 +70,7 @@ def port(serial):
 # and CMakeCache.txt beside zephyr.uf2) before the board is touched; any other pair is refused
 MODELS = {"promicro": {"LR-P1", "LR-P2", "LR-P3", "LR-PN", "LR HCI relay"},  # the relay (firmware/hcirelay): its USB name
           "n4": {"LR-N4"}, "n5": {"LR-N5"},
-          "n5s": set()}  # LR-N5-S (R1): no build for its pins yet; N5's drives P0.15, R1's buzzer, as its LED
+          "n5s": {"LR-N5S"}}  # LR-N5-S (R1): its own build only (lr.sh n5s); N5's drives P0.15, its buzzer, as an LED
 NAMES = {"promicro": "ProMicro", "n4": "LR-N4", "n5": "LR-N5", "n5s": "LR-N5-S (R1)"}
 
 
@@ -101,8 +101,6 @@ def n4_unfit(text):
 def image_problem(board, uf2, dcdc_fitted):
     """Why this UF2 must not go onto this board as fitted, or None. dcdc_fitted: the board's DCDC inductors are on it
     (True), missing (False), not said (None)"""
-    if not MODELS[board]:
-        return f"no image for {NAMES[board]} yet: N5's firmware would drive its pins as N5's (P0.15 is its buzzer)"
     img = image(uf2)
     if not img:
         return f"{uf2}: not a zephyr.uf2 in its build (no zephyr/.config and CMakeCache.txt beside it), so what it was " \
@@ -113,7 +111,7 @@ def image_problem(board, uf2, dcdc_fitted):
                f"{'' if board == 'promicro' else ' --' + board})"
     if kind == "recorder" and what not in MODELS[board]:
         return f"{uf2} is built for model {what or '(none)'}; {NAMES[board]} takes {', '.join(sorted(MODELS[board]))}"
-    if dcdc and (board == "n4" or dcdc_fitted is False):
+    if dcdc and (board in ("n4", "n5s") or dcdc_fitted is False):  # LR-N5-S's first boards: LDOs (lr.sh)
         return f"{uf2} turns DCDC on at boot and this board has no DCDC inductor (L1): VDD collapses, it hangs"
     if dcdc and board == "n5" and dcdc_fitted is None:
         return f"{uf2} turns DCDC on at boot: say whether this LR-N5 has its L1 (--dcdc fitted, --no-dcdc missing)"
@@ -311,6 +309,7 @@ def check():
     rec = lambda m, dcdc, more="": f'CONFIG_BT_DIS_MODEL="{m}"\n' + more + (
         "CONFIG_SOC_DCDC_NRF52X=y\nCONFIG_SOC_DCDC_NRF52X_HV=y\n" if dcdc else "")
     fit4 = "CONFIG_LR_SWITCH_OPEN_ON=y\nCONFIG_LR_MIC_GAIN=0x38\nCONFIG_LR_PARK=y\n"  # lr_release.py's FIT for LR-N4
+    n5s, n5sdcdc = build_dir("n5s", rec("LR-N5S", False)), build_dir("n5sd", rec("LR-N5S", True))
     relay = build_dir("relay", 'CONFIG_USB_DEVICE_PRODUCT="LR HCI relay"\nCONFIG_SOC_DCDC_NRF52X=y\n')
     n5, n4, n4dcdc, p3 = build_dir("n5", rec("LR-N5", True)), build_dir("n4", rec("LR-N4", False, fit4)), \
         build_dir("n4d", rec("LR-N4", True, fit4)), build_dir("p3", rec("LR-P3", True))
@@ -321,11 +320,12 @@ def check():
     bare = f"{root}/bare.uf2"
     open(bare, "wb").write(b"UF2")
     ok = [("n5", st5, None), ("n5", st5, False), ("n4", st4, None), ("promicro", stp, None), ("n5", n5, True),
-          ("n4", n4, None), ("promicro", p3, None), ("promicro", relay, None), ("n4", st4on, None)]
+          ("n4", n4, None), ("promicro", p3, None), ("promicro", relay, None), ("n4", st4on, None), ("n5s", n5s, None)]
     refused = [("n4", st5, None, "LR-N5 self-test"), ("n5", stp, None, "ProMicro self-test"),
                ("n5", n5, False, "no DCDC inductor"), ("n5", n5, None, "say whether"), ("n5", p3, True, "model LR-P3"),
                ("n4", n4dcdc, True, "no DCDC inductor"), ("n4", n5, None, "model LR-N5"), ("promicro", n4, None, "LR-N4"),
-               ("n5", bare, None, "cannot be read"), ("n5s", st5, None, "no image"), ("n5s", n5, True, "no image"),
+               ("n5", bare, None, "cannot be read"), ("n5s", st5, None, "LR-N5 self-test"), ("n5s", n5, True, "model LR-N5;"),
+               ("n5", n5s, True, "model LR-N5S"), ("n5s", n5sdcdc, True, "no DCDC inductor"),
                ("n5", relay, True, "model LR HCI relay"), ("n4", n4hv, True, "no DCDC inductor"),
                ("n4", n4nopark, None, "LR_PARK=None"), ("n4", n4closed, None, "LR_SWITCH_OPEN_ON=None"),
                ("promicro", st4on, None, "LR-N4 self-test")]
@@ -640,7 +640,8 @@ if __name__ == "__main__":
                     "test, flash refuses an image that turns DCDC on")
     ap.add_argument("--dcdc", action="store_true", help="flash: this LR-N5 has its L1 (needed for an image that turns "
                     "DCDC on)")
-    ap.add_argument("--n5s", action="store_true", help="flash: LR-N5-S (R1); refused, no image for its pins yet")
+    ap.add_argument("--n5s", action="store_true", help="flash: LR-N5-S (R1): its recorder build only (lr.sh build n5s); "
+                    "no self-test of its own yet")
     ap.add_argument("--n5", action="store_true", help="LR-N5 (build, flash, run): LR-N4's checks with its NAND in place "
                     "of the SD card")
     ap.add_argument("--flip", type=int, default=20, help="--p3, --n4, --n5: seconds to wait for the switch to be flipped "

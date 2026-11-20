@@ -6,9 +6,10 @@
 #   ./lr.sh build promicro-p2         the same board as LR-P2: the spare ProMicro kept for tests (bootloader 0.10.0)
 #   ./lr.sh build promicro-p3         the same board as LR-P3: the ProMicro wired into the boxed recorder
 #   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
-#   ./lr.sh build n5                  LR-N5 (not LR-N5-S: its balls differ): LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
+#   ./lr.sh build n5                  LR-N5: LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
+#   ./lr.sh build n5s                 LR-N5-S (R1): LR-N5 with its own balls (overlay/lr_n5s.overlay), a buzzer, DCDC off
 #   ./lr.sh build promicro-nand       LR-PN: a ProMicro with a W25N NAND on the SD module's pins, for tests
-#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
+#   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|n5s|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
 #   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
 #                                     builds, packs and uploads it to the server, where the app finds it
 set -euo pipefail
@@ -21,13 +22,15 @@ EXTRA=(-DCONFIG_OMI_ENABLE_SPEAKER=n -DCONFIG_OMI_ENABLE_HAPTIC=n -DCONFIG_OMI_E
 case $V in
   sdmod) OVL="$OVL;$D/overlay/lr_sdmod.overlay" ;;
   expansion) OVL="$OVL;$D/overlay/xiao_expansion_base.overlay" ;;
-  promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand)
+  promicro|promicro-p2|promicro-p3|n4|n5|n5s|promicro-nand)
             M=LR-P1; [ "$V" = promicro ] || M=LR-P${V#promicro-p}  # LR-P2/P3: the same board, their own model and name
             [ "$V" != promicro-nand ] || M=LR-PN
             OVL="$OVL;$D/overlay/lr_promicro.overlay"
-            if [ "$V" = n4 ] || [ "$V" = n5 ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
+            N5=; [ "$V" != n5 ] && [ "$V" != n5s ] || N5=1  # LR-N5-S is LR-N5 with lr_n5s.overlay on top
+            if [ "$V" = n4 ] || [ -n "$N5" ]; then  # LR-N4: the ProMicro's bootloader and pins, with its own changes on top
               M=LR-N${V#n} HW="LR-N${V#n} nRF52840" OVL="$OVL;$D/overlay/lr_n4.overlay"
-              [ "$V" != n5 ] || OVL="$OVL;$D/overlay/lr_n5.overlay"  # its card LDO enable and CHRG swapped balls
+              [ "$V" != n5s ] || M=LR-N5S HW="LR-N5S nRF52840"
+              [ -z "$N5" ] || OVL="$OVL;$D/overlay/lr_n5.overlay"  # its card LDO enable and CHRG swapped balls
               # battery on AIN0, CHRG from chrg-gpios (P0.29 on N4, P0.31 on N5); Fxx chips ship locked: the UICR's
               # APPROTECT 0x5A (written at the first flash) only opens SWD if the app writes APPROTECT.DISABLE at
               # every boot, which SystemInit does with this
@@ -40,6 +43,9 @@ case $V in
               # it hung on 11-11), the switch open = on, its mics +8 dB. Every LR-N4 package is this build (lr_release.py checks)
               [ "$V" != n4 ] || EXTRA+=(-DCONFIG_BOARD_ENABLE_DCDC=n -DCONFIG_BOARD_ENABLE_DCDC_HV=n
                                         -DCONFIG_LR_SWITCH_OPEN_ON=y -DCONFIG_LR_MIC_GAIN=0x38)
+              # LR-N5-S's first boards on the LDOs too, till REG0 and REG1 on DCDC are each checked (FW-TODO-R31 FW-1
+              # step 7); its buzzer driver, silent till a first article sets its duty cap (CONFIG_LR_BUZZER_DUTY_MAX)
+              [ "$V" != n5s ] || EXTRA+=(-DCONFIG_BOARD_ENABLE_DCDC=n -DCONFIG_BOARD_ENABLE_DCDC_HV=n -DCONFIG_LR_BUZZER=y)
             else  # battery on VDDH, P0.13/P0.17 are not charger pins here; the clones' 32.768 kHz crystals run +47..+125 ppm
               HW="ProMicro nRF52840"
               EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)
@@ -55,10 +61,11 @@ case $V in
                                                -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560)
             # LR-N5's switch and power trail; no phone mode (the NAND idles at 1-50 uA, no card to spare). The NAND
             # in place of the card (docs/nand-store.md 8): no FAT, no USB disk; SPIM3 wants errata 198's workaround
-            [ "$V" != n5 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y
+            [ -z "${N5:-}" ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_POWER_TRACE=y
                                       -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560)
-            if [ "$V" = n5 ] || [ "$V" = promicro-nand ]; then
+            if [ -n "${N5:-}" ] || [ "$V" = promicro-nand ]; then
               OVL="$OVL;$D/overlay/lr_nand.overlay"
+              [ "$V" != n5s ] || OVL="$OVL;$D/overlay/lr_n5s.overlay"  # last: its balls over N5's
               EXTRA+=(-DCONFIG_LR_NAND=y -DCONFIG_USBD_MSC_CLASS=n -DCONFIG_DISK_ACCESS=n -DCONFIG_FAT_FILESYSTEM_ELM=n
                       -DCONFIG_FS_FATFS_MOUNT_MKFS=n -DCONFIG_FS_FATFS_EXFAT=n -DCONFIG_NRF52_ANOMALY_198_WORKAROUND=y)
             fi ;;
