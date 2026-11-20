@@ -6,7 +6,7 @@
 #   ./lr.sh build promicro-p2         the same board as LR-P2: the spare ProMicro kept for tests (bootloader 0.10.0)
 #   ./lr.sh build promicro-p3         the same board as LR-P3: the ProMicro wired into the boxed recorder
 #   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
-#   ./lr.sh build n5                  LR-N5 and LR-N5-S: LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
+#   ./lr.sh build n5                  LR-N5 (not LR-N5-S: its balls differ): LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
 #   ./lr.sh build promicro-nand       LR-PN: a ProMicro with a W25N NAND on the SD module's pins, for tests
 #   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
 #   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py

@@ -100,10 +100,31 @@ jobs:
             if grep -q '^CONFIG_LR_SWITCH_OPEN_ON=y' "$c"; then exit 1; fi
             python3 -c 'import lr_release, sys; assert lr_release.unfit("n4", open(sys.argv[1]).read())' "$c"
           fi
+      - name: The boards selftest.py flash gives this build to
+        if: "!endsWith(matrix.variant, '-rawpcm')"
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |  # only its own board (the XIAO's: none), read from the real build; an LR-N5 without L1 never a DCDC build
+          f=firmware/devkit/build/lr-$VARIANT/zephyr/zephyr.uf2
+          [ "$VARIANT" != selftest-n5 ] || f=firmware/selftest/build-n5/zephyr/zephyr.uf2
+          python3 - "$f" "$VARIANT" <<'EOF'
+          import sys; sys.path.insert(0, "firmware/selftest"); import selftest as s
+          f, v = sys.argv[1:]
+          want = {"selftest-n5": "n5", "n5": "n5", "n4": "n4"}.get(v, None if v in ("sdmod", "expansion") else "promicro")
+          takes = {b for b in s.MODELS for fitted in (True, None) if s.image_problem(b, f, fitted) is None}
+          assert takes == ({want} if want else set()), (v, takes)
+          no_l1 = s.image_problem("n5", f, False) if want == "n5" else None
+          assert not s.image(f)[2] or "inductor" in no_l1 if want == "n5" else True, (v, no_l1)  # DCDC build: refused
+          print(v, "->", takes or "no board", "| LR-N5 without L1:", no_l1 or "ok")
+          EOF
       - if: endsWith(matrix.variant, '-rawpcm')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: firmware-test-${{ matrix.variant }}-${{ github.event.pull_request.head.sha }}
-          path: firmware/devkit/build/lr-${{ matrix.variant }}/zephyr/zephyr.uf2
+          path: |  # with its .config and CMakeCache.txt, which selftest.py flash --uf2 reads to know what it is for
+            firmware/devkit/build/lr-${{ matrix.variant }}/zephyr/zephyr.uf2
+            firmware/devkit/build/lr-${{ matrix.variant }}/zephyr/.config
+            firmware/devkit/build/lr-${{ matrix.variant }}/CMakeCache.txt
           retention-days: 14
+          include-hidden-files: true  # .config: upload-artifact skips dot files by default
           if-no-files-found: error

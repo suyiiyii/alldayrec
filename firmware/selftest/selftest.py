@@ -7,6 +7,7 @@ serial number (the chip's DEVICEID, the same in the UF2 bootloader and in this f
   python3 selftest.py build [--n4|--n5] the firmware (NCS v2.7.0, as lr.sh); --n4 / --n5: LR-N4's / LR-N5's, in build-n4/5
   uv run selftest.py flash SERIAL [--n4|--n5]   UF2 onto that board only: its bootloader drive, or this firmware's dfu
   uv run selftest.py flash SERIAL --uf2 F   another UF2 the same way (the recording firmware after the self-test)
+  ... flash ... [--dcdc|--no-dcdc]      only an image built for this board as fitted, read from its build; else refused
   uv run selftest.py run SERIAL [--clk S] [--json FILE]   every check, a PASS/FAIL report; exit 1 on any FAIL
   uv run selftest.py run SERIAL --p3 [--flip S]           a board wired into an LR-P3: also its SD card, mic and switch
   uv run selftest.py run SERIAL --n4 [--flip S] [--cover S]   an LR-N4: also SD, both mics, IMU, CHRG, switch
@@ -64,12 +65,76 @@ def port(serial):
     return ports[0].device if len(ports) == 1 else None
 
 
-def flash(serial, board, uf2=None):
+# What each board, as fitted, may take (the N5 process review's §3.5): its own self-test build, or a recording firmware
+# built for its model; DCDC on at boot only where its inductors are fitted. Read from the image's own build (zephyr/.config
+# and CMakeCache.txt beside zephyr.uf2) before the board is touched; any other pair is refused
+MODELS = {"promicro": {"LR-P1", "LR-P2", "LR-P3", "LR-PN", "LR HCI relay"},  # the relay (firmware/hcirelay): its USB name
+          "n4": {"LR-N4"}, "n5": {"LR-N5"},
+          "n5s": set()}  # LR-N5-S (R1): no build for its pins yet; N5's drives P0.15, R1's buzzer, as its LED
+NAMES = {"promicro": "ProMicro", "n4": "LR-N4", "n5": "LR-N5", "n5s": "LR-N5-S (R1)"}
+
+
+def image(uf2):
+    """(kind, what it is for, DCDC on at boot, .config) of a UF2 from its build: ("selftest", board) or ("recorder",
+    model); None when it is not a Zephyr build's zephyr.uf2"""
+    z = os.path.dirname(os.path.abspath(uf2))
+    try:
+        text = open(f"{z}/.config").read()
+        cfg = dict(re.findall(r"^CONFIG_(\w+)=(.*)$", text, re.M))
+        cache = open(f"{os.path.dirname(z)}/CMakeCache.txt").read()
+    except OSError:
+        return None
+    dcdc = "y" in (cfg.get("SOC_DCDC_NRF52X"), cfg.get("SOC_DCDC_NRF52X_HV"))
+    if cfg.get("USB_DEVICE_PRODUCT") == f'"{PRODUCT}"':
+        on = lambda d: re.search(rf"^{d}:\w+=(1|ON|YES|TRUE|Y)$", cache, re.M | re.I)  # CMake's true values
+        return "selftest", "n5" if on("LR_N5") else "n4" if on("LR_N4") else "promicro", dcdc, text
+    return "recorder", (cfg.get("BT_DIS_MODEL") or cfg.get("USB_DEVICE_PRODUCT", "")).strip('"'), dcdc, text
+
+
+def n4_unfit(text):
+    """What an LR-N4 recorder's .config lacks for its boards: lr_release.py's FIT, the one place that says it"""
+    sys.path.insert(0, f"{D}/../devkit")
+    import lr_release
+    return lr_release.unfit("n4", text)
+
+
+def image_problem(board, uf2, dcdc_fitted):
+    """Why this UF2 must not go onto this board as fitted, or None. dcdc_fitted: the board's DCDC inductors are on it
+    (True), missing (False), not said (None)"""
+    if not MODELS[board]:
+        return f"no image for {NAMES[board]} yet: N5's firmware would drive its pins as N5's (P0.15 is its buzzer)"
+    img = image(uf2)
+    if not img:
+        return f"{uf2}: not a zephyr.uf2 in its build (no zephyr/.config and CMakeCache.txt beside it), so what it was " \
+               "built for cannot be read; flash the build's own zephyr/zephyr.uf2"
+    kind, what, dcdc, text = img
+    if kind == "selftest" and what != board:
+        return f"{uf2} is the {NAMES[what]} self-test, not {NAMES[board]}'s (selftest.py build" \
+               f"{'' if board == 'promicro' else ' --' + board})"
+    if kind == "recorder" and what not in MODELS[board]:
+        return f"{uf2} is built for model {what or '(none)'}; {NAMES[board]} takes {', '.join(sorted(MODELS[board]))}"
+    if dcdc and (board == "n4" or dcdc_fitted is False):
+        return f"{uf2} turns DCDC on at boot and this board has no DCDC inductor (L1): VDD collapses, it hangs"
+    if dcdc and board == "n5" and dcdc_fitted is None:
+        return f"{uf2} turns DCDC on at boot: say whether this LR-N5 has its L1 (--dcdc fitted, --no-dcdc missing)"
+    if kind == "recorder" and board == "n4" and (bad := n4_unfit(text)):
+        return f"{uf2} is not built as LR-N4's boards need (lr.sh build n4): {bad}"
+    return None
+
+
+def flash(serial, board, uf2=None, dcdc_fitted=None):
     selftest, uf2 = not uf2, uf2 or f"{out_dir(board)}/zephyr/zephyr.uf2"
+    if problem := image_problem(board, uf2, dcdc_fitted):
+        sys.exit(f"not flashing {serial}: {problem}")
     if not drive(serial):
         if not port(serial):
             sys.exit(f"{serial}: neither its UF2 drive nor {PRODUCT} on USB; double-tap RST to enter the bootloader")
-        Board(serial).cmd("dfu")  # wait for its reply: closing the port right after the write loses the command
+        b = Board(serial)
+        ran = b.cmd("info").get("board", "promicro")
+        if ran != board:  # what it was last given says another board: one of the two is wrong, a person decides
+            sys.exit(f"not flashing {serial}: it runs the {NAMES.get(ran, ran)} self-test, and you said {NAMES[board]}. "
+                     "Check the board; if it really is one, double-tap RST and flash it from its UF2 drive")
+        b.cmd("dfu")  # wait for its reply: closing the port right after the write loses the command
         for _ in range(40):
             time.sleep(0.5)
             if drive(serial):
@@ -229,6 +294,76 @@ def check():
     assert [r[0] for r in bad if r[1] == "FAIL"] == ["UICR REGOUT0", "UICR APPROTECT", "CPU"], bad
     assert swd_verdict("Error: target is locked")[0][1] == "FAIL"
     print("swd_verdict: ok")
+
+    # flash: which image each board as fitted takes, from builds laid out as west leaves them; refused before the board
+    import tempfile
+    root = tempfile.mkdtemp()
+
+    def build_dir(name, config, cache=""):
+        os.makedirs(f"{root}/{name}/zephyr")
+        open(f"{root}/{name}/zephyr/.config", "w").write(config)
+        open(f"{root}/{name}/CMakeCache.txt", "w").write(cache)
+        open(f"{root}/{name}/zephyr/zephyr.uf2", "wb").write(b"UF2")
+        return f"{root}/{name}/zephyr/zephyr.uf2"
+    st = f'CONFIG_USB_DEVICE_PRODUCT="{PRODUCT}"\n# CONFIG_SOC_DCDC_NRF52X is not set\n'
+    st5, st4, stp = build_dir("st5", st, "LR_N5:UNINITIALIZED=1\n"), build_dir("st4", st, "LR_N4:UNINITIALIZED=1\n"), \
+        build_dir("stp", st)
+    rec = lambda m, dcdc, more="": f'CONFIG_BT_DIS_MODEL="{m}"\n' + more + (
+        "CONFIG_SOC_DCDC_NRF52X=y\nCONFIG_SOC_DCDC_NRF52X_HV=y\n" if dcdc else "")
+    fit4 = "CONFIG_LR_SWITCH_OPEN_ON=y\nCONFIG_LR_MIC_GAIN=0x38\nCONFIG_LR_PARK=y\n"  # lr_release.py's FIT for LR-N4
+    relay = build_dir("relay", 'CONFIG_USB_DEVICE_PRODUCT="LR HCI relay"\nCONFIG_SOC_DCDC_NRF52X=y\n')
+    n5, n4, n4dcdc, p3 = build_dir("n5", rec("LR-N5", True)), build_dir("n4", rec("LR-N4", False, fit4)), \
+        build_dir("n4d", rec("LR-N4", True, fit4)), build_dir("p3", rec("LR-P3", True))
+    n4hv = build_dir("n4hv", rec("LR-N4", False, fit4 + "CONFIG_SOC_DCDC_NRF52X_HV=y\n"))  # REG0's DCDC alone
+    n4nopark = build_dir("n4np", rec("LR-N4", False, fit4.replace("CONFIG_LR_PARK=y\n", "")))  # a hand-made west build
+    n4closed = build_dir("n4c", rec("LR-N4", False, fit4.replace("CONFIG_LR_SWITCH_OPEN_ON=y\n", "")))
+    st4on = build_dir("st4on", st, "LR_N4:BOOL=ON\n")  # -DLR_N4=ON by hand: N4's self-test all the same
+    bare = f"{root}/bare.uf2"
+    open(bare, "wb").write(b"UF2")
+    ok = [("n5", st5, None), ("n5", st5, False), ("n4", st4, None), ("promicro", stp, None), ("n5", n5, True),
+          ("n4", n4, None), ("promicro", p3, None), ("promicro", relay, None), ("n4", st4on, None)]
+    refused = [("n4", st5, None, "LR-N5 self-test"), ("n5", stp, None, "ProMicro self-test"),
+               ("n5", n5, False, "no DCDC inductor"), ("n5", n5, None, "say whether"), ("n5", p3, True, "model LR-P3"),
+               ("n4", n4dcdc, True, "no DCDC inductor"), ("n4", n5, None, "model LR-N5"), ("promicro", n4, None, "LR-N4"),
+               ("n5", bare, None, "cannot be read"), ("n5s", st5, None, "no image"), ("n5s", n5, True, "no image"),
+               ("n5", relay, True, "model LR HCI relay"), ("n4", n4hv, True, "no DCDC inductor"),
+               ("n4", n4nopark, None, "LR_PARK=None"), ("n4", n4closed, None, "LR_SWITCH_OPEN_ON=None"),
+               ("promicro", st4on, None, "LR-N4 self-test")]
+    for b, f, l1 in ok:
+        assert image_problem(b, f, l1) is None, (b, f, l1, image_problem(b, f, l1))
+    for b, f, l1, why in refused:
+        assert why in (image_problem(b, f, l1) or ""), (b, f, l1, image_problem(b, f, l1))
+    global drive
+    real, drive = drive, lambda s: (_ for _ in ()).throw(AssertionError("touched the board"))
+    try:
+        flash("0123456789ABCDEF", "n5", n5, False)
+        raise AssertionError("flashed")
+    except SystemExit as e:
+        assert "not flashing" in str(e) and "no DCDC inductor" in str(e), e
+    finally:
+        drive = real
+    # a board running another board's self-test: refused before dfu
+    global port, Board
+    sent = []
+
+    class Fake:
+        def __init__(self, serial):
+            pass
+
+        def cmd(self, c):
+            sent.append(c)
+            return {"board": "promicro"}
+    saved = drive, port, Board
+    drive, port, Board = (lambda s: None), (lambda s: "/dev/null"), Fake
+    try:
+        flash("0123456789ABCDEF", "n5", st5)
+        raise AssertionError("flashed")
+    except SystemExit as e:
+        assert "runs the ProMicro self-test" in str(e) and sent == ["info"], (e, sent)
+    finally:
+        drive, port, Board = saved
+    shutil.rmtree(root)
+    print("image_problem, flash refusals: ok")
 
 
 def dbfs(v):
@@ -501,7 +636,11 @@ if __name__ == "__main__":
                     "zephyr.uf2)")
     ap.add_argument("--n4", action="store_true", help="LR-N4 (build, flash, run): its own build, pins and checks: SD, "
                     "both mics, IMU, CHRG, switch, both LEDs")
-    ap.add_argument("--no-dcdc", action="store_true", help="run: skip the DCDC test (a board without its L1 or L3)")
+    ap.add_argument("--no-dcdc", action="store_true", help="the board has no DCDC inductor (L1 / L3): run skips the DCDC "
+                    "test, flash refuses an image that turns DCDC on")
+    ap.add_argument("--dcdc", action="store_true", help="flash: this LR-N5 has its L1 (needed for an image that turns "
+                    "DCDC on)")
+    ap.add_argument("--n5s", action="store_true", help="flash: LR-N5-S (R1); refused, no image for its pins yet")
     ap.add_argument("--n5", action="store_true", help="LR-N5 (build, flash, run): LR-N4's checks with its NAND in place "
                     "of the SD card")
     ap.add_argument("--flip", type=int, default=20, help="--p3, --n4, --n5: seconds to wait for the switch to be flipped "
@@ -513,14 +652,20 @@ if __name__ == "__main__":
         sys.exit(check())
     if a.action == "swd":
         sys.exit(swd())
-    if a.p3 + a.n4 + a.n5 > 1:
-        ap.error("one of --p3, --n4, --n5")
-    board = "n5" if a.n5 else "n4" if a.n4 else "promicro"
+    if a.p3 + a.n4 + a.n5 + a.n5s > 1:
+        ap.error("one of --p3, --n4, --n5, --n5s")
+    if a.dcdc and a.no_dcdc:
+        ap.error("--dcdc or --no-dcdc")
+    if a.dcdc and a.action != "flash":
+        ap.error("--dcdc: flash only")
+    if a.n5s and a.action != "flash":
+        ap.error("--n5s: flash only")
+    board = "n5s" if a.n5s else "n5" if a.n5 else "n4" if a.n4 else "promicro"
     if a.action != "build" and not re.fullmatch(r"[0-9A-F]{16}", a.serial or ""):
         ap.error("SERIAL: 16 hex digits, as ioreg shows it")
     if a.action == "build":
         build(board)
     elif a.action == "flash":
-        flash(a.serial, board, a.uf2)
+        flash(a.serial, board, a.uf2, True if a.dcdc else False if a.no_dcdc else None)
     else:
         run(a.serial, a.clk, a.json, a.p3, a.flip, board, a.cover, not a.no_dcdc)
