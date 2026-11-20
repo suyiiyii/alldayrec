@@ -42,6 +42,13 @@ jobs:
           cc -w -I$d -o $d/raw_pcm_check test/raw_pcm_check.c && $d/raw_pcm_check  # E1's raw PCM: frames the mic ring or the host queue lost are a gap in seq (src/raw_pcm.c)
       - run: |  # DCDC is Kconfig's alone (SOC_DCDC_NRF52X*, lr_release.py's FIT): no code writes DCDCEN or DCDCEN0
           if git grep -n -i dcdcen -- '*.c' '*.h'; then echo "::error::set DCDC in Kconfig, not in code"; exit 1; fi
+      - run: |  # lr.sh flash / pkg n5s refuse before any USB or Bluetooth, with LR_LOG and the others renaming V too
+          for e in "" LR_LOG=1 LR_RAW_PCM=1 LR_DEBUG=1 LR_CARD_ON=1 "LR_LOG=1 LR_RAW_PCM=1 LR_DEBUG=1 LR_CARD_ON=1"; do
+            for c in flash pkg; do
+              if out=$(env $e bash lr.sh $c n5s 2>&1); then echo "::error::$e lr.sh $c n5s passed"; exit 1; fi
+              grep -q '^n5s: not through' <<<"$out" || { echo "::error::$e lr.sh $c n5s: $out"; exit 1; }
+            done
+          done
       - run: pipx install uv  # into /opt/pipx_bin, on the image's PATH
       - run: uv run --no-project --with bleak python lr_sync.py --selftest  # the record stream, event log and Ogg as lr_sync.py reads them
       - run: python3 lr_pcm.py --selftest  # E1's raw PCM frames (src/raw_pcm.c) and its before / after verdict

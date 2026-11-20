@@ -8,7 +8,7 @@
 #   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
 #   ./lr.sh build n5                  LR-N5: LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
 #   ./lr.sh build n5s                 LR-N5-S (R1): LR-N5 with its own balls (overlay/lr_n5s.overlay), a buzzer, DCDC off,
-#                                     no side key yet (records from power-up); flashed over SWD only, not by flash below
+#                                     no side key yet (records from power-up); flashed over SWD only, not by flash or pkg below
 #   ./lr.sh build promicro-nand       LR-PN: a ProMicro with a W25N NAND on the SD module's pins, for tests
 #   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
 #   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
@@ -53,7 +53,7 @@ case $V in
             fi
             EXTRA+=("-DCONFIG_LR_NAME_PREFIX=\"$M\"" "-DCONFIG_BT_DEVICE_NAME=\"$M\"" "-DCONFIG_BT_DIS_MODEL=\"$M\""
                     "-DCONFIG_BT_DIS_HW_REV_STR=\"$HW\""
-                    -DCONFIG_LR_ONE_LED=y)  # only P0.15's LED is fitted (LR-N4: the yellow-green one): short flash codes
+                    -DCONFIG_LR_ONE_LED=y)  # only led2's LED is fitted (P0.15; R1: P1.15; LR-N4: the yellow-green one): short flash codes
             # only LR-P3 and LR-N4 have the switch on P1.15, and keep a power trail while the battery cuts out
             # and phone mode (the card idle while the phone acks what it has: lr_store.c). Phone mode's way back to the
             # card mounts it, from a DFU write (BT RX) and the switch, low battery or 1200 bps touch (the system
@@ -105,6 +105,9 @@ UF2="$D/build/lr-$V/zephyr/zephyr.uf2"
 FWV="$(git -C "$D" log -1 --format=%cd --date=format:%Y%m%d.%H%M%S)-$(git -C "$D" rev-parse --short HEAD)$(git -C "$D" diff --quiet HEAD -- . || echo +)${FWS:-}"
 EXTRA+=("-DCONFIG_BT_DIS_FW_REV_STR=\"$FWV\"")
 
+# the nice!nano bootloader PWMs P0.15, R1's buzzer, up to ~31 % (R1 r3.1 review p.10): no UF2 flash or DFU package
+# for n5s till R1's own bootloader (FW-1), SWD only. ${2:-}, not $V: LR_LOG and the others above have renamed V
+[ "${2:-}" != n5s ] || [ "${1:-}" = build ] || { echo "n5s: not through the nice!nano UF2 bootloader (it drives R1's buzzer); SWD only" >&2; exit 1; }
 case ${1:-} in
 build)
   cd "${NCS:-/opt/nordic/ncs/v2.7.0}"  # CI: NCS is a west workspace of v2.7.0
@@ -122,8 +125,6 @@ pkg)
   uvx adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0xFFFE --application "${UF2%.uf2}.hex" "$D/build/lr-$V/lr-$V.zip"
   ;;
 flash)
-  # the nice!nano bootloader PWMs P0.15, R1's buzzer, up to ~31 % (R1 r3.1 review p.10): SWD only till R1's own (FW-1)
-  [ "$V" != n5s ] || { echo "n5s: not through the nice!nano UF2 bootloader (it drives R1's buzzer); SWD only" >&2; exit 1; }
   [ -f "$UF2" ] || { echo "build first: $UF2 missing" >&2; exit 1; }
   uf2drive() { for v in /Volumes/*; do [ -f "$v/INFO_UF2.TXT" ] && { echo "$v"; return; }; done; return 0; }  # XIAO-SENSE, NICENANO, ...
   if [ -z "$(uf2drive)" ]; then
