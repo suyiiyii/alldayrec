@@ -16,6 +16,7 @@
 
 // --- what mic_gain.c (and config.h) use
 #define CONFIG_OMI_CODEC_OPUS 1
+#define CONFIG_LR_MIC_GAIN 0x28
 #define DT_PATH(x) 0
 #define DT_NODE_HAS_PROP(n, p) 0
 #define LOG_MODULE_REGISTER(...)

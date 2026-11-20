@@ -100,6 +100,16 @@ config LR_SWITCH
     help
         "Only on a board with the switch wired: elsewhere P1.15 is open and reads off, and the board would never record."
 
+config LR_SWITCH_OPEN_ON
+    bool "The switch open = on, closed to GND = off (LR-N4 as built, its lever away from USB = on): lr_switch.c"
+    depends on LR_SWITCH
+    default n
+
+config LR_MIC_GAIN
+    hex "The mic's default PDM gain, till CTRL 0x21 sets one (mic_gain.c): 0x28 = 0 dB, 0.5 dB a step; LR-N4 0x38 (+8 dB, its mics)"
+    range 0x00 0x50
+    default 0x28
+
 config LR_LOW_BATTERY_MV
     int "On battery, three readings a minute apart under this many mV end recording and go to System OFF (or park, LR_PARK) until USB, or LR-P3's switch, wakes it (lr_power.c); 0: never"
     default 3300

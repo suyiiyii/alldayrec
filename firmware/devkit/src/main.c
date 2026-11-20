@@ -160,9 +160,6 @@ int main(void)
     // Print and clear reset reason
     print_reset_reason();
 
-    NRF_POWER->DCDCEN = 1;
-    NRF_POWER->DCDCEN0 = 1;
-
     LOG_INF("Booting...\n");
 
     LOG_INF("Model: %s", CONFIG_BT_DIS_MODEL);

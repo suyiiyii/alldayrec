@@ -1,10 +1,10 @@
-/* LR-P3's slide switch, CONFIG_LR_SWITCH: P1.15 on its pull-up, closed to GND = on. A position counts once
- * it has read the same for 0.5 s (lr_switch_debounce): 116C's lever bounced on and off for seconds on 10-07, four
- * boots in a row, two of them mounting the card. Off ends the open file, drops the phone and restarts; a boot that
- * finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at once (CONFIG_LR_PARK: the park,
- * lr_power.c), before the card or the radio, its BOOT the only record, and wakes when the switch moves or USB comes
- * (VBUS). On USB it stays up instead, not recording (the USB port still takes a firmware), until the switch is on
- * (restart, recording) or the cable goes (System OFF or the park).
+/* LR-P3's slide switch, CONFIG_LR_SWITCH: P1.15 on its pull-up, closed to GND = on (LR-N4: open = on,
+ * CONFIG_LR_SWITCH_OPEN_ON). A position counts once it has read the same for 0.5 s (lr_switch_debounce): 116C's lever
+ * bounced on and off for seconds on 10-07, four boots in a row, two of them mounting the card. Off ends the open file,
+ * drops the phone and restarts; a boot that finds the switch off, or not on for 0.5 s within 3 s, goes to System OFF at
+ * once (CONFIG_LR_PARK: the park, lr_power.c), before the card or the radio, its BOOT the only record, and wakes when
+ * the switch moves or USB comes (VBUS). On USB it stays up instead, not recording (the USB port still takes a
+ * firmware), until the switch is on (restart, recording) or the cable goes (System OFF or the park).
  * Events: SWITCH (lr_log.h); the wake reason is BOOT's RESETREAS (OFF: the switch, VBUS: USB), parked the POWER a 3
  * before it (its RESETREAS SREQ). */
 #include "lr_switch.h"
@@ -28,7 +28,7 @@ extern bool is_off;  // main.c's status flashes stop while it goes down
 
 static bool on(void)
 {
-    return !nrf_gpio_pin_read(SWITCH);
+    return nrf_gpio_pin_read(SWITCH) == IS_ENABLED(CONFIG_LR_SWITCH_OPEN_ON);
 }
 
 static bool vbus(void)
@@ -53,7 +53,9 @@ void lr_switch_arm(void)
 {
     nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
     k_msleep(1);
-    nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP, on() ? NRF_GPIO_PIN_SENSE_HIGH : NRF_GPIO_PIN_SENSE_LOW);
+    // wakes on the other level, whichever way round on is
+    nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP,
+                             nrf_gpio_pin_read(SWITCH) ? NRF_GPIO_PIN_SENSE_LOW : NRF_GPIO_PIN_SENSE_HIGH);
 }
 
 /* The park (lr_power.c, CONFIG_LR_PARK): the pin's level, its pull-up on for this read only (on, the switch closed to

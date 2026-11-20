@@ -36,6 +36,10 @@ case $V in
               # turnover (-194 ppm at -40 °C, -167 at +85: its -40..+85 range), ±3 ppm a year, ±10 after two reflows
               # ([4] 7): ~240 ppm at the cold end after 5 years, ~70 over 0..45 °C. MPSL reads this at build time only
               EXTRA+=(-DCONFIG_LR_BATTERY_AIN0=y -DCONFIG_NRF_APPROTECT_USE_UICR=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)
+              # LR-N4 as the two boards were built (11-12 lab): no L1, so REG0 and REG1 both on their LDOs (with DCDC on
+              # it hung on 11-11), the switch open = on, its mics +8 dB. Every LR-N4 package is this build (lr_release.py checks)
+              [ "$V" != n4 ] || EXTRA+=(-DCONFIG_BOARD_ENABLE_DCDC=n -DCONFIG_BOARD_ENABLE_DCDC_HV=n
+                                        -DCONFIG_LR_SWITCH_OPEN_ON=y -DCONFIG_LR_MIC_GAIN=0x38)
             else  # battery on VDDH, P0.13/P0.17 are not charger pins here; the clones' 32.768 kHz crystals run +47..+125 ppm
               HW="ProMicro nRF52840"
               EXTRA+=(-DCONFIG_LR_BATTERY_VDDH=y -DCONFIG_CLOCK_CONTROL_NRF_K32SRC_250PPM=y)

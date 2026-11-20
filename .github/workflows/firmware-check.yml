@@ -45,14 +45,16 @@ jobs:
       - run: python3 ../selftest/selftest.py check && uv run ../selftest/swd.py test  # the self-test's verdicts, LR-N5's SWD flash / diag and UICR file
 
   # n5 and promicro-nand compile (lr.sh build), LR-N5's self-test, and the raw-PCM test builds (LR_RAW_PCM=1, kept as
-  # artifacts to flash for a lab test): not released, so a PR is where a broken one shows
+  # artifacts to flash for a lab test): not released, so a PR is where a broken one shows. The released boards too, for
+  # their DCDC and switch settings: LR-N4's as its boards were built (lr_release.py's FIT), every other one's DCDC on
   nand-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        variant: [n5, promicro-nand, selftest-n5, promicro-p3-rawpcm, n4-rawpcm]
+        variant: [n5, promicro-nand, selftest-n5, promicro-p3-rawpcm, n4-rawpcm, sdmod, expansion, promicro, promicro-p2,
+                  promicro-p3, n4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -77,6 +79,24 @@ jobs:
             LR_RAW_PCM=1 LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "${VARIANT%-rawpcm}"
           else
             LR_BUILD_JOBS=4 bash firmware/devkit/lr.sh build "$VARIANT"
+          fi
+      - name: DCDC and switch settings
+        if: matrix.variant != 'selftest-n5'
+        working-directory: firmware/devkit
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          c=build/lr-$VARIANT/zephyr/.config
+          grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON)?|LR_MIC_GAIN)[= ]' "$c"
+          if [ "${VARIANT%-rawpcm}" = n4 ]; then  # what lr_release.py checks before an LR-N4 upload
+            python3 -c 'import lr_release, sys; sys.exit(lr_release.unfit("n4", open(sys.argv[1]).read()) or None)' "$c"
+          else  # DCDC on as before (main.c set DCDCEN and DCDCEN0 on every board till the SoC's init alone did), and
+            # an LR-N4 check that refuses this build; one command a line: bash -e ignores a failure before && or after !
+            grep -qx CONFIG_SOC_DCDC_NRF52X=y "$c"
+            grep -qx CONFIG_SOC_DCDC_NRF52X_HV=y "$c"
+            grep -qx CONFIG_LR_MIC_GAIN=0x28 "$c"
+            if grep -q '^CONFIG_LR_SWITCH_OPEN_ON=y' "$c"; then exit 1; fi
+            python3 -c 'import lr_release, sys; assert lr_release.unfit("n4", open(sys.argv[1]).read())' "$c"
           fi
       - if: endsWith(matrix.variant, '-rawpcm')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
