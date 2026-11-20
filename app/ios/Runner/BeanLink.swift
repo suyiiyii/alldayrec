@@ -13,6 +13,7 @@ import CallKit
 import CoreBluetooth
 import Foundation
 import Network
+import UIKit
 
 final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, BeanIo {
   static let restoreId = "live-record.bean"
@@ -40,6 +41,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   @Shared private var cmd: CBCharacteristic?
   @Shared private var mtu = 23
   @Shared private var rssi: Int?
+  private var noted = (n: 0, bytes: 0, gap: 0.0, last: 0.0, since: 0.0)  // on q: notifications since notifications()
   @Shared private var lastSeen: Int64?
   @Shared private var downWhy: String?
   @Shared private var established = false  // the link came up this round: a drop is not a failure to back off from
@@ -312,11 +314,13 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func phoneState() -> [String: Any] {
     let p = BeanLink.path.currentPath, net = [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .other].filter(p.usesInterfaceType)
     let s = AVAudioSession.sharedInstance(), r = s.currentRoute
-    let (call, front) = DispatchQueue.main.sync { (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp) }
+    let (call, front, locked) = DispatchQueue.main.sync {  // locked: with a passcode, ~10 s after the screen locks
+      (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp, !UIApplication.shared.isProtectedDataAvailable)
+    }
     let power = Recorder.phone().filter { ["phone_battery", "phone_charging", "low_power", "thermal"].contains($0.key) }
     return power.merging(["audio_out": r.outputs.map(\.portType.rawValue), "audio_in": r.inputs.map(\.portType.rawValue),
                           "audio_category": s.category.rawValue, "other_audio": s.isOtherAudioPlaying, "call": call,
-                          "foreground": front, "net": net.map { "\($0)" }, "net_status": "\(p.status)"]) { $1 }
+                          "foreground": front, "locked": locked, "net": net.map { "\($0)" }, "net_status": "\(p.status)"]) { $1 }
   }
 
   //
@@ -388,6 +392,20 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) { done(error) }
   func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor c: CBCharacteristic, error: Error?) { done(error) }
   func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
-    if c.uuid == BeanLink.notify, let v = c.value { notes.put([UInt8](v)) }
+    guard c.uuid == BeanLink.notify, let v = c.value else { return }
+    let t = ProcessInfo.processInfo.systemUptime
+    if noted.last > 0 { noted.gap = max(noted.gap, t - noted.last) }
+    noted.n += 1; noted.bytes += v.count; noted.last = t
+    notes.put([UInt8](v))
+  }
+
+  func notifications() -> [String: Any] {
+    q.sync {
+      let t = ProcessInfo.processInfo.systemUptime, s = noted
+      noted = (0, 0, 0, s.last, t)
+      guard s.since > 0, t > s.since else { return [:] }
+      return ["ble_noteds": (Double(s.n) / (t - s.since) * 10).rounded() / 10, "ble_note_bytes": s.n > 0 ? s.bytes / s.n : NSNull(),
+              "ble_gap_ms": Int(s.gap * 1000)]
+    }
   }
 }

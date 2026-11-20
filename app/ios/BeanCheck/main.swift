@@ -199,7 +199,8 @@ final class FakeBean: BeanIo {
   func watched() -> Bool { pageOpen }
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
-  func phoneState() -> [String: Any] { ["foreground": false, "net": ["wifi"]] }
+  func phoneState() -> [String: Any] { ["foreground": false, "locked": true, "net": ["wifi"]] }
+  func notifications() -> [String: Any] { ["ble_notes_s": 33.0] }
   func hold(_ at: Int64?) { holds.append(at); heldAt = at }
   func held() -> Int64? { heldAt }
   var liveFroms: [Int64] = []
@@ -657,8 +658,11 @@ do {
   check((15.0...18.0).contains(rates[0]), true, "the first minute at a third of real time: \(rates[0])")
   check((50.0...56.0).contains(rates[1]), true, "the next one's own units, not since the start: \(rates[1])")
   let st = bean.reports.first { $0["link_units_s"] != nil }!
-  check([st["xfer_live"] as? Bool, st["xfer_realtime"] as? Bool, st["watched"] as? Bool, st["foreground"] as? Bool],
-        [true, false, false, false], "what is read, the page and the phone's side with it")
+  check([st["xfer_live"] as? Bool, st["xfer_realtime"] as? Bool, st["watched"] as? Bool, st["foreground"] as? Bool, st["locked"] as? Bool],
+        [true, false, false, false, true], "what is read, the page and the phone's side with it")
+  check(st["ble_notes_s"] as? Double, 33.0, "the link's notifications with it")
+  let behind = st["live_behind_s"] as! Int64
+  check((38...42).contains(behind), true, "how far from the bean, as live_lag_s: \(behind)")
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
   check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
   check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
@@ -686,6 +690,8 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0]])
   check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 2, 0], "filling the tail at the first two, caught up, then dated anew")
+  let behinds = bean.reports.dropFirst().map { $0["live_behind_s"] as? Int64 ?? -1 }
+  check(behinds[0] > 100 && behinds[1] > 30 && behinds[2] <= 3, true, "live_behind_s while live_lag_s is not there yet: \(behinds)")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 

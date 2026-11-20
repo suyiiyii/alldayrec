@@ -271,6 +271,9 @@ protocol BeanIo: AnyObject {
   func refused() -> Set<Int64>
   /// The phone's side of a slow link, for bean_lag and too_slow (BeanSync.diag()): its audio route, a call, power, front.
   func phoneState() -> [String: Any]
+  /// What a central sees of the link since the last call (link()): notifications a second, their mean size, the longest
+  /// gap between two; the connection interval and packets per event iOS does not give.
+  func notifications() -> [String: Any]
   /// The fast transfer was asked for (once: reading it clears it).
   func wifiAsked() -> Bool
   /// Joins the bean's hotspot and opens its WebSocket (`endpoint`: the 1A/05 answer); send and receive go over it then,
@@ -284,7 +287,7 @@ extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say o
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { throw Bean.Fail("no Wi-Fi") }
   func wifiLeave() {}
 }
-extension BeanIo { func phoneState() -> [String: Any] { [:] } }
+extension BeanIo { func phoneState() -> [String: Any] { [:] }; func notifications() -> [String: Any] { [:] } }
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
@@ -888,13 +891,16 @@ final class BeanSync {
   /// How the BLE link goes, with each status (11-20: a live read at 0.67 of real time for an hour, front or back, then
   /// three times as fast for ten minutes in the same connection, the trigger not in the status): units a second since
   /// the transfer began or the last status (50: real time), what is read, the live page, the phone's side
-  /// (BeanIo.phoneState). None without a BLE transfer.
+  /// (BeanIo.phoneState), its notifications, and how far a live read is from the bean (live_lag_s only comes once it has
+  /// been within 10 s). None without a BLE transfer.
   private func link(_ now: Int64) -> [String: Any] {
     defer { linkUnits = 0; linkAt = now }
+    let notes = io.notifications()  // counted since the last status, transfer or not
     guard let x = xfer, !overWifi, now > linkAt else { return [:] }
     let unitsS = Double(linkUnits) * 1000 / Double(now - linkAt)
-    return io.phoneState().merging(["link_units_s": (unitsS * 10).rounded() / 10, "xfer_live": x.live, "xfer_realtime": x.realtime,
-                                    "watched": io.watched()]) { $1 }
+    let behind: Any = x.live && x.last >= 0 ? (edge(x.file) - x.last - 1) * Bean.frameMs / 1000 : NSNull()
+    return io.phoneState().merging(notes) { $1 }.merging(["link_units_s": (unitsS * 10).rounded() / 10, "xfer_live": x.live,
+        "xfer_realtime": x.realtime, "watched": io.watched(), "live_behind_s": behind]) { $1 }
   }
 
   /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
