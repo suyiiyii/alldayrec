@@ -7,6 +7,7 @@ streaming engine that hears its tones. The session's audio goes uncompressed."""
 import datetime as dt
 import json
 import math
+import re
 import time
 
 import anyio
@@ -18,6 +19,7 @@ from alldayrec import db
 from alldayrec import device_pipeline
 from alldayrec import qwen_stream
 from alldayrec import ws
+from alldayrec.tenant import T
 from test_backlog import DEVICE, SR, flac, heard, rig, save, st, tone
 
 
@@ -98,6 +100,8 @@ def test_stream_drafts(tmp_path, monkeypatch):
             starts = [dt.datetime.fromisoformat(r["start"]) for r in drafts]
             assert all(abs((s - live0).total_seconds() - 5 * j) < 0.3 for j, s in enumerate(starts)), starts  # on the audio's clock
             assert len(FakeSession.opened) >= 2, "the session the server ended was opened again"
+            started = [e["text"] for e in T().events if "开始出初稿" in e["text"]]
+            assert len(started) == 1 and re.fullmatch(rf"{DEVICE}：页面在看，开始出初稿（实时流，从 \d\d:\d\d:\d\d 起）", started[0]), started
             partial = [m["row"]["text"] for m in pushed if m["type"] == "partial" and m["row"]]
             assert set(partial) <= {str(7 + j) for j in range(n)} and partial, pushed
             tg.cancel_scope.cancel()
