@@ -280,6 +280,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun report(hw: Map<String, Any?>) = onReport(name, hw + mapOf("name" to name, "rssi" to rssi))
         override fun hold(at: Long?) = prefs.edit().apply { if (at == null) remove("hold:$name") else putLong("hold:$name", at) }.apply()
         override fun held() = prefs.getLong("hold:$name", -1).takeIf { it >= 0 }
+        override fun liveFrom(at: Long) = prefs.edit().putLong("live:$name", at).apply()
         override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
         override fun end(at: Long) { prefs.edit().putLong("end:$name", at).commit() }  // Uploader.ends() sends it
         override fun piece() = onPiece(1)

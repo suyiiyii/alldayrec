@@ -201,6 +201,8 @@ final class FakeBean: BeanIo {
   func report(_ hw: [String: Any]) { reports.append(hw) }
   func hold(_ at: Int64?) { holds.append(at); heldAt = at }
   func held() -> Int64? { heldAt }
+  var liveFroms: [Int64] = []
+  func liveFrom(_ at: Int64) { liveFroms.append(at) }
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
@@ -381,6 +383,7 @@ do {
   check(anchors[a]!, a * 1000, "the bean's clock: a read from 0 starts behind, its first unit is not now")
   check(bean.heldAt, nil, "closed A is pending while B records: no hold")
   check(bean.holds.isEmpty, true, "live never sets a hold")
+  check(bean.liveFroms, [anchors[a]! - 60_000, anchors[b]! - 60_000], "each live transfer: its pieces go up ahead of a backlog")
   check((t0 / 1000 - 1...t0 / 1000 + 1).contains(Bean.u32(bean.sentOf(0x01A6), 0)), true)
 
   // a new session (what the phone knows of the files read back): on in B from its offset, then the backlog
@@ -395,6 +398,7 @@ do {
   _ = error(BeanSync.Gone.self) { try two.session(since: since, steps: "") }
   check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 200, 0], [b, 250, 0]])
   check(bean.logs.contains { $0.0 == "bean_gap" && $0.1.contains("250..259") }, true)
+  check(Array(bean.liveFroms.dropFirst(2)), [anchors[b]! + 200 * 20 - 60_000], "live again from its offset; the backlog sets none")
   var seen: [Int64: [Int64]] = [:]
   for (start, ps) in pieces {
     check(ps[0][9], 2, "stereo")

@@ -293,6 +293,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func report(_ hw: [String: Any]) { onReport(name, hw.merging(["name": name, "rssi": rssi ?? NSNull()]) { $1 }) }
   func hold(_ at: Int64?) { if let at { prefs.set(at, forKey: "hold:\(name)") } else { prefs.removeObject(forKey: "hold:\(name)") } }
   func held() -> Int64? { Recorder.hold(name) }
+  func liveFrom(_ at: Int64) { prefs.set(at, forKey: "live:\(name)") }
   func end(_ at: Int64) { prefs.set(at, forKey: "end:\(name)") }  // Uploader.ends() sends it
   func piece() { files += 1 }
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }

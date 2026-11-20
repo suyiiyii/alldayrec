@@ -167,6 +167,7 @@ class BeanTest {
         assertEquals("the bean's clock: a read from 0 starts behind, its first unit is not now", a * 1000, anchorA)
         assertNull("closed A is pending while B records: no hold", bean.held)
         assertTrue("live never sets a hold", bean.holds.isEmpty())
+        assertEquals("each live transfer: its pieces go up ahead of a backlog", listOf(anchors[a]!! - 60_000, anchors[b]!! - 60_000), bean.liveFroms)
         assertTrue(Bean.u32(bean.sentOf(0x01A6), 0) in t0 / 1000 - 1..t0 / 1000 + 1)
 
         // a new session (what the phone knows of the files read back): on in B from its offset, then the backlog
@@ -181,6 +182,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { two.session(since, "") }
         assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false), Triple(b, 200L, false), Triple(b, 250L, false)), bean.transfers)
         assertTrue(bean.logs.any { it.first == "bean_gap" && "250..259" in it.second })
+        assertEquals("live again from its offset; the backlog sets none", listOf(anchors[b]!! + 200 * 20 - 60_000), bean.liveFroms.drop(2))
 
         val seen = mutableMapOf<Long, MutableList<Long>>()
         for ((start, ps) in pieces) {
@@ -1826,6 +1828,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun report(hw: Map<String, Any?>) { reports += hw.toMap() }
     override fun hold(at: Long?) { holds += at; held = at }
     override fun held() = held
+    val liveFroms = mutableListOf<Long>()
+    override fun liveFrom(at: Long) { liveFroms += at }
     override fun end(at: Long) { ends += at }
     override fun piece() {}
     override fun refused() = refused

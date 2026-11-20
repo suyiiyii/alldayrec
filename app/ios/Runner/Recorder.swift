@@ -328,6 +328,8 @@ enum Recorder {
 
   /// Where the server's finalization waits for a recorder's backlog (BleLink.holdAhead), nil: it does not.
   static func hold(_ tag: String) -> Int64? { (defaults.object(forKey: "hold:\(tag)") as? NSNumber)?.int64Value }
+  /// Where a bean's latest live transfer began (BeanIo.liveFrom), nil: none yet.
+  static func liveFrom(_ tag: String) -> Int64? { (defaults.object(forKey: "live:\(tag)") as? NSNumber)?.int64Value }
 
   /// The phone, for the status sent with its recorder's: this build, the system, the model identifier
   /// (iPhone18,1; never the name the person gave the phone), its battery and whether it saves power or runs hot (iOS
@@ -639,9 +641,10 @@ final class Uploader: Thread {
 
   private func pass() {
     if UploadAnswer.waits(haltedAt: haltedAt, now: Recorder.now(), beanWifi: UploadPath.device != nil) { Thread.sleep(forTimeInterval: 2); return }
-    // a recorder's pieces from its hold on go first (what is said now, ahead of a backlog read off its card)
+    // a recorder's pieces from its hold (a bean's: its live transfer) on go first: what is said now, ahead of a
+    // backlog read off its card or left by an outage (11-20: after a Wi-Fi fast transfer the live page waited 4 min)
     let all = Uploader.files(dir), ahead = { (f: URL) in
-      Store.piece(f).map { p in p.device.flatMap(Recorder.hold).map { p.start >= $0 } ?? false } ?? false
+      Store.piece(f).map { p in p.device.flatMap { Recorder.hold($0) ?? Recorder.liveFrom($0) }.map { p.start >= $0 } ?? false } ?? false
     }
     let q = all.filter(ahead) + all.filter { !ahead($0) }
     ends(q)

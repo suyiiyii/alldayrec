@@ -67,6 +67,34 @@ class UploaderTest {
         } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
     }
 
+    /** A bean's pieces from where its live transfer began (`live:<device>`) go up first, without a hold; the backlog
+     *  queued before them (11-20: a Wi-Fi fast transfer's, the live page waited 4 min behind it) goes after, oldest first. */
+    @Test fun liveFirst() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        for (start in listOf(1000L, 61_000L, 900_000L)) File(dir, "$start@D3200-0A0B.ogg").writeBytes(ByteArray(64))
+        val kv = mapOf("live:D3200-0A0B" to 840_000L)
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            if (m.name == "getLong") kv[a[0] as String] ?: a[1] else null } as SharedPreferences
+        val got = LinkedBlockingQueue<String>()
+        val http = ServerSocket(0)
+        Thread {
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                got += path
+                c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        try {
+            assertEquals(listOf(900_000L, 1000L, 61_000L).map { "/api/chunks?device=D3200-0A0B&start=$it" },
+                         List(3) { got.poll(5, TimeUnit.SECONDS) })
+        } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
+    }
+
     /** A recording's end (`end:<device>`: the bean's own, or a stop on the phone) goes once its pieces are up, again
      *  until the server takes it (10-25: T2's end never reached the server); none when that device records again before
      *  it went (it carries on). */
