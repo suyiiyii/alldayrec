@@ -661,6 +661,10 @@ do {
   check([st["xfer_live"] as? Bool, st["xfer_realtime"] as? Bool, st["watched"] as? Bool, st["foreground"] as? Bool, st["locked"] as? Bool],
         [true, false, false, false, true], "what is read, the page and the phone's side with it")
   check(st["ble_notes_s"] as? Double, 33.0, "the link's notifications with it")
+  // CI does not compile BeanLink.swift: the fake's keys must be the ones it returns, or a typo there passes unseen
+  let link = try! String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Runner/BeanLink.swift"), encoding: .utf8)
+  for k in Array(bean.phoneState().keys) + Array(bean.notifications().keys) { check(link.contains("\"\(k)\":"), true, "BeanLink.swift returns \(k)") }
   let behind = st["live_behind_s"] as! Int64
   check((38...42).contains(behind), true, "how far from the bean, as live_lag_s: \(behind)")
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")

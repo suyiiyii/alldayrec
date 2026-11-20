@@ -72,6 +72,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   }
 
   func start() {
+    _ = BeanLink.path  // start the monitor now: one started on the first read still reports [] unsatisfied
     q.sync { central = CBCentralManager(delegate: self, queue: q, options: [CBCentralManagerOptionRestoreIdentifierKey: BeanLink.restoreId]) }
     Thread.detachNewThread { self.loop() }
   }
@@ -404,7 +405,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       let t = ProcessInfo.processInfo.systemUptime, s = noted
       noted = (0, 0, 0, s.last, t)
       guard s.since > 0, t > s.since else { return [:] }
-      return ["ble_noteds": (Double(s.n) / (t - s.since) * 10).rounded() / 10, "ble_note_bytes": s.n > 0 ? s.bytes / s.n : NSNull(),
+      return ["ble_notes_s": (Double(s.n) / (t - s.since) * 10).rounded() / 10, "ble_note_bytes": s.n > 0 ? s.bytes / s.n : NSNull(),
               "ble_gap_ms": Int(s.gap * 1000)]
     }
   }
