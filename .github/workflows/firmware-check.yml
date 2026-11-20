@@ -126,4 +126,5 @@ jobs:
             firmware/devkit/build/lr-${{ matrix.variant }}/zephyr/.config
             firmware/devkit/build/lr-${{ matrix.variant }}/CMakeCache.txt
           retention-days: 14
+          include-hidden-files: true  # .config: upload-artifact skips dot files by default
           if-no-files-found: error

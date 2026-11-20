@@ -14,7 +14,7 @@ python3 firmware/selftest/selftest.py check                   # 不接板子：�
   | 板子 | 能刷的 | 拒绝 |
   |---|---|---|
   | ProMicro（不加板型参数） | ProMicro 自检；型号 LR-P1 / LR-P2 / LR-P3 / LR-PN 的录音固件；蓝牙中继（`firmware/hcirelay`，按 USB 名 `LR HCI relay` 认） | N4、N5 的自检和录音固件 |
-  | `--n4` | N4 自检；LR-N4 录音固件，且开机不开 DCDC（N4 都没装 L1） | 其余全部 |
+  | `--n4` | N4 自检；LR-N4 录音固件，且符合 `lr_release.py` 的 FIT（开机不开 DCDC：N4 都没装 L1；开关断开 = 开；停泊不关机；麦克风增益 0x38），也就是 `lr.sh build n4` 编出来的 | 其余全部（包括缺 FIT 任何一项的手工构建） |
   | `--n5` | N5 自检（开机不开 DCDC，有没有 L1 都行）；LR-N5 录音固件：它开机就开 DCDC，**必须写明** `--dcdc`（L1 装了）才刷，`--no-dcdc`（没装 L1）或者不写都拒绝 | 其余全部 |
   | `--n5s`（LR-N5-S，即 R1） | 暂时没有：它的引脚和 N5 不一样（P0.15 是蜂鸣器，N5 拿它当灯），N5 的固件会去驱动蜂鸣器 | 全部 |
 
