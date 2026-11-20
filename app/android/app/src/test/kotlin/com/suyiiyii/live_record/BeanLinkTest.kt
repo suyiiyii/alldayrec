@@ -322,6 +322,23 @@ class BeanLinkTest {
         }
     }
 
+    @Test fun scanPhaseReportCountsCallbacksOfItsOwnRegistrationOnly() {
+        val h = DiscoveryHarness()
+        h.find()  // first round: found with no broadcast counted
+        val old = h.starts.single().second
+        h.onStart = { _, id ->
+            h.discovery.heard(old, 3, true)  // the ended round's late broadcast counts nowhere
+            h.discovery.heard(id, 2, false)  // other beans only
+            h.discovery.heard(id, 0, false)  // an error broadcast
+            h.discovery.heard(id, 1, true)
+            assertTrue(h.discovery.deliver(id, name, true, "found")); true
+        }
+        h.find()
+        val (first, second) = h.reports.filter { it["outcome"] == "found" }.map { listOf(it["callbacks"], it["results"], it["sawBean"]) }
+        assertEquals(listOf(0, 0, false), first)
+        assertEquals(listOf(3, 3, true), second)
+    }
+
     @Test fun onlyNaturalRolloverWithForegroundImportanceAndCooldownQualifies() {
         val h = DiscoveryHarness()
         h.find()  // Initial addition/drop/error: no allowance.

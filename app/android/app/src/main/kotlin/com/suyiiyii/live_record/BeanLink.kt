@@ -152,7 +152,8 @@ internal class BeanDiscovery<T>(name: String, private val now: () -> Long,
     private var rollover = false
     private var lastFast: Long? = null
     private var reason = "ordinary"
-    private data class Registration(val id: String, val deadline: Long?)
+    /** `callbacks`: system scan broadcasts for it (results or an error), `results` in them (any bean), `sawBean`: this one. */
+    private class Registration(val id: String, val deadline: Long?) { var callbacks = 0; var results = 0; var sawBean = false }
     @Volatile private var active: Registration? = null
 
     fun again(e: BeanSync.Again) { rollover = e.naturalRollover }
@@ -196,12 +197,18 @@ internal class BeanDiscovery<T>(name: String, private val now: () -> Long,
         catch (e: BeanScanWait.ScanFailure) { outcome = "scan_error"; throw e }
         finally {
             timing(mapOf("phase" to registration.id, "requestedMode" to if (mode == Mode.FAST) "LOW_LATENCY" else "LOW_POWER",
-                "reason" to reason, "budgetMs" to budget, "elapsedMs" to (now() - began), "outcome" to outcome))
+                "reason" to reason, "budgetMs" to budget, "elapsedMs" to (now() - began), "outcome" to outcome,
+                "callbacks" to registration.callbacks, "results" to registration.results, "sawBean" to registration.sawBean))
         }
     }
 
     @Synchronized fun accepts(id: String): Boolean =
         active?.let { it.id == id && (it.deadline == null || now() < it.deadline) } == true
+    /** A system scan callback for registration `id`: counted in its phase's report, to tell a system that delivered
+     *  nothing from one that delivered but not this bean. */
+    @Synchronized fun heard(id: String, results: Int, bean: Boolean) {
+        active?.takeIf { it.id == id }?.let { it.callbacks++; it.results += results; if (bean) it.sawBean = true }
+    }
     @Synchronized fun deliver(id: String, name: String, connectable: Boolean, value: T): Boolean =
         accepts(id) && wait.deliver(name, connectable, value)
     @Synchronized fun fail(id: String, error: Exception) { if (active?.id == id) wait.fail(error) }
@@ -386,8 +393,9 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         val id = intent.data?.schemeSpecificPart ?: return
         if (!discovery.accepts(id)) return
         val error = intent.getIntExtra(BluetoothLeScanner.EXTRA_ERROR_CODE, 0)
-        if (error != 0) { discovery.fail(id, Exception("scan failed: $error")); return }
         val results = intent.getParcelableArrayListExtra<ScanResult>(BluetoothLeScanner.EXTRA_LIST_SCAN_RESULT).orEmpty()
+        discovery.heard(id, results.size, results.any { beanAdv(it)?.first == name })
+        if (error != 0) { discovery.fail(id, Exception("scan failed: $error")); return }
         for (r in results) {
             val (n, flags) = beanAdv(r) ?: continue
             if (n != name || !on || prefs.getString("bleName", null) != name) continue

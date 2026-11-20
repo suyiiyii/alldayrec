@@ -153,7 +153,11 @@ class RecorderService : Service() {
     }
 
     private val screen = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) { slicer?.screenOff = i.action == Intent.ACTION_SCREEN_OFF }
+        override fun onReceive(c: Context, i: Intent) {
+            val off = i.action == Intent.ACTION_SCREEN_OFF
+            slicer?.screenOff = off
+            DeviceLog.app(DeviceLog.mine(), if (off) "screen_off" else "screen_on", if (off) "手机熄屏" else "手机亮屏")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
