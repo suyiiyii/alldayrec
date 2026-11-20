@@ -285,33 +285,10 @@ final class BeanWifi {
     UploadPath.device = device
   }
 
-  /// A new socket on the hotspot, the one before closed: the bean stops sending its file then, as when BLE goes (redial()
-  /// in BeanSync.wifiLoop: what the phone has already is not sent again).
-  func redial() throws {
-    keepAlive?.cancel(); keepAlive = nil
-    udp?.cancel(); udp = nil
-    let old = ws
-    ws = nil
-    old?.stateUpdateHandler = nil
-    old?.cancel()
-    inbox.clear()
-    let t0 = BeanWifi.mono()
-    for n in 1...3 {
-      do { try connect() } catch {
-        log("bean_wifi_socket", "重连豆子的 WebSocket 第 \(n) 次没成：\(error)；状态 \(trail)", "warn", ["redial": true, "tries": n, "error": "\(error)", "states": trail])
-        if n == 3 { throw error }
-        Thread.sleep(forTimeInterval: 0.7)
-        continue
-      }
-      log("bean_wifi_socket", "重连了豆子的 WebSocket（第 \(n) 次，\(BeanWifi.mono() - t0) ms）：让豆子停下这个文件", nil, ["redial": true, "tries": n, "ms": BeanWifi.mono() - t0])
-      return
-    }
-  }
-
   /// Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not).
   private func pump(_ c: NWConnection) {
     c.receiveMessage { [weak self] data, context, _, error in
-      guard let self, self.ws === c else { return }  // a socket redial() closed: nothing of it any more
+      guard let self, self.ws === c else { return }  // a socket close() closed: nothing of it any more
       if error != nil { self.inbox.put(nil); return }
       let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
       if let data {
