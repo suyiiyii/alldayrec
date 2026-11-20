@@ -262,11 +262,14 @@ object DeviceLog {
     fun disconnected(device: String, status: Int) {
         synchronized(steps) { steps.clear() }
         if (!::file.isInitialized) return
-        val pm = ctx.getSystemService(PowerManager::class.java)
-        app(device, "disconnect", "断开（status $status）", "warn", mapOf("status" to status, "interactive" to pm.isInteractive,
-            "deviceIdle" to pm.isDeviceIdleMode, "low_power" to pm.isPowerSaveMode,
-            "battery_exempt" to pm.isIgnoringBatteryOptimizations(ctx.packageName),
-            "standby_bucket" to ctx.getSystemService(UsageStatsManager::class.java).appStandbyBucket))
+        // On the reconnect path (GATT callback, connect's finally): a failing system call only drops the fields.
+        val fields = try {
+            val pm = ctx.getSystemService(PowerManager::class.java)
+            mapOf("interactive" to pm.isInteractive, "deviceIdle" to pm.isDeviceIdleMode, "low_power" to pm.isPowerSaveMode,
+                "battery_exempt" to pm.isIgnoringBatteryOptimizations(ctx.packageName),
+                "standby_bucket" to ctx.getSystemService(UsageStatsManager::class.java).appStandbyBucket)
+        } catch (_: Exception) { emptyMap() }
+        app(device, "disconnect", "断开（status $status）", "warn", mapOf("status" to status) + fields)
     }
 
     //

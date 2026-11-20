@@ -322,21 +322,27 @@ class BeanLinkTest {
         }
     }
 
-    @Test fun scanPhaseReportCountsCallbacksOfItsOwnRegistrationOnly() {
+    @Test fun scanPhaseReportSplitsItsOwnCallbacksFromLateOnes() {
         val h = DiscoveryHarness()
         h.find()  // first round: found with no broadcast counted
         val old = h.starts.single().second
+        h.discovery.heard(old, 1, 5_000)  // between rounds: late, goes into the next report
         h.onStart = { _, id ->
-            h.discovery.heard(old, 3, true)  // the ended round's late broadcast counts nowhere
-            h.discovery.heard(id, 2, false)  // other beans only
-            h.discovery.heard(id, 0, false)  // an error broadcast
-            h.discovery.heard(id, 1, true)
+            h.discovery.heard(old, 3, 90_000)  // the ended round's held-back broadcast
+            h.discovery.heard(id, 2, null)  // other beans only
+            h.discovery.heard(id, 0, null)  // an error broadcast
+            h.discovery.heard(id, 1, 40)
+            h.discovery.heard(id, 1, 7)
             assertTrue(h.discovery.deliver(id, name, true, "found")); true
         }
         h.find()
-        val (first, second) = h.reports.filter { it["outcome"] == "found" }.map { listOf(it["callbacks"], it["results"], it["sawBean"]) }
-        assertEquals(listOf(0, 0, false), first)
-        assertEquals(listOf(3, 3, true), second)
+        h.onStart = { _, id -> assertTrue(h.discovery.deliver(id, name, true, "found")); true }
+        h.find()  // the late counts were reported once
+        val keys = listOf("callbacks", "results", "sawBean", "beanAgeMs", "lateCallbacks", "lateResults", "lateSawBean", "lateBeanAgeMs")
+        val (first, second, third) = h.reports.filter { it["outcome"] == "found" }.map { r -> keys.map { r[it] } }
+        assertEquals(listOf(0, 0, false, null, 0, 0, false, null), first)
+        assertEquals(listOf(4, 4, true, 40L, 2, 4, true, 90_000L), second)
+        assertEquals(listOf(0, 0, false, null, 0, 0, false, null), third)
     }
 
     @Test fun onlyNaturalRolloverWithForegroundImportanceAndCooldownQualifies() {
