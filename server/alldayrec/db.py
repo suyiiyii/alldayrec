@@ -5,6 +5,7 @@ work runs in threads, shared by the tenants), WAL so reads never wait for a writ
 import datetime as dt
 import hashlib
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -39,11 +40,12 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS conversations_start ON conversations(start);
 CREATE TABLE IF NOT EXISTS summaries (        -- body: the summary as the API returns it
     conversation TEXT PRIMARY KEY, status TEXT NOT NULL, prompt_version INTEGER, body TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- db.done_hints reads these few, not every body
+CREATE INDEX IF NOT EXISTS summaries_done_hints ON summaries(conversation)  -- init reads these few (prompt v15-v17), not every body
     WHERE status = 'done' AND json_array_length(body, '$.done_hints') > 0;
 CREATE TABLE IF NOT EXISTS voices (           -- one label of one conversation; label and e NULL: no recording, not retried
     conv TEXT NOT NULL, label TEXT, device TEXT, n INTEGER, speech_s REAL, k INTEGER, e BLOB,
     clip TEXT, clip_start TEXT, clip_end TEXT, clip_text TEXT, level REAL,  -- level: dBFS of its sentences (selfvoice.level)
+    used TEXT,  -- the sentences e is made of, written while BG_GATE is on (sounds.verified); last: undo inserts rows by position
     UNIQUE (conv, label));
 CREATE TABLE IF NOT EXISTS apart (voice TEXT NOT NULL, grp TEXT NOT NULL, PRIMARY KEY (voice, grp));
 CREATE TABLE IF NOT EXISTS people (name TEXT PRIMARY KEY, n INTEGER NOT NULL, e BLOB NOT NULL);  -- bank.py: the mean of enrolled
@@ -60,10 +62,12 @@ CREATE TABLE IF NOT EXISTS pieces (           -- uploaded audio pieces, the inge
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, seconds REAL NOT NULL, path TEXT NOT NULL,  -- hour file, relative
     pos INTEGER, size INTEGER, n INTEGER,                                                       -- to the recordings dir;
     received_ms INTEGER, rms REAL, hum REAL, zero_ms INTEGER, full INTEGER,                     -- n: samples the client wrote;
-    env BLOB,                                                                                   -- received_ms: when it came
+    env BLOB, samples INTEGER,                                                                  -- received_ms: when it came
     PRIMARY KEY (start_ms, device));                                                            -- (NULL before 10-07);
                                                                                                 -- rms..full: audio.health();
-                                                                                                -- env: audio.envelope() (colocate.py)
+                                                                                                -- env: audio.envelope() (colocate.py);
+                                                                                                -- samples: what it decoded to
+                                                                                                -- (NULL before 11-16)
 CREATE INDEX IF NOT EXISTS pieces_device ON pieces(device, start_ms);  -- each device's stream and backlog
 CREATE INDEX IF NOT EXISTS pieces_end ON pieces(device, start_ms + seconds * 1000);  -- where its audio ends: backlog, a stream's start, pending
 CREATE TABLE IF NOT EXISTS store_objects (    -- STORAGE=s3 (seal.py): each hour file (and import) on its way to an object;
@@ -96,13 +100,60 @@ CREATE TABLE IF NOT EXISTS processed_audio (  -- layer final / late: transcribed
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL, layer TEXT NOT NULL,
     PRIMARY KEY(device, start_ms, end_ms, layer));
 CREATE INDEX IF NOT EXISTS processed_audio_range ON processed_audio(device, end_ms);
+CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw output over one stretch of a device's decoded
+    device TEXT NOT NULL, model TEXT NOT NULL,      -- audio (<= 300 s, piece-less time in it only as gaps). model: <name>@<sha256 12>
+    start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- (sound.MODELS); frame i: start_ms + i * hop_ms, window_ms long
+    hop_ms INTEGER NOT NULL, window_ms INTEGER NOT NULL, n INTEGER NOT NULL,  -- (to end_ms at most; mn10_as's last up to 12 s)
+    db BLOB NOT NULL,                               -- int8 x n: each frame's level, dBFS, as recorded
+    top BLOB,                                       -- zlib(n x K x (uint16 class, float16 score)); NULL past the model's keep_days
+    minutes BLOB NOT NULL,                          -- zlib: per wall-clock minute (by each frame's middle): minute (unix),
+    gaps TEXT NOT NULL,                             -- frames, float16 mean x classes, uint8 frames >= 0.2 x classes. gaps: JSON
+    gain_db REAL NOT NULL DEFAULT 0,                -- [[a, b] ms] in the row with no piece (zeros to the model, not covered).
+    at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
+    PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
+CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
+CREATE TABLE IF NOT EXISTS sound_wrong (        -- sound_events.py: the owner's 不对 on a sound event (event) of [start_ms,
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- end_ms) of device (a conversation's tag: conv), as the model (its id,
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- sounds.model) said it; at: when. For
+    event TEXT NOT NULL, model TEXT NOT NULL, conv TEXT);  -- the gold labels later; a row dropped is the undo
+CREATE TABLE IF NOT EXISTS seg_emb (          -- tenant "seg_emb" only: the voiceprint the final layer's diarist took of each
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- engine segment (transcript.voices: its
+    part INTEGER NOT NULL, engine_speaker TEXT,     -- first 15 s) or part, unix ms; part: of one split_speakers cut (1 on,
+                                                    -- each its own even when label() joins them again), 0 whole
+    model TEXT NOT NULL, e BLOB NOT NULL,           -- model: <file>@<sha256 12> (infer.MODELS); e: float16 x dim
+    gain_db REAL NOT NULL DEFAULT 0,                -- the gain its audio was given before the model (dB; 0: as decoded)
+    sentence INTEGER NOT NULL,                      -- its row's rowid in sentences: segments overlap and two rows can
+    seg INTEGER NOT NULL,                           -- start in one ms (one id); seg: its engine segment's place in the
+    sentence_start TEXT NOT NULL,                   -- piece (0 on); sentence_start: that row's start as it went in.
+    PRIMARY KEY (sentence, seg, part));             -- Goes with its sentence (replace_sentences), its audio (trim.py)
+-- A voiceprint's sentence: rowid = sentence AND source = device AND start = sentence_start, else none (its own span
+-- tells nothing: final_rows can end a row before a segment in it starts).
+-- shortcut: sentences has no INTEGER PRIMARY KEY, so a rowid holds only while the file is copied whole (the backup
+-- API; docs/how-to/backup.md); a SQL dump or INSERT ... SELECT renumbers it: the rule leaves orphans (trim.py drops
+-- them with their audio) and mixes up only two rows of one device starting in one ms. To take a logical import, give
+-- sentences an explicit INTEGER PRIMARY KEY in a controlled migration (enrolled.row too)
+CREATE INDEX IF NOT EXISTS seg_emb_audio ON seg_emb(device, start_ms);  -- trim.py's delete with the audio
 CREATE TABLE IF NOT EXISTS conversation_aliases (old TEXT PRIMARY KEY, new TEXT NOT NULL, labels TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS walls (device TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (device, at));  -- split.py: where a later part starts; late audio never merges across
 CREATE TABLE IF NOT EXISTS timelines (conversation TEXT PRIMARY KEY, body TEXT NOT NULL);  -- the live analysis as it stood at the close
 CREATE TABLE IF NOT EXISTS feedback (conv TEXT NOT NULL, at TEXT NOT NULL, text TEXT NOT NULL);  -- what the owner says a summary got wrong, read back in batches
 CREATE TABLE IF NOT EXISTS todo_marks (       -- 完成 / 不对 on one todo (todo_ids), at: when; a row dropped is the undo
     id TEXT PRIMARY KEY, conv TEXT NOT NULL, mark TEXT NOT NULL CHECK (mark IN ('done', 'wrong')), at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS stars (id TEXT PRIMARY KEY, conv TEXT NOT NULL, at TEXT NOT NULL);  -- 收藏: a sentence (its id in conv's device's rows), when
+CREATE TABLE IF NOT EXISTS todo_auto (        -- what todo_auto.py found about a todo (todo_ids) of conv, never deleted:
+    todo TEXT NOT NULL, conv TEXT NOT NULL,   -- done / dropped close it on a quote, stale (no quote) as 可能不需要了, hint
+    kind TEXT NOT NULL CHECK (kind IN ('done', 'dropped', 'stale', 'hint', 'seen')),  -- only shows, seen: talked about, open
+    reason TEXT NOT NULL, src TEXT, sentence TEXT, at_said TEXT, speaker TEXT, quote TEXT,  -- the sentence (its id, start) in src
+    model TEXT, at TEXT NOT NULL, undone_at TEXT,  -- at: when judged; the undo keeps the row and its quote closes it no more
+    UNIQUE (todo, kind, src, sentence));
+CREATE INDEX IF NOT EXISTS todo_auto_todo ON todo_auto(todo);
+CREATE TABLE IF NOT EXISTS todo_same (       -- duplicates (todo_auto.py): each todo of a group to its first one; by: the
+    id TEXT PRIMARY KEY, head TEXT NOT NULL, model TEXT, at TEXT NOT NULL);  -- model that said so, at: when
+CREATE TABLE IF NOT EXISTS stars (id TEXT PRIMARY KEY, conv TEXT, at TEXT NOT NULL,  -- 收藏: a final sentence (id, device, start), when;
+    device TEXT, start TEXT);                       -- conv: stars from before 11-16 only (the rest: db.conv_at, as read)
+CREATE TABLE IF NOT EXISTS reports (              -- 上报问题 on one row, any state: the owner's note, the row as it read (row: JSON
+    id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- text speaker start end state device engine), the page (live or
+    note TEXT NOT NULL, page TEXT NOT NULL,         -- conversation); its conversation: db.conv_at, as read
+    sentence TEXT NOT NULL, device TEXT, start TEXT NOT NULL, row TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);  -- per device: finalized_to:<d>, draft_to:<d>, open_conversation:<d>, end_at:<d>, live:<d>
 CREATE TABLE IF NOT EXISTS device_log (       -- what happened to a device, as its phone uploads it. src 'rec': the recorder's
     device TEXT NOT NULL, src TEXT NOT NULL,  -- own event log (firmware lr_log.h), seq that log's, data its record (boot t
@@ -113,8 +164,13 @@ CREATE INDEX IF NOT EXISTS device_log_app ON device_log(at) WHERE src != 'rec'; 
 CREATE TABLE IF NOT EXISTS device_status (    -- every status a client read from a BLE recorder (battery, card, firmware)
     device TEXT NOT NULL, at TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS device_status_at ON device_status(device, at);
+CREATE TABLE IF NOT EXISTS device_gain (      -- gain.py: a device's gain from since_ms (unix ms) on, each column its newest
+    device TEXT NOT NULL, since_ms INTEGER NOT NULL,  -- non-NULL value: capture_db, what the device set (reported) or
+    capture_db REAL, offset_db REAL,          -- someone wrote down; offset_db, the calibration offset every reader gets
+    source TEXT NOT NULL, note TEXT,          -- (none: 0). source: manual (set by hand), reported (by its client)
+    PRIMARY KEY (device, since_ms, source));
 CREATE TABLE IF NOT EXISTS calls (            -- every ASR and LLM call: how it went and what it took, never what it said.
-    at TEXT NOT NULL, kind TEXT NOT NULL,     -- kind: final, draft (ASR); summary, split, hints, profile, recap, live, ask (LLM)
+    at TEXT NOT NULL, kind TEXT NOT NULL,     -- kind: final, draft (ASR); summary, split, hints, profile, recap, resolve, live, ask (LLM)
     engine TEXT NOT NULL, device TEXT,        -- engine: the provider or model; device: whose audio (ASR)
     ms INTEGER NOT NULL, error TEXT,          -- error: NULL when it answered, else its class, code and first words
     audio_s REAL, sent_s REAL,                -- ASR: the window, and what was sent of it (silences squeezed)
@@ -144,6 +200,7 @@ CREATE TABLE IF NOT EXISTS perf_pieces (      -- a device's final pieces and dra
 CREATE INDEX IF NOT EXISTS perf_pieces_at ON perf_pieces(at);
 """
 
+log = logging.getLogger(__name__)
 _local = threading.local()  # .c: this thread's connection per file
 
 
@@ -161,7 +218,31 @@ def init():
     tenant.T().db.parent.mkdir(parents=True, exist_ok=True)
     marks_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'todo_marks'").fetchone() is None
     enrolled_new = conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'enrolled'").fetchone() is None
+    old_stars = conn().execute("SELECT \"notnull\" FROM pragma_table_info('stars') WHERE name = 'conv'").fetchone()
+    if old_stars and old_stars[0]:  # 11-16: a star had to name a closed conversation; now its sentence's device and start
+        conn().execute("ALTER TABLE stars RENAME TO stars_old")
     conn().executescript(SCHEMA)
+    # 11-16: a summary's done_hints (prompt v15-v17) become hint rows, the summaries keep theirs. Each start, only the
+    # ones not there yet (undone ones are there): a start cut off halfway, or a store put back, is caught up the next time.
+    # There by the todo and the sentence's start, wherever it is now: a split moves the row's src, the summary's stays
+    with tx() as c:
+        for cid, device, body in c.execute("SELECT c.id, c.device, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
+                                           " WHERE s.status = 'done' AND json_array_length(s.body, '$.done_hints') > 0").fetchall():
+            s = json.loads(body)
+            for h in s["done_hints"]:
+                tid = resolve_todo(h["id"])
+                if c.execute("SELECT 1 FROM todo_auto WHERE todo = ? AND kind = 'hint' AND at_said IS ?", (tid, h.get("at"))).fetchone():
+                    continue
+                r = c.execute("SELECT id, speaker FROM sentences WHERE start = ? AND (? IS NULL OR source = ?)", (h.get("at"), device, device)).fetchone()
+                c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, ?, ?, ?, ?, NULL)",
+                          (tid, tid.split(":", 1)[0], cid, r and r[0], h.get("at"), r and r[1], h.get("quote"),
+                           s.get("model"), s.get("created_at") or dt.datetime.now().isoformat(timespec="seconds")))
+    if conn().execute("SELECT 1 FROM sqlite_master WHERE name = 'stars_old'").fetchone():
+        with tx() as c:
+            c.execute("INSERT OR IGNORE INTO stars SELECT s.id, s.conv, s.at, x.source, x.start FROM stars_old s"
+                      " LEFT JOIN conversations k ON k.id = s.conv LEFT JOIN sentences x ON x.id = s.id"
+                      " AND x.start >= k.start AND x.start <= k.end AND (k.device IS NULL OR x.source = k.device)")
+            c.execute("DROP TABLE stars_old")
     if enrolled_new:  # 10-25: the people bank was a running mean; what it learnt before stays, as one row each
         conn().execute("INSERT INTO enrolled SELECT name, NULL, NULL, n, e FROM people")
     if marks_new:  # 10-24: marks were feedback lines (TODO_MARKS) keyed by the todo's text; the lines stay, the log for the prompt
@@ -186,8 +267,12 @@ def init():
     for (name,) in conn().execute("SELECT p.name FROM people p LEFT JOIN people_samples s ON s.name = p.name "
                                   "WHERE s.n IS NOT p.n").fetchall():
         bank.fill(name)
+    if "used" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 11-17: voices made before BG_GATE: not known
+        conn().execute("ALTER TABLE voices ADD COLUMN used TEXT")
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
+    if "samples" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-16: sounds.py's exact coverage; older pieces have none
+        conn().execute("ALTER TABLE pieces ADD COLUMN samples INTEGER")
     for col in ("kind", "dictation_share"):  # 10-24: 口述 (history rows imported as dictation) no longer a kind of its own
         if col in {r[1] for r in conn().execute("PRAGMA table_info(conversations)")}:
             conn().execute(f"ALTER TABLE conversations DROP COLUMN {col}")
@@ -254,6 +339,62 @@ def blob(e) -> bytes:
     return np.asarray(e, np.float32).tobytes()
 
 
+# stars and reports
+
+def conv_at(table: str) -> str:
+    """SQL for the closed conversation of a star's or a report's device whose span holds its start, as it is read: a
+    split or a merge moves it with nothing to rewrite, a read writes nothing. Two parts that touch both hold the cut:
+    the later one has it (a split's later part starts on that row). NULL: no closed one of that device holds it (its
+    conversation goes on, or its words made none: a pause a split cut at, too few to keep, a stop and a start again).
+    One indexed lookup per row (conversations_start)."""
+    return (f"(SELECT c.id FROM conversations c WHERE c.start <= {table}.start AND c.end >= {table}.start"
+            f" AND c.device = {table}.device ORDER BY c.start DESC LIMIT 1)")
+
+
+SNAPSHOT = (("text", 2000), ("speaker", 40), ("start", 26), ("end", 26), ("state", 10), ("source", 80), ("engine", 40))  # the longest
+AT = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?")  # a row's start or end as a page sends it
+
+
+def at_ms(s) -> str | None:
+    """A row's start or end as conversations hold it (to the ms), None: not a time (no month 13, no 30 February)."""
+    try:
+        return dt.datetime.fromisoformat(s).isoformat(timespec="milliseconds") if isinstance(s, str) and AT.fullmatch(s) else None
+    except ValueError:
+        return None
+
+
+def snapshot(row) -> dict | None:
+    """A report's row (as the page sent it, or as it was kept) with its fields of SNAPSHOT, strings no longer than
+    those, start (required) and end to the ms; None: it is not one."""
+    if not (isinstance(row, dict) and all(row.get(k) is None or isinstance(row[k], str) and len(row[k]) <= n for k, n in SNAPSHOT)):
+        return None
+    snap = {k: row[k] for k, _ in SNAPSHOT if row.get(k)}
+    for k in ("start", "end"):
+        if k in snap:
+            snap[k] = at_ms(snap[k])
+    return snap if snap.get("start") and snap.get("end", "") is not None else None
+
+
+def reports() -> list[dict]:
+    """Every report, the newest first (上报问题: GET /api/reports, MCP's reports). going: in no conversation yet, its
+    device's open one started at or before it. A row that does not read (written by other code, a bad snapshot) is
+    left out, logged: the others still read."""
+    out = []
+    for r in conn().execute(f"SELECT id, at, note, page, sentence, device, start, {conv_at('reports')} AS conv, row FROM reports"
+                            " ORDER BY at DESC, id DESC"):
+        try:
+            row, start = snapshot(json.loads(r["row"])), at_ms(r["start"])
+            if not (row and start and isinstance(r["at"], str) and isinstance(r["note"], str)):
+                raise ValueError("not a report")
+            o = not r["conv"] and kv(f"open_conversation:{r['device']}")
+            going = bool(o) and dt.datetime.fromisoformat(o["start"]) <= dt.datetime.fromisoformat(start)
+        except (TypeError, ValueError, KeyError) as e:
+            log.warning("report %s left out: %r", r["id"], e)
+            continue
+        out.append({**dict(r), "row": row, "going": going})
+    return out
+
+
 # sentences
 
 S_COLS = ("id", "start", "end", "speaker", "speaker_confidence", "text", "source", "engine", "shown_at", "dictation", "music")
@@ -270,16 +411,49 @@ def sentences(lo: str, hi: str, inclusive: bool = False, source: str | None = No
                                                  (lo, hi, source, source))]
 
 
-def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str):
-    """A device's pass replaces only that device's rows: another device may have recorded the same minutes."""
-    c.execute("DELETE FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0", (lo, hi, source))
+def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict], source: str) -> list[int | None]:
+    """A device's pass replaces only that device's rows: another device may have recorded the same minutes. Returns
+    each row's rowid as it went in, None for one the late layer protected."""
+    q = "FROM sentences WHERE start >= ? AND start < ? AND source = ? AND late = 0"
+    gone = c.execute(f"SELECT rowid, source, start {q}", (lo, hi, source)).fetchall()
+    c.execute(f"DELETE {q}", (lo, hi, source))
+    # their voiceprints, by row (db seg_emb's rule): a joined row's later segments can start at hi or after (a shorter
+    # pass now), another row's can start in this one's span
+    c.executemany("DELETE FROM seg_emb WHERE sentence = ? AND device = ? AND sentence_start = ?", gone)
     protected = c.execute("SELECT id, start, end FROM sentences WHERE source = ? AND late = 1 AND start < ? AND end > ?", (source, hi, lo)).fetchall()
-    insert_sentences(c, [r for r in rows if not any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)])
+    return [None if any(p["id"] == r["id"] or p["start"] < r["end"] and p["end"] > r["start"] for p in protected)
+            else insert_sentences(c, [r])[0] for r in rows]
 
 
-def insert_sentences(c: sqlite3.Connection, rows: list[dict]):
-    c.executemany(f"INSERT INTO sentences ({','.join(S_COLS)}) VALUES ({','.join('?' * len(S_COLS))})",
-                  [tuple(r.get(k) for k in S_COLS) for r in rows])
+def ms(s: str) -> int:
+    """A row's start or end (iso) as seg_emb holds it, unix ms."""
+    return int(dt.datetime.fromisoformat(s).timestamp() * 1000)
+
+
+def put_seg_embs(c: sqlite3.Connection, source: str, rows: list[dict], ids: list[int | None], embs: list[tuple]) -> bool:
+    """A pass's voiceprints (device_pipeline.seg_embs: each with its row's place in the pass's rows) beside the rows
+    replace_sentences put in (ids: what it returned), none for a row it did not. False: none written (logged, a key
+    already there too); the rows stay, for the voiceprints are only beside them."""
+    c.execute("SAVEPOINT seg_emb")
+    try:
+        c.executemany("INSERT INTO seg_emb VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      [(*e[:8], ids[e[8]], e[9], rows[e[8]]["start"]) for e in embs if ids[e[8]] is not None])
+    except Exception as e:
+        if not c.in_transaction:  # SQLite dropped the whole transaction (disk full, I/O): the rows are gone too
+            raise
+        c.execute("ROLLBACK TO seg_emb")
+        log.warning("%s: segment voiceprints not kept: %r", source, e)
+        return False
+    finally:
+        if c.in_transaction:
+            c.execute("RELEASE seg_emb")
+    return True
+
+
+def insert_sentences(c: sqlite3.Connection, rows: list[dict]) -> list[int]:
+    """Their rowids, in order."""
+    q = f"INSERT INTO sentences ({','.join(S_COLS)}) VALUES ({','.join('?' * len(S_COLS))})"
+    return [c.execute(q, tuple(r.get(k) for k in S_COLS)).lastrowid for r in rows]
 
 
 def processed(device: str, start_ms: int, end_ms: int, layer: str | None = None) -> list[list[int]]:
@@ -506,25 +680,138 @@ def wrong_todos(device: str | None, n: int = 20) -> list[dict]:
     return out
 
 
-def open_todos(device: str | None, before: str, days: int = 7, n: int = 30) -> list[tuple[str, dict]]:
-    """Id and todo of the todos not marked in this device's conversations of the days before `before`, the newest
-    first: what a later conversation may say is done (summary done_hints)."""
-    lo, closed, out = (dt.datetime.fromisoformat(before) - dt.timedelta(days=days)).isoformat(), closed_todos(), []
-    for cid, body in conn().execute("SELECT c.id, s.body FROM conversations c JOIN summaries s ON s.conversation = c.id"
-                                    " WHERE c.device IS ? AND c.start >= ? AND c.start < ? AND s.status = 'done' ORDER BY c.start DESC",
-                                    (device, lo, before)):
-        todos = json.loads(body).get("todos") or []
-        out += [(i, t) for i, t in zip(todo_ids(cid, todos), todos) if i not in closed and t.get("owner") != "未知"]
-    return out[:n]
+CLOSE = ("done", "dropped", "stale")  # the automatic marks (todo_auto) that close a todo; hint only shows, seen only dates a mention
+
+
+def same_todos() -> dict[str, str]:
+    """Id to its group's head of the todos merged as one (todo_same)."""
+    return {r[0]: r[1] for r in conn().execute("SELECT id, head FROM todo_same")}
+
+
+def _groups(same: dict[str, str]) -> dict[str, set[str]]:
+    """Head to every id of its group, the head too."""
+    out = {}
+    for i, h in same.items():
+        out.setdefault(h, {h}).add(i)
+    return out
+
+
+def group_of(i: str, same: dict[str, str] | None = None) -> set[str]:
+    same = same_todos() if same is None else same
+    return _groups(same).get(same.get(i, i), {i})
+
+
+def auto_marks() -> dict[str, dict]:
+    """Todo id to its standing automatic mark (a todo_auto row): the newest not undone that closes it, else the newest
+    hint; a group's (todo_same) stands for each of its todos. A group with a todo marked by hand (todo_marks) has none:
+    a mark always beats an automatic one."""
+    marks, same, by = closed_todos(), same_todos(), {}
+    for r in conn().execute("SELECT * FROM todo_auto WHERE undone_at IS NULL AND kind != 'seen' ORDER BY at, rowid"):
+        h = same.get(r["todo"], r["todo"])
+        if r["kind"] in CLOSE or by.get(h, {}).get("kind") not in CLOSE:
+            by[h] = dict(r)
+    groups, out = _groups(same), {}
+    for h, r in by.items():
+        if not (ids := groups.get(h, {h})) & marks.keys():
+            out |= dict.fromkeys(ids, r)
+    return out
+
+
+def shut_todos() -> dict[str, str]:
+    """Id to why each closed todo is closed: its mark (done, wrong) or an automatic one (auto_done, auto_dropped,
+    auto_stale); a group's for each of its todos. Closed todos leave the due list, the recaps and the resolve pass."""
+    marks, same = closed_todos(), same_todos()
+    out = {i: "auto_" + r["kind"] for i, r in auto_marks().items() if r["kind"] in CLOSE}
+    groups = _groups(same)
+    for i, m in marks.items():
+        for k in groups.get(same.get(i, i), {i}):
+            out[k] = marks.get(k, m)
+    return out
+
+
+def auto_view(r: dict | None) -> dict | None:
+    """An automatic mark as the pages show it: why, and the sentence it rests on (src, its start at, its id), who said
+    it, the model and when it judged."""
+    return r and {"kind": r["kind"], "reason": r["reason"], "conv": r["src"], "at": r["at_said"], "sentence": r["sentence"],
+                  "speaker": r["speaker"], "quote": r["quote"], "model": r["model"], "judged_at": r["at"]}
 
 
 def done_hints() -> dict[str, dict]:
-    """Todo id to the latest sentence saying it is done ({conv, at, quote}; summary done_hints): shown, never a mark."""
-    out = {}
-    for cid, body in conn().execute("SELECT conversation, body FROM summaries s JOIN conversations c ON c.id = s.conversation"
-                                    " WHERE s.status = 'done' AND json_array_length(body, '$.done_hints') > 0 ORDER BY c.start"):
-        for h in json.loads(body)["done_hints"]:
-            out[resolve_todo(h["id"])] = {"conv": cid, "at": h.get("at"), "quote": h.get("quote")}
+    """Todo id to a sentence that suggests it is done ({conv, at, quote…}; todo_auto hints): shown, never a mark."""
+    return {i: auto_view(r) for i, r in auto_marks().items() if r["kind"] == "hint"}
+
+
+def add_auto(rows: list[dict]) -> list[dict]:
+    """Keep what todo_auto.py found (todo_auto rows, without undone_at), the rows it took. Never over a mark by hand; a
+    quote already kept (undone too) is not kept again, and after an undo of the group's a todo closes only on a quote said
+    later than the one undone; stale only once."""
+    took = []
+    with tx() as c:
+        marks, same = closed_todos(), same_todos()
+        for r in rows:
+            ids = group_of(r["todo"], same)
+            if ids & marks.keys():
+                continue
+            q = ",".join("?" * len(ids))
+            had = c.execute(f"SELECT kind, at_said, undone_at FROM todo_auto WHERE todo IN ({q}) AND kind != 'seen'", (*ids,)).fetchall()
+            if r["kind"] == "stale" and any(k == "stale" for k, _, _ in had):
+                continue
+            if r["kind"] in ("done", "dropped") and any(u and a and a >= (r.get("at_said") or "") for k, a, u in had if k != "stale"):
+                continue
+            cur = c.execute("INSERT OR IGNORE INTO todo_auto VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+                            (r["todo"], r["todo"].split(":", 1)[0], r["kind"], r.get("reason") or "", *(r.get(k) for k in (
+                                "src", "sentence", "at_said", "speaker", "quote", "model")), r.get("at") or dt.datetime.now().isoformat(timespec="seconds")))
+            if cur.rowcount:
+                took.append(r)
+    return took
+
+
+def undo_auto(id: str) -> int:
+    """The undo of the automatic marks of id's group (closing ones and hints): the rows stay, undone now. How many."""
+    ids = group_of(resolve_todo(id))
+    with tx() as c:
+        return c.execute(f"UPDATE todo_auto SET undone_at = ? WHERE todo IN ({','.join('?' * len(ids))}) AND undone_at IS NULL AND kind != 'seen'",
+                         (dt.datetime.now().isoformat(timespec="seconds"), *ids)).rowcount
+
+
+def merge_same(ids: list[str], model: str | None = None):
+    """These todos are one: their groups become one, its head the first said (the smallest id: conversation, then time)."""
+    with tx() as c:
+        same = same_todos()
+        heads = {same.get(i, i) for i in ids}
+        groups = _groups(same)
+        all_ids = set(ids).union(*(groups.get(h, {h}) for h in heads))
+        head = min(all_ids)
+        now = dt.datetime.now().isoformat(timespec="seconds")
+        c.executemany("INSERT OR REPLACE INTO todo_same VALUES (?, ?, ?, ?)", [(i, head, model, now) for i in all_ids if i != head and same.get(i) != head])
+        c.execute("DELETE FROM todo_same WHERE id = ?", (head,))
+
+
+def move_todos(c: sqlite3.Connection, ids: dict[str, str]):
+    """Todos given new ids (a merge, a split; old to new): their automatic marks and groups follow."""
+    for old, new in ids.items():
+        c.execute("UPDATE todo_auto SET todo = ?, conv = ? WHERE todo = ?", (new, new.split(":", 1)[0], old))
+        c.execute("UPDATE todo_same SET id = ? WHERE id = ?", (new, old))
+        c.execute("UPDATE todo_same SET head = ? WHERE head = ?", (new, old))
+
+
+def todos_since(lo: str, hi: str) -> list[tuple[dict, str, dict]]:
+    """(conversation, id, todo) of the done summaries of the conversations started in [lo, hi), the newest first."""
+    out = []
+    for r in conn().execute("SELECT c.*, s.body FROM conversations c JOIN summaries s ON s.conversation = c.id"
+                            " WHERE c.start >= ? AND c.start < ? AND s.status = 'done' ORDER BY c.start DESC", (lo, hi)):
+        conv, ts = _conversation(r), json.loads(r["body"]).get("todos") or []
+        out += [(conv, i, t) for i, t in zip(todo_ids(conv["id"], ts), ts)]
+    return out
+
+
+def sources(ids: set[str]) -> list[dict]:
+    """Where each todo of a group was said, the first first: {id, conv, at, quote, title, start}."""
+    out = []
+    for i in sorted(ids):
+        cid = i.split(":", 1)[0]
+        if (t := todo(i)) is not None and (c := conversation(cid)):
+            out.append({"id": i, "conv": cid, "at": t.get("at"), "quote": t.get("quote"), "title": (summary(cid) or {}).get("title"), "start": c["start"]})
     return out
 
 
@@ -542,8 +829,11 @@ def mark_todos(ids: list[str], mark: str | None):
 def preserve_todos(conv: str, old: list[dict], new: list[dict], c: sqlite3.Connection) -> list[dict]:
     """Pin a uniquely matched action to its old ID; keep unmatched marked actions unchanged. Marks never move.
     Text, else quote, must match uniquely on both sides with the same owner/recipient. New actions get fresh IDs,
-    so a removed action's ID (including a cached recap's) cannot be reused by another action."""
-    marks = {r[0] for r in c.execute("SELECT id FROM todo_marks WHERE conv = ?", (conv,))}
+    so a removed action's ID (including a cached recap's) cannot be reused by another action. A mark here is one by
+    hand, an automatic one (todo_auto: its evidence and undo stay shown) or a group of the same (todo_same)."""
+    marks = {r[0] for r in c.execute("SELECT id FROM todo_marks WHERE conv = ? UNION SELECT todo FROM todo_auto WHERE conv = ? AND kind != 'seen'"
+                                     " UNION SELECT id FROM todo_same UNION SELECT head FROM todo_same", (conv, conv))
+             if r[0].split(":", 1)[0] == conv}
     before = list(zip(todo_ids(conv, old), old))
     after = [{k: v for k, v in t.items() if k not in ("id", "mark")} for t in new]
     used = set()
@@ -598,12 +888,13 @@ def undo_todo_rename(conv: str, changed: dict, to: str, c: sqlite3.Connection):
     put_summary(s, c)
 
 
-def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict, hints: dict) -> dict:
+def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict, auto: dict) -> dict:
     """A todo as the pages show it: with its id and mark, the sentence it came from, whom it is to (an alias as its
-    person; none given: the others in the conversation), the conversation's title and start, and a later sentence
-    saying it is done (done_hints)."""
-    to = al.get(t.get("to"), t.get("to"))
-    return {"id": i, "mark": closed.get(i), "done_hint": hints.get(i), "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
+    person; none given: the others in the conversation), the conversation's title and start, and its automatic mark
+    (auto: auto_marks'): a hint as done_hint, one that closes it as auto."""
+    to, a = al.get(t.get("to"), t.get("to")), auto.get(i)
+    return {"id": i, "mark": closed.get(i), "done_hint": auto_view(a) if a and a["kind"] == "hint" else None,
+            "auto": auto_view(a) if a and a["kind"] in CLOSE else None, "conv": conv["id"], "text": t.get("text"), "to": t.get("to"),
             **{k: t.get(k) for k in ("due", "due_date", "due_certainty", "at", "quote")}, "title": s.get("title"), "start": conv["start"],
             "with": [to] if to else [al.get(p, p) for p in conv["participants"] if p not in ("我", "S?")]}
 
@@ -611,22 +902,49 @@ def todo_view(conv: dict, s: dict, i: str, t: dict, closed: dict, al: dict, hint
 def due_todos(day: str) -> list[dict]:
     """My todos due on day (YYYY-MM-DD) or before and not closed, oldest due first, each with its age_days past due and
     stale: past due over 7 days, over 3 for a due said as the same or the next day (SAME_DAY). Only summaries from prompt
-    v8 on date them."""
-    closed, al, hints, out = closed_todos(), aliases(), done_hints(), []
+    v8 on date them. Not closed: no mark, none automatic that closes it (shut_todos). Todos merged as one (todo_same)
+    are one, the newest said with a due (a due put off is the one that counts), with sources: where each was said."""
+    closed, shut, al, auto, same, newest = closed_todos(), shut_todos(), aliases(), auto_marks(), same_todos(), {}
     for r in conn().execute("SELECT c.*, s.body FROM summaries s JOIN conversations c ON c.id = s.conversation"
                             " WHERE s.prompt_version >= 8 AND s.status = 'done'"):
         conv, s = _conversation(r), json.loads(r["body"])
         todos = s.get("todos") or []
         for i, t in zip(todo_ids(conv["id"], todos), todos):
-            if t.get("owner") == "我" and t.get("due_date") and t["due_date"] <= day and i not in closed:
-                age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
-                out.append({**todo_view(conv, s, i, t, closed, al, hints), "age_days": age,
-                            "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7)})
+            said = t.get("at") or conv["start"]
+            if t.get("owner") == "我" and t.get("due_date") and i not in shut and said > newest.get(h := same.get(i, i), ("",))[0]:
+                newest[h] = (said, conv, s, i, t)
+    out = []
+    for h, (_, conv, s, i, t) in newest.items():
+        if t["due_date"] <= day:
+            age = (dt.date.fromisoformat(day) - dt.date.fromisoformat(t["due_date"])).days
+            out.append({**todo_view(conv, s, i, t, closed, al, auto), "age_days": age,
+                        "stale": age > (3 if any(w in (t.get("due") or "") for w in SAME_DAY) else 7),
+                        **({"sources": sources(group_of(h, same))} if h in same.values() else {})})
     return sorted(out, key=lambda t: (t["due_date"], t["conv"]))
+
+
+def auto_todos(since: str) -> list[dict]:
+    """The todos (anyone's) closed automatically since then and not undone, one per group, the last judged first: as the
+    due list has them (todo_view) with their owner, and with sources when merged."""
+    closed, al, auto, same, out = closed_todos(), aliases(), auto_marks(), same_todos(), {}
+    for r in auto.values():
+        i = r["todo"]
+        if r["kind"] in CLOSE and r["at"] >= since and (h := same.get(i, i)) not in out and (t := todo(i)) is not None:
+            c = conversation(i.split(":", 1)[0])
+            out[h] = {**todo_view(c, summary(c["id"]) or {}, i, t, closed, al, auto), "owner": t.get("owner")}
+            if len(g := group_of(i, same)) > 1:
+                out[h]["sources"] = sources(g)
+    return sorted(out.values(), key=lambda v: v["auto"]["judged_at"], reverse=True)
+
+
+def auto_closed_on(day: str) -> int:
+    """How many todos (groups) were closed automatically on day (YYYY-MM-DD) and stay so."""
+    return len({(r["todo"], r["kind"], r["at"]) for r in auto_marks().values() if r["kind"] in CLOSE and r["at"][:10] == day})
 
 
 # voices, apart pins, people bank, aliases, name hints
 
+# not used: a row written through these (a merge, a split, late) is not known to be free of music (sounds.verified)
 V_COLS = ("conv", "label", "device", "n", "speech_s", "k", "e", "clip", "clip_start", "clip_end", "clip_text", "level")
 
 

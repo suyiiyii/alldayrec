@@ -9,6 +9,7 @@ target_sources(app PRIVATE
     src/main.c
     src/transport.c
     src/mic.c
+    src/mic_gain.c
     src/led.c
     src/codec.c
     src/lib/battery/battery.c
@@ -28,6 +29,7 @@ else()
     target_sources(app PRIVATE src/sdcard.c)
 endif()
 target_sources_ifdef(CONFIG_LR_SWITCH app PRIVATE src/lr_switch.c)
+target_sources_ifdef(CONFIG_LR_RAW_PCM app PRIVATE src/raw_pcm.c)
 
 target_sources_ifdef(CONFIG_OMI_CODEC_OPUS app PRIVATE
     src/lib/opus-1.2.1/A2NLSF.c

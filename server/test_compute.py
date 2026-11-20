@@ -261,7 +261,8 @@ def test_token(service, monkeypatch, caplog):
     assert httpx2.get(f"{service}/health").json() == {"ok": True}
     assert httpx2.get(f"{service}/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
     ok = {"Authorization": f"Bearer {TOKEN}"}
-    assert httpx2.get(f"{service}/health", headers=ok).json() == {"ok": True, "models": compute.models(), "dim": 192}
+    assert httpx2.get(f"{service}/health", headers=ok).json() == {"ok": True, "models": compute.models(), "dim": 192,
+                                                                  "formats": ["s16le", "f32le"]}
     assert httpx2.post(f"{service}/embed", content=x[:3], headers=ok).status_code == 400
     big = b"\0" * (infer_server.MAX_S * 32000 + 2)
     assert httpx2.post(f"{service}/music", content=big, headers=ok).status_code == 413
@@ -292,7 +293,7 @@ def test_service_holds_nothing_of_a_tenant(tmp_path):
                           "sys.argv = ['alldayrec', '--infer', '--port', '9']; import alldayrec.__main__ as m; m.main()"],
                          capture_output=True, text=True, check=True, env=env).stdout
     mods, argv, routes = out.splitlines()
-    assert eval(routes) == ["/embed", "/health", "/metrics", "/music", "/segment"] and eval(argv) == ["--port", "9"]
+    assert eval(routes) == ["/embed", "/health", "/metrics", "/music", "/scene/{name}", "/segment"] and eval(argv) == ["--port", "9"]
     usage = subprocess.run([sys.executable, "-m", "alldayrec", "--infer", "--help"], capture_output=True, text=True,
                            check=True, env=env).stdout
     assert usage.startswith("usage: alldayrec --infer [-h] [--port PORT]"), usage

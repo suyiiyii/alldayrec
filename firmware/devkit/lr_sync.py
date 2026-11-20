@@ -6,6 +6,8 @@ when undated) from the card; the open file stays. `log` prints the recorder's ev
     uv run --no-project --with bleak python lr_sync.py OUT_DIR [--follow SECONDS] [--delete] [--name LR-P3-XXXX]
         [--server URL --token T]
     uv run --no-project --with bleak python lr_sync.py log [--name LR-P3-XXXX] [--from SEQ]
+    uv run --no-project --with bleak python lr_sync.py gain [DB] [--name LR-P3-XXXX]   the mic's PDM gain in force
+        (TIME's mic_gain) and whether NVS keeps it, and with DB (-20..20, 0.5 dB steps) set first: CTRL 0x21
 """
 import asyncio
 import ctypes
@@ -373,6 +375,12 @@ def read_done(x, a, b):
             f"{b >> 22} B a packet, interval {x * 1.25:g} ms")
 
 
+def park_end(b):
+    """POWER a 3, the park's end (lr_power.h lr_park_end): b seconds parked (bits 0-27) | what woke it << 28"""
+    why = "+".join(w for i, w in enumerate(["switch", "USB", "charging", "battery back at 3.6 V"]) if b >> 28 + i & 1)
+    return f"park ended after {(b & 0xFFFFFFF) // 60} min {(b & 0xFFFFFFF) % 60} s, woken by {why or '?'}"
+
+
 EVENTS = {
     1: ("BOOT", lambda x, a, b: f"reset {reas(a)} (0x{a:x}), battery {x * 20} mV, fw {b & 0xFFFFFFF:07x}{'+' * (b >> 28 & 1)}"),
     2: ("FAULT", lambda x, a, b: f"{FAULT[a] if a < len(FAULT) else a}, PC 0x{b:08x} (previous boot)"),
@@ -408,7 +416,8 @@ EVENTS = {
         ["recording", "System OFF", "up on USB, not recording", "restart"][a] if a < 4 else str(a))),
     29: ("POWER", lambda x, a, b: {0: f"on battery, VDDH {x * 20} mV",
                                    1: "power-fail warning: VDDH under 3.3 V or VDD under 2.8 V",
-                                   2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch"}.get(a, str(a))),
+                                   2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch",
+                                   3: park_end(b)}.get(a, str(a))),
     30: ("LIVE_LOST", lambda x, a, b: f"{a} records ({b} B) left out of LIVE ({'link lost' if x else 'link stalled'}),"
                                       " on the card all the same"),
     31: ("HEALTH", health),
@@ -420,6 +429,9 @@ EVENTS = {
          f"{a * 512 / 1e9:.2f} GB card not formatted: " + {17: "it mounted after all", 19: "no card answered",
                                                         5: "the format failed"}.get(x, f"error {x}")),
     37: ("NVS_FAIL", lambda x, a, b: f"NVS did not take the block of {a} NAND erase(s), erased all the same (first this boot)"),
+    38: ("GAIN", lambda x, a, b: {0: f"mic gain {code_db(a):+.1f} -> {code_db(b):+.1f} dB",
+                                  1: f"mic gain {code_db(b):+.1f} dB not kept in NVS: {err(a)} (the next boot takes NVS's)",
+                                  2: f"NVS's mic gain record bad ({a} B: {b:08x}), the default 0 dB in force"}.get(x, f"x {x}")),
 }
 
 
@@ -472,6 +484,44 @@ async def log(name: str, start: int):
     for seq, when, boot, ev, args in timeline(log_records(packets)):
         print(f"{seq:6d}  {when:26s} boot {boot:<4d} {ev:11s} {args}")
     print(f"next: lr_sync.py log --from {nxt}")
+
+
+def gain_code(db: float) -> int:
+    """dB (-20..20, 0.5 dB steps) -> CTRL 0x21's GAINL/GAINR code (0x28 = 0 dB)"""
+    if db * 2 != int(db * 2) or not -20 <= db <= 20:
+        raise ValueError(f"gain {db} dB: -20..20 in 0.5 dB steps")
+    return 0x28 + int(db * 2)
+
+
+def code_db(code: int) -> float:
+    """a GAINL/GAINR code (0x28 = 0 dB, 0.5 dB a step) in dB"""
+    return (code - 0x28) / 2
+
+
+def gain_db(status: bytes) -> float | None:
+    """TIME's mic_gain:i8 (half dB, 0 = 0x28) in dB; None: older firmware, no such byte"""
+    return struct.unpack_from("<b", status, 53)[0] / 2 if len(status) > 53 else None
+
+
+def gain_kept(status: bytes) -> bool | None:
+    """TIME's gain_flags bit 0 clear: the gain in force is the one NVS keeps; None: firmware without the byte"""
+    return not status[54] & 1 if len(status) > 54 else None
+
+
+async def gain(name: str, db: float | None):
+    code = None if db is None else gain_code(db)
+    dev = await BleakScanner.find_device_by_filter(
+        lambda d, a: U(0) in a.service_uuids and (a.local_name or "").startswith(name), 20)
+    if not dev:
+        sys.exit("no device")
+    async with BleakClient(dev) as c:
+        if code is not None:  # an ATT error (0x13 out of range) raises here; NVS takes it later, no time promised
+            await c.write_gatt_char(CTRL, bytes([0x21, code]), response=True)
+            await asyncio.sleep(0.5)
+        status = await c.read_gatt_char(TIME)
+    got, kept = gain_db(status), gain_kept(status)
+    print(f"{dev.name}: mic gain {'unknown (firmware without it)' if got is None else f'{got:+.1f} dB'}"
+          + ("" if kept is not False else ", NOT kept in NVS: the next boot takes another (lr_sync.py log: GAIN)"))
 
 
 def selftest():
@@ -544,6 +594,10 @@ def selftest():
     assert EVENTS[36][1](0, 124735488, 30000) == "63.86 GB card made exFAT in 30.0 s"
     assert EVENTS[36][1](17, 62333952, 900) == "31.91 GB card not formatted: it mounted after all"
     assert EVENTS[29][1](165, 2, 0).startswith("low battery (3300 mV)")
+    assert EVENTS[29][1](0, 3, 0x60000000 | 125) == "park ended after 2 min 5 s, woken by USB+charging"
+    assert EVENTS[29][1](180, 3, 0x80000E10) == "park ended after 60 min 0 s, woken by battery back at 3.6 V"
+    assert EVENTS[29][1](0, 3, 5) == "park ended after 0 min 5 s, woken by ?"
+    assert EVENTS[29][1](0, 3, 0xFFFFFFFF) == "park ended after 4473924 min 15 s, woken by switch+USB+charging+battery back at 3.6 V"
     assert EVENTS[8][1](0, 0, 3) == "card back (the computer left it 3 min): ok" and EVENTS[8][1](0, 0, 0) == "card back: ok"
     assert EVENTS[30][0] == "LIVE_LOST" and EVENTS[30][1](0, 12, 4800).startswith("12 records (4800 B) left out of LIVE (link stalled)")
     assert EVENTS[30][1](1, 3, 1100).startswith("3 records (1100 B) left out of LIVE (link lost)")
@@ -564,6 +618,18 @@ def selftest():
     assert EVENTS[35][1](2, 31000, 8000 | 30 << 16) == \
         "back to the card (no ACK for 8 s): 31000 B not acked, last ACK 8000 ms before, at most 30 KB not acked"
     assert EVENTS[35][1](5, 9000, 0x10010004) == "9000 B a reset left in RAM, to the card as 10010004.BIN"
+    assert gain_code(0) == 0x28 and gain_code(-20) == 0 and gain_code(20) == 0x50 and gain_code(6.5) == 0x35
+    for bad in (20.5, -21, 1.25):
+        try:
+            gain_code(bad)
+            raise AssertionError(bad)
+        except ValueError:
+            pass
+    assert gain_db(bytes(53)) is None and gain_db(bytes(53) + b"\xf3") == -6.5 and gain_db(bytes(53) + b"\x28") == 20
+    assert gain_kept(bytes(54)) is None and gain_kept(bytes(55)) is True and gain_kept(bytes(54) + b"\x01") is False
+    assert EVENTS[38][1](0, 0x28, 0x34) == "mic gain +0.0 -> +6.0 dB"
+    assert EVENTS[38][1](1, (-5) & 0xFFFFFFFF, 0x1b) == "mic gain -6.5 dB not kept in NVS: -5 -EIO (the next boot takes NVS's)"
+    assert EVENTS[38][1](2, 2, 0xD720) == "NVS's mic gain record bad (2 B: 0000d720), the default 0 dB in force"
     print("selftest ok")
 
 
@@ -573,6 +639,9 @@ if __name__ == "__main__":
     arg = lambda k, default=None: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else default
     if sys.argv[1] == "log":
         sys.exit(asyncio.run(log(arg("--name", "LR-"), int(arg("--from", 0)))))
+    if sys.argv[1] == "gain":
+        v = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
+        sys.exit(asyncio.run(gain(arg("--name", "LR-"), None if v is None else float(v))))
     d = Path(sys.argv[1])
     d.mkdir(parents=True, exist_ok=True)
     asyncio.run(main(d, "--delete" in sys.argv, arg("--name", "LR-"), float(arg("--follow", 0)), arg("--server"),

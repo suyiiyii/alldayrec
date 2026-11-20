@@ -287,6 +287,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         /** prefs hold:<tag>, sent with every upload while set (Uploader); null: let go. */
         fun hold(at: Long?)
         fun held(): Long?
+        /** prefs live:<tag>: where the latest live transfer began; the Uploader sends its pieces from there on ahead of
+         *  a backlog (what is said now first), the server not asked to wait (no hold: older audio after its finals goes late). */
+        fun liveFrom(at: Long)
         /** The bean's last recording ended at `at` (wall ms) and all of it is up: the server is told (BeanLink: kept in the
          *  prefs until it takes it). */
         fun end(at: Long)
@@ -1116,7 +1119,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
         io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 开始：首单元 ${s.seq}（请求从 ${x.from} 起），Opus 配置 ${(audio.getOrNull(0)?.toInt() ?: 0) and 255 shr 3}",
             fields = mapOf("file" to x.file, "seq" to s.seq, "from" to x.from, "realtime" to x.realtime, "toc" to ((audio.getOrNull(0)?.toInt() ?: 0) and 255)))
-        if (x.live) state = say("connected")
+        if (x.live) { state = say("connected"); io.liveFrom(files[x.file]!!.at(s.seq) - HOLD_MARGIN_MS) }
     }
 
     private fun complete(x: Xfer, result: Int, why: String = "") {

@@ -69,17 +69,19 @@ def long_conv(store, monkeypatch):
         db.insert_sentences(t, rows)
         db.insert_conversation(t, dict(id=A, start=iso(0), end=rows[-1]["end"], participants=["S1", "S2", "我"],
                                        sentences=len(rows), speech_s=640, device=D))
-        db.put_summary({"conversation": A, "status": "done", "title": "whole", "prompt_version": 13, "todos": [
+        db.put_summary({"conversation": A, "status": "done", "title": "whole", "prompt_version": 13, "place": {"label": "home"}, "todos": [
             {"owner": "我", "to": "S1", "text": "first", "at": iso(60)}, {"owner": "我", "to": "S2", "text": "second", "at": iso(630)}]}, t)
         db.put_name_hints({"conv": A, "names": [{"who": "S1", "name": "a", "at": iso(30)}, {"who": "S2", "name": "b", "at": iso(630)}]}, t)
         db.insert_voices(t, [{"conv": A, "label": "S1", "device": "live", "e": E1, "k": 1, "level": -30.0},
                              {"conv": A, "label": "S2", "device": "live", "e": E2, "k": 1},
                              {"conv": A, "label": "我", "device": "live", "e": E3, "k": 1}])
         t.execute("INSERT INTO apart VALUES (?, ?)", (A + "|S2", "Named"))
-        t.executemany("INSERT INTO stars VALUES (?, ?, ?)", [("r30", A, "now"), ("r630", A, "now")])
+        t.executemany("INSERT INTO stars (id, conv, at) VALUES (?, ?, ?)", [("r30", A, "now"), ("r630", A, "now")])
         db.put_timeline(A, {"conversation": A, "messages": []}, t)
     tids = db.todo_ids(A, db.summary(A)["todos"])
     db.mark_todos(tids, "done")
+    db.conn().executemany("INSERT INTO todo_auto VALUES (?, ?, 'hint', '', ?, ?, ?, NULL, NULL, NULL, 'now', NULL)",
+                          [(tids[0], A, A, "r630", iso(630)), (tids[1], A, A, "r630", iso(630))])  # a quote in the later part
     db.put_profile({"name": "Named", "src": [{"conv": A, "at": iso(630)}, {"conv": A}]})
     db.put_kv("recap:2026-10-20", {"todos": [{"id": tids[1], "conv": A}], "highlights": [{"conv": A}]})
     calls = []
@@ -108,11 +110,13 @@ def test_split_moves_every_reference(long_conv):
     assert len(core.conversation_rows(a)) == 17 and core.conversation_rows(b)[0]["start"] == iso(600) and len(core.conversation_rows(b)) == 17
     sa, sb = db.summary(A), db.summary(P2)
     assert sa["status"] == sb["status"] == "pending" and sa["title"] == "whole" and sb["prompt_version"] == 13
+    assert "place" not in sa and "place" not in sb, "the whole conversation's place: not kept should the part's summary fail"
     assert db.todo_ids(A, sa["todos"]) == [tids[0]] and [t["text"] for t in sb["todos"]] == ["second"]
     moved = db.todo_ids(P2, sb["todos"])[0]
     assert moved.startswith(P2 + ":split-")
     marks = {r["id"]: r["conv"] for r in db.conn().execute("SELECT id, conv FROM todo_marks")}
     assert marks == {tids[0]: A, moved: P2}
+    assert {(r["todo"], r["src"]) for r in db.conn().execute("SELECT todo, src FROM todo_auto")} == {(tids[0], P2), (moved, P2)}, "the quote's part"
     assert [x["name"] for x in db.name_hints(A)[A]["names"]] == ["a"] and [x["name"] for x in db.name_hints(P2)[P2]["names"]] == ["b"]
     voices = {(r["conv"], r["label"]): dict(r) for r in db.conn().execute("SELECT * FROM voices")}
     assert set(voices) == {(A, "S1"), (A, "我"), (P2, "S2"), (P2, "我")}
@@ -210,7 +214,7 @@ def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
 
     counts = {x: db.conn().execute(f"SELECT count(*) FROM {x}").fetchone()[0] for x in TABLES}
     with db.tx() as t:  # its summary and the day's recap were done again since the split
-        db.put_summary({**db.summary(A), "status": "done"}, t)
+        db.put_summary({**db.summary(A), "status": "done", "place": {"label": "home"}}, t)
         db.put_kv("recap:2026-10-20", {**db.kv("recap:2026-10-20"), "stale": False}, t)
     recap_rev = db.kv("recap_revision:2026-10-20")
     T().undo.update(a=[{"conv": A}], b=[{"conv": P2}], c=[{"conv": "c20261020102000"}])
@@ -228,6 +232,7 @@ def test_recheck_merges_back_a_cut_that_no_longer_stands(long_conv, tmp_path):
     assert [tuple(r) for r in db.conn().execute("SELECT at FROM walls")] == [(iso(1200),)], "the third part's wall stays"
     s = db.summary(A)
     assert s["status"] == "pending" and db.todo_ids(A, s["todos"])[0] == tids[0] and len(s["todos"]) == 2
+    assert "place" not in s, "the early part's place: not shown again should the merged summary fail"
     assert {r["conv"] for r in db.conn().execute("SELECT conv FROM todo_marks")} == {A} and moved not in {
         r["id"] for r in db.conn().execute("SELECT id FROM todo_marks")}
     assert dict(db.conn().execute("SELECT id, conv FROM stars").fetchall()) == {"r30": A, "r630": A}

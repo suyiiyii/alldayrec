@@ -43,6 +43,11 @@ check(
 );
 check(said(35, 5, 9000, 0x10010004), "上次重启时内存里的 9000 B 写上卡：10010004.BIN");
 check(said(37, 0, 1, 0), "设置区两次都没记下要擦的块，照样擦了（1 次，本次开机第一条）");
+check(said(38, 0, 0x28, 0x34), "麦克风增益 +0.0 → +6.0 dB");
+check(said(38, 1, -5 >>> 0, 0x1b), "麦克风增益 -6.5 dB 没存进设置区：-5 -EIO；下次开机用存着的");
+check(said(38, 2, 2, 0xd720), "存着的麦克风增益校验不过（2 B：0000d720），用默认 0 dB");
+check(describe({ boot: 1, t: 100, code: 38, x: 0, a: 0x28, b: 0x34 }).level, ""); // a change: no warning
+check(describe({ boot: 1, t: 100, code: 38, x: 1, a: -5 >>> 0, b: 0x1b }).level, "warn"); // not kept
 check(said(6, 3, -5, 4096), "文件长度没写上卡：-5 -EIO（4096 B）");
 check(said(6, 0, -5, 512), "-5 -EIO（512 B）");
 check(said(4, 3, 4212, 1810000), "音频批次 4212（文件 1074xxxx），剩 1767 MB；卡上的计数读不出；新计数没写进卡");  // a boot number counted before
@@ -92,11 +97,19 @@ check(
 const rec = (code: number, x: number, a = 0) => ({ boot: 1, t: 100, code, x, a, b: 0 });
 check(String([1, 22, 29].map((c) => millivolts(rec(c, 195)))), "3900,3900,3900"); // BOOT, HEARTBEAT, LR-P3's POWER
 check(String(millivolts(rec(29, 0, 1))), "0"); // the power-fail warning: not measured
+// the park's end (POWER a 3, lr_power.h lr_park_end, the same b as power_check.c): seconds | what woke it << 28
+check(said(29, 0, 3, 0x10000001), "关机结束：关了 1 秒，因为拨了开关");
+check(said(29, 180, 3, 0x80000e10), "关机结束：关了 1 小时 0 分，因为电池回到 3.6 V");
+check(said(29, 0, 3, (0x60000000 | 125) >>> 0), "关机结束：关了 2 分 5 秒，因为插了 USB+在充电");
+check(said(29, 0, 3, 5), "关机结束：关了 5 秒，因为?"); // no wake bit
+check(describe({ boot: 1, t: 100, code: 29, x: 0, a: 3, b: 0x20000001 }).level, ""); // not a fault
+check(describe({ boot: 1, t: 100, code: 29, x: 165, a: 2, b: 0 }).level, "bad");
 check(String(cardBusy(rec(25, 0, 84_000 | (713 << 20)))), "14"); // 84 s of 10 min (LR-P1, 10-05)
 check(String(cardBusy(rec(22, 195))), "null");
 
 i18n.global.locale.value = "en"; // the same records in English
 check(said(3, 2, -116 >>> 0, 0), "try 2: -116 -ETIMEDOUT (no card, or not seated)");
+check(said(29, 0, 3, 0xffffffff), "back on after 74565 h 24 min off, woken by the switch+USB+charging+the battery back at 3.6 V");
 check(said(30, 1, 3, 1100), "3 records (1100 B) not sent live (Bluetooth disconnected); kept on the card, the phone catches up from it");
 check(describe({ boot: 1, t: 2500, code: 1 | 0x80, x: 195, a: 0b10, b: 0x1751f88 }).text,
   "last run ended by watchdog DOG, battery 3900 mV, firmware 1751f88 (2.5 s after boot)");

@@ -119,6 +119,11 @@ config LR_POWER_DEBUG
     bool "Power tests only, never in a release: CTRL 0x30 turns the mic, the codec, the card, the LED, advertising and the link's parameters on and off one by one, and drops the link for a while (lr_store.c)"
     default n
 
+config LR_RAW_PCM
+    bool "Tests only, never in a release: every mic buffer as raw 16-bit PCM, before the high-pass and the codec, on the USB serial port (src/raw_pcm.c, lr_pcm.py)"
+    depends on USBD_CDC_ACM_CLASS && !UART_CONSOLE
+    default n
+
 config LR_ONE_LED
     bool "One LED (the ProMicro's P0.15, led2): the status as short flashes (led_code.h) instead of the XIAO's RGB"
     default n

@@ -1,4 +1,4 @@
-// Host check of lr_low_count and lr_park_wake (src/lr_power.h), what turns a recorder off and on again: cc -o power_check test/power_check.c && ./power_check
+// Host check of lr_low_count, lr_park_wake and lr_park_end (src/lr_power.h), what turns a recorder off and on again: cc -o power_check test/power_check.c && ./power_check
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -31,15 +31,22 @@ int main(void)
     assert(lr_charge_state(true, 1) == LR_CHARGING);
     assert(lr_charge_state(true, 0) == LR_CHARGED);  // the X1's charger done
     assert(lr_charge_state(true, -ENOTSUP) == LR_CHARGING);  // the ProMicro: USB is all it knows
-    // a second of the park (lr_park_wake): what restarts it
-    assert(!lr_park_wake(false, false, true, false, -EAGAIN, 0));  // low, nothing new: parked on
-    assert(lr_park_wake(true, false, false, false, -EAGAIN, 0));   // the switch moved
-    assert(lr_park_wake(false, true, false, false, -EAGAIN, 0));   // USB
-    assert(lr_park_wake(false, false, true, true, -EAGAIN, 0));    // low and charging: USB the board cannot see
-    assert(!lr_park_wake(false, false, false, true, 0, 4000));     // switched off: charging or a full cell, parked on
-    assert(lr_park_wake(false, false, true, false, 0, 3600));      // low, the battery back at 3.6 V
-    assert(!lr_park_wake(false, false, true, false, 0, 3590));
-    assert(!lr_park_wake(false, false, true, false, -EIO, 3700));  // a failed read
+    // a second of the park (lr_park_wake): what restarts it, as the bits the park's end logs
+    assert(lr_park_wake(false, false, true, false, -EAGAIN, 0) == 0);  // low, nothing new: parked on
+    assert(lr_park_wake(true, false, false, false, -EAGAIN, 0) == LR_WAKE_SWITCH);  // the switch moved
+    assert(lr_park_wake(false, true, false, false, -EAGAIN, 0) == LR_WAKE_USB);
+    assert(lr_park_wake(false, false, true, true, -EAGAIN, 0) == LR_WAKE_CHARGING);  // USB the board cannot see
+    assert(lr_park_wake(false, false, false, true, 0, 4000) == 0);  // switched off: charging or a full cell, parked on
+    assert(lr_park_wake(false, false, true, false, 0, 3600) == LR_WAKE_BATTERY);  // low, the battery back at 3.6 V
+    assert(lr_park_wake(false, false, true, false, 0, 3590) == 0);
+    assert(lr_park_wake(false, false, true, false, -EIO, 3700) == 0);  // a failed read
+    assert(lr_park_wake(true, true, true, true, 0, 3700) == 15);       // all at once: every bit
+    assert(lr_park_wake(false, true, true, true, -EAGAIN, 0) == (LR_WAKE_USB | LR_WAKE_CHARGING));
+    // the park's end (POWER a 3's b): seconds in bits 0-27, the wake in 28-31, as recorderLog.check.ts decodes it
+    assert(lr_park_end(1, LR_WAKE_SWITCH) == 0x10000001u);
+    assert(lr_park_end(3600, LR_WAKE_BATTERY) == 0x80000E10u);
+    assert(lr_park_end(LR_PARK_S_MAX, 15) == 0xFFFFFFFFu);
+    assert(lr_park_end(0xFFFFFFFFu, LR_WAKE_USB) == (0x20000000u | LR_PARK_S_MAX));  // saturates, the wake intact
     puts("power_check ok");
     return 0;
 }

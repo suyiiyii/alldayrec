@@ -1,4 +1,5 @@
 import { i18n, t } from "../i18n.ts";
+import type { ConvSounds } from "./sounds.ts";
 
 export interface Row {
   id: string;
@@ -12,6 +13,7 @@ export interface Row {
   dictation?: string;
   music?: number; // 1: the server heard music here (a song played aloud): no voiceprint, speaker S?
   source?: string; // the device that recorded it
+  engine?: string; // the ASR that heard it
 }
 
 export interface Span {
@@ -26,23 +28,26 @@ export const MIN_SPEECH_S = 60; // server summary.MIN_SPEECH_S: a conversation i
 export const isFragment = (c: Conversation) =>
   (c.speech_s ?? Infinity) < MIN_SPEECH_S && (c.summary?.media_share ?? 0) < MOSTLY_MEDIA;
 
-// Rows in order, a run of FOLD or more media rows folded into one line; a shorter run stays, greyed
-export type Seg = { k: "row"; r: Row; media: boolean } | { k: "fold"; key: string; rows: Row[] };
+// Rows in order, a run of min or more rows of one kind (kind(r): true or its name, "media" or "broadcast") folded into
+// one line; a shorter run stays, greyed
+export type Seg = { k: "row"; r: Row; media: boolean } | { k: "fold"; key: string; rows: Row[]; kind?: string };
 const FOLD = 3;
-export function fold(rows: Row[], media: (r: Row) => boolean): Seg[] {
+export function fold(rows: Row[], kind: (r: Row) => boolean | string, min = FOLD): Seg[] {
   const out: Seg[] = [];
-  let run: Row[] = [];
+  let run: Row[] = [],
+    at: boolean | string = false;
   const flush = () => {
-    if (run.length >= FOLD) out.push({ k: "fold", key: "m" + run[0].id, rows: run });
+    if (run.length >= min)
+      out.push({ k: "fold", key: "m" + run[0].id, rows: run, kind: typeof at === "string" ? at : undefined });
     else out.push(...run.map((r) => ({ k: "row" as const, r, media: true })));
     run = [];
   };
   for (const r of rows) {
-    if (media(r)) run.push(r);
-    else {
-      flush();
-      out.push({ k: "row", r, media: false });
-    }
+    const k = kind(r);
+    if (k !== at) flush();
+    at = k;
+    if (k) run.push(r);
+    else out.push({ k: "row", r, media: false });
   }
   flush();
   return out;
@@ -58,6 +63,17 @@ export type Mark = "done" | "wrong";
 
 export interface At {
   at: string | null;
+}
+export type PlaceLabel = "home" | "office" | "car" | "train" | "restaurant" | "outdoors" | "shop" | "other";
+export type SoundEvent = "vehicle" | "music" | "speech" | "quiet";
+export interface Place {
+  label: PlaceLabel | null;
+  detail?: string; // the more exact place a sentence named, "" when none did
+  confidence?: "high" | "medium";
+  evidence?: (
+    | { kind: "line"; at: string; who?: string | null; text: string } // a sentence (its start), not media or AI speech
+    | { kind: "sound"; event: SoundEvent; minutes: number } // minutes as the sound layer measured them
+  )[];
 }
 export interface Summary {
   conversation: string;
@@ -80,11 +96,15 @@ export interface Summary {
     id?: string; // in a conversation's summary: the todo's id (server db.todo_id) and its mark
     mark?: Mark | null;
     done_hint?: DoneHint | null;
+    auto?: AutoMark | null;
   })[];
   ai_requests?: (At & { text: string })[];
   ai_spans?: Span[];
   media_spans?: Span[]; // media played aloud (video, TV, music): greyed and folded
-  media_share?: number; // of the speech, the part in media_spans
+  broadcast_spans?: Span[]; // tenant media_view: announcements, navigation, prompts, music (their own fold)
+  live_spans?: (Span & { kind?: "media" | "broadcast" })[]; // rows marked live (改回现场): out of the two above and a redo's
+  media_share?: number; // of the speech, the part in media_spans and broadcast_spans
+  place?: Place; // tenant "place": where I probably was (server place.py); label null: unsure, nothing shown
   decisions?: (At & { text: string; quote?: string; unsupported?: boolean })[];
   model?: string | null;
   via?: "live"; // written by the conversation's live agent at its close
@@ -102,6 +122,8 @@ export interface Conversation {
   device?: string | null; // its rows' source; none: from before per-device pipelines
   summary?: Summary | null;
   standby?: string[]; // other recorders that stood by in its time (same place): their audio of it is kept
+  sounds?: ConvSounds; // its sound tags (lib/sounds.ts); none while the tenant's sound is off, or it has none
+  media_view?: boolean; // GET /api/conversation/{id}: the tenant tells media, broadcasts and live apart (each run folded)
 }
 
 export interface LiveTopic {
@@ -283,6 +305,7 @@ export interface Upgrade {
 
 export interface Status {
   balance?: Balance | null; // StepFun's prepaid account
+  sound_events?: true; // the tenant's sound is on: sound tags, bars and the sound filter (lib/sounds.ts)
   device?: string | null;
   behind_s?: number | null;
   queued?: number; // uploaded pieces the server has not fed yet, all devices'
@@ -317,7 +340,7 @@ export const engines = (s: Status) =>
 
 // GET /api/calls: the ASR and LLM calls since a time, by kind and engine, and the StepFun balance
 export interface CallSum {
-  kind: string; // final, draft (ASR); summary, split, hints, profile, recap, live, ask (LLM)
+  kind: string; // final, draft (ASR); summary, split, hints, profile, recap, resolve, live, ask (LLM)
   engine: string;
   n: number;
   failed: Record<string, number>; // by HTTP code, else exception class
@@ -346,20 +369,41 @@ export interface Recap {
   highlights: { text: string; conv: string | null; participants?: string[] }[];
   todos: TodoView[];
   people: { who: string; note: string }[];
+  auto?: { closed: number; due: number }; // todos closed automatically that day, mine due the day after
 }
 // One of my todos with where it came from (server db.todo_view): GET /api/todos/due, a recap's todos
 // a todo's due as said: confirmed (that day, for sure) or tentative (大概, 争取, 看情况)
 export type Certainty = "confirmed" | "tentative";
-// a later sentence saying a todo is done (server db.done_hints, summary prompt v15): shown, never a mark
-export interface DoneHint {
-  conv: string;
-  at: string;
+// an automatic mark (server db.auto_view, todo_auto.py): done / dropped (a quote closed it), stale (past due, no
+// mention since: its last mention as at), hint (only maybe done: shown, closes nothing); the sentence it rests on in conv
+export interface AutoMark {
+  kind: "done" | "dropped" | "stale" | "hint";
+  reason: string;
+  conv: string | null;
+  at: string | null;
+  sentence?: string | null;
+  speaker?: string | null;
   quote?: string | null;
+  model?: string | null;
+  judged_at: string;
+}
+export type DoneHint = AutoMark;
+// where one todo of a group of the same todo said several times was said (server db.sources)
+export interface Source {
+  id: string;
+  conv: string;
+  at?: string | null;
+  quote?: string | null;
+  title?: string | null;
+  start: string;
 }
 export interface TodoView {
   id?: string; // none: a recap's todo from before ids whose text names no todo of a summary (no marks then)
   mark?: Mark | null;
   done_hint?: DoneHint | null;
+  auto?: AutoMark | null; // closed automatically (GET /api/todos/auto)
+  sources?: Source[]; // the same todo said several times: each
+  owner?: string; // in GET /api/todos/auto (anyone's)
   conv: string;
   text: string; // the summary's
   short?: string; // a recap's wording
@@ -433,6 +477,11 @@ export class ApiError extends Error {
 export const errorTitle = (e: unknown) => (e instanceof ApiError ? e.detail : "");
 
 export async function call<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await request<T>(path, init))[0];
+}
+
+// call(), with the response's headers (a list that says in one where it stopped)
+async function request<T>(path: string, init?: RequestInit): Promise<[T, Headers]> {
   let r: Response;
   try {
     r = await fetch(path, init);
@@ -440,7 +489,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(t("err.network"), `${path}: ${e}`);
   }
   const j = await r.json().catch(() => ({}));
-  if (r.ok) return j;
+  if (r.ok) return [j, r.headers];
   const raw = typeof j.detail === "string" ? j.detail : "";
   const code = /^\[([a-z_]+)\] /.exec(raw)?.[1] ?? "";
   const said = code ? raw.slice(code.length + 3) : raw;
@@ -463,6 +512,11 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
   const q = new URLSearchParams(params).toString();
   return call<T>(path + (q ? "?" + q : ""));
+}
+
+export function getWithHeaders<T>(path: string, params: Record<string, string> = {}): Promise<[T, Headers]> {
+  const q = new URLSearchParams(params).toString();
+  return request<T>(path + (q ? "?" + q : ""));
 }
 
 export function post<T>(path: string, body?: unknown, method = "POST"): Promise<T> {

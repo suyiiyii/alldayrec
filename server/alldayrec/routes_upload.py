@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from alldayrec import audio
 from alldayrec import db
+from alldayrec import gain
 from alldayrec import late_store
 from alldayrec import perf
 from alldayrec import threads
@@ -64,7 +65,8 @@ BAD_AUDIO = "could not decode"  # /api/chunks' detail for a piece that is not au
 
 
 @router.post("/api/chunks")
-async def chunk(request: Request, device: str, start: int, n: int | None = None, hold: int | None = None):
+async def chunk(request: Request, device: str, start: int, n: int | None = None, hold: int | None = None,
+                capture_gain_db: float | None = None):
     """One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz
     samples the client wrote into it (the iPhone's AAC: the decoder adds some at both ends). Kept on disk (also
     for playback) and queued; the device's pipeline takes its pieces in time order at the pace finalization keeps up
@@ -72,7 +74,8 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
     (unix ms): the client still has older audio of this device than that to send (it sends what is said now while it
     reads a backlog off the recorder's card): finalization waits there for it, drafts go on (audio.hold); an upload
     without it lets go. The answer has the piece's seconds and the piece lengths now (`slice`, slices()): the apps'
-    native uploaders take them from here, as Dart does not run in the background to ask /api/client-config."""
+    native uploaders take them from here, as Dart does not run in the background to ask /api/client-config.
+    `capture_gain_db`: the gain the phone gave its audio before the encoder (gain.report: a row when it changed)."""
     released = hold is None and db.kv(f"hold:{device}") is not None
     audio.hold(device, hold)  # before the piece is in: the queue must not hand it out ahead of the older audio
     saved = {}
@@ -99,6 +102,8 @@ async def chunk(request: Request, device: str, start: int, n: int | None = None,
         # the one answer the clients drop a piece on (#328): 400 with exactly this detail. Any other 4xx (a proxy's, a
         # token's) they keep the audio for, 5xx they retry; keep the words as they are (the apps out there match them)
         raise HTTPException(400, BAD_AUDIO)
+    if capture_gain_db is not None:
+        gain.report(device, start, capture_gain_db)
     audio.piece_in(device)
     if released:
         late_store.release(device)
@@ -137,8 +142,11 @@ async def hold_release(device: str):
 @router.post("/api/device-status")
 async def device_status_report(device: str, hw: dict):
     """What a client read from a BLE recorder (battery, card, firmware, model): each one kept, the newest shown with
-    the device's pipeline."""
-    db.add_device_status(device, iso(dt.datetime.now()), hw)
+    the device's pipeline. Its mic_gain_db (a recorder's PDM gain), when there: gain.report, a row when it changed."""
+    now = dt.datetime.now()
+    db.add_device_status(device, iso(now), hw)
+    if "mic_gain_db" in hw:
+        gain.report(device, int(now.timestamp() * 1000), hw["mic_gain_db"])
     return {"ok": True}
 
 

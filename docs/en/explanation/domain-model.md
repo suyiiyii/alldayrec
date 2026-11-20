@@ -64,10 +64,13 @@ The `kv` keys for a device `<d>`:
 | Object | What it is | Unique key | Stored in | Created by | Changed by | Lifecycle |
 |---|---|---|---|---|---|---|
 | Live analysis | A topic timeline of the conversation going on, kept by one multi-turn agent | Device | Going on: `live:<d>` in `kv`; at the close: `timelines` | `live_update` in `device_pipeline.py` (`live.py`) | Redone after every 120 s of new speech (`LIVE_EVERY_S`) | Saved into `timelines` when the conversation closes; the `kv` key is cleared |
-| Summary | A conversation's title, summary, points, todos, decisions and tags | `conversation` | `summaries` (`body` is JSON) | A `pending` row when the conversation closes (`commit`); the summary workers write it (`summaries.py`) | Rewritten after a rename, a speaker correction or a late merge | `pending` → `done` or `failed` |
+| Summary | A conversation's title, summary, points, todos, decisions and tags, and which sentences were said to an AI, played aloud (`media_spans`) or broadcast (`broadcast_spans`, tenant `media_view`; runs the user marked 改回现场 in `live_spans`, kept when it is written again) | `conversation` | `summaries` (`body` is JSON) | A `pending` row when the conversation closes (`commit`); the summary workers write it (`summaries.py`) | Rewritten after a rename, a speaker correction or a late merge | `pending` → `done` or `failed` |
 | Todo | One todo in a summary | The conversation `id` plus the time it was said, with `#2`, `#3` for later ones at the same time; `preserve_todos` keeps the old `id` when the summary is written again | `todos` in `summaries.body`; no table of its own | The summary | A new summary | With its summary |
 | Todo mark | 完成 (done) or 不对 (wrong) on a todo | The todo's `id` | `todo_marks` | The web pages | Deleting the row is the undo | — |
-| Star | A starred sentence | The sentence's `id` | `stars`, with its conversation in `conv` | The web pages | Splits and merges change `conv` | Deleted when unstarred |
+| Automatic mark | Done, dropped, probably not needed, or a hint, judged automatically, with the reason, the sentence and the model | The todo's `id` | `todo_auto` | `todo_auto.py` (after each summary, once a day) | The undo only sets `undone_at`; the row stays; a mark by hand wins | Counts while `undone_at` is empty |
+| Duplicate todos | The same task said in several conversations | Each todo's `id` points to the group's first | `todo_same` | `todo_auto.py` | Merged only, never split | — |
+| Star | A starred final sentence | The sentence's `id` | `stars`, with its device and start; its conversation is looked up when read (older stars keep `conv`) | The web pages | Splits and merges change older stars' `conv` | Deleted when unstarred |
+| Report | What the user says is wrong with one sentence | An autoincrement `id` | `reports`, with a snapshot of the row, its device and start; its conversation is looked up when read | The web pages | — | Kept |
 | Feedback | What the user says a summary got wrong | None | `feedback` | The web pages | — | Kept; read when summaries are written |
 | Name hints | What each label was called in a conversation; only for suggesting names | `conv` | `name_hints` | After a summary is done (`hints.py`) | Follows a rename | — |
 | Profile | A named person's profile, each line with its sources | `name` | `profiles` | The person page (`profiles.py`) | Updated after a summary of a conversation the person took part in | — |
@@ -100,7 +103,7 @@ The core rule: objects relate by "same device, overlapping time". The schema in 
 
 - **A summary and a live analysis each belong to one conversation.** `summaries` and `timelines` both use the conversation `id` as their primary key. A live analysis exists only while a page watches, so a conversation has 0 or 1.
 - **A todo mark points to a todo in a summary**, not to a sentence. A todo's `id` joins the conversation `id` and the time it was said. When a summary is written again, `db.preserve_todos` matches each old todo uniquely by its text (else its quote), owner and recipient, and pins the old `id` on the new todo. A marked old todo that matches none stays as it was.
-- **A star points to a sentence `id`**, with its conversation. Reading stars finds the sentence by that `id`, on the conversation's device, within the conversation's time (`routes_sentences.py`).
+- **A star points to a sentence `id`**, with its device and start. Reading stars finds the sentence by that `id` on that device; its conversation is not stored (only stars from before this change keep `conv`). It is looked up when read: the closed conversation of that same device whose span holds the start (an old conversation with no device never counts), never written back (`db.conv_at`). Where a split cut, the earlier part ends at the moment the later one starts; that moment belongs to the later part (the one that starts last). So splits and merges move it with nothing to rewrite. None found means 「不在任何对话里」 (in no conversation): it is still going on, or the row sits in the pause a split cut at, in words too few to make a conversation, or in the moment recording stopped and started again. The page then jumps to the live page at that time. A report keeps a snapshot of the row, so it outlives a rewrite of the sentence, its start and end kept to the ms; a snapshot that does not read is skipped and logged; the conversation the page sends is not used (a split may have just cut it in two).
 - **A voice points to a conversation and a label**; `apart` points to a voice; `enrolled` points to a sentence's `rowid` and a name.
 
 ### Rewriting sentences is where things break
@@ -210,7 +213,14 @@ erDiagram
     }
     stars {
         text id PK
+        text device
+        text start
         text conv
+    }
+    reports {
+        int id PK
+        text device
+        text start
     }
 
     conversations ||--o| summaries : "conversation"
@@ -220,6 +230,7 @@ erDiagram
     summaries ||--o{ todo_marks : "todo id"
     conversations ||--o{ stars : "conv"
     sentences ||--o{ stars : "id"
+    reports }o..o| conversations : "same device, start within"
     sentences }o..o| conversations : "same device, start within"
 ```
 

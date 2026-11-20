@@ -1,6 +1,7 @@
 """Who speaks: a conversation's labels renamed, the speakers page (voices grouped across conversations), aliases, and a
 person's page and profile. The voiceprints of closed conversations and the 「哪个是你？」 card: routes_voices.py."""
 import datetime as dt
+import itertools
 import json
 import logging
 import os
@@ -12,15 +13,18 @@ import time
 import anyio.to_thread
 import numpy as np
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
+from alldayrec import audio
 from alldayrec import bank
 from alldayrec import db
 from alldayrec import diarist
+from alldayrec import gain
 from alldayrec import hints
 from alldayrec import profiles
 from alldayrec import routes_audio
 from alldayrec import selfvoice
+from alldayrec import sounds
 from alldayrec import speakers
 from alldayrec import summary
 from alldayrec import threads
@@ -50,7 +54,7 @@ async def rename(conv_id: str, body: dict):
     if body.get("check") and (q := await anyio.to_thread.run_sync(name_check, [(conv_id, frm)], to, limiter=threads.DB)):
         return {"check": q}
     also = None if speakers.ANON.fullmatch(to) else await earlier(conv_id, frm)
-    me = [voice_of(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
+    me = [await voice_of_me(conv_id, frm)] if to == "我" else []  # before the merge deletes its voice
     r, rows, before = apply_rename(conv_id, frm, to)
     await enroll_soon(to, rows)
     return {**r, **learn_me(to, me, [before]), "undo": keep_undo([before]), "also": also}
@@ -160,10 +164,12 @@ def apply_rename(conv_id: str, frm: str, to: str) -> tuple[dict, list[dict], dic
 
 def learnable(conv_id: str, to: str, hit: list[dict]) -> list[dict]:
     """The sentences of a label named `to` that teach the people bank: up to ENROLL of bank.LEARN_MIN_S or more. S<n>
-    means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank."""
+    means "not known": nothing to learn; 我 is learnt into its own voiceprint (learn_me), not the people bank. Tenant
+    "media_view": none played aloud or broadcast (summary.not_live), the line's voice is not the person's."""
     if to == "我" or re.fullmatch(r"S\d+", to) or not state.get("embed"):
         return []
-    return sorted(({**r, "conv": conv_id} for r in hit if (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
+    away = summary.not_live(db.summary(conv_id)) if T().media_view else []
+    return sorted(({**r, "conv": conv_id} for r in hit if not summary.in_media(r, away) and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
                   key=lambda r: r["start"])[:ENROLL]
 
 
@@ -172,10 +178,49 @@ UNDO_KEEP = 20  # renames that can be taken back, the newest; in memory: not aft
 ME_MIN_S = 10.0  # 「这是我」 needs this much total sentence speech per click across labels with voiceprints
 
 
+async def label_voice(c: dict, label: str, rs: list[dict]) -> dict | None:
+    """A label's voices row in conversation c (voices_loop's), from its sentences rs: the mean voiceprint of up to 4 of
+    >= 1.5 s, the longest, each capped at 15 s; one with music under it (BG_GATE) is not one of the 4, n and speech_s
+    count it still. used: those it is made of. None: no sentence of it to hear here."""
+    dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
+    long = list(itertools.islice((r for r in sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True) if not sounds.under_music(r, "voices")), 4))
+    es, ls, used = [], [], []
+    for r in long:
+        try:
+            x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
+        except HTTPException:
+            continue
+        es.append(await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER))
+        used.append(r)
+        if (lv := selfvoice.level(x)) is not None:
+            ls.append(lv)
+    if not es:
+        return None
+    e = np.mean(es, 0)
+    best = min(used, key=lambda r: abs(dur(r) - 6))
+    return {"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
+            "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
+            "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
+            "clip_text": best.get("text"), "used": [(r["start"], r["end"], r.get("source")) for r in used]}
+
+
 def voice_of(conv: str, label: str) -> tuple[np.ndarray, float] | None:
-    """A label's voiceprint in one conversation (the voices table: a mean of its longest sentences) and its speech."""
-    r = db.conn().execute("SELECT e, speech_s FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone()
-    return (db.vec(r[0]), r[1] or 0.0) if r else None
+    """A label's voiceprint in one conversation (the voices table: a mean of its longest sentences) and its speech.
+    BG_GATE in effect (sounds.gating): None for one not shown free of music under its sentences (sounds.verified)."""
+    g = sounds.gating()
+    r = db.conn().execute(f"SELECT e, speech_s{', used' if g else ''} FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone()
+    return (db.vec(r[0]), r[1] or 0.0) if r and (not g or sounds.verified(r[2])) else None
+
+
+async def voice_of_me(conv: str, label: str) -> tuple[np.ndarray, float] | None:
+    """voice_of, for learn_me: a voice voice_of holds back (BG_GATE) made again here from the label's sentences, those
+    with music under them left out (label_voice; not stored); None as voice_of when the label has no voice at all."""
+    if (v := voice_of(conv, label)) or not sounds.gating() or not db.conn().execute(
+            "SELECT 1 FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (conv, label)).fetchone():
+        return v
+    c = find_conversation(conv)
+    v = c and await label_voice(c, label, [r for r in conversation_rows(c) if r.get("speaker") == label and not r.get("music")])
+    return (v["e"], v["speech_s"]) if v else None
 
 
 def save_owner(bank: dict[str, np.ndarray]):
@@ -303,18 +348,24 @@ async def enroll_soon(to: str, rows: list[dict]):
 async def enroll(to: str, rows: list[dict]):
     """Each row's voiceprint (from the recording, when still here) into to's in the people bank and the diarists: those
     bank.pick keeps (alike within their label, not what 我 could have said, at most CAP a click), recorded each in
-    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py) teaches nothing.
-    A failure is logged: it must not end the tenant's tasks beside it."""
+    the ledger (bank.learn) so that an undo or 不是 takes them back out; a row heard as music (music.py), or with music
+    under it (sounds.under_music, BG_GATE), teaches nothing. A failure is logged: it must not end the tenant's tasks
+    beside it."""
     try:
-        labels = {}  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
+        labels, bg = {}, 0  # conv: [(row, voiceprint)]; rows of one rename are one conversation's label
         for r in rows:
             if r.get("music"):
                 continue
+            if sounds.under_music(r, "enroll"):
+                bg += 1
+                continue
             try:
-                x = np.frombuffer(await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "s16le", r.get("source")), np.int16)
+                x = await routes_audio.cut(r["start"], min(r["end"], (dt.datetime.fromisoformat(r["start"]) + dt.timedelta(seconds=15)).isoformat()), "pcm", r.get("source"))
             except HTTPException:  # history conversations have no recording here
                 continue
             labels.setdefault(r.get("conv"), []).append((r, await anyio.to_thread.run_sync(state["embed"], x, limiter=threads.INFER)))
+        if not labels and bg:
+            ws.note(f"{to}：记住了 0 句的声纹，{bg} 句有背景音乐没用上", "state")
         if labels:
             ls = list(labels.items())
             had = db.people().get(to)
@@ -322,7 +373,8 @@ async def enroll(to: str, rows: list[dict]):
             with db.tx() as t:
                 n = sum(bank.learn(t, to, conv, [l[j] for i2, j in keep if i2 == i]) for i, (conv, l) in enumerate(ls))
             bank.sync(to)
-            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else ""), "state")
+            ws.note(f"{to}：记住了 {n} 句的声纹" + (f"，{k} 句没用上" if (k := sum(map(len, labels.values())) - n) else "")
+                    + (f"，{bg} 句有背景音乐没用上" if bg else ""), "state")
     except Exception:
         log.exception("enroll %s", to)
 
@@ -352,7 +404,7 @@ def classified_voices(convs: dict | None = None) -> list[dict]:
     media = {}
     for cid in {v["conv"] for v in vs}:
         c = convs.get(cid)
-        if c and (spans := (c.get("summary") or {}).get("media_spans")):
+        if c and (spans := summary.not_live(c.get("summary"))):
             media[cid] = summary.media_labels(conversation_rows(c), spans)
     return [{**v, "media": v["label"] in media.get(v["conv"], ())} for v in vs]
 
@@ -522,7 +574,7 @@ async def speaker_name(body: dict):
     for m in ms:
         if m["label"] == to:
             continue
-        v = voice_of(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
+        v = await voice_of_me(m["conv"], m["label"]) if to == "我" else None  # before the merge deletes it
         try:
             _, more, before = apply_rename(m["conv"], m["label"], to)
         except HTTPException as e:  # the conversation changed since the page loaded
@@ -708,6 +760,8 @@ async def person(name: str):
         raise HTTPException(404, "no conversation with this name")
     top = lambda d, n: sorted(d, key=lambda k: -d[k])[:n]
     pf = db.profile(name)
+    if pf and T().persona_v2 and not await anyio.to_thread.run_sync(profile_stands, pf, limiter=threads.DB):
+        pf = None  # made from labels or words since changed (or by v1): void, made again on the next click
     return {"name": name, "count": len(convs), "first": convs[-1]["start"], "last": convs[0]["start"],
             "aliases": sorted(a for a, n in db.aliases().items() if n == name),
             "profile": pf, "profile_newer": sum(c["start"] > pf["upto"] for c in convs) if pf and pf.get("upto") else 0,
@@ -736,8 +790,45 @@ def mentions(name: str, limit: int = 30, per_conv: int = 3) -> list[dict]:
     return out
 
 
-async def make_profile(name: str) -> dict:
-    """The person's profile from their 40 latest conversations, their todos and mine to them, and 30 mentions."""
+def profile_stands(pf: dict) -> bool:
+    """A v2 profile's conversations still hold what it was made from (profiles.fresh)."""
+    now = {}
+    for x in pf.get("used") or []:
+        c = find_conversation(x["conv"])
+        now[x["conv"]] = profiles.sha(conversation_rows(c), db.summary(c["id"])) if c else None
+    return profiles.fresh(pf, now)
+
+
+def profile_inputs(name: str) -> tuple[str, dict, dict, str | None]:
+    """profiles.evidence_v2's from the store, with the newest conversation with them (upto)."""
+    convs = [c for c in all_conversations() if name in (c.get("participants") or [])]
+    if not convs:
+        raise HTTPException(404, "no conversation with this name")
+    ms = [] if name == "我" else mentions(name)  # 我 is in nearly every row
+    for m in ms:
+        c = find_conversation(m["conv"])
+        m.update(summary=db.summary(c["id"]), conv_rows=conversation_rows(c))
+    return *profiles.evidence_v2(name, convs, ms, conversation_rows), convs[0]["start"]
+
+
+async def make_profile(name: str, auto: bool = False) -> dict:
+    """The person's profile from their 40 latest conversations, their todos and mine to them, and 30 mentions.
+    persona_v2: from what they said themselves in the 40 latest conversations that can tell (profiles.evidence_v2),
+    only of a named person, and no call when none can; auto (a refresh after a summary): none either when the model
+    would be asked just what it was last time, the stored one kept up to the conversations as they are now."""
+    if T().persona_v2:
+        if speakers.ANON.fullmatch(name):  # an unnamed voice: nobody the owner named or confirmed
+            raise HTTPException(400, "[not_named] 只给命名过的人写档案")
+        text, ev, made, upto = await anyio.to_thread.run_sync(profile_inputs, name, limiter=threads.DB)
+        if not any(e["kind"] == "self" for e in ev.values()):  # hearsay alone makes no profile
+            raise HTTPException(422, f"[no_evidence] 还没有 {name} 自己说的、能当证据的原句")
+        pf = db.profile(name)
+        if auto and pf and pf.get("input") == profiles.key(text, ev):
+            pf.update(upto=upto, used=made["used"], skipped=made["skipped"])
+        else:
+            pf = await profiles.profile_v2(name, text, ev, made, upto)
+        db.put_profile(pf)
+        return pf
     p = await person(name)
     ms = await anyio.to_thread.run_sync(mentions, name, limiter=threads.DB)
     pf = await profiles.profile(name, p["conversations"][:40], (p["theirs"] + p["mine"])[:30], ms)
@@ -758,7 +849,32 @@ async def person_profile(name: str):
 
 @router.get("/api/voice-clip/{name}")
 async def voice_clip(name: str):
+    """A history voice's sample: as stored, or, when its device has a non-zero offset anywhere in the clip (gain.py),
+    decoded with it, each sample at its own time's, as WAV (X-Gain-Db: its first sample's). A clip of no time
+    (clip_start NULL: the history generator wrote none) takes gain.only_db, its device's one offset for all time; else
+    (several, or the first from after 0) it is served as stored, logged and counted (lr_gain_untimed_clips_total).
+    Revalidated each time (no-cache): an offset set later must not meet a cached copy."""
     p = T().data / "voices" / "clips" / name  # the history voices' samples
     if not re.fullmatch(r"[\w.-]+\.ogg", name) or not p.is_file():
         raise HTTPException(404, "no such clip")
-    return FileResponse(p, media_type="audio/ogg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    r = await anyio.to_thread.run_sync(lambda: db.conn().execute(  # only a device with a non-zero offset is decoded
+        "SELECT device, clip_start FROM voices WHERE clip = ? AND device IS NOT NULL AND EXISTS ("
+        "SELECT 1 FROM device_gain g WHERE g.device = voices.device AND g.offset_db != 0) ORDER BY clip_start IS NULL LIMIT 1",
+        (name,)).fetchone(), limiter=threads.DB)
+    if r and r["clip_start"] is None:
+        # shortcut: a history clip has no time, so it is calibrated only while its device's offset is one value for all
+        # time; to calibrate it exactly, backfill its clip_start
+        if (g := await anyio.to_thread.run_sync(gain.only_db, r["device"], limiter=threads.DB)) is None:
+            log.warning("voice clip %s: no time, and %s's offset is not one value for all time: served as stored", name, r["device"])
+            T().gain_untimed[r["device"]] = T().gain_untimed.get(r["device"], 0) + 1
+        elif (x := await anyio.to_thread.run_sync(audio.decode, p.read_bytes(), limiter=threads.MEDIA)) is not None:
+            y = x.astype(np.float32) * np.float32(10 ** (g / 20))  # gain.apply's, on every sample
+            return Response(audio.wav(gain.to16(y, r["device"])), media_type="audio/wav",
+                            headers={"Cache-Control": "no-cache", "X-Gain-Db": f"{g:g}"})
+    elif r and (x := await anyio.to_thread.run_sync(audio.decode, p.read_bytes(), limiter=threads.MEDIA)) is not None:
+        at = dt.datetime.fromisoformat(r["clip_start"]).timestamp() * 1000
+        y, g = await anyio.to_thread.run_sync(lambda: (gain.apply(x, r["device"], at), gain.offset_db(r["device"], at)), limiter=threads.DB)
+        if y is not x:  # some sample of it has a non-zero offset (apply: x itself where none has)
+            return Response(audio.wav(gain.to16(y, r["device"])), media_type="audio/wav",
+                            headers={"Cache-Control": "no-cache", "X-Gain-Db": f"{g or 0:g}"})
+    return FileResponse(p, media_type="audio/ogg", headers={"Cache-Control": "no-cache"})

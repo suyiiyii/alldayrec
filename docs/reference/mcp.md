@@ -28,4 +28,8 @@ description: "AllDayRec 远程 MCP 端点 POST /mcp 的参考：认证、协议�
 
 `grep` 和 `conversation` 另外返回 `structuredContent`（`outputSchema` 见 `tools/list`）：`{"evidence": [...]}`，每条证据是一句原话的 `conversation`（对话 id）、`sentence`（句子 id）、`at`（开始时间，到秒）、`speaker`、`quote`；`conversation` 的证据还带 `kind`（`todo` / `decision`）和 `text`（那条待办或决定）。摘要里的原话不是它引用的那句（或接着的两句）说的时，`sentence`、`at`、`speaker` 是 `null`。分页时每一页都带全部证据。
 
+`sounds` 工具和 `search` 的 `sound` 参数只在这个租户开了[环境声音](./configuration.md#可选-环境声音)时出现在 `tools/list` 里；没开时列表、参数和每个工具的返回都和以前一样。开了以后，`day`、`search`、`conversation` 返回的每段对话下面多一行「环境声音（模型从声音猜的，可能不对）」，列出音乐、交通工具上、安静各多少分钟（规则见[数据](./data.md#声音事件-sound-events)）。声音事件只说听到了什么，不说在哪里。
+
+`voiceprint`、`voice_compare`、`voice_nearest` 三个声纹工具只在这个租户开了 [`voice_tools`](./configuration.md#tenants-json) 时出现；没开时列表和调用都和以前一样（调用返回 `Unknown tool`）。句子写成「对话 id@时:分:秒」（`grep` 每行的对话 id 和时间，或 `transcript` 每行开头的时间），也可以是 `grep` 的 `structuredContent` 里 `evidence` 的 `sentence`（两台设备都录到同一句时只能用前一种）；`from_s`、`to_s` 只取句里一段（0.5–15 秒，要落在句子里），用来查一句里是不是混了两个人。`voice_nearest` 和所有认出名字的人、「我」、这句所在对话的各个标签比；某个人的声纹样本是这句教出来的（在对话页改过名）时，去掉这句重新算再比，标签的声纹就是用这句算的时会注明（分数偏高），不知道用没用（旧的标签声纹没记）时也注明。「我」的声纹不能去掉某一句重算：这句所在的对话教过「我」（点过「这是我」）时会注明，分数偏高。分数的参考线（0.7 / 0.63）只适用于和人、「我」、标签比；两句之间、一小段没有固定界线，要拿同一段对话里确定的句子当参照。`voiceprint` 的向量只在 `structuredContent.voiceprint.e` 里，不在文字里。同样的功能在 HTTP 上是 `GET /api/voiceprint`、`/api/voiceprint/compare`、`/api/voiceprint/nearest`（见 [HTTP API](./api.md)）。
+
 <!--@include: ../parts/mcp-tools.md-->

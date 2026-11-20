@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One conversation: its title, time and people, then two tabs. 摘要 (the default): how much recording it rests on, the
+// One conversation: its title, time and people, its tags and sound tags (SoundTags, each with 不对), then two tabs. 摘要 (the default): how much recording it rests on, the
 // summary (one sentence since prompt v11, the lead), topics with their points (a tap on a title folds it), todos,
 // decisions, each person's points, 让 AI 做的事 (folded under its heading); speaker labels in what the model wrote read
 // like the header's (labelText); ▶ on them plays about 10 s of the sentence they cite, its time opens 原文 there
@@ -27,6 +27,8 @@ import MediaFold from "../components/MediaFold.vue";
 import PlayerBar from "../components/PlayerBar.vue";
 import QuoteAt from "../components/QuoteAt.vue";
 import RowMenu from "../components/RowMenu.vue";
+import Scrubber, { type Stop } from "../components/Scrubber.vue";
+import SoundTags from "../components/SoundTags.vue";
 import SpeakerSheet from "../components/SpeakerSheet.vue";
 import Timeline from "../components/Timeline.vue";
 import TodoMarks from "../components/TodoMarks.vue";
@@ -54,6 +56,7 @@ import { dayLabel } from "../lib/calendar";
 import { useDismiss } from "../lib/dismiss";
 import { useSocket } from "../lib/socket";
 import { useMutation } from "../lib/mutation";
+import { timeWeights } from "../lib/scrub";
 import { labelText, likeness, speakerColor, speakerLabel } from "../lib/speakers";
 import { loadStars } from "../lib/stars";
 import { toast } from "../lib/toast";
@@ -69,8 +72,30 @@ const c = ref<
   missing = ref(false), // the server says there is none (404); not a load that failed
   failed = ref<{ msg: string; title: string } | null>(null); // the first load failed: the page has nothing to show
 const s = computed(() => c.value?.summary ?? null);
-const media = (r: Row) => inSpans(r, s.value?.media_spans);
-const segs = computed(() => fold(c.value?.rows ?? [], media));
+// tenant media_view: a run played aloud (外放) or broadcast (广播/提示音) folded whatever its length, with 改回现场;
+// else media rows as before
+const view = computed(() => !!c.value?.media_view);
+const kind = (r: Row) =>
+  inSpans(r, s.value?.media_spans) ? "media" : view.value && inSpans(r, s.value?.broadcast_spans) ? "broadcast" : false;
+const media = (r: Row) => !!kind(r);
+const segs = computed(() => (view.value ? fold(c.value?.rows ?? [], kind, 1) : fold(c.value?.rows ?? [], media)));
+// 改回现场 (on: the run's kind, media or broadcast) or its undo, 恢复为外放 (off: DELETE the mark), from..to the run's
+// first and last row
+async function setLive(from: string, to: string, on?: string) {
+  try {
+    const path = `/api/conversation/${encodeURIComponent(props.id)}/live`;
+    await post(path, on ? { from, to, kind: on } : { from, to }, on ? "POST" : "DELETE");
+    toast(t(on ? "conv.toLive" : "conv.unLive"));
+    await reload();
+  } catch (e) {
+    toast((e as Error).message);
+  }
+}
+const toLive = (rows: Row[], kind: string) => setLive(rows[0].start, rows.at(-1)!.start, kind);
+// a mark shows where its run was, at its first row, with its undo.
+// shortcut: found by its first row's exact start; a split, late merge or new transcript that moves it hides the undo
+// (the mark still holds over redos): match the nearest row if that happens
+const markAt = (r: Row) => (view.value ? s.value?.live_spans?.find((x) => x.from === r.start) : undefined);
 
 // a reload that fails (the server restarting, the network) keeps what is shown; the socket's resync loads it again
 async function load() {
@@ -118,6 +143,7 @@ function flipAll(p: string, n: number) {
 }
 // what the model wrote, its S<n> as the header says them
 const said = (x: string) => labelText(x, c.value?.participants);
+const clip = (x: string) => (x.length > 16 ? x.slice(0, 15) + "…" : x); // a place's quote: one line with its time at 390 px
 
 // the tabs
 type Tab = "summary" | "transcript";
@@ -172,6 +198,31 @@ onUnmounted(() => {
   removeEventListener("touchmove", byHand);
   trackClose();
 });
+
+// the fast-scroll rail on 原文: a stop per sentence (a fold of media rows: one), each as long as the time to the next,
+// so the rail reads as the conversation's clock; drawn in 5-minute segments. Not by speaker turns: a monologue would be
+// one stop and a quick exchange hundreds, and one remembers "about twenty minutes in" more than "the 37th turn"
+const scrubStops = computed<Stop[]>(() => {
+  const from = Date.parse(c.value?.start ?? ""),
+    firsts = segs.value.map((g) => (g.k === "row" ? g.r : g.rows[0])),
+    at = firsts.map((r) => Date.parse(r.start)),
+    ws = timeWeights(at, Date.parse(c.value?.end ?? ""));
+  return firsts.map((r, i) => ({
+    start: r.start,
+    w: ws[i],
+    group: Math.floor((at[i] - from) / 300_000),
+    time: hhmmss(r.start),
+    title: r.text,
+    sub: r.speaker ? speakerLabel(r.speaker) : undefined,
+  }));
+});
+function scrubTo(s: Stop) {
+  track.follow = false; // the player no longer pulls the page back to its sentence
+  const el = rowEl(s.start),
+    head = document.querySelector("header")?.getBoundingClientRect().bottom ?? 0;
+  if (el)
+    scrollTo({ top: el.getBoundingClientRect().top + scrollY - Math.max(0, head) - 8, behavior: "instant" });
+}
 
 // who spoke how much (not counting media played aloud)
 const share = computed(() => talkShare((c.value?.rows ?? []).filter((r) => !media(r))));
@@ -356,6 +407,7 @@ function edit(label: string) {
           >{{ t }}</RouterLink
         >
       </div>
+      <SoundTags v-if="c.sounds" :s="c.sounds" :conv="c.id" editable />
 
       <section v-if="panel === 'sug' && sug" class="card panel sug">
         <div class="phead">
@@ -470,6 +522,30 @@ function edit(label: string) {
           }}
         </button>
         <template v-if="s?.status === 'done'">
+          <section v-if="s.place?.label" class="card place">
+            <div class="where">
+              <Icon name="map-pin" :size="16" />{{
+                t("conv.place.maybe", {
+                  place:
+                    t(`conv.place.labels.${s.place.label}`) +
+                    (s.place.detail ? ` · ${s.place.detail}` : ""),
+                })
+              }}
+            </div>
+            <ul class="why">
+              <li v-for="(e, i) in s.place.evidence" :key="i">
+                <template v-if="e.kind === 'sound'">{{
+                  t(`conv.place.sound.${e.event}`, { n: e.minutes })
+                }}</template>
+                <template v-else
+                  >{{
+                    e.who === "我" ? t("conv.place.you") : t("conv.place.said", { who: speakerLabel(e.who) })
+                  }}「{{ clip(said(e.text)) }}」<QuoteAt :at="e.at" :c="c" @jump="jump"
+                /></template>
+              </li>
+            </ul>
+            <div class="hint">{{ t("conv.place.hint") }}</div>
+          </section>
           <div v-if="s.summary" class="card summary">{{ said(s.summary) }}</div>
           <div v-else-if="!s.model" class="card muted">{{ t("conv.tooShort") }}</div>
           <section v-if="s.topics?.length" class="card">
@@ -519,6 +595,12 @@ function edit(label: string) {
                     class="hint"
                     :to="{ path: `/c/${td.done_hint.conv}`, query: { tab: 'transcript', at: td.done_hint.at } }"
                     >{{ t("todoItem.maybeDone", { q: t("conv.quote", { q: td.done_hint.quote ?? "" }) }) }}</RouterLink
+                  >
+                  <RouterLink
+                    v-if="td.auto && !markOf(td)"
+                    class="hint"
+                    :to="{ path: `/c/${td.auto.conv}`, query: td.auto.at ? { tab: 'transcript', at: td.auto.at } : {} }"
+                    >{{ t("autoTodos.why", { kind: t(`autoTodos.${td.auto.kind}`), reason: td.auto.reason }) }}</RouterLink
                   >
                 </div>
               </li>
@@ -616,6 +698,12 @@ function edit(label: string) {
         </div>
         <div class="rows">
           <template v-for="g in segs" :key="g.k === 'row' ? g.r.id : g.key">
+            <div v-if="g.k === 'row' && markAt(g.r)" class="livemark">
+              <span>{{ t("mediaFold.marked") }}</span>
+              <button @click="setLive(markAt(g.r)!.from, markAt(g.r)!.to)">
+                {{ t(markAt(g.r)!.kind === "broadcast" ? "mediaFold.unBroadcast" : "mediaFold.unMedia") }}
+              </button>
+            </div>
             <TranscriptRow
               v-if="g.k === 'row'"
               :row="g.r"
@@ -625,8 +713,23 @@ function edit(label: string) {
               :menu="press"
               :who="edit"
             />
-            <MediaFold v-else :rows="g.rows" :hit="hit" :seek="seekRow" :menu="press" :who="edit" />
+            <MediaFold
+              v-else
+              :rows="g.rows"
+              :kind="g.kind"
+              :live="view && g.kind ? (rows: Row[]) => toLive(rows, g.kind!) : undefined"
+              :hit="hit"
+              :seek="seekRow"
+              :menu="press"
+              :who="edit"
+            />
           </template>
+          <Scrubber
+            :stops="scrubStops"
+            :label="t('scrub.conv')"
+            avoid="header, .nav-tabs, .player"
+            :go="scrubTo"
+          />
         </div>
       </template>
       <SpeakerSheet ref="speaker" :conv="c" :sug="sug" :reload="reload" />
@@ -643,6 +746,21 @@ function edit(label: string) {
 </template>
 
 <style scoped>
+.livemark {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  padding: var(--space-1) 0;
+}
+.livemark button {
+  font-size: var(--fs-sm);
+  min-height: 32px;
+  padding: 0 var(--space-2);
+}
 main.playing {
   padding-bottom: 120px; /* the last sentence clears the player */
 }
@@ -813,6 +931,24 @@ button.person,
 }
 .card h3 {
   margin: 0 0 var(--space-2);
+}
+.place .where {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: 500;
+}
+.place .hint {
+  margin-top: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.place .why {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
 .summary {
   font-size: var(--fs-md);

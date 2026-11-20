@@ -199,8 +199,12 @@ final class FakeBean: BeanIo {
   func watched() -> Bool { pageOpen }
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
+  func phoneState() -> [String: Any] { ["foreground": false, "locked": true, "net": ["wifi"]] }
+  func notifications() -> [String: Any] { ["ble_notes_s": 33.0] }
   func hold(_ at: Int64?) { holds.append(at); heldAt = at }
   func held() -> Int64? { heldAt }
+  var liveFroms: [Int64] = []
+  func liveFrom(_ at: Int64) { liveFroms.append(at) }
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
@@ -216,11 +220,6 @@ final class FakeBean: BeanIo {
     if !joinFails.isEmpty { throw joinFails.removeFirst() }
     onWifi = true
   }
-  var redials = 0
-  var staleOnRedial = false  // the bean goes on with what it was sending, on the new socket (replayStale())
-  private var stale: [([UInt8], Int64)] = []
-  func wifiRedial() throws { redials += 1; if staleOnRedial { stale = out }; out = [] }  // else nothing of the socket before
-  func replayStale() { out += stale; stale = [] }
   func wifiLeave() { onWifi = false }
 
   func info() -> [UInt8] {
@@ -386,6 +385,7 @@ do {
   check(anchors[a]!, a * 1000, "the bean's clock: a read from 0 starts behind, its first unit is not now")
   check(bean.heldAt, nil, "closed A is pending while B records: no hold")
   check(bean.holds.isEmpty, true, "live never sets a hold")
+  check(bean.liveFroms, [anchors[a]! - 60_000, anchors[b]! - 60_000], "each live transfer: its pieces go up ahead of a backlog")
   check((t0 / 1000 - 1...t0 / 1000 + 1).contains(Bean.u32(bean.sentOf(0x01A6), 0)), true)
 
   // a new session (what the phone knows of the files read back): on in B from its offset, then the backlog
@@ -400,6 +400,7 @@ do {
   _ = error(BeanSync.Gone.self) { try two.session(since: since, steps: "") }
   check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 200, 0], [b, 250, 0]])
   check(bean.logs.contains { $0.0 == "bean_gap" && $0.1.contains("250..259") }, true)
+  check(Array(bean.liveFroms.dropFirst(2)), [anchors[b]! + 200 * 20 - 60_000], "live again from its offset; the backlog sets none")
   var seen: [Int64: [Int64]] = [:]
   for (start, ps) in pieces {
     check(ps[0][9], 2, "stereo")
@@ -652,6 +653,20 @@ do {
   check(bean.reports.first!["live_lag_s"] == nil, true, "not live yet when connected")
   let lags = bean.reports.compactMap { $0["live_lag_s"] as? Int64 }
   check(lags.count, 2, "a status a minute")
+  let rates = bean.reports.compactMap { $0["link_units_s"] as? Double }
+  check(rates.count, 2, "the link's rate with each status during the transfer")
+  check((15.0...18.0).contains(rates[0]), true, "the first minute at a third of real time: \(rates[0])")
+  check((50.0...56.0).contains(rates[1]), true, "the next one's own units, not since the start: \(rates[1])")
+  let st = bean.reports.first { $0["link_units_s"] != nil }!
+  check([st["xfer_live"] as? Bool, st["xfer_realtime"] as? Bool, st["watched"] as? Bool, st["foreground"] as? Bool, st["locked"] as? Bool],
+        [true, false, false, false, true], "what is read, the page and the phone's side with it")
+  check(st["ble_notes_s"] as? Double, 33.0, "the link's notifications with it")
+  // CI does not compile BeanLink.swift: the fake's keys must be the ones it returns, or a typo there passes unseen
+  let link = try! String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Runner/BeanLink.swift"), encoding: .utf8)
+  for k in Array(bean.phoneState().keys) + Array(bean.notifications().keys) { check(link.contains("\"\(k)\":"), true, "BeanLink.swift returns \(k)") }
+  let behind = st["live_behind_s"] as! Int64
+  check((38...42).contains(behind), true, "how far from the bean, as live_lag_s: \(behind)")
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
   check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
   check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
@@ -679,6 +694,8 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0]])
   check(bean.reports.dropFirst().map { $0["live_lag_s"] as? Int64 }, [nil, nil, 2, 0], "filling the tail at the first two, caught up, then dated anew")
+  let behinds = bean.reports.dropFirst().map { $0["live_behind_s"] as? Int64 ?? -1 }
+  check(behinds[0] > 100 && behinds[1] > 30 && behinds[2] <= 3, true, "live_behind_s while live_lag_s is not there yet: \(behinds)")
   check(bean.logs.contains { $0.0 == "bean_lag" }, false)
 }
 
@@ -810,8 +827,8 @@ do {
 }
 
 /// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496
-/// units it sent the phone had): the read stops where that stretch begins, by a new socket (as BLE's by the link going),
-/// the next hole from its own offset; a short stretch is read through. What the phone had is counted apart.
+/// units it sent the phone had): read through, one socket (11-20 10:13: the bean answered nothing on a second one and the
+/// fast transfer ended), each hole written once. What the phone had is counted apart.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -827,35 +844,35 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("都取到了"), true, again.description)
-  check(bean.transfers, [[a, 0, 0], [a, 35_000, 0]], "cut at 1000 (34,000 had), read through 36,000..37,000 (1,000 had)")
-  check(bean.redials, 1)
-  check(Set(queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)), Set(Array(0..<1000) + Array(35_000..<36_000) + Array(37_000..<n)), "the holes, each once")
+  check(bean.transfers, [[a, 0, 0]], "one read, through 1000..35,000 and 36,000..37,000 (had)")
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
+  check(got.count, 5000, "each hole once")
+  check(Set(got), Set(Array(0..<1000) + Array(35_000..<36_000) + Array(37_000..<n)), "the holes")
   let done = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_done" }!]
   check(done["new_s"] as? Int64, 100, "5,000 units the phone lacked")
-  check((done["dupes"] as? Int).map { $0 >= 1000 && $0 < 1010 }, true, "the short stretch, and the cut frame's rest: \(done["dupes"] ?? "")")
+  check(done["dupes"] as? Int, 35_000, "the stretches the phone had")
 }
 
-/// After a new socket the bean goes on with the file before, its next header first (#318 review): those units carry no
-/// file and would decrypt to noise as the next file's, then count as had. A first unit not at the offset asked for ends
-/// Wi-Fi with nothing of it written, and BLE reads that file whole.
+/// The bean goes on with the file before, behind the next file's header (#318 review): those units carry no file and
+/// would decrypt to noise as the next file's, then count as had. A first unit not at the offset asked for ends Wi-Fi
+/// with nothing of it written, and BLE reads that file whole.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
   let a = (t0 - 1_000_000) / 1000, b = (t0 - 100_000) / 1000, n: Int64 = 40_000
-  bean.list(a, n * 20); bean.list(b, 60_000); bean.wifiAsk = true; bean.staleOnRedial = true
+  bean.list(a, n * 20); bean.list(b, 60_000); bean.wifiAsk = true
   let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[1000, n]], "p": [[Int64]]()] as [String: Any]]
   try! JSONSerialization.data(withJSONObject: state).write(to: dir.appendingPathComponent("state.json"))
   bean.onTransfer = { file, from, _ in
     let units: Int64 = file == a ? n : 3000
     bean.header(file, units * Int64(Bean.unit))
-    if bean.onWifi && file == b { bean.replayStale() }
+    if bean.onWifi && file == b { bean.units(a, Array(1000..<1003), ms: 0) }  // a's, still on its way
     bean.units(file, Array(from..<units), last: units - 1, ms: 0); bean.complete(file)
   }
   bean.script = Array(repeating: {}, count: 40)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("不是要的 0"), true, again.description)
-  check(bean.redials, 1)
   bean.script = Array(repeating: {}, count: 5)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 0, 0]], "a's hole over Wi-Fi, b over Wi-Fi refused, then b over BLE")

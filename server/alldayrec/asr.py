@@ -13,6 +13,7 @@ import anyio
 import numpy as np
 
 from alldayrec import db
+from alldayrec import gain
 from alldayrec import local_asr
 from alldayrec import net
 from alldayrec import qwen_asr
@@ -84,11 +85,12 @@ async def hinted(engine: str, endpoint: str, call, limit: int, fits=lambda w: Tr
         return out
 
 
-def sent_audio(x: np.ndarray, speech: list[tuple[float, float]]) -> tuple[np.ndarray, list[tuple[float, float]]]:
+def sent_audio(x: np.ndarray, speech: list[tuple[float, float]], device: str | None = None) -> tuple[np.ndarray, list[tuple[float, float]]]:
     """What a provider gets of a window and the spans unsqueeze maps its times back by: x with the VAD silences squeezed
-    out, lifted where it is quiet (squeeze.py)."""
+    out, lifted where it is quiet (squeeze.py), as int16: a float32 x (gain.apply's offset) stays float32 through both
+    and is rounded once, here (gain.to16, soft-limited past its knee), the one int16 the engine is sent."""
     xs, spans = squeeze.squeeze(x, speech, SQUEEZE_KEEP_S)
-    return squeeze.lift(xs), spans
+    return gain.to16(squeeze.lift(xs), device), spans
 
 
 async def engine_segs(x: np.ndarray, speech: list[tuple[float, float]], partial=None, engine: str = ENGINE, kind: str = "final",
@@ -98,7 +100,7 @@ async def engine_segs(x: np.ndarray, speech: list[tuple[float, float]], partial=
     x, (start, end) seconds; the provider gets sent_audio (silences squeezed, quiet audio lifted), the times come back in x.
     partial(segs): the sentences so far, whenever an answer adds some during the call (volc, stepfun*). Each try goes
     in the calls table as `kind` (final, draft) of `device`, one cut off (the task cancelled) too, as CancelledError."""
-    xs, spans = sent_audio(x, speech)
+    xs, spans = sent_audio(x, speech, device)
     why = None
     for name in dict.fromkeys(filter(None, (engine, ENGINE_FALLBACK))):
         mark = lambda gs, name=name: squeeze.unsqueeze([{**g, "engine": name, **({"fallback": why} if why else {})} for g in gs], spans)
@@ -192,7 +194,7 @@ async def diarize(x: np.ndarray, model: str = FILE_MODELS[0]) -> list[dict]:
     t_enc = time.perf_counter()
     async with threads.MEDIA:
         ogg = (await anyio.run_process(["ffmpeg", "-v", "error", "-f", "s16le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0",
-                                        "-c:a", "libopus", "-b:a", "16k", "-f", "ogg", "pipe:1"], input=x.tobytes())).stdout
+                                        "-c:a", "libopus", "-b:a", "16k", "-f", "ogg", "pipe:1"], input=gain.to16(x).tobytes())).stdout
     t_up = time.perf_counter()
     url = await upload(ogg, "audio/ogg")
     auth = {"Authorization": "Basic " + base64.b64encode(os.environ["ASR_SERVICE_BASIC_AUTH"].encode()).decode()}

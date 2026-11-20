@@ -106,6 +106,7 @@ const KINDS = [
   "hints",
   "profile",
   "recap",
+  "resolve",
   "live",
   "ask",
 ];

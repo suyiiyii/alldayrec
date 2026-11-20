@@ -42,7 +42,7 @@ def test_due_context_and_stale(tmp_path):
     assert {k: (t["age_days"], t["stale"]) for k, t in got.items()} == {
         "过了八天": (8, True), "过了七天": (7, False), "说待会儿的过了四天": (4, True), "说明天的过了三天": (3, False), "没标题的": (1, False),
         "今天的": (0, False)}
-    assert got["今天的"] == {"id": f"{C1}:2026-10-01T10:05:00.000", "mark": None, "done_hint": None, "conv": C1, "text": "今天的", "to": "S1", "due": "某天",
+    assert got["今天的"] == {"id": f"{C1}:2026-10-01T10:05:00.000", "mark": None, "done_hint": None, "auto": None, "conv": C1, "text": "今天的", "to": "S1", "due": "某天",
                            "due_date": day, "due_certainty": None, "at": "2026-10-01T10:05:00.000", "quote": "我今天把文档发你", "title": "周会",
                            "start": "2026-10-01T10:00:00.000", "with": ["S1"], "age_days": 0, "stale": False}
     assert got["过了八天"]["with"] == ["S1", "老王"] and got["过了八天"]["id"].startswith(f"{C1}:") and "#" not in got["过了八天"]["id"], "no to: the others, aliases as their person"
@@ -133,7 +133,7 @@ def test_redo_keeps_summary_and_marks(tmp_path, monkeypatch):
     a = "2026-10-01T10:01:00.000"
     store(tmp_path, [mine("发文档", today, at=a, quote="我把文档发你"), mine("约会议", today, at="2026-10-01T10:02:00.000", quote="周五开会"),
                      mine("买票", today), mine("没标的", today, at="2026-10-01T10:09:00.000")])
-    db.conn().execute("INSERT INTO stars VALUES (?, ?, ?)", ("sentence", C1, today))
+    db.conn().execute("INSERT INTO stars (id, conv, at) VALUES (?, ?, ?)", ("sentence", C1, today))
     recap = {"date": today, "headline": "before", "todos": []}
     db.put_kv(f"recap:{today}", recap)
     old = db.todo_ids(C1, db.summary(C1)["todos"])
@@ -159,7 +159,7 @@ def test_redo_keeps_summary_and_marks(tmp_path, monkeypatch):
         ("把文档发给他", "done"), ("约个会", "done"), ("买票", "done"), ("新的", None)]
     assert set(old[:3]) == set(db.closed_todos()), "the original mark rows never move or duplicate"
     assert db.todo_ids(C1, db.summary(C1)["todos"])[:3] == old[:3]
-    assert [tuple(x) for x in db.conn().execute("SELECT * FROM stars")] == [("sentence", C1, today)]
+    assert [tuple(x) for x in db.conn().execute("SELECT id, conv, at FROM stars")] == [("sentence", C1, today)]
     assert db.kv(f"recap:{today}") == recap
 
 

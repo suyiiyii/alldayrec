@@ -3,6 +3,8 @@ import datetime as dt
 import io
 import urllib.error
 
+import pytest
+
 from alldayrec import resummarize as r
 
 
@@ -131,3 +133,37 @@ def test_failed_retry_waits_for_this_attempt_before_next_post(tmp_path, monkeypa
     monkeypatch.setenv("LIVE_RECORD_TOKEN", "test")
     result = anyio.run(run)
     assert result["redone"] == 2 and result["failed"] == 0 and polls[:3] == ["pending"] * 3
+
+
+def test_version_flag_redoes_summaries_below_it(monkeypatch):
+    """A media_view tenant's backfill (--version 19): its v18 summaries are not current, and a redo waits for 19."""
+    state = {"old": conv("old", r.PROMPT_VERSION), "new": conv("new", 19)}
+    posted = []
+
+    def api(method, path, **params):
+        if path == "/api/conversations":
+            return list(state.values())
+        if path == "/api/calls":
+            return {"calls": []}
+        id = path.split("/")[3]
+        if method == "POST":
+            posted.append(id)
+            state[id] = conv(id, 19)
+            return {"status": "pending"}
+        return {**state[id], "media_view": on}
+
+    on = True
+    monkeypatch.setenv("LIVE_RECORD_URL", "http://localhost")
+    monkeypatch.setenv("LIVE_RECORD_TOKEN", "test")
+    monkeypatch.setattr(r, "client", lambda *args: api)
+    monkeypatch.setattr(r.time, "sleep", lambda s: None)
+    assert r.main(["--days", "1", "--dry-run"])["todo"] == 0, "18 is current without the flag"
+    on = False
+    with pytest.raises(SystemExit):  # a tenant with media_view off would write 18 again and wait for 19
+        r.main(["--days", "1", "--version", "19"])
+    with pytest.raises(SystemExit):
+        r.main(["--days", "1", "--version", "20"])
+    assert posted == []
+    on = True
+    got = r.main(["--days", "1", "--version", "19"])
+    assert posted == ["old"] and got["redone"] == 1, (posted, got)

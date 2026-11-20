@@ -2,11 +2,17 @@
 
     INFER_TOKEN=... alldayrec --infer [--port 8771]          (or python -m alldayrec --infer; --port: the service's)
 
-POST /embed, /music and /segment: the body is int16 little-endian 16 kHz samples (application/octet-stream, at most
-MAX_S s, /segment SEG_S, else 413), with "Authorization: Bearer $INFER_TOKEN"; the answer {"embedding": [192 floats]},
-{"music": bool} or {"frames": [589 x 7 floats]} (pyannote's log-probabilities, transcript.segment).
-GET /health: {"ok": true}, with the token also its model files' sha256 and compute.DIM (the server checks them at
-start; a wrong token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
+POST /embed, /music, /segment and /scene/<model> (one of SOUND_MODEL's, sound.py): the body is int16 little-endian 16 kHz
+samples (application/octet-stream), or float32 ones at int16's scale (F32, application/x-f32le: a device's calibrated
+audio, gain.py; finite, else 400), at most MAX_S s, /segment SEG_S, else 413, with "Authorization: Bearer
+$INFER_TOKEN"; samples the model will not take (onnxruntime's InvalidArgument) 422, like 413 the call's, not the
+service's failure; the answer {"embedding": [192 floats]}, {"music": bool}, {"frames": [589 x 7 floats]} (pyannote's
+log-probabilities, transcript.segment) or {"shape": [frames, classes], "scores": base64 float16} (sound.encode; one
+call at a time, threads.SOUND).
+GET /health: {"ok": true}, with the token also its model files' sha256, compute.DIM, formats (the bodies it takes: the
+server sends F32 only to a service that says it does, an older one gets int16), and in "scene" its scene models' files
+(the server checks them: the voiceprints' at start, the scene ones before a first scene score; a wrong
+token: 401); GET /metrics (token): Prometheus text. It keeps nothing and knows no tenant: no database,
 no audio files, no tenants.json; only MODELS_DIR, which it fills as the server does (infer.fetch). infer.py imports
 alldayrec.tenant for MODELS_DIR's default (DATA_DIR/models), only that path. INFER_HOST (127.0.0.1) and INFER_PORT
 (8771): its own, so it never takes the server's HOST and PORT from a shared .env. INFER_CALLS and INFER_THREADS as for
@@ -25,14 +31,17 @@ import anyio.to_thread
 import numpy as np
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
+from onnxruntime.capi.onnxruntime_pybind11_state import InvalidArgument
 
 from alldayrec import compute
 from alldayrec import infer
+from alldayrec import sound
 from alldayrec import threads
 
 MAX_S = 600  # a voiceprint takes at most 15 s of a sentence and a few enrollment samples; this bounds a request's memory
 SEG_S = 10  # pyannote's chunk (transcript.SEG_N): a longer one would fail in transcript.segment
 SR = 16000
+F32 = "application/x-f32le"
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 state = {"compute": None, "token": ""}  # main() sets them; tests put their own
 CALLS, SECONDS, AUDIO_S = Counter(), Counter(), Counter()  # (op, result) -> calls; op -> compute seconds, audio seconds
@@ -43,27 +52,32 @@ def authorized(request: Request) -> bool:
                                                         f"Bearer {state['token']}".encode())
 
 
-async def run(op: str, request: Request, f, most: int = MAX_S):
+async def run(op: str, request: Request, f, most: int = MAX_S, limiter=threads.INFER):
     if not authorized(request):
         CALLS[op, "401"] += 1
         return JSONResponse({"error": "unauthorized"}, 401)
     over = JSONResponse({"error": f"over {most} s"}, 413)
-    if int(request.headers.get("content-length") or 0) > most * SR * 2:
+    f32 = request.headers.get("content-type", "").split(";")[0].strip() == F32
+    width = 4 if f32 else 2
+    if int(request.headers.get("content-length") or 0) > most * SR * width:
         CALLS[op, "413"] += 1
         return over
     body = bytearray()
     async for chunk in request.stream():  # counted as it comes: a chunked body without a length stops at the limit too
         body += chunk
-        if len(body) > most * SR * 2:
+        if len(body) > most * SR * width:
             CALLS[op, "413"] += 1
             return over
-    if not body or len(body) % 2:
+    x = np.frombuffer(body, "<f4" if f32 else "<i2", len(body) // width)
+    if not body or len(body) % width or f32 and not np.isfinite(x).all():
         CALLS[op, "400"] += 1
-        return JSONResponse({"error": "the body is int16 samples"}, 400)
-    x = np.frombuffer(body, "<i2")
+        return JSONResponse({"error": f"the body is {'finite float32' if f32 else 'int16'} samples"}, 400)
     t = time.perf_counter()
     try:
-        out = await anyio.to_thread.run_sync(f, x, limiter=threads.INFER)
+        out = await anyio.to_thread.run_sync(f, x, limiter=limiter)
+    except InvalidArgument as e:  # the model will not take these samples: this call's, no try helps (not the service)
+        CALLS[op, "422"] += 1
+        return JSONResponse({"error": f"the model takes no such input: {str(e)[:300]}"}, 422)
     except Exception:
         CALLS[op, "500"] += 1
         raise
@@ -88,13 +102,21 @@ async def segment(request: Request):
     return await run("segment", request, lambda x: {"frames": state["compute"].segment(x).tolist()}, SEG_S)
 
 
+@app.post("/scene/{name}")
+async def scene(name: str, request: Request):
+    if name not in sound.names():
+        return JSONResponse({"error": f"no scene model {name} here (SOUND_MODEL)"}, 404)
+    return await run(f"scene/{name}", request, lambda x: sound.encode(state["compute"].scene(name, x)), limiter=threads.SOUND)
+
+
 @app.get("/health")
 async def health(request: Request):
     if "authorization" not in request.headers:
         return {"ok": True}
     if not authorized(request):
         return JSONResponse({"error": "unauthorized"}, 401)
-    return {"ok": True, "models": compute.models(), "dim": compute.DIM}
+    return {"ok": True, "models": compute.models(), "dim": compute.DIM, "formats": ["s16le", "f32le"],
+            **({"scene": f} if (f := sound.files()) else {})}
 
 
 @app.get("/metrics")
@@ -114,6 +136,7 @@ def main():
     if not os.environ.get("INFER_TOKEN"):
         raise SystemExit("not set: INFER_TOKEN (the server sends the same one)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    sound.check()
     infer.fetch()
     infer.check()
     state["compute"], state["token"] = compute.Local(), os.environ["INFER_TOKEN"]

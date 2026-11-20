@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /* What a POWER event is (its a, lr_log.h) */
-enum { LR_POWER_MINUTE, LR_POWER_WARNING, LR_POWER_LOW };
+enum { LR_POWER_MINUTE, LR_POWER_WARNING, LR_POWER_LOW, LR_POWER_PARK_END };
 
 /* After lr_log_init, before the card and the radio: the restart after a low battery goes to System OFF here; else
  * the battery is read once a minute from now on (lr_power.c) */
@@ -35,13 +35,22 @@ static inline int lr_low_count(int count, bool usb, int err, uint16_t mv, uint16
     return !usb && !err && mv > 2000 && mv < limit ? count + 1 : 0;
 }
 
-/* A second of the park (CONFIG_LR_PARK), what restarts it: the switch moved, USB; after a low battery (low) also the
- * charger charging, or the battery read (err 0) back at LR_PARK_UP_MV. Switched off, charging is no reason: on a board
- * that cannot see VBUS, every boot would find the switch off and park again. */
+/* A second of the park (CONFIG_LR_PARK), what restarts it, 0: nothing: the switch moved, USB; after a low battery
+ * (low) also the charger charging, or the battery read (err 0) back at LR_PARK_UP_MV. Switched off, charging is no
+ * reason: on a board that cannot see VBUS, every boot would find the switch off and park again. */
 #define LR_PARK_UP_MV 3600  // a cell rested after the 3.3 V cut reads ~3.35-3.45 V: this is charging
-static inline bool lr_park_wake(bool moved, bool usb, bool low, bool charging, int err, uint16_t mv)
+enum { LR_WAKE_SWITCH = 1, LR_WAKE_USB = 2, LR_WAKE_CHARGING = 4, LR_WAKE_BATTERY = 8 };
+static inline uint32_t lr_park_wake(bool moved, bool usb, bool low, bool charging, int err, uint16_t mv)
 {
-    return moved || usb || (low && (charging || (!err && mv >= LR_PARK_UP_MV)));
+    return (moved ? LR_WAKE_SWITCH : 0) | (usb ? LR_WAKE_USB : 0) | (low && charging ? LR_WAKE_CHARGING : 0) |
+           (low && !err && mv >= LR_PARK_UP_MV ? LR_WAKE_BATTERY : 0);
+}
+
+/* The park's end, POWER a 3's b: the seconds parked (bits 0-27, saturating at ~8.5 years) | lr_park_wake << 28 */
+#define LR_PARK_S_MAX 0x0FFFFFFFu
+static inline uint32_t lr_park_end(uint32_t s, uint32_t wake)
+{
+    return (s < LR_PARK_S_MAX ? s : LR_PARK_S_MAX) | wake << 28;
 }
 
 #endif

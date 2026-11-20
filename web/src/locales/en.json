@@ -196,6 +196,8 @@
     "otherListen": "Listen to {d}",
     "other": "{d} recorded this too",
     "regenerating": "Regenerating the summary",
+    "toLive": "Marked as said here",
+    "unLive": "Put back",
     "made": "AI summary · {at}, by {model}",
     "madeLive": "AI summary · {at}, by {model}, written by the live analysis",
     "noteThanks": "Thanks, we'll use this to improve",
@@ -258,6 +260,28 @@
     "transcript": "Transcript",
     "sentences": "{n} sentence | {n} sentences",
     "tooShort": "Less than 60 s of speech, so no summary",
+    "place": {
+      "maybe": "Probably at: {place}",
+      "you": "You said",
+      "said": "{who} said",
+      "labels": {
+        "home": "Home",
+        "office": "Lab or office",
+        "car": "In a car",
+        "train": "Metro or train",
+        "restaurant": "Restaurant",
+        "outdoors": "Outdoors",
+        "shop": "Shop",
+        "other": "Elsewhere"
+      },
+      "sound": {
+        "vehicle": "Vehicle noise {n} min",
+        "music": "Music {n} min",
+        "speech": "Speech {n} min",
+        "quiet": "Quiet {n} min"
+      },
+      "hint": "Guessed by AI from the sentences and the sound around; may be wrong"
+    },
     "todos": "To-dos",
     "aiRequests": "Tasks for the AI · {n}",
     "decisions": "Decisions",
@@ -393,6 +417,12 @@
     "empty": "No transcript this day",
     "toLatest": "Jump to latest"
   },
+  "scrub": {
+    "live": "Jump through the day's conversations",
+    "conv": "Jump through the conversation by time",
+    "going": "going on",
+    "loose": "outside any conversation"
+  },
   "liveCard": {
     "going": "Conversation going on",
     "full": "Full screen",
@@ -436,9 +466,11 @@
     "version": "server version {commit}",
     "engine": "speech engine {engine}",
     "stars": "Starred",
-    "starsEmpty": "Press and hold a sentence to copy it, star it or fix who said it",
+    "starsEmpty": "Press and hold a sentence to copy it, star it, report a problem or fix who said it",
     "starsAll": "All {n}",
     "starsLess": "Show less",
+    "reports": "Reported problems",
+    "reportsEmpty": "Press and hold a sentence, then Report a problem",
     "older": "Earlier devices ({n})",
     "terms": "Terms",
     "termsSub": "Names, companies, products and jargon, spelled right in transcripts and summaries"
@@ -468,7 +500,13 @@
     "history": "Past imports"
   },
   "mediaFold": {
-    "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences"
+    "line": "Media {from}–{to} · {n} sentence | Media {from}–{to} · {n} sentences",
+    "media": "Played aloud {from}–{to} · {n} sentence | Played aloud {from}–{to} · {n} sentences",
+    "broadcast": "Announcement/prompt {from}–{to} · {n} sentence | Announcement/prompt {from}–{to} · {n} sentences",
+    "live": "Said here",
+    "marked": "Marked as said here",
+    "unMedia": "Back to played aloud",
+    "unBroadcast": "Back to announcement/prompt"
   },
   "monthGrid": {
     "min": "{n}m"
@@ -522,6 +560,7 @@
       "hints": "Name hints",
       "profile": "Profiles",
       "recap": "Daily recap",
+      "resolve": "To-do check",
       "live": "Live analysis",
       "ask": "Ask AI",
       "late": "Late audio"
@@ -663,6 +702,7 @@
       "PHONE": "Phone takes the stream",
       "FORMAT": "Format the card",
       "NVS_FAIL": "Erase record not saved",
+      "GAIN": "Mic gain",
       "unknown": "Unknown event"
     },
     "reset": {
@@ -724,14 +764,21 @@
     },
     "switch": {
       "0": "recording",
-      "1": "power off (System OFF; flip the switch or plug in USB to wake)",
+      "1": "power off (flip the switch or plug in USB to wake)",
       "2": "USB plugged in, not recording",
       "3": "restart"
     },
     "power": {
       "0": "on battery, VDDH {mv} mV",
       "1": "brownout warning: VDDH below 3.3 V or VDD below 2.8 V",
-      "2": "battery too low ({mv} mV): recording stopped, powered off (System OFF); plug in USB or flip the switch to wake"
+      "2": "battery too low ({mv} mV): recording stopped, powered off; plug in USB or flip the switch to wake",
+      "3": "back on after {took} off, woken by {why}"
+    },
+    "wake": {
+      "switch": "the switch",
+      "usb": "USB",
+      "charging": "charging",
+      "battery": "the battery back at 3.6 V"
     },
     "ok": "success",
     "powerOn": "power-on",
@@ -747,6 +794,9 @@
     "phoneRecovered": "{b} B left in RAM by the last reset written to the card: {file}.BIN",
     "formatDone": "{gb} GB card formatted as {fs} in {s} s",
     "nvsFail": "settings did not take the block about to be erased, twice; erased anyway ({n}, first this boot)",
+    "gain": "mic gain {from} → {to} dB",
+    "gainUnkept": "mic gain {db} dB not saved: {err}; the next boot takes the saved one",
+    "gainBad": "saved mic gain unreadable ({n} B: {b}), default 0 dB in force",
     "formatFail": "{gb} GB card not formatted: {why}",
     "formatWhy": {
       "5": "the format failed",
@@ -818,7 +868,9 @@
     "of": "Recap of {day}",
     "mine": "My to-dos",
     "people": "People I talked with",
-    "person": "{who}: {note}"
+    "person": "{who}: {note}",
+    "autoClosed": "Closed {n} to-do automatically | Closed {n} to-dos automatically",
+    "dueToday": "{n} due today"
   },
   "record": {
     "recording": "Recording",
@@ -876,6 +928,7 @@
       "unsure": "not sure"
     },
     "picked": "Got it: in new conversations from now on, what you say shows as “Me”. Existing conversations stay as they are.",
+    "pickedMusic": "Not saved this time: the voice you picked had music under it, or it could not be checked. You will be asked again.",
     "later": "OK, we'll ask again tomorrow.",
     "none": "OK, we'll ask again once there's more recorded.",
     "title": "Which one is you?",
@@ -902,6 +955,7 @@
     "doneYes": "Got it.",
     "doneNo": "Got it: not them.",
     "doneLater": "OK, this one will not be asked again.",
+    "doneMusic": "Got it. These sentences had music under them, so no voiceprint was learnt this time.",
     "stale": "This conversation was just renamed; the card no longer applies."
   },
   "nameCheck": {
@@ -1025,7 +1079,9 @@
     "overdue": "{n} day overdue | {n} days overdue",
     "tentative": "tentative",
     "maybeDone": "Maybe done: {q}",
-    "done": "Done"
+    "done": "Done",
+    "said": "Said once | Said {n} times",
+    "notDone": "Not done yet"
   },
   "todoMarks": {
     "doneToast": "Marked done",
@@ -1034,6 +1090,14 @@
     "markDone": "Mark as done",
     "more": "More",
     "notTodo": "Wrong: not a to-do"
+  },
+  "autoTodos": {
+    "title": "Sorted automatically",
+    "done": "Done",
+    "dropped": "Dropped",
+    "stale": "Probably not needed",
+    "hint": "Maybe done",
+    "why": "{kind}: {reason}"
   },
   "todos": {
     "week": "This week",
@@ -1077,7 +1141,12 @@
     "save": "OK",
     "fixed": "This sentence is now {to}",
     "fixedLearn": "This sentence is now {to}; learning their voice from it",
-    "fixedBack": "Changed back to {to}"
+    "fixedBack": "Changed back to {to}",
+    "report": "Report a problem",
+    "reportWhat": "What's wrong here?",
+    "reportSend": "Send",
+    "cancel": "Cancel",
+    "reported": "Reported"
   },
   "terms": {
     "intro": "Put the names, companies, products and jargon you use here: speech recognition listens for them, and summaries and answers fix words that sound like them.",
@@ -1090,5 +1159,34 @@
     "empty": "No terms yet.",
     "names": "Names added for you",
     "namesSub": "People you named on the People page are added by themselves."
+  },
+  "sound": {
+    "title": "Ambient sound",
+    "hint": "Guessed by a model from the sound, may be wrong; tap a stretch for details",
+    "tag": {
+      "music": "🎵 Maybe music {n} min",
+      "vehicle": "🚗 Maybe in a vehicle {n} min",
+      "quiet": "🤫 Maybe quiet {n} min"
+    },
+    "mostlyQuiet": "🤫 Maybe mostly quiet",
+    "ev": {
+      "speech": "Speech",
+      "music": "Music",
+      "vehicle": "Vehicle",
+      "quiet": "Quiet"
+    },
+    "filter": {
+      "music": "🎵 Music",
+      "vehicle": "🚗 In a vehicle",
+      "quiet": "🤫 Quiet"
+    },
+    "maybe": "Maybe: ",
+    "nothing": "Sound, but none of these",
+    "wrong": "Wrong",
+    "wrongLabel": "{what}: wrong",
+    "undo": "Undo “wrong”",
+    "marked": "Noted: not “{what}” here",
+    "open": "Open the conversation",
+    "play": "Play this minute"
   }
 }

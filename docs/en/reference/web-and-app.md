@@ -19,7 +19,7 @@ The server serves the web pages (`web/` builds into `server/alldayrec/static/dis
 | `/calendar` | 日历 (Calendar) | How many conversations each day has |
 | `/speakers` | 人物 (People) | Recognized speakers |
 | `/p/<name>` | 人物 (Person) | One person's conversations, points and to-dos |
-| `/me` | 我的 (Me) | Every device that has recorded, with its battery (a Feishu recorder bean also shows its charging case's), free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices)), the sentences under 「收藏」 (Starred) (each opens its conversation's transcript), links to the to-dos and the pages below, and the page language |
+| `/me` | 我的 (Me) | Every device that has recorded, with its battery (a Feishu recorder bean also shows its charging case's), free card space and lag (those whose last recording is over 7 days old fold under 「更早的设备」 (Earlier devices)), the sentences under 「收藏」 (Starred) and 「我上报的问题」 (Reported problems) (each opens its conversation's transcript, or the live page at its time while the conversation goes on), links to the to-dos and the pages below, and the page language |
 | `/progress` | 处理进度 (Progress) | How far along transcription and summaries are, AI calls and the system log |
 | `/device/<name>` | 设备日志 (Device log) | One device's events and status history |
 | `/connect` | 连接手机 (Connect a phone) | The Android app download, the QR code to sign in by scanning (with the app: fills in the address and token; with the phone camera: opens the web UI signed in), and the settings for connecting AI (MCP) |
@@ -56,3 +56,15 @@ Of the app's four bottom tabs, **时间线** (Timeline), **实时** (Live) and *
 | 设备名 (Device name) | Read-only, taken from the phone name in the system settings; a Bluetooth recorder's audio is uploaded under the recorder's own name |
 | 本地保留录音 (Keep recordings on the phone) | Keeps a copy on the phone after upload: on iOS in the Files app › On My iPhone › AllDayRec › recordings › date; on Android in `Android/data/com.suyiiyii.live_record/files/recordings/<date>/` |
 | 切片长度（服务端下发） (Piece length, set by the server) | Read-only: seconds of audio per piece in the foreground and in the background (and with the screen off on Android), set by the server's `SLICE_*` variables |
+
+### Capture gain and what is reported
+
+The standard: the wearer's normal speech at −26 dBov (ITU-T P.56). It takes two steps: a gain at capture on the device (as high as it goes without clipping), then a per-device calibration offset the server multiplies in after decoding. The app only reports its capture gain; it never sets the server's offset.
+
+| Source | Capture gain | Reported |
+|---|---|---|
+| iPhone microphone | **+6 dB** in float before the encoder; a sample still under 0.9 of full scale after the gain is exactly the input times the gain, past 0.9 a tanh soft limiter keeps it at most full scale. The AVAudioSession runs in `.measurement` mode (no voice processing by the system) | Each piece is named with the gain it was recorded with (`<start>_g6_<n>.ogg`) and uploaded with it as `capture_gain_db=6`; pieces recorded by an app before this one go up without the field. A `capture` event in the device log records `capture_gain_db`, `session_mode`, `input_gain`, `input_gain_settable` |
+| Android microphone | **0 dB**, source `MIC` | Each uploaded piece carries `capture_gain_db=0`; a `capture` event in the device log records `capture_gain_db`, `audio_source` |
+| Bluetooth recorder | The recorder's own PDM gain (firmware); the app adds none | Read from byte 53 of its TIME status as `mic_gain_db = int8 / 2` (dB, 0 = 0x28) and sent with its status (`/api/device-status`); older firmware has a 53-byte TIME, and the value is null |
+
+The app writes a `capture` event only when one of its values differs from the last one it logged (kept across recordings and app launches). For the gains themselves, the server's gain history adds a row only when a value changes. A change of capture gain needs a new calibration of the offset.

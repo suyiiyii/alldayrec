@@ -641,6 +641,21 @@ do {
   let line = try! String(contentsOf: dir.appendingPathComponent("devlog.jsonl"), encoding: .utf8)
   let e = try! JSONSerialization.jsonObject(with: Data(line.utf8)) as! [String: Any], data = e["data"] as! [String: Any]
   check([e["device"], data["kind"], data["step"], data["to"]].map { $0 as? String }, ["LR-P3-116C", "dfu", "start", new], "queued event")
+
+  // the capture event (Recorder.swift logCapture): once per values, not per recording; the last ones in prefs, so a
+  // relaunch with the same values adds none
+  let capture = { (g: Double) in DeviceLog.appChanged("phone", "capture", "采集", fields: ["capture_gain_db": g, "input_gain": Float(0.501)]) }
+  capture(6); capture(6)
+  capture(0); capture(0)
+  let kinds = try! String(contentsOf: dir.appendingPathComponent("devlog.jsonl"), encoding: .utf8).split(separator: "\n").map {
+    ((try! JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any])["data"] as! [String: Any])["capture_gain_db"] as? Double
+  }
+  check(kinds, [nil, 6, 0], "capture: logged when a value changed")
+  let suite = "storecheck-\(UUID().uuidString)"
+  check(DeviceLog.changed(UserDefaults(suiteName: suite)!, "logLast:capture:phone", "a"), true, "first value")
+  check(DeviceLog.changed(UserDefaults(suiteName: suite)!, "logLast:capture:phone", "a"), false, "same value after a relaunch")
+  check(DeviceLog.changed(UserDefaults(suiteName: suite)!, "logLast:capture:phone", "b"), true, "a new value")
+  UserDefaults.standard.removePersistentDomain(forName: suite)
 }
 
 // ACK (StoreTest.kt UsbDiskTest.ack's case): only to a board that says it takes one; the file and how much of it the
@@ -650,6 +665,46 @@ do {
   check([old, old + [0], old + [1], old + [3, 9]].map(Store.acks), [false, false, true, true], "acks")
   check(Store.ack(0x0003_0002, 0x54_3210), [8, 0x02, 0x00, 0x03, 0x00, 0x10, 0x32, 0x54, 0x00], "ack")
   check(Store.ack(0xFFFF_FFFF, 0xFFFF_FFFF), [8] + [UInt8](repeating: 0xFF, count: 8), "ack at the top")
+}
+
+// the board's mic gain in TIME (firmware #358 byte 53): none in 53 bytes, int8 half dB in 54
+do {
+  let old = [UInt8](repeating: 0, count: 53)
+  check(Store.micGainDb(old), nil, "53 bytes: older firmware")
+  check([0, 12, 0xF4, 40, 0xD8].map { Store.micGainDb(old + [$0]) }, [0, 6, -6, 20, -20], "54 bytes")
+}
+
+// the phone's capture gain (Capture.louder): x times the gain under the knee, never past full scale
+do {
+  let g = Float(pow(10, Capture.gainDb / 20))
+  var x = (0..<2001).map { Float($0 - 1000) / 1000 * 3 }  // -3 .. 3 full scale
+  let before = x
+  x.withUnsafeMutableBufferPointer { Capture.louder($0) }
+  for (a, y) in zip(before, x) where abs(a * g) <= Capture.knee { check(y, a * g, "under the knee: \(a)") }
+  check(x.allSatisfy { abs($0) <= 1 }, true, "at most full scale")
+  check(zip(before, x).allSatisfy { a, y in (y > 0) == (a > 0) || a == 0 }, true, "sign kept")
+  check(zip(x, x.dropFirst()).allSatisfy { $0 <= $1 }, true, "monotonic")
+  check(abs(20 * log10(Double(x[1000 + 100] / before[1000 + 100])) - 6) < 0.001, true, "+6 dB")  // 0.3 in, 0.6 out
+  var loud: [Float] = [1e6, -1e6, .greatestFiniteMagnitude]
+  loud.withUnsafeMutableBufferPointer { Capture.louder($0) }
+  check(loud.map(abs).allSatisfy { $0 <= 1 }, true, "far past full scale")
+  var odd: [Float] = [.nan, -.nan, .infinity, -.infinity]
+  odd.withUnsafeMutableBufferPointer { Capture.louder($0) }
+  check(odd, [0, 0, 1, -1], "no NaN into the encoder")
+}
+
+// a queued file's name (Store.piece): the gain it was recorded with, none in a name from an app before
+do {
+  let p = { (name: String) in Store.piece(URL(fileURLWithPath: "/q/\(name)")).map { "\($0.start) \($0.n ?? -1) \($0.device ?? "-") \($0.gainDb ?? -99)" } }
+  check(p("1000_g6_16000.ogg"), "1000 16000 - 6.0", "microphone piece")
+  check(p("1000_g6.ogg"), "1000 -1 - 6.0", "cut short by a kill")
+  check(p("1000_g-1.5_160.ogg"), "1000 160 - -1.5", "another gain")
+  check(p("1000_16000.ogg"), "1000 16000 - -99.0", "from an app before: no gain")
+  check(p("1000.ogg"), "1000 -1 - -99.0", "cut short, from an app before")
+  check(p("1000.aac"), "1000 -1 - -99.0", "AAC from an app before")
+  check(p("1000@LR-P1-0A0B.ogg"), "1000 -1 LR-P1-0A0B -99.0", "a BLE recorder's")
+  check(["1000_g6.part.ogg", "1000.part.ogg", "1000_gx_5.ogg", "1000_g6_5_6.ogg", "1000_5_g6.ogg", "1000_g6.wav", "x.ogg"].map { p($0) },
+        Array(repeating: nil, count: 7), "not a piece")
 }
 
 // an upload's answer (UploadAnswer, live-record#328): only the server's own "not audio" drops the pieces

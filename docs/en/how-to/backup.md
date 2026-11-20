@@ -34,7 +34,7 @@ Do this for every tenant, with the path changed to its `data` directory in `tena
    docker compose stop
    ```
 
-2. Put the backed-up `data` directory (or one tenant's `live.db` from it) back in place.
+2. Put the backed-up `data` directory (or one tenant's `live.db` from it) back in place. Put back only whole database files (from the stopped-server archive, or copied with the SQLite backup API above); never rebuild a database from a SQL dump (`.dump`, `iterdump()`) or with `INSERT … SELECT`: the per-segment voiceprints (`seg_emb`) and the sentences each voiceprint was learnt from (`enrolled`) point at sentences by `rowid`, which a rebuild renumbers, and they no longer match their own sentences.
 3. Start it:
 
    ```bash

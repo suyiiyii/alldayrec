@@ -23,10 +23,13 @@ from alldayrec import audio
 from alldayrec import core
 from alldayrec import db
 from alldayrec import device_pipeline
+from alldayrec import gain
+from alldayrec import infer
 from alldayrec import monitor
 from alldayrec import perf
 from alldayrec import pipeline_state
 from alldayrec import server
+from alldayrec import sounds
 from alldayrec import summary
 from alldayrec import tenant
 from alldayrec import ws
@@ -69,6 +72,8 @@ def seed(t: tenant.Tenant):
             c.execute("INSERT INTO people VALUES (?, 1, ?)", (f"{mark}人", db.blob(VEC)))
             c.execute("INSERT INTO aliases VALUES (?, ?)", (f"{mark}哥", f"{mark}人"))
             c.execute("INSERT INTO terms VALUES (?, ?)", (f"{mark}词", AT))
+            c.execute("INSERT INTO reports (at, note, page, sentence, device, start, row) VALUES (?, ?, 'live', 'f1', ?, ?, '{}')",
+                      (AT, f"{mark} 上报", DEV, AT))
             db.put_name_hints({"conv": CID, "names": [{"who": "S1", "name": f"{mark}人", "kind": "self", "at": AT, "by": "S1", "quote": mark}]}, c)
             db.put_kv(f"recap:{TODAY}", {"date": TODAY, "headline": mark, "todos": [], "highlights": [], "people": []}, c)
         db.put_profile({"name": f"{mark}人", "facts": [{"text": mark, "src": []}]})
@@ -76,6 +81,11 @@ def seed(t: tenant.Tenant):
         db.put_device_log(DEV, [{"src": "app", "seq": 1, "at": AT, "data": {"kind": mark}},
                                 {"src": "app", "seq": 3, "at": AT, "data": {"kind": "mic_lost", "reason": mark}}])  # GET /api/phone-spans
         db.add_device_status(DEV, AT, {"battery": 50, "note": mark})
+        gain.put(DEV, 0, 3.0, note=mark)  # GET /api/device-gain; /api/audio, /api/listen: each its own offset
+        with db.tx() as c:  # a quiet minute of a's own (/api/sounds/day, a conversation's tags) and a 不对 on it
+            sounds.write(c, DEV, "mn10_as", sounds.row("mn10_as", MS, np.full(60 * SR, 5, np.int16), np.full((6, 527), 0.01, np.float32)), (), 3.0)
+            c.execute("INSERT INTO sound_wrong (at, device, start_ms, end_ms, event, model, conv) VALUES (?, ?, ?, ?, 'quiet', 'mn10_as@x', ?)",
+                      (AT, DEV, MS, MS + 60_000, mark))
         db.add_call("final", f"engine-{mark}", DEV, 100)
         db.add_balance("stepfun", 1.0)
         audio.save(DEV, MS, OGG, "audio/ogg")
@@ -83,6 +93,8 @@ def seed(t: tenant.Tenant):
         (t.data / "voices" / "clips" / f"{mark}.ogg").write_bytes(OGG)
     tenant.call(t, store)
     t.events.append({"type": "event", "at": AT, "kind": "info", "text": mark})
+    t.sound = True  # SOUND_MODEL: the fixture two
+    t.voice_tools = True
     t.devices[DEV] = pipeline_state.PipelineState(
         conversation={"start": f"{TODAY}T11:00:00.000", "end": f"{TODAY}T11:01:00.000", "sentences": 1, "speech_s": 30,
                       "device": DEV, "note": mark},
@@ -128,6 +140,10 @@ REQUESTS = {
     ("GET", "/api/days"): ("GET", "/api/days", {}),
     ("GET", "/api/calendar"): ("GET", "/api/calendar", {}),
     ("GET", "/api/search"): ("GET", "/api/search", dict(params={"q": "说的话"})),
+    ("GET", "/api/sounds/day"): ("GET", "/api/sounds/day", dict(params={"date": TODAY})),
+    ("POST", "/api/sounds/wrong"): ("POST", "/api/sounds/wrong", dict(json={"device": DEV, "start_ms": MS, "end_ms": MS + 60_000, "event": "quiet", "conv": "MARKa"})),
+    ("DELETE", "/api/sounds/wrong/{wrong_id}"): ("DELETE", "/api/sounds/wrong/999", {}),  # none of a's: 404
+    ("GET", "/api/sounds/wrong"): ("GET", "/api/sounds/wrong", {}),
     ("POST", "/api/ask"): ("POST", "/api/ask", dict(json={"q": "说过什么？"})),
     ("POST", "/api/ask/live/{device}"): ("POST", f"/api/ask/live/{DEV}", dict(json={"start": MS, "end": MS + 2000})),
     ("POST", "/api/ask/voice"): ("POST", "/api/ask/voice", dict(content=OGG, headers={"content-type": "audio/ogg"})),
@@ -139,6 +155,8 @@ REQUESTS = {
     ("DELETE", "/api/mcp-links/{link_id}"): ("DELETE", "/api/mcp-links/not-present", {}),
     ("GET", "/api/recap"): ("GET", "/api/recap", {}),
     ("GET", "/api/todos/due"): ("GET", "/api/todos/due", {}),
+    ("GET", "/api/todos/auto"): ("GET", "/api/todos/auto", {}),
+    ("DELETE", "/api/todos/{todo_id}/auto"): ("DELETE", f"/api/todos/{TODO}/auto", {}),
     ("PUT", "/api/todos/{todo_id}/mark"): ("PUT", f"/api/todos/{TODO}/mark", dict(json={"mark": "done"})),
     ("DELETE", "/api/todos/{todo_id}/mark"): ("DELETE", f"/api/todos/{TODO}/mark", {}),
     ("POST", "/api/todos/marks"): ("POST", "/api/todos/marks", dict(json={"ids": [TODO], "mark": "wrong"})),
@@ -147,6 +165,8 @@ REQUESTS = {
     ("GET", "/api/conversation/{conv_id}"): ("GET", f"/api/conversation/{CID}", {}),
     ("POST", "/api/conversation/{conv_id}/feedback"): ("POST", f"/api/conversation/{CID}/feedback", dict(json={"text": "不对"})),
     ("GET", "/api/feedback"): ("GET", "/api/feedback", {}),
+    ("POST", "/api/conversation/{conv_id}/live"): ("POST", f"/api/conversation/{CID}/live", dict(json={"from": AT, "to": AT})),
+    ("DELETE", "/api/conversation/{conv_id}/live"): ("DELETE", f"/api/conversation/{CID}/live", dict(json={"from": AT, "to": AT})),
     ("POST", "/api/conversation/{conv_id}/summarize"): ("POST", f"/api/conversation/{CID}/summarize", {}),
     ("GET", "/api/names"): ("GET", "/api/names", {}),
     ("POST", "/api/conversation/{conv_id}/rename"): ("POST", f"/api/conversation/{CID}/rename", dict(json={"from": "S1", "to": "MARKa人"})),
@@ -171,10 +191,17 @@ REQUESTS = {
     ("POST", "/api/voice-check"): ("POST", "/api/voice-check", dict(json={"answer": "later"})),
     ("GET", "/api/audio"): ("GET", "/api/audio", dict(params={"start": AT, "end": f"{TODAY}T10:00:06.000", "device": DEV})),
     ("GET", "/api/listen"): ("GET", "/api/listen", dict(params={"device": DEV})),
-    ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"conv": CID})),
+    ("GET", "/api/device-gain"): ("GET", "/api/device-gain", {}),
+    ("PUT", "/api/sentences/{sid}/star"): ("PUT", "/api/sentences/f1/star", dict(json={"device": DEV})),
+    ("POST", "/api/sentences/{sid}/report"): ("POST", "/api/sentences/f1/report",
+                                              dict(json={"note": "MARKa 上报", "page": "live", "row": {"start": AT, "source": DEV}})),
+    ("GET", "/api/reports"): ("GET", "/api/reports", {}),
     ("GET", "/api/stars"): ("GET", "/api/stars", {}),
     ("DELETE", "/api/sentences/{sid}/star"): ("DELETE", "/api/sentences/f1/star", {}),
     ("POST", "/api/sentences/{sid}/speaker"): ("POST", "/api/sentences/f1/speaker", dict(json={"conv": CID, "to": "我"})),
+    ("GET", "/api/voiceprint"): ("GET", "/api/voiceprint", dict(params={"sentence": "f1"})),  # its audio: a's recording
+    ("GET", "/api/voiceprint/compare"): ("GET", "/api/voiceprint/compare", dict(params={"sentence": "f1", "person": "MARKa人"})),
+    ("GET", "/api/voiceprint/nearest"): ("GET", "/api/voiceprint/nearest", dict(params={"sentence": "f1"})),  # a's people only
 }
 SHARED = {  # routes with no tenant data: the same for every tenant, by design
     "/": "the web app's page", "/conversations": "page", "/c/{conv_id}": "page", "/record": "page", "/import": "page", "/speakers": "page",
@@ -221,6 +248,7 @@ def two(tmp_path, monkeypatch):
         seed(t)
     monkeypatch.setattr(core, "TENANTS", [a, b])
     monkeypatch.setitem(core.state, "embed", lambda x: VEC)
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")  # every tenant's sound events on (seed)
     return a, b
 
 
@@ -334,6 +362,7 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     queue position and diarists; a rename in one teaches only its own diarists."""
     rig(tmp_path, monkeypatch, hear)  # the fake VAD, engines and LLM
     a, b = make(tmp_path, "a", "ta"), make(tmp_path, "b", "tb")
+    a.seg_emb = True  # a keeps its segments' voiceprints, b (as by default) does not
     silence = np.zeros(PIECE_S * SR, np.int16)
     t0 = dt.datetime.fromtimestamp(round(dt.datetime.now().timestamp()) - 6 * PIECE_S)
     tones = {a: (1, 2), b: (51, 52)}
@@ -372,6 +401,15 @@ def test_pipelines_side_by_side(tmp_path, monkeypatch):
     assert a.devices[DEV].seg is not b.devices[DEV].seg
     assert len(dias["a"]) == len(dias["b"]) == 2 and not set(map(id, dias["a"])) & set(map(id, dias["b"])), "each its own diarists"
     assert not a.dias and not b.dias, "gone with their pipelines"
+    embs = {t.id: tenant.call(t, lambda: db.conn().execute("SELECT * FROM seg_emb ORDER BY start_ms").fetchall()) for t in (a, b)}
+    rows = tenant.call(a, db.sentences, core.iso(t0), "~", False, DEV)
+    assert [(r["device"], r["part"], r["engine_speaker"], r["model"], r["gain_db"]) for r in embs["a"]] == [(DEV, 0, "SPEAKER_0", f"redimnet2-b6.onnx@{infer.MODELS[infer.EMB][:12]}", 0.0)] * 2
+    owners = tenant.call(a, lambda: [r[0] for r in db.conn().execute("SELECT s.id FROM seg_emb e JOIN sentences s ON s.rowid = e.sentence AND s.source = e.device"
+                                                                    " AND s.start = e.sentence_start ORDER BY e.start_ms")])
+    assert owners == [r["id"] for r in rows], "each with its own row"
+    assert [(r["start_ms"], r["end_ms"]) for r in embs["a"]] == [tuple(int(dt.datetime.fromisoformat(r[k]).timestamp() * 1000) for k in ("start", "end")) for r in rows]
+    assert all(np.allclose(np.frombuffer(r["e"], np.float16), [0, 1, 0, 0]) for r in embs["a"]), "the voiceprint the diarist took, as float16"
+    assert embs["b"] == [], "off: nothing kept"
 
 
 def test_outside_any_tenant():
@@ -414,13 +452,16 @@ def test_nothing_per_person_in_a_module():
     """The modules the server runs keep no mutable state at module level but these (none of them a person's): a cache
     or a dict added there would be shared by every tenant."""
     allowed = {"core": {"TENANTS", "state", "NO_CACHE"}, "asr": {"PROVIDERS", "refused_at", "REJECTED"}, "monitor": {"CHARGE"}, "db": {"_local"}, "ask": {"TOOLS", "SPECS"},
-               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST"},
+               "conversations": {"IGNORE"}, "hints": {"NOT_NAMES"}, "mcp_server": {"SERVER", "S", "CURSOR", "DATE", "READ", "TOOLS", "N", "EVIDENCE", "READ_LIST", "SOUND_WORDS", "SPAN", "REF"},
                "infer": {"MODELS", "SOURCES", "@cache _vad"},  # the model files' hashes and URLs; the VAD model, loaded once for everyone
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
                "music": {"@cache _yamnet"},  # the music model, loaded once for everyone like the VAD
+               "sound": {"MODELS", "@cache _session", "@cache _remote"},  # the scene models' settings and sessions, the service's client: everyone's
+               "sound_events": {"CLASSES", "THRESH"},  # each model's AudioSet classes of an event and its thresholds, read only
                "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)
+               "place": {"LABELS", "SOUNDS"},  # the prompt's categories and sound events, read only
                "compute": {"CALLS"}, "infer_server": {"state"}}  # calls to the inference service by op and result; its model and token
     # asr's: the engines that refused the hotwords and how often (an engine's, at its endpoint, for everyone)
     here = Path(server.__file__).parent

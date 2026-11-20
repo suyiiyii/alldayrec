@@ -22,7 +22,9 @@ from alldayrec import local_asr
 from alldayrec import mcp_server
 from alldayrec import mcp_links
 from alldayrec import qwen_stream
+from alldayrec import sound_events
 from alldayrec import split
+from alldayrec import summary
 from alldayrec import tenant
 from alldayrec import threads
 from alldayrec.core import conversation_rows, find_conversation, queue_summary, tag_counts
@@ -100,8 +102,9 @@ async def sentences(date: str | None = None):
 async def conversations(date: str | None = None):
     day = dt.date.fromisoformat(date) if date else dt.date.today()
     closed = db.conversations(day.isoformat(), (day + dt.timedelta(days=1)).isoformat())
-    return closed + [{**st.conversation, "state": "open"} for st in T().devices.values()
-                     if st.conversation and st.conversation["start"][:10] == day.isoformat()]
+    return await anyio.to_thread.run_sync(sound_events.with_tags, closed + [
+        {**st.conversation, "state": "open"} for st in T().devices.values() if st.conversation and st.conversation["start"][:10] == day.isoformat()],
+        limiter=threads.DB)
 
 
 @router.get("/api/days")
@@ -123,9 +126,57 @@ async def calendar():
 
 
 @router.get("/api/search")
-async def search(q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30):
-    """db.search; `before` is the start of the last one already shown."""
-    return db.search(q, tag, who, after, before, limit)
+async def search(response: Response, q: str = "", tag: str = "", who: str = "", after: str = "", before: str = "", limit: int = 30,
+                 sound: str = ""):
+    """db.search; `before` is the start of the last one already shown. sound (music, vehicle, quiet): only those with
+    that sound tag (sound_events.search; the tenant's sound off: ignored). Looking at only so many conversations per
+    call, it may stop before `limit`: then the header X-Searched-To is where it stopped, the `before` to go on with."""
+    if sound and sound_events.model():
+        if sound not in ("music", "vehicle", "quiet"):
+            raise HTTPException(400, "sound is music, vehicle or quiet")
+        cs, to = await anyio.to_thread.run_sync(sound_events.search, sound, q, tag, who, after, before, limit, limiter=threads.DB)
+        if to:
+            response.headers["X-Searched-To"] = to
+        return cs
+    return await anyio.to_thread.run_sync(sound_events.with_tags, db.search(q, tag, who, after, before, limit), limiter=threads.DB)
+
+
+@router.get("/api/sounds/day")
+async def sounds_day(date: str):
+    """The day's sound events by device, as runs of minutes (sound_events.day): [] while the tenant's sound is off."""
+    try:
+        dt.date.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(400, "date is YYYY-MM-DD") from None
+    return await anyio.to_thread.run_sync(sound_events.day, date, limiter=threads.DB)
+
+
+@router.post("/api/sounds/wrong")
+async def sound_wrong(body: dict):
+    """不对 on a sound event: {device, start_ms, end_ms, event, conv?} kept with its model (sound_events.wrong): {id}."""
+    if not sound_events.model():
+        raise HTTPException(404, "[no_sound] 环境声音没有打开")
+    a, b = body.get("start_ms"), body.get("end_ms")
+    if body.get("event") not in sound_events.EVENTS or not isinstance(body.get("device"), str) or not all(
+            isinstance(x, int) and not isinstance(x, bool) for x in (a, b)) or a >= b:
+        raise HTTPException(400, "device, start_ms < end_ms (unix ms) and event, one of " + ", ".join(sound_events.EVENTS))
+    conv = body.get("conv") if isinstance(body.get("conv"), str) else None
+    return {"id": sound_events.wrong(body["device"], a, b, body["event"], conv)}
+
+
+@router.delete("/api/sounds/wrong/{wrong_id}")
+async def sound_wrong_undo(wrong_id: int):
+    """Take a 不对 back (撤销): its row deleted."""
+    with db.tx() as c:
+        if not c.execute("DELETE FROM sound_wrong WHERE id = ?", (wrong_id,)).rowcount:
+            raise HTTPException(404, "no such mark")
+    return {"ok": True}
+
+
+@router.get("/api/sounds/wrong")
+async def sound_wrongs():
+    """Every 不对 on a sound event, oldest first (the export for the gold labels)."""
+    return sound_events.wrongs()
 
 
 @router.post("/api/ask")
@@ -372,14 +423,15 @@ async def mcp_links_revoke(link_id: str, request: Request):
 @router.get("/api/recap")
 async def recap_get(date: str = ""):
     """A day's recap, the newest one when no day is given; null when there is none. Its todos as the due list has them
-    (id, the sentence, whom to), a todo marked done or wrong since left out."""
+    (id, the sentence, whom to), a todo closed since left out; auto: how many todos closed automatically that day
+    (closed) and, on yesterday's, how many of mine are due today (due)."""
     if date:
         r = db.kv(f"recap:{date}")
     else:
         row = db.conn().execute("SELECT value FROM kv WHERE key LIKE 'recap:%' ORDER BY key DESC LIMIT 1").fetchone()
         r = json.loads(row[0]) if row else None
     if r:
-        closed, al, hints, todos = db.closed_todos(), db.aliases(), db.done_hints(), []
+        closed, shut, al, auto, todos = db.closed_todos(), db.shut_todos(), db.aliases(), db.auto_marks(), []
         for x in r["todos"]:
             c, s = db.conversation(x["conv"]), db.summary(x["conv"]) or {}
             ts = s.get("todos") or []
@@ -392,12 +444,16 @@ async def recap_get(date: str = ""):
             if c and len(matches) == 1:
                 if matches[0][1].get("owner") != "我":  # a resolved action owned by someone else is not an orphan of mine
                     continue
-                v = {**x, **db.todo_view(c, s, *matches[0], closed, al, hints)}
+                v = {**x, **db.todo_view(c, s, *matches[0], closed, al, auto)}
             else:
                 v = {**x, "id": None} if x.get("id") else x
-            if v.get("id") not in closed:
+            if v.get("id") not in shut:
                 todos.append(v)
         r["todos"] = todos
+        if r.get("date"):  # due: only yesterday's recap says it (today's), and due_todos reads every summary
+            nxt = (dt.date.fromisoformat(r["date"]) + dt.timedelta(days=1)).isoformat()
+            due = sum(t["due_date"] == nxt for t in db.due_todos(nxt)) if nxt == dt.date.today().isoformat() else 0
+            r["auto"] = {"closed": db.auto_closed_on(r["date"]), "due": due}
         for h in r.get("highlights") or []:
             if h.get("conv") and (c := db.conversation(h["conv"])):
                 h["participants"] = c["participants"]
@@ -411,6 +467,20 @@ async def todos_due():
 
 
 MARKS = ("done", "wrong")
+
+
+@router.get("/api/todos/auto")
+async def todos_auto(days: int = 14):
+    """The todos closed automatically in the last days (db.auto_todos), anyone's: why, and the sentence."""
+    return db.auto_todos((dt.datetime.now() - dt.timedelta(days=days)).isoformat(timespec="seconds"))
+
+
+@router.delete("/api/todos/{todo_id}/auto")
+async def todo_auto_undo(todo_id: str):
+    """The undo of a todo's automatic marks (its group's): open again, not closed again on the same sentence."""
+    if not db.todo(todo_id):
+        raise HTTPException(404, "no such todo")
+    return {"id": todo_id, "undone": db.undo_auto(todo_id)}
 
 
 @router.put("/api/todos/{todo_id}/mark")
@@ -494,11 +564,53 @@ async def conversation(conv_id: str):
         raise HTTPException(404, "no such conversation")
     conv_id = c["id"]
     s, closed = db.summary(conv_id), db.closed_todos()
-    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark), and a later sentence saying it is done
-        hints = db.done_hints()
-        s["todos"] = [{**t, "id": i, "mark": closed.get(i), "done_hint": hints.get(i)} for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
+    if s and s.get("todos"):  # each todo with its id and mark, for 完成 / 不对 (/api/todos/{id}/mark), and its automatic one
+        auto = db.auto_marks()
+        s["todos"] = [{**t, "id": i, "mark": closed.get(i), **{k: v[k] for v in [db.todo_view(c, s, i, t, closed, {}, auto)] for k in ("done_hint", "auto")}}
+                      for i, t in zip(db.todo_ids(conv_id, s["todos"]), s["todos"])]
+    tags = await anyio.to_thread.run_sync(sound_events.tags, c, limiter=threads.DB)
     return {**c, "summary": s, "timeline": live.public(t) if (t := db.timeline(conv_id)) else None, "feedback": db.feedback(conv_id),
-            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"])}
+            "rows": conversation_rows(c), "standby": colocate.stood_by(c.get("device"), c["start"], c["end"]), **({"sounds": tags} if tags else {}),
+            **({"media_view": True} if T().media_view else {})}
+
+
+@router.post("/api/conversation/{conv_id}/live")
+async def mark_live(conv_id: str, body: dict):
+    """改回现场 (tenant "media_view"): the rows from..to (two rows' starts) of kind media or broadcast were said in the
+    room: out of the summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind, for its undo.
+    The summary as it is now."""
+    return await live_mark(conv_id, body, True)
+
+
+@router.delete("/api/conversation/{conv_id}/live")
+async def unmark_live(conv_id: str, body: dict):
+    """恢复为外放 (tenant "media_view"): the mark from..to taken back, its rows of its kind again (summary.unmark_live)."""
+    return await live_mark(conv_id, body, False)
+
+
+async def live_mark(conv_id: str, body: dict, on: bool) -> dict:
+    c = find_conversation(conv_id)
+    if not c or not T().media_view:  # off: as if the route were not there
+        raise HTTPException(404, "no such conversation")
+    a, b, s = body.get("from"), body.get("to"), db.summary(c["id"])
+    if not (isinstance(a, str) and isinstance(b, str) and a <= b):
+        raise HTTPException(400, "from <= to: the first and last row's start")
+    if not s or s.get("status") != "done":
+        raise HTTPException(409, "no summary yet")
+    rows = conversation_rows(c)
+    if on:
+        kind, starts = body.get("kind"), {r["start"] for r in rows}
+        if kind not in ("media", "broadcast") or not {a, b} <= starts or not summary.in_media({"start": a}, s.get(kind + "_spans") or []):
+            raise HTTPException(400, "kind media or broadcast; from and to two rows' starts, from in a span of that kind")
+        s = summary.keep_live(s, (s.get("live_spans") or []) + [{"from": a, "to": b, "kind": kind}], rows)
+    elif mark := next((x for x in s.get("live_spans") or [] if (x["from"], x["to"]) == (a, b)), None):
+        s = summary.unmark_live(s, mark, rows)
+    else:
+        raise HTTPException(404, "no such mark")
+    with db.tx() as t:
+        db.put_summary(s, t)
+    T().speakers["at"] = 0.0  # media labels may have changed: the voice cards again
+    return db.summary(c["id"])
 
 
 @router.post("/api/conversation/{conv_id}/feedback")

@@ -112,7 +112,7 @@ def test_card_round_trip(tmp_path, monkeypatch):
 
     async def cut(start, end, fmt, device=None):
         n = int((dt.datetime.fromisoformat(end) - dt.datetime.fromisoformat(start)).total_seconds() * SR)
-        return (np.ones(n) * amp[start]).astype(np.int16).tobytes()
+        return (np.ones(n) * amp[start]).astype(np.int16)
     monkeypatch.setattr(routes_audio, "cut", cut)
     monkeypatch.setitem(core.state, "embed", lambda x: noisy(ME) if x.max() > 2000 else noisy(FR))
     monkeypatch.setattr(ws, "broadcast", lambda m: anyio.sleep(0))

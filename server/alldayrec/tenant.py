@@ -11,6 +11,23 @@ tenant, create(); server/tenants.sh adds tenants):
 A process with one tenant whose token is empty runs without auth, and only on loopback (HOST 127.0.0.1): elsewhere it
 won't start. "lang" (optional): the language the models write that tenant's summaries, recaps and answers in, zh or
 en; without it UI_LANG, else zh. One set by PUT /api/lang (the 我的 page's switch) is kept in the store and wins.
+"sound" (optional, false): true gives its audio scene scores when SOUND_MODEL is set (sounds.py). Its trims wait for
+them with SOUND_MODEL set either way (trim.py).
+"seg_emb" (optional, false): true keeps the voiceprint the final layer takes of each segment (db seg_emb): of everyone
+near the recorder, so off unless the tenant asks for it.
+"persona_v2" (optional, false): true makes a person's profile from their own sentences (profiles.evidence_v2), not
+from summary points; off, profiles are made as before.
+"place" (optional, false): true adds where the recorder probably was to each summary a model call writes, with its
+evidence (place.py: one more model call a conversation); off, summaries are as before.
+"place_sensitive" (optional, false): with "place" on, true lets the place be a medical, religious, political, police or
+court, rehab or LGBTQ one too (place.py SENSITIVE); off, such a place is never written.
+"voice_tools" (optional, false): true lets an agent (MCP, the HTTP API) read any sentence's voiceprint and compare it
+with other sentences and the known people's (voice_tools.py): from seg_emb when kept, else from the audio. Off, those
+tools are not there. Each its own choice: one keeps everyone's voiceprints, the other lets agents read them.
+"media_view" (optional, false): true asks the summary for three kinds (summary.MEDIA_SYSTEM, prompt_version 19): media
+played aloud, broadcasts (announcements, navigation, prompts, music: broadcast_spans) and live speech (a call on speaker
+is live); the conversation page folds each run with its kind and 改回现场, voiceprints learn no line of either, and the
+transcripts an agent reads (MCP, 问 AI) mark them. Off, all as before.
 """
 import contextvars
 import hmac
@@ -20,6 +37,7 @@ import os
 import secrets
 import sys
 import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -47,6 +65,13 @@ class Tenant:
     recordings: Path
     lang: str = "zh"  # what the models write in (summary.lang_line); PUT /api/lang's, kept in the store, wins (db.init)
     db: Path = None  # data / live.db unless given (a test's own file)
+    sound: bool = False  # tenants.json's "sound": scene scores (sounds.on)
+    seg_emb: bool = False  # tenants.json's "seg_emb": each final segment's voiceprint kept (device_pipeline.seg_embs)
+    persona_v2: bool = False  # tenants.json's "persona_v2": profiles from the person's own sentences (profiles.evidence_v2)
+    place: bool = False  # tenants.json's "place": where the recorder probably was, in each summary (place.py)
+    place_sensitive: bool = False  # tenants.json's "place_sensitive": sensitive places written too (place.py)
+    voice_tools: bool = False  # tenants.json's "voice_tools": agents may read and compare voiceprints (voice_tools.py)
+    media_view: bool = False  # tenants.json's "media_view": media, broadcasts and live speech told apart (summary.MEDIA_SYSTEM)
     # its state in memory: what its pages see and what its pipelines run on
     clients: set = field(default_factory=set)       # its WebSockets
     events: list = field(default_factory=list)      # its system log, the last 300
@@ -60,6 +85,8 @@ class Tenant:
     owner: dict | None = None                       # 我's voiceprint picked on its card (selfvoice), for the next conversations
     read_to: dict = field(default_factory=dict)     # audio.stream: per device, the last piece its reader has finished with
     gone: set = field(default_factory=set)          # audio.gone: its recordings found missing, each warned of once
+    gain_limited: dict = field(default_factory=dict)  # gain.to16: per device, samples into its soft limiter on the way to int16
+    gain_untimed: dict = field(default_factory=dict)  # voice_clip: per device, clips of no time served as stored (offset not one value)
     store_calls: dict = field(default_factory=dict)  # store.timed: op -> [calls, {failure kind: n}, seconds] (lr_store_* metrics)
     store_locks: dict = field(default_factory=dict)  # seal.lock: path -> the lock of its one seal or merge at a time
     store_retry: dict = field(default_factory=dict)  # seal.step: path -> (failures, when to try again) of a failed one
@@ -74,6 +101,8 @@ class Tenant:
     summaries: tuple = None                         # (send, receive): its conversations waiting for a summary
     late_queued: set[str] = field(default_factory=set)  # dirty late summaries already queued/in flight
     summary_generations: dict[str, int] = field(default_factory=dict)  # newest queued request per conversation
+    scene_retry: dict = field(default_factory=dict)  # sounds.failed: (device, model) -> [a, b, until ms, tries] of parts that failed
+    scene_stats: Counter = field(default_factory=Counter)  # sounds.py: (audio | decode | compute | failed | backlog, model) -> s or n
     tg: "anyio.abc.TaskGroup | None" = None         # its tasks (run_tenant): pipelines, live analyses, loops
     scope: anyio.CancelScope | None = None          # cancelled: the tenant stops, every task of it with it
 
@@ -112,7 +141,7 @@ def load(path: Path = FILE) -> list[Tenant]:
         raise SystemExit(f"{path}: no tenants file (DATA_DIR; see tenant.py)")
     if path.stat().st_mode & 0o077:
         raise SystemExit(f"{path}: others can read it, and it holds every token: chmod 600")
-    expected = 'expected a JSON array of objects with string fields id, token, data, recordings and optional lang (zh or en)'
+    expected = 'expected a JSON array of objects with string fields id, token, data, recordings, optional lang (zh or en), sound, seg_emb, persona_v2, place, place_sensitive, voice_tools and media_view (true or false)'
 
     def invalid(reason):
         # Never include configuration values or decoder excerpts: they may contain tokens.
@@ -140,8 +169,15 @@ def load(path: Path = FILE) -> list[Tenant]:
             invalid(f"entry {i}: lang must be a string or null")
         if (x.get("lang") or os.environ.get("UI_LANG") or "zh") not in LANGS:
             invalid(f"entry {i}: lang (or UI_LANG) must be one of {', '.join(LANGS)}")
-    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh")
-          for x in config]
+        if not isinstance(x.get("sound", False), bool):
+            invalid(f"entry {i}: sound must be true or false")
+        for key in ("seg_emb", "persona_v2", "place", "place_sensitive", "voice_tools", "media_view"):
+            if not isinstance(x.get(key, False), bool):
+                invalid(f"entry {i}: {key} must be true or false")
+    ts = [Tenant(x["id"], x["token"], x["data"], x["recordings"], x.get("lang") or os.environ.get("UI_LANG") or "zh",
+                 sound=x.get("sound", False), seg_emb=x.get("seg_emb", False), persona_v2=x.get("persona_v2", False), place=x.get("place", False),
+                 place_sensitive=x.get("place_sensitive", False),
+                 voice_tools=x.get("voice_tools", False), media_view=x.get("media_view", False)) for x in config]
     each = [[getattr(t, k) for t in ts] for k in ("id", "token", "data", "recordings")]  # two sharing a store would see each other's
     if not ts or any(len(set(x)) < len(x) for x in each) or (len(ts) > 1 and not all(each[1])):
         raise SystemExit(f"{path}: at least one tenant, ids, tokens and dirs one each, and every tenant a token when there are several")

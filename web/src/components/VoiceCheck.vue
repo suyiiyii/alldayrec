@@ -7,6 +7,7 @@ import { t } from "../i18n";
 import { get, hhmm, post } from "../lib/api";
 import { play, player } from "../lib/audio";
 import { dayLabel, today } from "../lib/calendar";
+import { checkDone } from "../lib/speakers";
 import Icon from "./Icon.vue";
 
 interface Card {
@@ -37,13 +38,12 @@ const when = (iso: string) => (iso.slice(0, 10) === today() ? "" : dayLabel(iso.
 const src = (c: Card["clip"]) =>
   `/api/audio?${new URLSearchParams({ start: c.start, end: c.end, ...(c.device && { device: c.device }) })}`;
 
-const DONE = { yes: "voiceCheck.doneYes", no: "voiceCheck.doneNo", later: "voiceCheck.doneLater" };
 async function answer(a: "yes" | "no" | "later") {
   busy.value = true;
   err.value = "";
   try {
-    const r = await post<{ ok: boolean }>("/api/voice-check", { answer: a });
-    done.value = r.ok ? DONE[a] : "voiceCheck.stale";
+    const r = await post<{ ok: boolean; learned?: number; reason?: string }>("/api/voice-check", { answer: a });
+    done.value = checkDone(a, r);
     card.value = null;
   } catch (e) {
     err.value = String((e as Error).message ?? e);

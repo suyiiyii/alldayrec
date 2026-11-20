@@ -7,11 +7,15 @@ import pytest
 from alldayrec import infer
 
 
-def test_cmvn_and_check(tmp_path):
+def test_cmvn_and_check(tmp_path, monkeypatch):
     stats = np.array([[2.0, 4.0, 2.0], [6.0, 20.0, 0.0]])  # count 2: means 1, 2; variances 2, 6
     (tmp_path / infer.CMVN).write_bytes(b"\0BDM \4" + struct.pack("<i", 2) + b"\4" + struct.pack("<i", 3) + stats.astype("<f8").tobytes())
     mean, istd = infer.cmvn(tmp_path / infer.CMVN)
     assert np.allclose(mean, [1, 2]) and np.allclose(istd, [1 / np.sqrt(2), 1 / np.sqrt(6)])
+    with pytest.raises(SystemExit) as e:
+        infer.check(tmp_path)
+    assert infer.MN10 not in str(e.value), "a scene model only when SOUND_MODEL names it"
+    monkeypatch.setenv("SOUND_MODEL", "mn10_as")
     with pytest.raises(SystemExit) as e:
         infer.check(tmp_path)
     assert all(n in str(e.value) for n in infer.MODELS) and "another sha256" in str(e.value) and "is missing" in str(e.value)

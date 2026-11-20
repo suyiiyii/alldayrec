@@ -911,7 +911,48 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get dontRemindVersion => 'Don\'t remind me of this version';
+  String get notToday => 'Not today';
+
+  @override
+  String get checkUpdate => 'Check for updates';
+
+  @override
+  String get update => 'Update';
+
+  @override
+  String updateNewer(Object version, Object size, Object mine) {
+    return 'Version $version is out$size; this is $mine';
+  }
+
+  @override
+  String appUpToDate(Object version) {
+    return 'Up to date: $version';
+  }
+
+  @override
+  String get updateUnauthorized =>
+      'The server refused this sign-in (401): scan to sign in again, then retry';
+
+  @override
+  String get updateNoApk => 'The server has no Android app yet';
+
+  @override
+  String updateOffline(Object error) {
+    return 'Can\'t reach the server; check the network and retry ($error)';
+  }
+
+  @override
+  String updateCheckFailed(Object error) {
+    return 'Check failed: $error';
+  }
+
+  @override
+  String iosUpdateHow(Object version) {
+    return 'This is version $version. The iPhone app updates through TestFlight';
+  }
+
+  @override
+  String get openTestFlight => 'Open TestFlight';
 
   @override
   String get resume => 'Resume';

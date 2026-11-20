@@ -196,6 +196,8 @@
     "otherListen": "听 {d} 录的",
     "other": "{d} 也录到了这段",
     "regenerating": "摘要重新生成中",
+    "toLive": "已改回现场",
+    "unLive": "已恢复",
     "made": "AI 摘要 · {at}，由 {model} 生成",
     "madeLive": "AI 摘要 · {at}，由 {model} 生成，会中实时分析写的",
     "noteThanks": "收到，会用来改进",
@@ -258,6 +260,28 @@
     "transcript": "原文",
     "sentences": "{n} 句",
     "tooShort": "语音不足 60 秒，没有生成摘要",
+    "place": {
+      "maybe": "可能在：{place}",
+      "you": "你说",
+      "said": "{who}说",
+      "labels": {
+        "home": "家",
+        "office": "实验室或办公室",
+        "car": "车上",
+        "train": "地铁或高铁",
+        "restaurant": "餐厅",
+        "outdoors": "户外",
+        "shop": "商店",
+        "other": "其他"
+      },
+      "sound": {
+        "vehicle": "交通工具行驶声 {n} 分钟",
+        "music": "音乐 {n} 分钟",
+        "speech": "讲话 {n} 分钟",
+        "quiet": "安静 {n} 分钟"
+      },
+      "hint": "AI 根据原句和环境声音推断，可能不对"
+    },
     "todos": "待办",
     "aiRequests": "让 AI 做的事 · {n} 条",
     "decisions": "决定",
@@ -393,6 +417,12 @@
     "empty": "这一天没有转写内容",
     "toLatest": "回到最新"
   },
+  "scrub": {
+    "live": "按对话快速跳转",
+    "conv": "按时间快速跳转",
+    "going": "进行中",
+    "loose": "不在任何对话里"
+  },
   "liveCard": {
     "going": "进行中的对话",
     "full": "全屏",
@@ -436,9 +466,11 @@
     "version": "服务器版本 {commit}",
     "engine": "识别引擎 {engine}",
     "stars": "收藏",
-    "starsEmpty": "长按一句话，就能复制、收藏，或者改正是谁说的",
+    "starsEmpty": "长按一句话，就能复制、收藏、上报问题，或者改正是谁说的",
     "starsAll": "全部 {n} 条",
     "starsLess": "收起",
+    "reports": "我上报的问题",
+    "reportsEmpty": "长按一句话，点「上报问题」",
     "older": "更早的设备（{n} 台）",
     "terms": "热词和术语",
     "termsSub": "人名、公司、产品、术语，转写和摘要照这里写"
@@ -468,7 +500,13 @@
     "history": "导入记录"
   },
   "mediaFold": {
-    "line": "媒体 {from}–{to} · {n} 句"
+    "line": "媒体 {from}–{to} · {n} 句",
+    "media": "外放 {from}–{to} · {n} 句",
+    "broadcast": "广播/提示音 {from}–{to} · {n} 句",
+    "live": "改回现场",
+    "marked": "已改回现场",
+    "unMedia": "恢复为外放",
+    "unBroadcast": "恢复为广播/提示音"
   },
   "monthGrid": {
     "min": "{n} 分"
@@ -522,6 +560,7 @@
       "hints": "认人提示",
       "profile": "人物档案",
       "recap": "每日回顾",
+      "resolve": "待办整理",
       "live": "实时分析",
       "ask": "问 AI",
       "late": "补转写"
@@ -663,6 +702,7 @@
       "PHONE": "手机接管录音流",
       "FORMAT": "格式化存储卡",
       "NVS_FAIL": "擦除记录没写进设置区",
+      "GAIN": "麦克风增益",
       "unknown": "未知事件"
     },
     "reset": {
@@ -724,14 +764,21 @@
     },
     "switch": {
       "0": "录音",
-      "1": "关机（System OFF，拨开或插 USB 唤醒）",
+      "1": "关机（拨开或插 USB 唤醒）",
       "2": "插着 USB，不录音",
       "3": "重启"
     },
     "power": {
       "0": "电池供电，VDDH {mv} mV",
       "1": "掉电预警：VDDH 低于 3.3 V 或 VDD 低于 2.8 V",
-      "2": "电量过低（{mv} mV）：停止录音，关机（System OFF），插 USB 或拨一下开关唤醒"
+      "2": "电量过低（{mv} mV）：停止录音，关机，插 USB 或拨一下开关唤醒",
+      "3": "关机结束：关了 {took}，因为{why}"
+    },
+    "wake": {
+      "switch": "拨了开关",
+      "usb": "插了 USB",
+      "charging": "在充电",
+      "battery": "电池回到 3.6 V"
     },
     "ok": "成功",
     "powerOn": "上电",
@@ -747,6 +794,9 @@
     "phoneRecovered": "上次重启时内存里的 {b} B 写上卡：{file}.BIN",
     "formatDone": "{gb} GB 的卡格式化成 {fs}，用时 {s} s",
     "nvsFail": "设置区两次都没记下要擦的块，照样擦了（{n} 次，本次开机第一条）",
+    "gain": "麦克风增益 {from} → {to} dB",
+    "gainUnkept": "麦克风增益 {db} dB 没存进设置区：{err}；下次开机用存着的",
+    "gainBad": "存着的麦克风增益校验不过（{n} B：{b}），用默认 0 dB",
     "formatFail": "{gb} GB 的卡没有格式化：{why}",
     "formatWhy": {
       "5": "格式化失败",
@@ -818,7 +868,9 @@
     "of": "{day}的回顾",
     "mine": "我要做的",
     "people": "聊过的人",
-    "person": "{who}：{note}"
+    "person": "{who}：{note}",
+    "autoClosed": "自动整理了 {n} 条待办",
+    "dueToday": "今天到期 {n} 条"
   },
   "record": {
     "recording": "录音中",
@@ -876,6 +928,7 @@
       "unsure": "不确定"
     },
     "picked": "记住了：之后的新对话里，你说的话会显示为「我」；已有的对话不变。",
+    "pickedMusic": "这次没有记下：选中的声音里有背景音乐，或者核对不了有没有。之后会再问一次。",
     "later": "好的，明天再问。",
     "none": "好的，等录得更多以后再问。",
     "title": "哪个是你？",
@@ -902,6 +955,7 @@
     "doneYes": "好的，记下了。",
     "doneNo": "好的，记下了：不是。",
     "doneLater": "好的，这段不再问了。",
+    "doneMusic": "好的，记下了。不过这几句下面有背景音乐，这次没有学声纹。",
     "stale": "这段对话的名字刚改过，这张卡作废了。"
   },
   "nameCheck": {
@@ -1025,7 +1079,9 @@
     "overdue": "过期 {n} 天",
     "tentative": "暂定",
     "maybeDone": "可能已完成：{q}",
-    "done": "完成"
+    "done": "完成",
+    "said": "提到 {n} 次",
+    "notDone": "不是，还没做完"
   },
   "todoMarks": {
     "doneToast": "已完成",
@@ -1034,6 +1090,14 @@
     "markDone": "标为完成",
     "more": "更多",
     "notTodo": "不对，不是待办"
+  },
+  "autoTodos": {
+    "title": "自动整理",
+    "done": "已完成",
+    "dropped": "已取消",
+    "stale": "可能不需要了",
+    "hint": "可能已完成",
+    "why": "{kind}：{reason}"
   },
   "todos": {
     "week": "本周",
@@ -1077,7 +1141,12 @@
     "save": "确定",
     "fixed": "这一句改成了 {to}",
     "fixedLearn": "这一句改成了 {to}，会记住这句的声音",
-    "fixedBack": "这一句改回了 {to}"
+    "fixedBack": "这一句改回了 {to}",
+    "report": "上报问题",
+    "reportWhat": "这里有什么问题？",
+    "reportSend": "提交",
+    "cancel": "取消",
+    "reported": "已上报"
   },
   "terms": {
     "intro": "常说的人名、公司、产品和术语记在这里：语音识别会优先识别这些词，摘要和问答遇到同音、近音的错字时按这里的写法改。",
@@ -1090,5 +1159,34 @@
     "empty": "还没有词。",
     "names": "自动加入的人名",
     "namesSub": "在人物页起过名字的人会自动加进来，不用再添加。"
+  },
+  "sound": {
+    "title": "环境声音",
+    "hint": "模型从声音猜的，可能不对；点一段看详情",
+    "tag": {
+      "music": "🎵 可能有背景音乐 {n} 分钟",
+      "vehicle": "🚗 可能在交通工具上 {n} 分钟",
+      "quiet": "🤫 可能安静 {n} 分钟"
+    },
+    "mostlyQuiet": "🤫 可能大半时间安静",
+    "ev": {
+      "speech": "说话",
+      "music": "音乐",
+      "vehicle": "交通工具",
+      "quiet": "安静"
+    },
+    "filter": {
+      "music": "🎵 有音乐",
+      "vehicle": "🚗 在交通工具上",
+      "quiet": "🤫 安静"
+    },
+    "maybe": "可能：",
+    "nothing": "听得到声音，但不是这几类",
+    "wrong": "不对",
+    "wrongLabel": "{what}不对",
+    "undo": "撤销「不对」",
+    "marked": "记下了：这里不是「{what}」",
+    "open": "看这段对话",
+    "play": "听这一分钟"
   }
 }

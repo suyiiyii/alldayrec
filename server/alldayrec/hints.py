@@ -66,7 +66,7 @@ async def hints(c: dict, rows: list[dict], skip: set[str]) -> dict:
 def shown(h: dict | None, s: dict | None) -> list[dict]:
     """The names the pages offer of one conversation's hints (h) with its summary (s): none on a label that is no
     one (外放媒体 of old history, asked before check skipped them) nor said inside media played aloud."""
-    spans = (s or {}).get("media_spans") or []
+    spans = summary.not_live(s)
     return [x for x in (h or {}).get("names", []) if x["who"] not in IGNORE and not summary.in_media({"start": x["at"]}, spans)]
 
 

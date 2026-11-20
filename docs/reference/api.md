@@ -88,7 +88,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `POST` | One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz samples the client wrote into it (the iPhone's AAC: the decoder adds some at both ends). | `device` (query, string)<br>`start` (query, integer)<br>`n?` (query, integer)<br>`hold?` (query, integer) |
+| `POST` | One self-contained audio file (the apps' Opus or AAC pieces), `start` its device time in unix ms, `n` the 16 kHz samples the client wrote into it (the iPhone's AAC: the decoder adds some at both ends). | `device` (query, string)<br>`start` (query, integer)<br>`n?` (query, integer)<br>`hold?` (query, integer)<br>`capture_gain_db?` (query, number) |
 
 ### `/api/chunks/end`
 
@@ -216,7 +216,26 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | db.search; `before` is the start of the last one already shown. | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer) |
+| `GET` | db.search; `before` is the start of the last one already shown. sound (music, vehicle, quiet): only those with that sound tag (sound_events.search; the tenant's sound off: ignored). | `q?` (query, string)<br>`tag?` (query, string)<br>`who?` (query, string)<br>`after?` (query, string)<br>`before?` (query, string)<br>`limit?` (query, integer)<br>`sound?` (query, string) |
+
+### `/api/sounds/day`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The day's sound events by device, as runs of minutes (sound_events.day): [] while the tenant's sound is off. | `date` (query, string) |
+
+### `/api/sounds/wrong`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Every 不对 on a sound event, oldest first (the export for the gold labels). | — |
+| `POST` | 不对 on a sound event: {device, start_ms, end_ms, event, conv?} kept with its model (sound_events.wrong): {id}. | body: JSON object |
+
+### `/api/sounds/wrong/{wrong_id}`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `DELETE` | Take a 不对 back (撤销): its row deleted. | `wrong_id` (path, integer) |
 
 ### `/api/ask`
 
@@ -269,6 +288,18 @@ type: reference
 |---|---|---|
 | `GET` | My todos due today or before, not marked done or wrong, with how stale each is (db.due_todos). | — |
 
+### `/api/todos/auto`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The todos closed automatically in the last days (db.auto_todos), anyone's: why, and the sentence. | `days?` (query, integer) |
+
+### `/api/todos/{todo_id}/auto`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `DELETE` | The undo of a todo's automatic marks (its group's): open again, not closed again on the same sentence. | `todo_id` (path, string) |
+
 ### `/api/todos/{todo_id}/mark`
 
 | 方法 | 说明 | 参数 |
@@ -306,6 +337,13 @@ type: reference
 | 方法 | 说明 | 参数 |
 |---|---|---|
 | `GET` | （无说明） | `conv_id` (path, string) |
+
+### `/api/conversation/{conv_id}/live`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | 改回现场 (tenant "media_view"): the rows from..to (two rows' starts) of kind media or broadcast were said in the room: out of the summary's spans, and out of a redo's (summary.keep_live); the mark keeps the kind, for its undo. | `conv_id` (path, string)<br>body: JSON object |
+| `DELETE` | 恢复为外放 (tenant "media_view"): the mark from..to taken back, its rows of its kind again (summary.unmark_live). | `conv_id` (path, string)<br>body: JSON object |
 
 ### `/api/conversation/{conv_id}/feedback`
 
@@ -420,7 +458,7 @@ type: reference
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | （无说明） | `name` (path, string) |
+| `GET` | A history voice's sample: as stored, or, when its device has a non-zero offset anywhere in the clip (gain.py), decoded with it, each sample at its own time's, as WAV (X-Gain-Db: its first sample's). | `name` (path, string) |
 
 ### `/api/self`
 
@@ -436,30 +474,66 @@ type: reference
 | `GET` | The card while it is up: the voice (conversation, label, when), the name it is asked about, the clip to hear. | — |
 | `POST` | yes: as a rename by hand (a, b: the label becomes 我 or the name; c: the name's sentences teach its samples); no: the voice kept apart from the name (c: back to a fresh S&lt;n> first), nothing learnt; later: the card away. | body: JSON object |
 
+### `/api/voiceprint`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | A sentence's voiceprint (voice_tools.voiceprint; sentence: its id, or &lt;conversation id>@HH:MM:SS; from_s / to_s: a stretch of it, from the audio): the one kept (seg_emb) or one made from the audio and not kept. 404 while the tenant's voice_tools is off. | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number) |
+
+### `/api/voiceprint/compare`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | The cosine of a sentence's voiceprint (or a stretch's) and exactly one of: other (a sentence), person (a known name or 我), label (S1 of its conversation, or &lt;conversation id>@S1); each kept part's too (voice_tools.compare). | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number)<br>`other?` (query, string)<br>`other_from_s?` (query, number)<br>`other_to_s?` (query, number)<br>`person?` (query, string)<br>`label?` (query, string) |
+
+### `/api/voiceprint/nearest`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | A sentence's voiceprint (or a stretch's) against every known person, 我 and its conversation's labels, the closest n first (voice_tools.nearest). | `sentence` (query, string)<br>`from_s?` (query, number)<br>`to_s?` (query, number)<br>`n?` (query, integer) |
+
 ### `/api/audio`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it. | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
+| `GET` | WAV of [start, end] (+0.2 s each side) cut from the uploaded pieces of `device` (any when not given) covering it; X-Gain-Db (with a device): the gain its first sample of audio has over the stored audio (audio.play_db); a later since_ms of the device's offset inside the WAV changes it from there on, which this one number does not say. | `start` (query, string)<br>`end` (query, string)<br>`device?` (query, string) |
 
 ### `/api/listen`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start; 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
+| `GET` | Listening in on a device (the live page polls it): its audio after `after` (unix ms, the X-After of the answer before; none: its newest piece) as WAV, X-Start the first piece's start (X-Gain-Db: its gain, as /api/audio's); 204 when there is nothing newer. | `device` (query, string)<br>`after?` (query, integer) |
+
+### `/api/device-gain`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Each device's gain rows (gain.py: since_ms on, capture_db, offset_db, source, note) and the level they calibrate to (target_dbov); read-only, set with server/gain.sh. | — |
 
 ### `/api/stars`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `GET` | The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start and title. ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list. | — |
+| `GET` | The starred sentences as they read now (a rename shows), the newest star first, with their conversation's start and title (none while it goes on). ponytail: a star whose row a replay re-cut (another start, another id) drops out of the list. | — |
 
 ### `/api/sentences/{sid}/star`
 
 | 方法 | 说明 | 参数 |
 |---|---|---|
-| `PUT` | （无说明） | `sid` (path, string)<br>body: JSON object |
+| `PUT` | A final row of `device`, its conversation closed or still going on. | `sid` (path, string)<br>body: JSON object |
 | `DELETE` | （无说明） | `sid` (path, string) |
+
+### `/api/sentences/{sid}/report`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `POST` | 上报问题 on a row as the page showed it (a draft or the sentence being said too: the row is the client's), with the owner's note. | `sid` (path, string)<br>body: JSON object |
+
+### `/api/reports`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Every 上报问题, the newest first: the note, the page, the row as it read then (row), the closed conversation that holds its start (none: it goes on, then going, or its words made none). | — |
 
 ### `/api/sentences/{sid}/speaker`
 

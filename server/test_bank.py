@@ -43,7 +43,7 @@ def store(tmp_path, monkeypatch):
     db.open_db(tmp_path / "t.db")
 
     async def cut(start, end, fmt, device=None):  # int16 audio that says which sentence it is
-        return start.ljust(24).encode()
+        return np.frombuffer(start.ljust(24).encode(), np.int16)
     monkeypatch.setattr(routes_audio, "cut", cut)
     monkeypatch.setitem(core.state, "embed", lambda x: SAID[x.tobytes().decode().strip()])
 

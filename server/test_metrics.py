@@ -132,6 +132,8 @@ def test_metrics(monkeypatch):
     st = pipeline_state.PipelineState(audio_end=now - dt.timedelta(seconds=2), final_latency=[4.0])
     T().devices.update({"LR-P3-116C": st, "某人的 iPhone": pipeline_state.PipelineState()})
     monkeypatch.setitem(core.state, "commit", "abc1234")
+    T().gain_limited["某人的 iPhone"] = 7  # gain.apply's soft-limited samples
+    T().gain_untimed["某人的 iPhone"] = 2  # voice_clip: clips of no time served as stored
     for h, cny in ((24, 27.3), (0, 24.1)):  # ¥3.2 a day: 7.5 days left
         db.conn().execute("INSERT INTO balances VALUES (?, 'stepfun', ?)", ((now - dt.timedelta(hours=h)).isoformat(timespec="seconds"), cny))
     text = monitor.metrics()
@@ -148,6 +150,8 @@ def test_metrics(monkeypatch):
     assert got['lr_device_info{instance="main",device="LR-P3-116C",firmware="a\\"b\\\\c\\nd"}'] == 1, "escaped"
     assert "iPhone" not in text and "某人" not in text, "a phone by a hash of its name"
     phone = re.search(r'device="(phone-[0-9a-f]{8})"', text)[1]
+    assert f'lr_gain_limited_samples_total{{instance="main",device="{phone}"}} 7.0' in lines
+    assert f'lr_gain_untimed_clips_total{{instance="main",device="{phone}"}} 2.0' in lines
     assert dev("hold_active", phone) == 1 and dev("behind_seconds", phone) is None and dev("device_battery_percent", phone) is None
     assert got['lr_summaries_pending{instance="main"}'] == 0
     assert got['lr_calls_total{instance="main",kind="final",engine="stepfun",result="ok"}'] == 1

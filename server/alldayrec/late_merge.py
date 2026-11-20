@@ -110,6 +110,8 @@ def merge(t, early: dict, later: dict, mapping: dict) -> dict:
     for r in t.execute("SELECT * FROM todo_marks WHERE conv = ?", (old,)).fetchall():
         nid = ids.setdefault(r["id"], f"{new}:merged-{hashlib.sha1(r['id'].encode()).hexdigest()[:24]}")
         t.execute("UPDATE todo_marks SET id = ?, conv = ? WHERE id = ?", (nid, new, r["id"]))
+    db.move_todos(t, {k: v for k, v in ids.items() if ":" in k})
+    t.execute("UPDATE todo_auto SET src = ? WHERE src = ?", (new, old))
     dst["todos"] = (dst.get("todos") or []) + moved
     db.put_summary(dst, t)
     for v in t.execute("SELECT * FROM voices WHERE conv = ?", (old,)).fetchall():
@@ -350,7 +352,8 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                 changed.append(early)
         for c in changed:
             s = db.summary(c["id"]) or {"conversation": c["id"]}
-            db.put_summary({**s, "status": "pending", "error": None}, t)
+            # its place was made from fewer rows: not shown again if the new summary fails and the old one stays
+            db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None}, t)
             key = f"conversation_revision:{c['id']}"
             db.put_kv(key, (db.kv(key) or 0) + 1, t)
             db.put_kv(f"late_summary:{c['id']}", True, t)

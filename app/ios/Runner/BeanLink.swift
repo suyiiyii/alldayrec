@@ -12,9 +12,13 @@ import AVFoundation
 import CallKit
 import CoreBluetooth
 import Foundation
+import Network
+import UIKit
 
 final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, BeanIo {
   static let restoreId = "live-record.bean"
+  /// The phone's network, for phoneState(): Wi-Fi on 2.4 GHz shares the radio with BLE
+  private static let path: NWPathMonitor = { let m = NWPathMonitor(); m.start(queue: DispatchQueue(label: "bean-path")); return m }()
   static let service = CBUUID(string: Bean.service), write = CBUUID(string: Bean.write), notify = CBUUID(string: Bean.notify)
 
   let name: String
@@ -37,6 +41,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   @Shared private var cmd: CBCharacteristic?
   @Shared private var mtu = 23
   @Shared private var rssi: Int?
+  private var noted = (n: 0, bytes: 0, gap: 0.0, last: 0.0, since: 0.0)  // on q: notifications since notifications()
   @Shared private var lastSeen: Int64?
   @Shared private var downWhy: String?
   @Shared private var established = false  // the link came up this round: a drop is not a failure to back off from
@@ -67,6 +72,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   }
 
   func start() {
+    _ = BeanLink.path  // start the monitor now: one started on the first read still reports [] unsatisfied
     q.sync { central = CBCentralManager(delegate: self, queue: q, options: [CBCentralManagerOptionRestoreIdentifierKey: BeanLink.restoreId]) }
     Thread.detachNewThread { self.loop() }
   }
@@ -293,6 +299,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func report(_ hw: [String: Any]) { onReport(name, hw.merging(["name": name, "rssi": rssi ?? NSNull()]) { $1 }) }
   func hold(_ at: Int64?) { if let at { prefs.set(at, forKey: "hold:\(name)") } else { prefs.removeObject(forKey: "hold:\(name)") } }
   func held() -> Int64? { Recorder.hold(name) }
+  func liveFrom(_ at: Int64) { prefs.set(at, forKey: "live:\(name)") }
   func end(_ at: Int64) { prefs.set(at, forKey: "end:\(name)") }  // Uploader.ends() sends it
   func piece() { files += 1 }
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
@@ -301,18 +308,20 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }
-  func wifiRedial() throws { guard let w = wifi else { throw BeanSync.Gone("no Wi-Fi") }; try w.redial() }
   func wifiLeave() { wifi?.close(); wifi = nil }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
-  /// (category PlayAndRecord: this app's voice question too); power, and whether the app is in front.
+  /// (category PlayAndRecord: this app's voice question too), and Wi-Fi; power, and whether the app is in front.
   func phoneState() -> [String: Any] {
+    let p = BeanLink.path.currentPath, net = [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .other].filter(p.usesInterfaceType)
     let s = AVAudioSession.sharedInstance(), r = s.currentRoute
-    let (call, front) = DispatchQueue.main.sync { (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp) }
+    let (call, front, locked) = DispatchQueue.main.sync {  // locked: with a passcode, ~10 s after the screen locks
+      (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp, !UIApplication.shared.isProtectedDataAvailable)
+    }
     let power = Recorder.phone().filter { ["phone_battery", "phone_charging", "low_power", "thermal"].contains($0.key) }
     return power.merging(["audio_out": r.outputs.map(\.portType.rawValue), "audio_in": r.inputs.map(\.portType.rawValue),
                           "audio_category": s.category.rawValue, "other_audio": s.isOtherAudioPlaying, "call": call,
-                          "foreground": front]) { $1 }
+                          "foreground": front, "locked": locked, "net": net.map { "\($0)" }, "net_status": "\(p.status)"]) { $1 }
   }
 
   //
@@ -384,6 +393,20 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func peripheral(_ p: CBPeripheral, didWriteValueFor c: CBCharacteristic, error: Error?) { done(error) }
   func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor c: CBCharacteristic, error: Error?) { done(error) }
   func peripheral(_ p: CBPeripheral, didUpdateValueFor c: CBCharacteristic, error: Error?) {
-    if c.uuid == BeanLink.notify, let v = c.value { notes.put([UInt8](v)) }
+    guard c.uuid == BeanLink.notify, let v = c.value else { return }
+    let t = ProcessInfo.processInfo.systemUptime
+    if noted.last > 0 { noted.gap = max(noted.gap, t - noted.last) }
+    noted.n += 1; noted.bytes += v.count; noted.last = t
+    notes.put([UInt8](v))
+  }
+
+  func notifications() -> [String: Any] {
+    q.sync {
+      let t = ProcessInfo.processInfo.systemUptime, s = noted
+      noted = (0, 0, 0, s.last, t)
+      guard s.since > 0, t > s.since else { return [:] }
+      return ["ble_notes_s": (Double(s.n) / (t - s.since) * 10).rounded() / 10, "ble_note_bytes": s.n > 0 ? s.bytes / s.n : NSNull(),
+              "ble_gap_ms": Int(s.gap * 1000)]
+    }
   }
 }

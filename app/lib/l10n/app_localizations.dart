@@ -1598,11 +1598,71 @@ abstract class AppLocalizations {
   /// **'（{mb} MB）'**
   String appUpdateSize(Object mb);
 
-  /// No description provided for @dontRemindVersion.
+  /// No description provided for @notToday.
   ///
   /// In zh, this message translates to:
-  /// **'这个版本不再提示'**
-  String get dontRemindVersion;
+  /// **'今天不再提示'**
+  String get notToday;
+
+  /// No description provided for @checkUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查更新'**
+  String get checkUpdate;
+
+  /// No description provided for @update.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新'**
+  String get update;
+
+  /// No description provided for @updateNewer.
+  ///
+  /// In zh, this message translates to:
+  /// **'有新版本 {version}{size}，当前是 {mine}'**
+  String updateNewer(Object version, Object size, Object mine);
+
+  /// No description provided for @appUpToDate.
+  ///
+  /// In zh, this message translates to:
+  /// **'已是最新版本 {version}'**
+  String appUpToDate(Object version);
+
+  /// No description provided for @updateUnauthorized.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器不认这次登录（401）：重新扫码登录后再试'**
+  String get updateUnauthorized;
+
+  /// No description provided for @updateNoApk.
+  ///
+  /// In zh, this message translates to:
+  /// **'服务器上还没有安卓安装包'**
+  String get updateNoApk;
+
+  /// No description provided for @updateOffline.
+  ///
+  /// In zh, this message translates to:
+  /// **'连不上服务器，检查网络后再试（{error}）'**
+  String updateOffline(Object error);
+
+  /// No description provided for @updateCheckFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查失败：{error}'**
+  String updateCheckFailed(Object error);
+
+  /// No description provided for @iosUpdateHow.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本 {version}。iPhone 版通过 TestFlight 更新'**
+  String iosUpdateHow(Object version);
+
+  /// No description provided for @openTestFlight.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开 TestFlight'**
+  String get openTestFlight;
 
   /// No description provided for @resume.
   ///

@@ -64,10 +64,13 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 | 对象 | 是什么 | 唯一键 | 存在哪 | 谁创建 | 谁修改 | 生命周期 |
 |---|---|---|---|---|---|---|
 | 实时分析 | 进行中对话的议题时间线，一个多轮对话的 Agent 维护 | 设备 | 进行中：`kv` 的 `live:<d>`；对话结束时：`timelines` | `device_pipeline.py` 的 `live_update`（`live.py`） | 每多 120 秒新语音重算一次（`LIVE_EVERY_S`） | 对话结束时存进 `timelines`，`kv` 清空 |
-| 总结 | 对话的标题、摘要、要点、待办、决定、标签 | `conversation` | `summaries`（`body` 是 JSON） | 对话关闭时写一行 `pending`（`commit`），总结 worker 生成（`summaries.py`） | 改名、改人、迟到合并后重写 | `pending` → `done` 或 `failed` |
+| 总结 | 对话的标题、摘要、要点、待办、决定、标签，以及哪些句子是对 AI 说的、外放的（`media_spans`）、广播和提示音（`broadcast_spans`，租户开了 `media_view`；用户「改回现场」的记在 `live_spans`，重新生成时保留） | `conversation` | `summaries`（`body` 是 JSON） | 对话关闭时写一行 `pending`（`commit`），总结 worker 生成（`summaries.py`） | 改名、改人、迟到合并后重写 | `pending` → `done` 或 `failed` |
 | 待办 | 总结里的一条待办 | 对话 `id` 加说出它的时刻，同一时刻第二条起加 `#2`、`#3`；重新生成后靠 `preserve_todos` 保住原 `id` | `summaries.body` 的 `todos`，没有单独的表 | 总结 | 重新生成总结 | 随总结 |
 | 待办标记 | 待办上的「完成」或「不对」 | 待办 `id` | `todo_marks` | 网页 | 删除这一行就是撤销 | — |
-| 收藏 | 收藏的一句话 | 句子 `id` | `stars`，另记所在对话 `conv` | 网页 | 切分、合并时改 `conv` | 取消收藏时删除 |
+| 自动标记 | 自动判定的完成、取消、可能不需要了、提示，带理由、原句和模型 | 待办 `id` | `todo_auto` | `todo_auto.py`（摘要之后、每天一次） | 撤销只填 `undone_at`，行不删；手动标记优先 | `undone_at` 为空才算数 |
+| 重复待办 | 几段对话里说的同一件事 | 待办 `id` 指向组里最早的一条 | `todo_same` | `todo_auto.py` | 只合并，不拆 | — |
+| 收藏 | 收藏的一句定稿 | 句子 `id` | `stars`，另记设备和开始时刻；所在对话读的时候现查（旧收藏存了 `conv`） | 网页 | 切分、合并时改旧收藏的 `conv` | 取消收藏时删除 |
+| 上报 | 用户说某一句哪里有问题 | 自增 `id` | `reports`，存那一句当时的快照、设备和开始时刻；所在对话读的时候现查 | 网页 | — | 一直保留 |
 | 反馈 | 用户说总结哪里错了 | 无 | `feedback` | 网页 | — | 一直保留，写下一次总结时读 |
 | 称呼线索 | 每个标签在对话里被怎么称呼，只用于建议名字 | `conv` | `name_hints` | 总结完成后（`hints.py`） | 改名时跟着改 | — |
 | 人物卡片 | 一个有名字的人的介绍，每行带出处 | `name` | `profiles` | 人物页（`profiles.py`） | 这个人参加的对话总结完成后更新 | — |
@@ -100,7 +103,7 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 
 - **总结、实时分析和对话一对一**：`summaries` 和 `timelines` 都以对话 `id` 为主键。实时分析只在有网页看着时才有，所以一个对话有 0 或 1 个。
 - **待办标记指向总结里的待办**，不指向句子。待办 `id` 由对话 `id` 和说出它的时刻拼成；重新生成总结时，`db.preserve_todos` 按文字（或原话）、负责人和对象唯一匹配，把旧 `id` 钉到新待办上，匹配不上但已标记的旧待办原样保留。
-- **收藏指向句子 `id`**，另存所在对话。查收藏时按「这个 `id`、在这个对话的设备上、在这个对话的时间里」找句子（`routes_sentences.py`）。
+- **收藏指向句子 `id`**，另存设备和开始时刻。查收藏时按「这个 `id`、在这台设备上」找句子；所在对话不存（只有改动前的旧收藏存了 `conv`），读的时候现查：同一台设备上起止包含这句开始时刻的已结束对话（没记设备的旧对话不算），不写回库（`db.conv_at`）。切分处前一段的结束和后一段的开始是同一刻，这一刻归后一段（开始最晚的那段）。所以切分、合并后归属自动跟着变。查不到就是「不在任何对话里」：对话还在进行，或者这句落在切分处的停顿、话太少没成对话、停了马上又开的那一刻；网页按时间跳到实时页。上报存的是那一句的快照，句子以后重写了也还在，开始和结束统一存到毫秒；读的时候不合格的快照逐条跳过并记日志；页面传来的对话不用（页面打开后对话可能刚被切开）。
 - **声音指向「对话 + 标签」**，`apart` 指向声音，`enrolled` 指向句子的 `rowid` 和人名。
 
 ### 重写句子时最容易出问题
@@ -210,7 +213,14 @@ erDiagram
     }
     stars {
         text id PK
+        text device
+        text start
         text conv
+    }
+    reports {
+        int id PK
+        text device
+        text start
     }
 
     conversations ||--o| summaries : "conversation"
@@ -220,6 +230,7 @@ erDiagram
     summaries ||--o{ todo_marks : "待办 id"
     conversations ||--o{ stars : "conv"
     sentences ||--o{ stars : "id"
+    reports }o..o| conversations : "同设备、开始时刻在起止内"
     sentences }o..o| conversations : "同设备、开始时刻在起止内"
 ```
 

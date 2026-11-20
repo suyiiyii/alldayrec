@@ -41,7 +41,11 @@
  *               bits 1-3: the card, 0 older firmware, 1 takes the stream (or full, lent), 2 none answers, 3 it answers and
  *               fails, 4 no file system: FORMAT takes it, 5 being formatted, 6 does not mount but shows a volume:
  *               GPT, or a FAT/exFAT volume FatFs cannot take; never formatted) card_kb:u32 (the card's size as it
- *               answered, file system or not; 0: none answered)
+ *               answered, file system or not; 0: none answered) mic_gain:i8 (the mic's PDM gain in force, half dB: 0
+ *               the default 0x28, -40..40 = -20..+20 dB on the module's own; older firmware: no such byte)
+ *               gain_flags:u8 (bit 0: that gain is not the one NVS keeps, the next boot would not take it: its save
+ *               still to come, when the system workqueue gets to it, or failed (event GAIN x 1), or NVS's record was bad at boot
+ *               (GAIN x 2, the default in force); a GAIN of the same value saves it again)
  *   ...02 CTRL  write commands, notify replies:
  *               0x01 LIST                -> 0x81 file:u32 size:u32 per file (the open one too, with what the stream
  *                                           has finished), then 0x80 err:i8 open:u32 (the file the stream goes on in)
@@ -68,6 +72,12 @@
  *                                           code, -19 no card answers, -5 the format or the mount after it failed
  *               0x20 PAUSE s:u32         nothing kept for s seconds (frames still counted), then recording again by
  *                                           itself; 0 resumes now; a reset resumes too. No reply: the write's response
+ *               0x21 GAIN g:u8           the mic's PDM gain (GAINL = GAINR): 0x28 0 dB, 0.5 dB a step, 0x00 -20 dB
+ *                                           .. 0x50 +20 dB; into the running mic at once (no restart: the frame
+ *                                           clock goes on), event GAIN; then kept in NVS, every boot starts with
+ *                                           it. TIME's mic_gain says it, gain_flags bit 0 while not kept. No reply:
+ *                                           the write's response once it is in force (not yet kept), an ATT error
+ *                                           0x13 past 0x50 or not 2 bytes (the gain unchanged)
  *   ...03 DATA  notify offset:u32 bytes...                 (READ)
  *   ...04 LIVE  notify file:u32 offset:u32 bytes...        each record as it enters the stream, while subscribed;
  *               a gap in the offsets (not subscribed, the link busy or gone) is the phone's to READ. Subscribing

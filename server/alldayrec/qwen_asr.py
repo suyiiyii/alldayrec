@@ -17,6 +17,7 @@ import wave
 import anyio
 import numpy as np
 
+from alldayrec import gain
 from alldayrec import net
 
 MODEL = os.environ.get("QWEN_ASR_MODEL") or "qwen-audio-3.1-asr-flash-filetrans"
@@ -41,7 +42,7 @@ def wav(x: np.ndarray) -> bytes:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(16000)
-        w.writeframes(x.astype(np.int16).tobytes())
+        w.writeframes(gain.to16(x).tobytes())
     return f.getvalue()
 
 

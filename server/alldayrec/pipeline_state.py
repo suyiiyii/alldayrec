@@ -29,6 +29,7 @@ class PipelineState:
     refine: dict | None = None
     standby: str | None = None  # the device this one's speech is left to (colocate.py), as of its final layer
     cut_to: dt.datetime | None = None  # where the final layer's last piece cut ends: done_to..cut_to on its way
+    seg_emb_failed: int = 0  # final pieces whose segment voiceprints (tenant "seg_emb") were not kept, since the start
 
     piece_in: anyio.Event = field(default_factory=anyio.Event)  # set when a piece comes in (audio.piece_in)
     read_idle: bool = False  # the queue reader waits for a piece: all audio there is now went to the final layer's feed

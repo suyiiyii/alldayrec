@@ -2,6 +2,7 @@ package com.suyiiyii.live_record
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -150,6 +151,16 @@ object DeviceLog {
             .apply { if (level != null) put("level", level) })))
     }
 
+    /** As [app], only when `fields` differ from the ones this install last logged as `kind` for `device`: kept in prefs,
+     *  so a new recording or launch with the same values adds no event. */
+    fun appChanged(device: String, kind: String, text: String, fields: Map<String, Any?>) {
+        if (::file.isInitialized && changed(prefs, "logLast:$kind:$device", fields.toSortedMap().toString())) app(device, kind, text, fields = fields)
+    }
+
+    /** `value` is not the one kept under `key`: it is now. */
+    fun changed(p: SharedPreferences, key: String, value: String): Boolean =
+        (p.getString(key, null) != value).also { if (it) p.edit().putString(key, value).apply() }
+
     /** The phone, for the status sent with its recorder's: this build, the system, the model as the
      *  maker names it (never the name the person gave the phone), its battery and whether it saves power or runs hot
      *  (the system slows or stops apps then), and this app's memory. */
@@ -245,10 +256,20 @@ object DeviceLog {
         app(device, "connect", "连上：$s")
     }
 
-    /** The link went down (GATT status: 8 timeout, 19 the recorder ended it, 0 the phone did, 133 never came up). */
+    /** The link went down (GATT status: 8 timeout, 19 the recorder ended it, 0 the phone did, 133 never came up), with
+     *  what may keep the system from finding it again: screen off, idle, power saving, no battery exemption, the app's
+     *  standby bucket (UsageStatsManager: 10 active … 45 restricted). */
     fun disconnected(device: String, status: Int) {
         synchronized(steps) { steps.clear() }
-        app(device, "disconnect", "断开（status $status）", "warn")
+        if (!::file.isInitialized) return
+        // On the reconnect path (GATT callback, connect's finally): a failing system call only drops the fields.
+        val fields = try {
+            val pm = ctx.getSystemService(PowerManager::class.java)
+            mapOf("interactive" to pm.isInteractive, "deviceIdle" to pm.isDeviceIdleMode, "low_power" to pm.isPowerSaveMode,
+                "battery_exempt" to pm.isIgnoringBatteryOptimizations(ctx.packageName),
+                "standby_bucket" to ctx.getSystemService(UsageStatsManager::class.java).appStandbyBucket)
+        } catch (_: Exception) { emptyMap() }
+        app(device, "disconnect", "断开（status $status）", "warn", mapOf("status" to status) + fields)
     }
 
     //

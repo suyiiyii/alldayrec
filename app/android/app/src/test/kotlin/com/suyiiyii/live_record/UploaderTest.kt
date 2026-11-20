@@ -67,6 +67,34 @@ class UploaderTest {
         } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
     }
 
+    /** A bean's pieces from where its live transfer began (`live:<device>`) go up first, without a hold; the backlog
+     *  queued before them (11-20: a Wi-Fi fast transfer's, the live page waited 4 min behind it) goes after, oldest first. */
+    @Test fun liveFirst() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        for (start in listOf(1000L, 61_000L, 900_000L)) File(dir, "$start@D3200-0A0B.ogg").writeBytes(ByteArray(64))
+        val kv = mapOf("live:D3200-0A0B" to 840_000L)
+        val prefs = Proxy.newProxyInstance(javaClass.classLoader, arrayOf(SharedPreferences::class.java)) { _, m, a ->
+            if (m.name == "getLong") kv[a[0] as String] ?: a[1] else null } as SharedPreferences
+        val got = LinkedBlockingQueue<String>()
+        val http = ServerSocket(0)
+        Thread {
+            while (!http.isClosed) try { http.accept().use { c ->
+                val r = c.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                val path = r.readLine().split(" ")[1]
+                val n = generateSequence { r.readLine() }.takeWhile { it.isNotEmpty() }
+                    .firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                repeat(n) { r.read() }
+                got += path
+                c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+            } } catch (_: Exception) {}
+        }.start()
+        val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
+        try {
+            assertEquals(listOf(900_000L, 1000L, 61_000L).map { "/api/chunks?device=D3200-0A0B&start=$it" },
+                         List(3) { got.poll(5, TimeUnit.SECONDS) })
+        } finally { up.running = false; up.join(2000); http.close(); dir.deleteRecursively() }
+    }
+
     /** A recording's end (`end:<device>`: the bean's own, or a stop on the phone) goes once its pieces are up, again
      *  until the server takes it (10-25: T2's end never reached the server); none when that device records again before
      *  it went (it carries on). */
@@ -103,7 +131,7 @@ class UploaderTest {
             while (kv.isNotEmpty() && System.currentTimeMillis() < until) Thread.sleep(100)
             Thread.sleep(500)
             val all = got.toList()
-            val (up1, upMic, upNew) = listOf("200 /api/chunks?device=D3200-0A0B&start=1000", "200 /api/chunks?device=phone&start=2000",
+            val (up1, upMic, upNew) = listOf("200 /api/chunks?device=D3200-0A0B&start=1000", "200 /api/chunks?device=phone&start=2000&capture_gain_db=0",
                                              "200 /api/chunks?device=D3200-0C0D&start=9500")
             val (lost, end1, endMic) = listOf("500 /api/chunks/end?device=D3200-0A0B&t=5000", "200 /api/chunks/end?device=D3200-0A0B&t=5000",
                                               "200 /api/chunks/end?device=phone&t=3000")
@@ -213,22 +241,22 @@ class UploaderTest {
         }.start()
         val up = Uploader(prefs, dir, "http://127.0.0.1:${http.localPort}", "", "phone", null).apply { start() }
         try {
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped: no second try", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > 0 && kept.exists())
             assertEquals("kept for MainActivity's upload gate", up.haltedAt, saved["haltedAt"])
             assertEquals("uploadRefused", up.note?.get("code"))
             up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on: it tries once more on its own
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("stopped again", null, got.poll(3, TimeUnit.SECONDS))
             assertTrue(up.haltedAt > System.currentTimeMillis() - 10_000 && kept.exists())
             down.set(true); up.haltedAt = System.currentTimeMillis() - Uploader.HALT_MS  // half an hour on, the network down
-            assertEquals("503 /api/chunks?device=phone&start=1000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("503 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             assertEquals("the refusal is over: a stop's drain must not report it", 0L, up.haltedAt)
             File(dir, "5000.ogg").writeBytes(ByteArray(64))  // not batched with it: over BATCH_GAP_MS apart
             down.set(false); proxy.set(false)  // the network back, the proxy fixed: the next try (5 s on) goes through
-            assertEquals("400 /api/chunks?device=phone&start=1000", got.poll(10, TimeUnit.SECONDS))
-            assertEquals("200 /api/chunks?device=phone&start=5000", got.poll(5, TimeUnit.SECONDS))
+            assertEquals("400 /api/chunks?device=phone&start=1000&capture_gain_db=0", got.poll(10, TimeUnit.SECONDS))
+            assertEquals("200 /api/chunks?device=phone&start=5000&capture_gain_db=0", got.poll(5, TimeUnit.SECONDS))
             Thread.sleep(200)
             assertEquals(emptyList<File>(), Uploader.queue(dir))
             assertEquals(0L, up.haltedAt)

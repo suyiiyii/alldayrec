@@ -21,6 +21,13 @@ type: reference
 | `data` | 数据目录：`live.db` 等，见[数据目录](./data.md) |
 | `recordings` | 录音目录 |
 | `lang` | 可选。大模型给这个人写的内容（摘要、待办、实时分析、每日回顾、「问 AI」回答等）用的语言：`zh` 或 `en`。不写时用 `UI_LANG`，`UI_LANG` 也没有时是 `zh`。在网页「我的」页切换语言（`PUT /api/lang`）之后，以切换的结果为准，记在这个人的数据库里，重启后也保留 |
+| `sound` | 可选，默认 `false`。`true`：设了 `SOUND_MODEL` 时给这个人的录音自动算环境声音（见下面的[环境声音](#可选-环境声音)）。写没写都一样：设了 `SOUND_MODEL`，修剪就要等环境声音算完 |
+| `seg_emb` | 可选，默认 `false`。`true`：定稿时每个识别分段算出的声纹（ReDimNet2，fp16）存进这个人 `live.db` 的 `seg_emb` 表，不多做任何计算，也不改识别结果。存的是佩戴者附近所有人的声纹，见[隐私](../explanation/privacy.md)。每天约 3 千个分段时约 1.1 MB/天（每个向量 384 字节）。只管存，不让 AI 助手读，那是 `voice_tools` |
+| `persona_v2` | 可选，默认 `false`。`true`：人物档案改用这个人自己说的原句当证据，不再用摘要要点；只给命名过的人写，碎片、人多场景里吸走大部分说话的标签、对 AI 说的话、外放媒体和口述都不当证据；改了标签以后旧档案作废。见[隐私](../explanation/privacy.md#人物档案)。`false` 时和以前完全一样。每次生成最多约 2 万个输入 token |
+| `voice_tools` | 可选，默认 `false`。`true`：接入的 AI 助手（MCP 的 `voiceprint`、`voice_compare`、`voice_nearest`，HTTP 的 `GET /api/voiceprint*`）可以读任意一句（或句里一段）的声纹，和别的句子、认出名字的人、「我」、对话里的标签比相似度，用来自己核对是谁说的。只读：`seg_emb` 存过的直接用，没存的从录音现算、算完不存，所以不开 `seg_emb` 也能用。现算一次最多 15 秒录音，整个进程同时只算一个，多的立刻返回「正在算别的声纹」；用推理服务（`INFER_URL`）时只试一次、最多 10 秒，失败后 30 秒内直接报错；推理服务被标成故障时也直接报错，等定稿的调用把它恢复。都不影响定稿。`false` 时这些工具和接口都不存在。和 `seg_emb` 是两个独立的决定：`seg_emb` 管「把所有人的声纹存进库」，`voice_tools` 管「允许 AI 助手读声纹」。见[隐私](../explanation/privacy.md) |
+| `place` | 可选，默认 `false`。`true`：每段对话写完摘要后，再单独调用一次大模型（`calls` 里记作 `place`），根据转写、这段的环境声音和时间推断「可能在哪里」，附上依据（哪句话、哪类声音），存进摘要的 `place` 字段，显示在对话页摘要顶部；没把握时不显示，医院、宗教场所、警局法院这类敏感场所默认不推断（见下面的 `place_sensitive`）。摘要的其他字段一个不改，人物档案不受影响。见[隐私](../explanation/privacy.md#可能在哪里)。`false` 时和以前完全一样。每段约 6 千个输入 token（主要是转写） |
+| `place_sensitive` | 可选，默认 `false`。开了 `place` 时才有用。`true`：看病的地方、宗教场所、政治集会、警局法院、戒断机构、性少数相关场所也照常推断和显示，提示词去掉这类禁令（`prompt_version` 3），代码也不再按敏感词过滤；要有原句依据等其他规则不变。见[隐私](../explanation/privacy.md#可能在哪里)。`false` 时和没有这个开关完全一样 |
+| `media_view` | 可选，默认 `false`。`true`：摘要按三类分开录音里的声音（`prompt_version` 19）：外放媒体（视频、电视、播客等，`media_spans`），广播、提示音和音乐（地铁报站、导航、纯音乐，`broadcast_spans`），其余是现场说话；免提打电话、线上会议算现场，对方是参与者。两类都不进摘要正文、人物、待办和决定。对话页原文里每段外放标「外放」、广播标「广播/提示音」，灰显并默认折叠，旁边的「改回现场」把这一段改成现场说话，之后重新生成摘要也保留；改错了在同一位置点「恢复为外放」（或「恢复为广播/提示音」）撤销。把标签改名成别人、声纹确认答「是」教别人的声纹时，这两类里的句子不学；改名成「我」用的是这个标签整体的声纹，不逐句跳过，只有大半落在这两类里的标签不当候选；AI 助手读到的原文（MCP 的 `transcript`、「问 AI」）在这些行上标（外放）、（广播）。见[隐私](../explanation/privacy.md#外放和广播)。已有摘要不重写，要重做用 `resummarize --version 19`（见[数据目录](./data.md)）。`false` 时和以前完全一样 |
 
 - 位置：`DATA_DIR/tenants.json`（见下面的 `DATA_DIR`）。Docker 镜像里 `DATA_DIR` 是 `/data`，也就是宿主机的 `data/tenants.json`。
 - 文件不存在时，服务器第一次启动会生成一个：一个租户 `main`，随机 token，目录是 `DATA_DIR/main` 和 `DATA_DIR/main/recordings`，并在日志里写出登录链接 `http://127.0.0.1:<PORT>/connect?token=<token>`。
@@ -109,6 +116,42 @@ type: reference
 - 服务器不会覆盖别人的对象：新对象只在这个键还不存在时才写（`If-None-Match: *`），合并只覆盖封存时的那个版本（`If-Match`）。两个实例配错成同一个前缀时，后封存的那个会被拒绝，日志里报错，那一小时留在本地。
 - 从 `s3` 改回 `local` 一段时间再改回 `s3`：这期间已封存的小时又来的块写在新的本地小时文件里；改回 `s3` 后，这些文件和它们的块留在本地照常读，日志里报一条错误，不会被删。
 
+### 可选：环境声音
+
+给全部录音（有人说话的和没人说话的）算 AudioSet 类别的打分，原样存进 `live.db` 的 `sounds` 表（格式见[数据目录](./data.md#环境声音-sounds)，隐私见[隐私](../explanation/privacy.md#环境声音)）。开了的租户，网页和 MCP 从这些打分推出几种可靠的声音事件（说话、音乐、交通工具上、安静），显示成对话上的声音标签、时间线上每天的声音条，也能按声音筛对话（见[查看声音标签](../how-to/sound-tags.md)，规则见[数据目录](./data.md#声音事件-sound-events)）；没开的租户什么都不显示。默认关。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `SOUND_MODEL` | 空（关） | 跑哪些模型，逗号隔开：`mn10_as`（EfficientAT，每 10 秒一个结果）、`yamnet`（每 0.48 秒一帧）。第一个是修剪闸门看的主模型。两个可以同时跑，各存各的。`mn10_as.onnx` 只有写进这里才下载和校验（`yamnet.onnx` 听音乐也要用，总会下载） |
+| `SOUND_SINCE` | 无 | 设了 `SOUND_MODEL` 时必填，不填服务器拒绝启动：从这个时刻（ISO，实例所在时区，例如 `2026-11-17`）起的录音由服务器自己补算；之前的历史只用下面的回填命令算，服务器不会自己去算。换了模型文件（sha256 变了，算新模型）也只从这个时刻起算 |
+| `SOUND_EVERY_S`、`SOUND_SETTLE_S` | `60`、`120` | 每隔多少秒找一次还没算的录音；一块音频到了多少秒后才算 |
+| `SOUND_EVENTS_MODEL` | `SOUND_MODEL` 的第一个 | 声音事件（标签、声音条、按声音筛、MCP）用哪个模型的打分；必须是 `SOUND_MODEL` 里的一个，否则服务器拒绝启动 |
+
+- 每个租户还要在 `tenants.json` 里写 `"sound": true` 才自动算。没写的租户不算，但修剪闸门照样拦它（见下）：要修剪，先回填，或者加 `--allow-unscened`。
+- 算的范围以上传的音频块为准，不管有没有转写、转写成没成功。解不开的块、解出来比记录的时长短的块不写结果，之后退避重试。在服务器进程里用一个线程算（全进程同时只算一段，所有租户轮流）；设了 `INFER_URL` 时在推理服务的 `POST /scene/<模型>` 上算，推理服务也要设同样的 `SOUND_MODEL`。第一次采用推理服务的结果之前，先核对它 `/health` 里场景模型的 sha256，对不上就不采用，日志里报错，之后退避重试。推理服务没有这个模型或模型不对时，只有环境声音推迟，声纹照常。
+- 监控指标：`lr_scene_audio_seconds_total`（算了多少秒音频）、`lr_scene_compute_seconds_total`（模型用的时间）、`lr_scene_failed_total`（失败、等重试的段数），按 `model` 分；`lr_scene_decode_seconds_total`（解码用的时间，所有模型共用一次解码）、`lr_scene_backlog_seconds`（每小时一次全量扫描做完后，还有模型没算的秒数，失败后等重试的也算；都算完是 0）。
+- 修剪闸门：设了 `SOUND_MODEL` 时，所有租户（不管 `"sound"` 写没写，`--db` 指定的库也一样）的 `trim.py` 要丢掉的块里，只要有 1 毫秒没有主模型的结果，这个小时就整个留着（原因 `no sound`），`SOUND_SINCE` 之前的历史也一样。没有任何容差：块尾没算到的一小段、解不开或解短的块，都算没覆盖。先回填再修剪；确实不要这些结果时加 `--allow-unscened`，日志里写明丢掉了多少秒没算过的音频。`SOUND_MODEL` 为空时，修剪和以前完全一样。
+- 回填历史（很重，按 1 个核算，每小时录音：解码 45–120 秒（所有模型共用一次），EfficientAT 约 30 秒，YAMNet 约 35–40 秒；在一台忙的老 CPU 上测的墙钟时间）：
+
+```sh
+uv run python -m alldayrec.sounds backfill --tenant main --since 2026-10-01 --until 2026-11-17   # 用 SOUND_MODEL 里的模型
+uv run python -m alldayrec.sounds backfill --db <副本>/live.db --recordings <副本>/recordings --since 2026-10-01 --until 2026-11-17 --model mn10_as
+```
+
+回填先校验要跑的模型（包括 `--model` 指定的）：本地算时下载缺的文件、核对 sha256；设了 `INFER_URL` 时核对推理服务 `/health` 里场景模型的 sha256。对不上直接报错退出，不写任何结果。
+
+在副本上算完，可以只把结果拷回去：`sqlite3 live.db "ATTACH '<副本>/live.db' AS c; INSERT OR IGNORE INTO sounds SELECT * FROM c.sounds"`。`--until` 不要晚于 `SOUND_SINCE`，免得和服务器自己算的重叠。
+
+背景音乐把关（`BG_GATE`，见[其他环境变量](#其他环境变量)）打开以后的代价。它只管学声纹的地方：人物页的分组、「这是你吗」卡片挑候选、拆分合并仍用已有的对话声纹，可能照样显示受音乐影响的分组。
+
+- **改名为「我」时当场重算。** 对话声纹不是开关打开以后建的、或者建好以后又查出音乐的，改名为「我」（对话页或人物页）时当场从录音里重新嵌入：每个标签最多 4 句、每句最多 15 秒；人物页一次给 N 个标签命名，最多 N×4 次，一个接一个算，和别的声纹计算共用 `INFER_CALLS`，请求要等它们算完。重算的结果不存，下次还要重算。打开前用真实的推理服务测一下耗时。
+- **录音已经不在的旧对话教不了「我」。** 上面那种要重算的对话声纹，录音修剪掉了（或者是导入的历史对话）就算不出来：改名照样成功，返回 `learned: false`，不建「我」的声纹。把标签改成「我」和记住「我」的声音是两回事。开关打开以后建的、现在仍查不出音乐的对话声纹，录音不在了也照常能教。
+- **「这个声音像 X」的提示会少。** 改名时 `name_check` 的声学相似提示（`like`）只看查得出没有音乐的对话声纹，旧的不算，返回里的 `alike` 可能为空；同名人物的提示（`same`）照旧。当场重算的结果不存，所以这类旧对话的提示也不会因此回来。
+- **「哪个是你」卡片要等新对话。** 候选只用开关打开以后建的、现在仍查不出音乐的对话声纹，打开前的对话不算，所以打开后卡片要等新对话攒够才弹。选「这是我」时，按当时已有的分数把这个候选的对话声纹重新核对一遍，用剩下的算「我」的声纹；一个都不剩（弹卡以后才到的分数查出了音乐，或者卡片是开关打开前弹的），什么都不存，返回 `learned: 0` 和 `reason: background_music`，网页上说这次没有记下，之后再弹一次。还没有「我」的声纹时，每轮（5 分钟）对每个对话声纹最多查 4 次分数。
+- **`bank relearn` 只用查得出没有音乐的对话声纹。** 打开前建的不算，够不上 5 个的人保持原样，输出里写 `N not shown free of music (BG_GATE)`。这个命令从自己的环境变量读 `BG_GATE`、`SOUND_MODEL`，所以要带着实例的 `.env` 跑；租户的 `"sound"` 要用 `--tenant ID`（代替数据库路径，用这个租户的库）从 `tenants.json` 读：`python -m alldayrec.bank relearn --tenant <ID> [--apply]`。给的是数据库路径时，它不知道是哪个租户，什么都不过滤，和没有这个开关时一样。
+- **合并、拆分、补录改过的对话声纹，算不知道用了哪些句子**，之后要学声纹时一样重算。
+- **查分数的开销。** 每句查一次 `sounds` 表，越早的句子要扫的行越多（在合成的 10 万行、约 347 天上，最早的一句约 31 ms，中间的约 16 ms）。
+
 ### 高级：只有 `stepfun` 和 `stepfun-file` 用
 
 `stepfun` 或 `stepfun-file` 出现在 `ENGINE`、`DRAFT_ENGINE` 或 `ENGINE_FALLBACK` 里时，下面四个 `ASR_*` 都必填。
@@ -128,7 +171,14 @@ type: reference
 | `LIVE_DATA` | `replay_case.py` | 一个租户的数据目录 |
 | `CASES_DIR` | `eval_all.sh` | 标注好的评测用例目录 |
 | `EMB_MODEL`、`SEG_MODEL`、`OWNER_SURE`、`LINK_MIN`、`OWNER_DEFAULT_DEVICE` | `replay_case.py`、`service_case.py` | 见这几个脚本 |
-| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里) |
+| `TRIM_AFTER_DAYS`（默认 `2`）、`TRIM_PAD_S`（`10`）、`TRIM_VAD`（`0.1`）、`TRIM_PURGE_AFTER_H`（`24`） | `trim.py` | 修剪：小时文件最新一块到达多少天后才修剪；人声和句子两侧各留多少秒；判人声的 VAD 阈值（别的阈值跑出来的 VAD 文件不用）；修剪后多少小时 `purge` 才能删原件（至少 24，配得更小 `purge` 直接报错），见[录音存在哪里](../explanation/architecture.md#录音存在哪里)。设了 `SOUND_MODEL` 时所有租户还有闸门，见[环境声音](#可选-环境声音) |
+
+### 设备增益（`device_gain`）
+
+不是环境变量，用命令登记：`server/gain.sh set <租户> <设备> <dB> [--since <时间>]`（本机 `python -m alldayrec.gain`），见[电平和增益](../explanation/architecture.md#电平和增益)。
+
+- 标定设备本身灵敏度的偏移，从 `--since 0`（默认值）开始登记，这样它的全部音频都按它标定，包括历史声纹片段。
+- 历史声纹片段（`/api/voice-clip`）有的没有时间（`voices.clip_start` 为空，早期的外部生成器没有写）。这种片段只在这台设备的偏移对所有时间都是同一个值时才标定：最早一行偏移从 0 开始，而且所有登记的偏移都相同，就整段乘这个偏移，返回 WAV，带 `X-Gain-Db`。设备登记了不同的偏移，或者最早一行从 0 以后才开始，就无法判断片段在哪一段：原样返回存下的文件，记一条日志，计入指标 `lr_gain_untimed_clips_total`（按设备）。设备没有任何非 0 的偏移时，原样返回。要精确标定这些片段，需要回补它们的 `clip_start`。
 
 ## 其他环境变量
 
@@ -147,15 +197,17 @@ type: reference
 | `ASR_CALLS`、`INFER_CALLS`、`DB_CALLS`、`MEDIA_CALLS` | `1`、`2`、`8`、`16` | 同时进行的本地语音识别、声纹计算、全库查询、音频编解码的数量 | `threads.py` |
 | `FINAL_ASR_CONCURRENCY`、`FINAL_EMBED_CONCURRENCY` | `4`、`2` | 按设备算：一个设备积压时，同时送引擎的定稿块数，和其中同时算声纹的块数。两个设备同时积压，各送各的，合计可到两倍；全进程的声纹计算仍共用 `INFER_CALLS` 名额。块照旧按时间顺序认人、切对话、写库，结果和逐块处理一样。不积压时始终只有一块，延迟不变；同一时段还有别的录音设备有音频，或本设备正给它当备用（同处备用）时，也是一块一块来 | `device_pipeline.py` |
 | `INFER_THREADS` | `4` | 每次声纹计算用的 onnxruntime 线程数 | `infer.py` |
+| `INFER_GRAPH_OPT` | `all` | onnxruntime 图优化级别：`all` 或 `extended`（不用 NCHWc 卷积布局；部分 Intel CPU 上快数倍，AMD 上慢约 10 %） | `infer.py` |
 | `INFER_URL` | 空 | 独立推理服务（`alldayrec --infer` 启动）的地址，例如 `https://infer.example.com`。设了以后声纹、音乐检测和换人检测只在那里算，服务器不下载、也不加载这三个模型；服务失败时调用等它恢复，按 2 秒起、翻倍到 60 秒的间隔一直重试。空：在服务器进程里算 | `compute.py` |
 | `INFER_TOKEN` | 空 | 推理服务的令牌。设了 `INFER_URL` 时必填，服务器和 `alldayrec --infer` 两边设成同一个值 | `compute.py`、`infer_server.py` |
 | `INFER_TIMEOUT` | `30` | 每次尝试等推理服务回答的秒数（连接：2 秒） | `compute.py` |
 | `INFER_HOST`、`INFER_PORT` | `127.0.0.1`、`8771` | `alldayrec --infer` 监听的地址和端口（`--port` 也只改它的端口；它自己的变量，共用 `.env` 时不会拿到服务器的 `HOST`、`PORT`） | `infer_server.py` |
 | `MUSIC_DETECT` | `1` | 定稿时听出是音乐（外放的歌、伴奏和人声差不多一样响）的句子不取声纹，说话人记为 `S?`，不会进人物页；仍然转写，转写行上有音符图标。把这句的说话人纠正成某个人，它就算人声：音符去掉，照常学声纹。0 关闭 | `music.py` |
-| `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；0 关闭 | `infer.py` |
-| `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；0 原样送 | `squeeze.py` |
+| `BG_GATE`、`BG_MUSIC_MIN` | `0`、`0.23` | 句下背景音乐把关：设成 1 时，人声下面压着音乐的句子（和这句重叠的 `mn10_as` 10 秒帧里，Music 分数最高的达到 `BG_MUSIC_MIN`）不拿来学声纹：不进人物的声纹登记，不算进对话的声纹（把标签改成「我」也就学不到它；开关打开前、或者分数到之前就建好的对话声纹，每次「我」要从它学、或者补录的音频要和它比对时，都按当时已有的分数重新检查一遍，用到的句子里有压着音乐的就去掉这些句子重新算；开关打开前建的不知道用了哪些句子，一律重新算），不当「哪个是你」「这是你吗」「这是 P 吗」卡片的试听片段；已经命名的人在「这是 P 吗」卡片上的句子全被挡时，回答「是」返回 `learned: 0` 和 `reason: background_music`。这句照常转写，说话人照常标，也不加音符（和 `MUSIC_DETECT` 不同）。生效的前提是租户开了环境声音（`"sound": true`），并且 `SOUND_MODEL` 里有 `mn10_as`；没有录音设备（没有 `source`）的句子，会查同一租户下所有设备的分数；不满足，或者这段还没算出分数时，和关闭时一样，只计数 `lr_bg_gate_unscored_total`；被挡掉的句数计 `lr_bg_gate_skipped_total`。两个都按 `use` 分，即在哪里判的（`enroll`：人物的声纹登记，`voices`：对话的声纹，`cached`：重新检查已建好的对话声纹，`late`、`clip`、`check`），同一句可能在几处各计一次。0.23 是暂定值，来自 74 个没有音乐的样本窗（误报约 5%），样本太少，以后要在新数据上复测。打开以后的代价见[可选：环境声音](#可选-环境声音) | `sounds.py` |
+| `VAD_GAIN_MAX_DB` | `16` | 给 VAD 的特征最多提升多少 dB（只影响语音检测，不影响送给引擎和回放的音频）；在设备的标定偏移之后算（[电平和增益](../explanation/architecture.md#电平和增益)）；0 关闭 | `infer.py` |
+| `ASR_GAIN_MAX_DB` | `16` | 送给引擎的音频最多提升多少 dB；在设备的标定偏移之后算；0 原样送 | `squeeze.py` |
 | `DEHUM` | `1` | 读取录音设备的音频时去掉它 10 ms 周期的哼声；0 关闭 | `audio.py` |
-| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭 | `audio.py` |
+| `PLAY_GAIN_DB` | `12` | 网页回放和实时收听时，自家录音豆（设备名 `LR-` 开头）的音频调响这么多 dB，峰值限制在 −1 dBFS 以下，不削波；手机、飞书/安克录音豆和导入的录音不变。只影响播放，不影响存储、转写和声纹；0 关闭。登记了标定偏移（`device_gain`）的那段音频（从它的 `since_ms` 起）不再加它，回放只用偏移；等所有录音豆都登记了偏移，这一项就可以删掉 | `audio.py` |
 | `SPEAKER_LINK`、`SPEAKER_SUGGEST`、`MERGE_SUGGEST` | `0.5`、`0.6`、`0.45` | 人物页的声纹相似度阈值：并入匿名组、建议给名字、建议合并同一段对话里的两个标签 | `routes_speakers.py` |
 | `SPLIT_TURNS` | `1` | 引擎把两个人的话并成一句时（快速的一问一答），先用 pyannote segmentation-3.0 听出句子里换人的地方，在最近的字边界切开，切点前后各 ≤3 s 的声纹不像才保留，每段各自认人；只对带字级时间的句子（`qwen` 引擎）生效；0 关闭，只按 `SPLIT_COS` 切 | `transcript.py` |
 | `SPLIT_COS` | `0.35` | `SPLIT_TURNS=0` 时，在句子里每 0.5 s 取一个 1.5 s 窗的声纹，切点前、后各 3 s 内的窗口相似度低于这个值就在最近的字边界切开，每段各自认人；只对 3 s 以上、带字级时间的句子（`qwen` 引擎）生效；0 关闭 | `transcript.py` |

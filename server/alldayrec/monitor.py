@@ -24,6 +24,7 @@ from alldayrec import db
 from alldayrec import late_store
 from alldayrec import device_pipeline
 from alldayrec import perf
+from alldayrec import sound_events
 from alldayrec import seal
 from alldayrec import stepfun_asr
 from alldayrec import tenant
@@ -73,6 +74,7 @@ def device_status(device: str, st: PipelineState) -> dict:
             "rate": round(rate, 1) if rate else None, "eta_s": round(left / rate) if rate and rate > 0.1 and left > 30 else None,
             "last_speech": st.last_speech.isoformat(timespec="seconds") if st.last_speech else None,
             "refine": st.refine, "conversation": st.conversation, "drafting": st.drafting, "draft": st.draft,
+            "seg_emb_failed": st.seg_emb_failed,  # pieces whose segment voiceprints were not kept (logged)
             "standby": st.standby,  # its speech left to this device in the same place (colocate.py): audio kept, not transcribed
             "analyzing": st.analyzing,  # the live analysis is running
             "draft_to": st.draft_to.isoformat(timespec="seconds") if st.draft_to else None,
@@ -131,7 +133,8 @@ def status() -> dict:
             "recording": any(d["recording"] for d in ds), "last_audio": max((d["received_to"] for d in ds if d["received_to"]), default=None),
             "balance": db.balance("stepfun"),
             "commit": state["commit"], "chunks": T().chunks, "lang": T().lang,
-            "engine": asr.ENGINE, "draft_engine": asr.DRAFT_ENGINE, "fallback_engine": asr.ENGINE_FALLBACK or None}  # the pages word them
+            "engine": asr.ENGINE, "draft_engine": asr.DRAFT_ENGINE, "fallback_engine": asr.ENGINE_FALLBACK or None,  # the pages word them
+            **({"sound_events": True} if sound_events.model() else {})}  # the pages' sound tags, bar and filter (none while off)
 
 
 async def status_loop():
@@ -167,6 +170,7 @@ def metrics() -> str:
     db.balance. Devices by their LR-… name, a phone (named by its owner) by a hash of it; never what was said, nor a name
     of anyone."""
     s, now, out = status(), dt.datetime.now(), []
+    label = lambda d: d if d.startswith("LR-") else "phone-" + hashlib.sha256(d.encode()).hexdigest()[:8]
 
     def m(name, v, **labels):
         if v is not None:
@@ -174,7 +178,7 @@ def metrics() -> str:
     m("lr_up", 1, commit=s["commit"])
     m("lr_summaries_pending", s["summaries_pending"])
     for d in s["devices"]:
-        dev = d["device"] if d["device"].startswith("LR-") else "phone-" + hashlib.sha256(d["device"].encode()).hexdigest()[:8]
+        dev = label(d["device"])
         hw, snd, arr = d["hw"] or {}, d["sound"] or {}, d["arrival"] or {}
         # the pipeline, its last 10 min of audio (sound), the recorder as its phone last read it (hw)
         for name, v in (("behind_seconds", d["behind_s"]), ("latency_seconds", d["latency_s"]), ("queued_pieces", d["queued"]),
@@ -186,6 +190,10 @@ def metrics() -> str:
             m(f"lr_{name}", v, device=dev)
         if hw.get("fw"):
             m("lr_device_info", 1, device=dev, firmware=hw["fw"])
+    for d, n in list(T().gain_limited.items()):  # gain.to16: samples that went into its soft limiter (past 0.9 of full scale) on the way to int16
+        m("lr_gain_limited_samples_total", n, device=label(d))
+    for d, n in list(T().gain_untimed.items()):  # voice_clip: clips of no time served as stored, the device's offset not one value
+        m("lr_gain_untimed_clips_total", n, device=label(d))
     for c in db.calls(STARTED):
         for result, n in {"ok": c["n"] - sum(c["failed"].values()), **c["failed"]}.items():  # failed: by HTTP code or class
             m("lr_calls_total", n, kind=c["kind"], engine=c["engine"], result=result)
@@ -201,6 +209,11 @@ def metrics() -> str:
                 m("lr_store_errors_total", k, op=op, kind=kind)
             m("lr_store_seconds_count", n, op=op)
             m("lr_store_seconds_sum", round(sec, 3), op=op)
+    for (k, model), v in list(T().scene_stats.items()):  # sounds.py: audio s scored, decode / compute s (wall), failed parts, backlog s (decode, backlog: all models)
+        m({"audio": "lr_scene_audio_seconds_total", "decode": "lr_scene_decode_seconds_total", "compute": "lr_scene_compute_seconds_total",
+           "failed": "lr_scene_failed_total", "backlog": "lr_scene_backlog_seconds",
+           "bg_skipped": "lr_bg_gate_skipped_total", "bg_unscored": "lr_bg_gate_unscored_total"}[k], round(v, 3),
+          **({"use": model} if k.startswith("bg_") else {"model": model} if model else {}))  # bg_*: sounds.under_music's use
     b = s["balance"] or {}
     m("lr_stepfun_balance_cny", b.get("cny"))
     m("lr_stepfun_days_left", b.get("days_left"))

@@ -306,6 +306,9 @@ class UsbDiskTest {
         assertEquals(false, Ble.acks(status(0) + byteArrayOf(0)))
         assertEquals(true, Ble.acks(status(0) + byteArrayOf(1)))
         assertEquals(true, Ble.acks(status(0) + byteArrayOf(3, 9)))  // more bits, more bytes later
+        // the board's mic gain (firmware #358 byte 53): none in 53 bytes, int8 half dB in 54
+        assertEquals(null, Ble.micGainDb(status(0) + ByteArray(5)))
+        assertEquals(listOf(0.0, 6.0, -6.0, 20.0, -20.0), listOf(0, 12, -12, 40, -40).map { Ble.micGainDb(status(0) + ByteArray(5) + byteArrayOf(it.toByte())) })
         assertEquals(null, Ble.card(status(0) + byteArrayOf(1)))  // older firmware: no card state, no card_kb
         assertEquals("blank", Ble.card(status(-19) + byteArrayOf(9) + ByteArray(4)))  // ACK | card 4 << 1: no file system
         assertEquals("ok", Ble.card(status(0) + byteArrayOf(2) + ByteArray(4)))  // card 1 << 1

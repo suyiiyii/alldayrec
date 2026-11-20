@@ -40,6 +40,7 @@ import anyio.to_thread
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from alldayrec import gain  # noqa: E402
 from alldayrec.asr import diarize  # noqa: E402
 from alldayrec.device_pipeline import REFINE_EVERY_S, REFINE_WINDOW_S  # noqa: E402
 from alldayrec.segmenter import SR, Segmenter  # noqa: E402
@@ -79,7 +80,7 @@ class Asr:
 
     def _post(self, x: np.ndarray) -> str:
         import urllib.request
-        body = json.dumps({"audio": {"data": base64.b64encode(x.tobytes()).decode(), "input": {
+        body = json.dumps({"audio": {"data": base64.b64encode(gain.to16(x).tobytes()).decode(), "input": {
             "transcription": {"model": ASR_MODEL, "language": "zh", "enable_itn": True},
             "format": {"type": "pcm", "codec": "pcm_s16le", "rate": SR, "bits": 16, "channel": 1}}}}).encode()
         req = urllib.request.Request(ASR_URL, body, {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
@@ -236,7 +237,12 @@ class Case:
         self.meta = json.load(open(d / "meta.json"))
         self.x = np.frombuffer(subprocess.run(["ffmpeg", "-v", "error", "-i", str(d / self.meta["audio"]), "-f", "s16le", "-ac", "1",
                                               "-ar", str(SR), "-"], capture_output=True, check=True).stdout, np.int16)
-        self.work = d / "work"
+        # meta's offset_db (optional, 0: as decoded): the device's calibration offset (gain.py), float32 as the server
+        # hands it on; its results cached apart (work@<dB>/), never an uncalibrated run's
+        g = float(self.meta.get("offset_db") or 0)
+        if g:
+            self.x = self.x.astype(np.float32) * np.float32(10 ** (g / 20))
+        self.work = d / (f"work@{g:g}" if g else "work")
         self.work.mkdir(exist_ok=True)
         self.asr = Asr(os.environ["STEPFUN_API_KEY"])
         self.cache_path = self.work / "asr_cache.jsonl"
