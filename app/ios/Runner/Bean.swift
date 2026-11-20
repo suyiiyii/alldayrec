@@ -383,6 +383,7 @@ final class BeanSync {
   private var liveSeen: Int64 = 0   // includes waiting for a header and gaps between code-4 retries
   private var liveStalled = false  // one warning until audio resumes, across reconnects
   private var lagging = false  // live audio over a minute behind: one warning until it is back within 10 s
+  private var linkUnits: Int64 = 0, linkAt: Int64 = 0  // BLE units of the transfer since linkAt (its start or the last status)
   private var xfer: Xfer?
   private var since: Int64 = 0
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
@@ -557,7 +558,7 @@ final class BeanSync {
         if now - settled >= 5000 { settled = now; settle(); owe(); if xfer == nil && !recording { try prune() } }
         if now - reported >= 60_000 {
           reported = now
-          io.report(hw.merging(owed) { $1 }.merging(xfer?.lag.map { ["live_lag_s": $0 / 1000] } ?? [:]) { $1 })
+          io.report(hw.merging(owed) { $1 }.merging(xfer?.lag.map { ["live_lag_s": $0 / 1000] } ?? [:]) { $1 }.merging(link(now)) { $1 })
         }
       }
     }
@@ -884,11 +885,23 @@ final class BeanSync {
     return d
   }
 
+  /// How the BLE link goes, with each status (11-20: a live read at 0.67 of real time for an hour, front or back, then
+  /// three times as fast for ten minutes in the same connection, the trigger not in the status): units a second since
+  /// the transfer began or the last status (50: real time), what is read, the live page, the phone's side
+  /// (BeanIo.phoneState). None without a BLE transfer.
+  private func link(_ now: Int64) -> [String: Any] {
+    defer { linkUnits = 0; linkAt = now }
+    guard let x = xfer, !overWifi, now > linkAt else { return [:] }
+    let unitsS = Double(linkUnits) * 1000 / Double(now - linkAt)
+    return io.phoneState().merging(["link_units_s": (unitsS * 10).rounded() / 10, "xfer_live": x.live, "xfer_realtime": x.realtime,
+                                    "watched": io.watched()]) { $1 }
+  }
+
   /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
   private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.latest ?? file * 1000)) / Bean.frameMs) }
 
   private func begin(_ x: Xfer) throws {
-    xfer = x; x.at = io.now(); x.seen = x.at; marked = false
+    xfer = x; x.at = io.now(); x.seen = x.at; marked = false; linkUnits = 0; linkAt = x.at
     if x.live && liveFile != x.file { liveFile = x.file; liveSeen = x.at }
     if !overWifi { state = ["code": x.live ? "joining" : "beanIdle"] }
     if x.live { syncDoneKb = 0; syncTotalKb = 0 }  // a backlog waits while the bean records
@@ -1085,7 +1098,7 @@ final class BeanSync {
       log("bean_xfer", "实时文件 \(x.file) 豆子从单元 \(x.last) 退回到 \(s.seq) 重发：这次传输之后的单元不再用来对钟", "warn",
           ["file": x.file, "from": x.last, "to": s.seq])
     }
-    x.units += 1; x.last = max(x.last, s.seq); x.seen = now
+    x.units += 1; x.last = max(x.last, s.seq); x.seen = now; linkUnits += 1
     if overWifi { wifiUnits += 1 }
     // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
     if !x.realtime && x.lag == nil && s.seq - x.first >= BeanSync.restUnits && now > x.firstAt {

@@ -12,9 +12,12 @@ import AVFoundation
 import CallKit
 import CoreBluetooth
 import Foundation
+import Network
 
 final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, BeanIo {
   static let restoreId = "live-record.bean"
+  /// The phone's network, for phoneState(): Wi-Fi on 2.4 GHz shares the radio with BLE
+  private static let path: NWPathMonitor = { let m = NWPathMonitor(); m.start(queue: DispatchQueue(label: "bean-path")); return m }()
   static let service = CBUUID(string: Bean.service), write = CBUUID(string: Bean.write), notify = CBUUID(string: Bean.notify)
 
   let name: String
@@ -305,14 +308,15 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func wifiLeave() { wifi?.close(); wifi = nil }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
-  /// (category PlayAndRecord: this app's voice question too); power, and whether the app is in front.
+  /// (category PlayAndRecord: this app's voice question too), and Wi-Fi; power, and whether the app is in front.
   func phoneState() -> [String: Any] {
+    let p = BeanLink.path.currentPath, net = [NWInterface.InterfaceType.wifi, .cellular, .wiredEthernet, .other].filter(p.usesInterfaceType)
     let s = AVAudioSession.sharedInstance(), r = s.currentRoute
     let (call, front) = DispatchQueue.main.sync { (CXCallObserver().calls.contains { !$0.hasEnded }, Recorder.foregroundApp) }
     let power = Recorder.phone().filter { ["phone_battery", "phone_charging", "low_power", "thermal"].contains($0.key) }
     return power.merging(["audio_out": r.outputs.map(\.portType.rawValue), "audio_in": r.inputs.map(\.portType.rawValue),
                           "audio_category": s.category.rawValue, "other_audio": s.isOtherAudioPlaying, "call": call,
-                          "foreground": front]) { $1 }
+                          "foreground": front, "net": net.map { "\($0)" }, "net_status": "\(p.status)"]) { $1 }
   }
 
   //

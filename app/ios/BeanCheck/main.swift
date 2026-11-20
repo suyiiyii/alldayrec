@@ -199,6 +199,7 @@ final class FakeBean: BeanIo {
   func watched() -> Bool { pageOpen }
   func log(_ kind: String, _ text: String, _ level: String?, _ fields: [String: Any], _ at: Int64?) { logs.append((kind, text)); logFields.append(fields) }
   func report(_ hw: [String: Any]) { reports.append(hw) }
+  func phoneState() -> [String: Any] { ["foreground": false, "net": ["wifi"]] }
   func hold(_ at: Int64?) { holds.append(at); heldAt = at }
   func held() -> Int64? { heldAt }
   var liveFroms: [Int64] = []
@@ -651,6 +652,13 @@ do {
   check(bean.reports.first!["live_lag_s"] == nil, true, "not live yet when connected")
   let lags = bean.reports.compactMap { $0["live_lag_s"] as? Int64 }
   check(lags.count, 2, "a status a minute")
+  let rates = bean.reports.compactMap { $0["link_units_s"] as? Double }
+  check(rates.count, 2, "the link's rate with each status during the transfer")
+  check((15.0...18.0).contains(rates[0]), true, "the first minute at a third of real time: \(rates[0])")
+  check((50.0...56.0).contains(rates[1]), true, "the next one's own units, not since the start: \(rates[1])")
+  let st = bean.reports.first { $0["link_units_s"] != nil }!
+  check([st["xfer_live"] as? Bool, st["xfer_realtime"] as? Bool, st["watched"] as? Bool, st["foreground"] as? Bool],
+        [true, false, false, false], "what is read, the page and the phone's side with it")
   check((38...42).contains(lags[0]), true, "two thirds of the first minute behind: \(lags[0])")
   check((33...39).contains(lags[1]), true, "catching up, 12 s in: \(lags[1])")
   check(bean.logs.filter { $0.0 == "bean_lag" }.map { $0.1.contains("追上了") }, [false, true])
