@@ -101,6 +101,8 @@ Pico 跑 debugprobe（或 lr-probe，带三路 ADC），**电池、板子的 USB
 uv run firmware/selftest/swd.py check -u PROBE                                   # 不停核、不复位、不写 flash / UICR / 外设：芯片、锁没锁、UICR 现状、下一步
 uv run firmware/selftest/swd.py flash -u PROBE --bootloader nice_nano_bootloader-0.10.0_s140_6.1.1.hex [--unlock]
 uv run firmware/selftest/swd.py diag -u PROBE [--usb yes|no] [--adc auto]        # 回流后、焊 B 面前
+uv run firmware/selftest/swd.py hfxo -u PROBE [-n 10]                            # 32 MHz 晶振：停振、起振、读回，重复 N 次
+uv run firmware/selftest/swd.py watch -u PROBE [--secs 120]                       # VBUSDETECT / OUTPUTRDY 带时间戳，对台架上的 VBUS 变化
 uv run firmware/selftest/swd.py uicr [--fxx] -o uicr-n5.hex                      # 只生成 UICR 文件
 uv run firmware/selftest/swd.py test                                             # 离线自测
 ```
@@ -133,6 +135,9 @@ uv run firmware/selftest/swd.py test                                            
   | 接了器件的线 | 不加上下拉读一次 | 只记录（不给没上电的器件灌电） |
 
   **板子的 USB 只在焊 B 面之前可以和 Pico 的 3V3 同时接**：那时 D2 没焊，USB 只把 5 V 送到 U1 的 VBUS 球，VDD 仍是 Pico 供。焊了 B 面以后插 USB，REG0 会和 Pico 抢着驱动 VDD；`diag` 看到 VDDH 有电会提示立刻拔掉。
+- **`hfxo`、`watch`**（A 面装完、B 面还没装就能用：不靠 USB、HFXO、BLE，芯片里有没有固件都行）：先停住内核并确认停住，内核这时用片内 HFINT 跑；结束时内核恢复原来的状态（原来在运行就让它继续跑，原来停着就保持停住），晶振停掉（只有原来就有应用开着它时才重新启动）。只写 CLOCK 的 HFCLKSTART / HFCLKSTOP 和 EVENTS_HFCLKSTARTED，其余都只读，不碰 GPIO，所以 **LR-N5 和 LR-N5-S（R1）都能跑**；`diag` 的上下拉是按 N5 的球排的，**R1 上不要跑 `diag`**。两个命令都在 `--out` 下写一份 JSON（全部读数）和一份 CSV（可以直接贴进实验记录）。
+  - `hfxo`：每一轮是 STOP → 清 EVENTS_HFCLKSTARTED → START，START 之后主机一直读事件，记下第一次读到的时刻（这是起振时间的上限，最多晚一次 SWD 读），在 1 / 10 / 100 / 1000 ms（主机计时）各读一次 HFCLKRUN、EVENTS_HFCLKSTARTED、HFCLKSTAT，最后再 STOP 一次，读回 HFCLKSTAT。判据：1 s 时 HFCLKSTAT = 0x10001（在晶振上跑）且事件为 1，否则 FAIL；STOP 之后 SRC 回到 0（HFINT），否则 FAIL。开头一行记 FICR（型号、build code、序列号）、UICR（REGOUT0、APPROTECT、PSELRESET0）、RESETREAS、MAINREGSTATUS、DCDCEN / DCDCEN0。**`-n` 是热重启**（芯片一直有电），统计不能代替冷启动：冷启动要人断电（拔掉 Pico，等 10 s 再插上），然后再跑一次 `hfxo -n 1`，每次断电各算一轮。
+  - `watch`：每 `--every` 秒（默认 0.1）读一次 USBREGSTATUS（bit 0 VBUSDETECT，bit 1 OUTPUTRDY）和 MAINREGSTATUS，一有变化马上打印一行（行尾带 `<-`），没变化就每秒打一行；结束时列出所有变化，以及每次 VBUSDETECT 0→1 之后过多久 OUTPUTRDY 变成 1。只记芯片报的状态，不判 PASS / FAIL：拿去和台架上 VBUS 0 → 4.75 / 5.0 V → 0 的时刻对照（AD2 球开路时，VBUS 有电而 VBUSDETECT 一直是 0）。
 - **lr-probe 的 ADC**（`--adc auto` 或 `--adc /dev/cu.usbmodemXXXX`）：GP26 经 10 kΩ 接 VDD（×1）、GP27 经 100k/100k 接 TP11 VSYS（×2）、GP28 经 100k/100k 接 TP1 VBUS（×2），取 1.5 s 的中位数。
 
 ### 自检固件（`--n5`）
