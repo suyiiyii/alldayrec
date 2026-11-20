@@ -27,8 +27,10 @@ MODELS = {"sdmod": "LR-X1", "promicro": "LR-P1", "promicro-p2": "LR-P2", "promic
           "n4": "LR-N4"}  # have (expansion is a test base for the XIAO); LR-P2 (kept for tests) and LR-P3 (the boxed
 # recorder) are ProMicros too, with packages of their own; LR-N4 is our own board on the ProMicro's bootloader
 # What a variant's boards need in its build (.config, lr.sh): LR-N4's were built with no L1 (DCDC on hangs them) and
-# read their switch open = on; a package without these would hang them, or park them while their switch says on
-FIT = {"n4": {"LR_SWITCH_OPEN_ON": "y", "SOC_DCDC_NRF52X": None, "SOC_DCDC_NRF52X_HV": None, "LR_MIC_GAIN": "0x38"}}
+# read their switch open = on, and park where System OFF would come (one sent there never woke); a package without these
+# would hang them, or park them while their switch says on
+FIT = {"n4": {"LR_SWITCH_OPEN_ON": "y", "SOC_DCDC_NRF52X": None, "SOC_DCDC_NRF52X_HV": None, "LR_MIC_GAIN": "0x38",
+              "LR_PARK": "y"}}
 
 
 def git(*a: str) -> str:
