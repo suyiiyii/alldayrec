@@ -1,18 +1,19 @@
 /* LR-N4: our own board around a bare nRF52840 (QIAA, aQFN73), applied after lr_promicro.overlay. The same bootloader
  * and partitions as the ProMicro (nice!nano UF2 bootloader 0.10.0 on S140 6.1.1, the app at 0x26000), and the same
  * pins for the PDM mic (DAT P0.06, CLK P0.08), the SD card (CS P0.20, MOSI P0.22, SCK P0.24, MISO P1.00) and the slide
- * switch (P1.15 to GND = on, CONFIG_LR_SWITCH). What differs is below; the battery is read on AIN0 (P0.02) through a
- * 1M/1M divider (CONFIG_LR_BATTERY_AIN0, battery.c), and the charger's CHRG on P0.29 (chrg-gpios).
+ * switch (P1.15, CONFIG_LR_SWITCH; the boards built read open = on, CONFIG_LR_SWITCH_OPEN_ON). What differs is below;
+ * the battery is read on AIN0 (P0.02) through a 1M/1M divider (CONFIG_LR_BATTERY_AIN0, battery.c), and the charger's
+ * CHRG on P0.29 (chrg-gpios).
  *
  * Power: VDDH comes from the system rail (the battery, or USB through a Schottky diode while plugged in), so the chip
- * runs in high-voltage mode: REG0 (VDDH -> VDD) and REG1 (VDD -> DEC4), each with its DCDC inductor fitted (L1 on
- * DCCH; L3 + L4 on DCC, nRF52840 PS v1.11 7.3.4 configuration 4). The board's Kconfig has BOARD_ENABLE_DCDC and
- * BOARD_ENABLE_DCDC_HV on, and main.c sets DCDCEN and DCDCEN0. VDD is REG0's output, 3.0 V by UICR REGOUT0 = 4 (PS v1.11
- * 5.3.8 and the REGOUT0 register): it is written once with the bootloader over SWD, not by this firmware (the nice!nano
- * 0.10.0 bootloader writes 3.3 V there itself when it finds REGOUT0 erased, boards.c, so the UICR file goes in the same
- * load as the bootloader), and matches
- * the SD card's and the mics' 3.0 V LDOs (SGM2036-3.0), so their I/O levels agree. REG0 needs VDDH 0.3 V above it,
- * which is why the low-battery cut-off stays at 3.3 V (CONFIG_LR_LOW_BATTERY_MV). */
+ * runs in high-voltage mode: REG0 (VDDH -> VDD) and REG1 (VDD -> DEC4). The design has their DCDC inductors (L1 on
+ * DCCH; L3 + L4 on DCC, nRF52840 PS v1.11 7.3.4 configuration 4), but the boards built have no L1 and hung with DCDC on
+ * (11-11): lr.sh builds LR-N4 with BOARD_ENABLE_DCDC and BOARD_ENABLE_DCDC_HV off, both regulators on their LDOs. VDD
+ * is REG0's output, 3.0 V by UICR REGOUT0 = 4 (PS v1.11 5.3.8 and the REGOUT0 register): it is written once with the
+ * bootloader over SWD, not by this firmware (the nice!nano 0.10.0 bootloader writes 3.3 V there itself when it finds
+ * REGOUT0 erased, boards.c, so the UICR file goes in the same load as the bootloader), and matches the SD card's and
+ * the mics' 3.0 V LDOs (SGM2036-3.0), so their I/O levels agree. REG0 needs VDDH 0.3 V above it, which is why the
+ * low-battery cut-off stays at 3.3 V (CONFIG_LR_LOW_BATTERY_MV). */
 / {
 	zephyr,user {
 		/* MIC_PWR: the enable of both mics' LDO (U5, 100k pull-down), not a supply from the pin as on LR-P3 */

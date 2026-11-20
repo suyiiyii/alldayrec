@@ -26,6 +26,9 @@ D = Path(__file__).resolve().parent
 MODELS = {"sdmod": "LR-X1", "promicro": "LR-P1", "promicro-p2": "LR-P2", "promicro-p3": "LR-P3",  # the boards people
           "n4": "LR-N4"}  # have (expansion is a test base for the XIAO); LR-P2 (kept for tests) and LR-P3 (the boxed
 # recorder) are ProMicros too, with packages of their own; LR-N4 is our own board on the ProMicro's bootloader
+# What a variant's boards need in its build (.config, lr.sh): LR-N4's were built with no L1 (DCDC on hangs them) and
+# read their switch open = on; a package without these would hang them, or park them while their switch says on
+FIT = {"n4": {"LR_SWITCH_OPEN_ON": "y", "SOC_DCDC_NRF52X": None, "SOC_DCDC_NRF52X_HV": None, "LR_MIC_GAIN": "0x38"}}
 
 
 def git(*a: str) -> str:
@@ -62,6 +65,12 @@ def config(v: str, key: str) -> str | None:
     return m and m.group(1)
 
 
+def unfit(v: str, dotconfig: str) -> str:
+    """What in a build's .config its boards cannot take (FIT), '' when none."""
+    got = dict(re.findall(r"^CONFIG_(\w+)=(.*)$", dotconfig, re.M))
+    return ", ".join(f"{k}={got.get(k)} (wants {w})" for k, w in FIT.get(v, {}).items() if got.get(k) != w)
+
+
 def main():
     ap = argparse.ArgumentParser(description="build, pack and upload recorder firmware")
     ap.add_argument("variants", nargs="+", choices=MODELS)
@@ -95,6 +104,8 @@ def main():
         model, version = config(v, "BT_DIS_MODEL"), config(v, "BT_DIS_FW_REV_STR") or ""
         if model != MODELS[v]:
             sys.exit(f"{v} built as model {model}, expected {MODELS[v]}")
+        if bad := unfit(v, (D / f"build/lr-{v}/zephyr/.config").read_text()):
+            sys.exit(f"{v} is not built for its boards: {bad}")
         if not version.endswith(f"-{short}"):
             sys.exit(f"{v} build carries revision {version}, not HEAD {short}")
         hexfile, pkg = D / f"build/lr-{v}/zephyr/zephyr.hex", D / f"build/lr-{v}/lr-{v}.zip"
