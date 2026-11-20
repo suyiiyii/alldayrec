@@ -100,6 +100,21 @@ class BeanTest {
             Bean.opus(field("file_key", "file_key_hex"), nonce, Bean.Slice(3, 0, field("audio_slice", "ciphertext_hex"))))
     }
 
+    @Test fun firstSince() {  // a bean added here: GET /api/audio-end's answer to the since BeanSync.pending reads from
+        val now = 1_795_200_000_000L; val end = now - 3_600_000  // the old phone's last piece ended an hour ago
+        val (since, why) = Bean.firstSince(now, 200, """{"device": "D3200-0A0B", "end_ms": $end}""")
+        assertEquals(end - 6 * 3_600_000 - 600_000, since); assertNull(why)
+        val mine = { idS: Long -> idS * 1000 >= since }  // BeanSync.pending's test, the file id in seconds
+        assertTrue("the 6 h file holding the end, begun a breath after it began", mine((end - Bean.FILE_MS) / 1000 + 1))
+        assertTrue("one begun at the end exactly 6 h before, its id early by the slack", mine((end - Bean.FILE_MS - 599_000) / 1000))
+        assertFalse("one that ended before the server's end: not read again", mine((end - Bean.FILE_MS - 601_000) / 1000))
+        assertEquals(now, Bean.firstSince(now, 200, """{"end_ms": ${now + 30 * 3_600_000L}}""").first)  // never after now
+        assertEquals(now to "服务端没有这颗豆子的音频", Bean.firstSince(now, 200, """{"device": "D3200-0A0B", "end_ms": null}"""))
+        assertEquals(now to "没连上服务端", Bean.firstSince(now, -1, null))
+        assertEquals(now to "服务端答复 HTTP 404", Bean.firstSince(now, 404, """{"detail": "Not Found"}"""))  // a server before it
+        assertEquals(now, Bean.firstSince(now, 200, "<html>").first)
+    }
+
     @Test fun parsing() {
         val unit = Bean.le32(7) + byteArrayOf(5) + ByteArray(160) { it.toByte() } + byteArrayOf(0)
         val s = Bean.slices(unit + unit).first()

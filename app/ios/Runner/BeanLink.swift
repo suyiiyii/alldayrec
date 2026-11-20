@@ -193,6 +193,8 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
       return try block()
     }
     notes.clear(); downWhy = nil
+    let adding = prefs.bool(forKey: "bindPending") || prefs.object(forKey: "beanSince:\(name)") == nil
+    let asked = adding ? audioEnd() : nil  // before the link where it can be: it is not held idle meanwhile
     peripheral = p
     defer {
       inSession = false
@@ -228,12 +230,30 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     }
     if mtu < 78 { throw Bean.Fail("MTU \(mtu): too small for the key exchange") }
     try step("services", "订阅通知") { if !q.sync(execute: { n.isNotifying }) { _ = try op("subscribe") { p.setNotifyValue(true, for: n) } } }
-    if prefs.bool(forKey: "bindPending") || prefs.object(forKey: "beanSince:\(name)") == nil {  // added now: its files from here on are this phone's
+    if let asked {  // added now: its files from the server's end of it (Bean.firstSince) on are this phone's
+      let (since, why) = Bean.firstSince(now: Recorder.now(), code: asked.code, body: asked.body)
       prefs.removeObject(forKey: "bindPending"); prefs.removeObject(forKey: "bindForce")
-      prefs.set(Recorder.now(), forKey: "beanSince:\(name)")
+      prefs.set(since, forKey: "beanSince:\(name)")
+      DeviceLog.app(name, "bean_since", why.map { "添加豆子：\($0)，从现在起算这台手机的文件" } ?? "添加豆子：从服务端这颗豆子最后一块音频往前一个文件（6 h 10 min）起补",
+                    level: why == nil ? nil : "warn", fields: ["since": since, "code": asked.code, "why": why ?? NSNull()])
     }
     inSession = true
     try sync.session(since: (prefs.object(forKey: "beanSince:\(name)") as? NSNumber)?.int64Value ?? 0, steps: "\(steps)（MTU \(mtu)）")
+  }
+
+  /// GET /api/audio-end of this bean: its HTTP code and body; -1 when no answer came.
+  private func audioEnd() -> (code: Int, body: Data?) {
+    let q = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? name
+    guard let u = URL(string: "\(prefs.string(forKey: "server") ?? "")/api/audio-end?device=\(q)") else { return (-1, nil) }
+    var r = URLRequest(url: u, timeoutInterval: 5)
+    r.setValue("Bearer \(prefs.string(forKey: "token") ?? "")", forHTTPHeaderField: "Authorization")
+    final class Reply { var code = -1; var body: Data? }
+    let reply = Reply(), done = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: r) { data, resp, _ in
+      reply.code = (resp as? HTTPURLResponse)?.statusCode ?? -1; reply.body = data; done.signal()
+    }.resume()
+    done.wait()
+    return (reply.code, reply.body)
   }
 
   //

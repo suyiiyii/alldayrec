@@ -37,6 +37,7 @@ ROUTES = [  # (methods, path, handler); app.include_router's routes in its place
     ("POST", "/api/chunks", "chunk"),
     ("POST", "/api/chunks/end", "chunk_end"),
     ("POST", "/api/hold/release", "hold_release"),
+    ("GET", "/api/audio-end", "audio_end"),
     ("POST", "/api/device-status", "device_status_report"),
     ("POST", "/api/device-log", "device_log_upload"),
     ("GET", "/api/device-log", "device_log"),

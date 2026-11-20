@@ -343,6 +343,26 @@ check(Bean.name([0x02, 0x00, 1, 2, 3]), nil)
 check(Bean.flags([0x02, 0x00, 1, 2, 3]), -1)
 check(Bean.isBean("D3200-0A0B"), true); check(Bean.isBean("LR-P3-0A0B"), false); check(Bean.isBean("xD3200-0A0B"), false)
 
+// a bean added here: GET /api/audio-end's answer to the since BeanSync.pending reads from (as BeanTest.firstSince)
+do {
+  let now: Int64 = 1_795_200_000_000, end = now - 3_600_000  // the old phone's last piece ended an hour ago
+  let json = { (s: String) in Data(s.utf8) }
+  let got = Bean.firstSince(now: now, code: 200, body: json("{\"device\": \"D3200-0A0B\", \"end_ms\": \(end)}"))
+  check(got.since, end - 6 * 3_600_000 - 600_000); check(got.why, nil)
+  let mine = { (idS: Int64) in idS * 1000 >= got.since }  // BeanSync.pending's test, the file id in seconds
+  check(mine((end - Bean.fileMs) / 1000 + 1), true, "the 6 h file holding the end")
+  check(mine((end - Bean.fileMs - 599_000) / 1000), true, "one begun 6 h before the end, its id early by the slack")
+  check(mine((end - Bean.fileMs - 601_000) / 1000), false, "one that ended before the server's end: not read again")
+  check(Bean.firstSince(now: now, code: 200, body: json("{\"end_ms\": \(now + 30 * 3_600_000)}")).since, now, "never after now")
+  let none = Bean.firstSince(now: now, code: 200, body: json("{\"device\": \"D3200-0A0B\", \"end_ms\": null}"))
+  check([String(none.since), none.why ?? ""], [String(now), "服务端没有这颗豆子的音频"])
+  let offline = Bean.firstSince(now: now, code: -1, body: nil)
+  check([String(offline.since), offline.why ?? ""], [String(now), "没连上服务端"])
+  let old = Bean.firstSince(now: now, code: 404, body: json("{\"detail\": \"Not Found\"}"))  // a server before it
+  check([String(old.since), old.why ?? ""], [String(now), "服务端答复 HTTP 404"])
+  check(Bean.firstSince(now: now, code: 200, body: json("<html>")).since, now)
+}
+
 let t0: Int64 = 1_793_000_000_000
 
 /// What a fake bean records goes up as pieces, each unit once and dated by its seq: the file being recorded from its

@@ -120,6 +120,7 @@ REQUESTS = {
     ("POST", "/api/chunks"): ("POST", "/api/chunks", dict(params={"device": DEV, "start": MS + 60_000}, content=OGG, headers={"content-type": "audio/ogg"})),
     ("POST", "/api/chunks/end"): ("POST", "/api/chunks/end", dict(params={"device": DEV, "t": MS + 62_000})),
     ("POST", "/api/hold/release"): ("POST", "/api/hold/release", dict(params={"device": DEV})),
+    ("GET", "/api/audio-end"): ("GET", "/api/audio-end", dict(params={"device": DEV})),  # test_audio_end: each its own
     ("POST", "/api/device-status"): ("POST", "/api/device-status", dict(params={"device": DEV}, json={"battery": 1})),
     ("POST", "/api/device-log"): ("POST", "/api/device-log", dict(params={"device": DEV}, json=[{"src": "app", "seq": 2, "at": MS, "data": {"kind": "x"}}])),
     ("GET", "/api/device-log"): ("GET", "/api/device-log", dict(params={"device": DEV, "since": TODAY})),
@@ -315,6 +316,23 @@ def test_routes(two, monkeypatch):
     assert a.chunks and b.chunks is None, "the upload is a's"
     assert a.lang == "en" and b.lang == "zh", "a's PUT /api/lang is a's"
     assert b.summaries[1].statistics().current_buffer_used == 0 and a.summaries[1].statistics().current_buffer_used >= 1
+
+
+def test_audio_end(two):
+    """GET /api/audio-end: where the token's own tenant's audio of the device ends, a recorder of the same name in another
+    tenant not counted; null for one it has no audio of (a phone adding a recorder then reads from now on)."""
+    a, b = two
+    tenant.call(b, audio.save, DEV, MS + 3_600_000, OGG, "audio/ogg")  # b's recorder recorded on an hour later
+    end = lambda t: tenant.call(t, lambda: db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (DEV,)).fetchone()[0])
+
+    async def run():
+        async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=server.app), base_url="http://live.test") as c:
+            get = lambda tok, d: c.get("/api/audio-end", params={"device": d}, headers={"Authorization": f"Bearer {tok}"})
+            assert (await get("ta", DEV)).json() == {"device": DEV, "end_ms": int(end(a))}
+            assert (await get("tb", DEV)).json() == {"device": DEV, "end_ms": int(end(b))}
+            assert MS < end(a) < MS + 3_600_000 < end(b), "a's own end, not b's later one"
+            assert (await get("ta", "D3200-0000")).json() == {"device": "D3200-0000", "end_ms": None}
+    anyio.run(run)
 
 
 def test_health(two):

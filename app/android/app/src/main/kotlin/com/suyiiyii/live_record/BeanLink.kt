@@ -32,6 +32,9 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.io.Writer
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.LinkedBlockingQueue
@@ -510,6 +513,8 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         }
         notes.clear(); downStatus = 0
         var up = false
+        val adding = prefs.getBoolean("bindPending", false) || !prefs.contains("beanSince:$name")
+        val asked = if (adding) audioEnd() else null  // before the link: it is not held idle meanwhile
         try {
             step("connecting", "连接") { op("connect", 30) { d.connectGatt(ctx, false, cb, BluetoothDevice.TRANSPORT_LE).also { gatt = it } != null } }
             val g = gatt ?: throw Gone()
@@ -523,8 +528,13 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
             cmd = s.getCharacteristic(Bean.WRITE) ?: throw Exception("no write characteristic")
             val n = s.getCharacteristic(Bean.NOTIFY) ?: throw Exception("no notify characteristic")
             step("services", "订阅通知") { subscribe(g, n) }
-            if (prefs.getBoolean("bindPending", false) || !prefs.contains("beanSince:$name"))  // added now: its files from here on are this phone's
-                prefs.edit().remove("bindPending").remove("bindForce").putLong("beanSince:$name", System.currentTimeMillis()).apply()
+            if (asked != null) {  // added now: its files from the server's end of it (Bean.firstSince) on are this phone's
+                val (since, why) = Bean.firstSince(System.currentTimeMillis(), asked.first, asked.second)
+                prefs.edit().remove("bindPending").remove("bindForce").putLong("beanSince:$name", since).apply()
+                DeviceLog.app(name, "bean_since", if (why == null) "添加豆子：从服务端这颗豆子最后一块音频往前一个文件（6 h 10 min）起补"
+                    else "添加豆子：$why，从现在起算这台手机的文件", if (why == null) null else "warn",
+                    mapOf("since" to since, "code" to asked.first, "why" to why))
+            }
             capture = File(ctx.getExternalFilesDir("bean-capture") ?: ctx.filesDir, "on").takeIf { it.exists() }
                 ?.let { File(it.parentFile, "${System.currentTimeMillis()}-$name.jsonl").bufferedWriter() }
             captured = 0
@@ -538,6 +548,15 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
             if (up) { lastSeen = System.currentTimeMillis(); DeviceLog.disconnected(name, downStatus) }
         }
     }
+
+    /** GET /api/audio-end of this bean: (HTTP code, body); -1 when no answer came. */
+    private fun audioEnd(): Pair<Int, String?> = try {
+        val c = URL("${prefs.getString("server", "")}/api/audio-end?device=${URLEncoder.encode(name, "UTF-8")}").openConnection() as HttpURLConnection
+        c.connectTimeout = 5_000; c.readTimeout = 5_000
+        c.setRequestProperty("Authorization", "Bearer ${prefs.getString("token", "")}")
+        val code = c.responseCode
+        code to (if (code < 400) c.inputStream else c.errorStream)?.use { it.readBytes().decodeToString() }
+    } catch (e: Exception) { Log.w("live-record", "audio-end: $e"); -1 to null }
 
     //
     // One GATT operation at a time (as BleLink): the session thread starts one and waits for its callback

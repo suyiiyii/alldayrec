@@ -139,6 +139,15 @@ async def hold_release(device: str):
     return {"ok": True}
 
 
+@router.get("/api/audio-end")
+async def audio_end(device: str):
+    """Where this tenant's stored audio of a device ends (unix ms; null: none): a phone adding a recorder bean reads its
+    files from there on (less one file's length), so a change of phone leaves no hole the old one did not send."""
+    q = lambda: db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (device,)).fetchone()[0]
+    end = await anyio.to_thread.run_sync(q, limiter=threads.DB)
+    return {"device": device, "end_ms": None if end is None else int(end)}
+
+
 @router.post("/api/device-status")
 async def device_status_report(device: str, hw: dict):
     """What a client read from a BLE recorder (battery, card, firmware, model): each one kept, the newest shown with

@@ -102,6 +102,12 @@ type: reference
 |---|---|---|
 | `POST` | No older audio of the recorder is coming from the phone: it no longer has the recorder (unbound, or another bound in its place), or its backlog is all up and no upload follows to let go (a recorder that stopped). | `device` (query, string) |
 
+### `/api/audio-end`
+
+| 方法 | 说明 | 参数 |
+|---|---|---|
+| `GET` | Where this tenant's stored audio of a device ends (unix ms; null: none): a phone adding a recorder bean reads its files from there on (less one file's length), so a change of phone leaves no hole the old one did not send. | `device` (query, string) |
+
 ### `/api/device-status`
 
 | 方法 | 说明 | 参数 |

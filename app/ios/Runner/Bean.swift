@@ -36,6 +36,25 @@ enum Bean {
 
   static func isBean(_ name: String?) -> Bool { name?.range(of: "^D3200-[0-9A-F]{4}$", options: .regularExpression) != nil }
 
+  static let fileMs: Int64 = 6 * 3_600_000  // a bean file: it rolls over to a new one every 6 h of recording
+  static let sinceSlackMs: Int64 = 600_000  // the file id is the bean's clock, its pieces the phone's (reanchor: ~16 s over 6 h)
+
+  /// `since` for a bean added here (BeanLink: bindPending), from GET /api/audio-end's answer (`code` -1: none came): its
+  /// files from there on are this phone's (BeanSync.pending: id * 1000 >= since). The server has its audio up to end_ms:
+  /// the file being written then began up to fileMs before it, so since is end_ms − fileMs − sinceSlackMs, or that file
+  /// (the hole a change of phone left in it) would not be read. Never later than now. The phone's own older since is not
+  /// kept: it says what this phone had, not what the server lacks. With no word from the server (offline, a server before
+  /// the endpoint) or no audio of it there (new to this account: its earlier files are not ours), now, as before; `why`
+  /// then says why, for the device log. As Bean.kt's.
+  static func firstSince(now: Int64, code: Int, body: Data?) -> (since: Int64, why: String?) {
+    if code != 200 { return (now, code == -1 ? "没连上服务端" : "服务端答复 HTTP \(code)") }
+    guard let o = body.flatMap({ try? JSONSerialization.jsonObject(with: $0) }) as? [String: Any], let end = o["end_ms"] else {
+      return (now, "服务端答复读不懂")
+    }
+    guard let ms = (end as? NSNumber)?.int64Value else { return (now, "服务端没有这颗豆子的音频") }  // NSNull
+    return (min(now, ms - fileMs - sinceSlackMs), nil)
+  }
+
   /// A bean's name from its advertisement's manufacturer data (iOS gives company id and payload as one buffer, as the
   /// SDK reads them; the bean's MAC first): the address it advertises from changes, its MAC does not.
   static func name(_ mfr: [UInt8]) -> String? { mfr.count < 6 ? nil : String(format: "D3200-%02X%02X", mfr[4], mfr[5]) }

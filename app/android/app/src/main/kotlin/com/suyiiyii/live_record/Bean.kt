@@ -59,6 +59,23 @@ object Bean {
 
     fun isBean(name: String?) = name != null && Regex("D3200-[0-9A-F]{4}").matches(name)
 
+    const val FILE_MS = 6 * 3_600_000L  // a bean file: it rolls over to a new one every 6 h of recording
+    const val SINCE_SLACK_MS = 600_000L  // the file id is the bean's clock, its pieces the phone's (reanchor: ~16 s over 6 h)
+
+    /** `since` for a bean added here (BeanLink: bindPending), from GET /api/audio-end's answer (`code` -1: none came):
+     *  its files from there on are this phone's (BeanSync.pending: id * 1000 >= since). The server has its audio up to
+     *  end_ms: the file being written then began up to FILE_MS before it, so since is end_ms − FILE_MS − SINCE_SLACK_MS,
+     *  or that file (the hole a change of phone left in it) would not be read. Never later than now. The phone's own
+     *  older since is not kept: it says what this phone had, not what the server lacks. With no word from the server
+     *  (offline, a server before the endpoint) or no audio of it there (new to this account: its earlier files are not
+     *  ours), now, as before; the second of the pair is then why, for the device log. */
+    fun firstSince(now: Long, code: Int, body: String?): Pair<Long, String?> {
+        if (code != 200) return now to if (code == -1) "没连上服务端" else "服务端答复 HTTP $code"
+        val end = try { JSONObject(body!!).get("end_ms") } catch (e: Exception) { return now to "服务端答复读不懂：$e" }
+        if (end !is Number) return now to "服务端没有这颗豆子的音频"
+        return minOf(now, end.toLong() - FILE_MS - SINCE_SLACK_MS) to null
+    }
+
     /** A bean's name from its advertisement's manufacturer data (company id and payload, as the SDK reads them: one
      *  buffer, the bean's MAC first): the address it advertises from changes, its MAC does not. */
     fun name(company: Int, payload: ByteArray): String? {
