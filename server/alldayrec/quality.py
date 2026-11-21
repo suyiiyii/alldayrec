@@ -10,7 +10,7 @@ last one of MIN_S or more is repeated up to WIN (as DNSMOS's own script does), a
 quality row: its P.808 MOS at -26 dBFS (P.56 practice: the level is a number of its own, rms_db), and the share of its
 samples at |x| >= 32700 as recorded (the calibration offset, gain.py, undone).
 shortcut: late-layer sentences that come into an hour already scored are not scored; to redo a device, delete its
-quality_to:<device> (and its rows), when that starts to matter.
+quality_to:<device> and its rows, when that starts to matter.
 
 The report (report(), GET /api/quality): per day, all speech and apart media played aloud (the summaries' media_spans and
 broadcast_spans, summary.not_live: 外放) from the rest: P.808's median, the share of speech in windows under QUALITY_LOW
@@ -32,7 +32,7 @@ from alldayrec.late_store import subtract, union
 log = logging.getLogger("live")
 SR = 16000
 ON = os.environ.get("QUALITY", "0") == "1"
-LOW = float(os.environ.get("QUALITY_LOW", "3.0"))  # provisional: the owner's 35 rated clips cannot settle it
+LOW = float(os.environ.get("QUALITY_LOW", "2.5"))  # provisional: 3.0 put 69 % of the owner's 35 rated clips (mean 3.8) low
 CLIP = 0.01  # a window over 1 % clipped: the one clip the owner called 爆音 had 5 %, two at 0.26 % were fine
 EVERY_S = float(os.environ.get("QUALITY_EVERY_S", "600"))
 WIN = 144160  # 9.01 s, DNSMOS's input
@@ -139,7 +139,8 @@ def speech(device: str, spans: list) -> tuple[np.ndarray, list[tuple[int, float]
 
 
 def score(device: str, a: int) -> int:
-    """The quality rows of device's hour from a (unix ms), in place of any before; how many."""
+    """The quality rows of the sentences of device's hour from a (unix ms; a window may start after it, a sentence
+    over the hour's end is its), each in place of one with its start; how many."""
     t = time.thread_time()  # this thread's: ffmpeg's decoding is not in it
     spans = union([[ms(r["start"]), ms(r["end"])] for r in db.sentences(iso(a), iso(a + H), source=device) if r["end"] > r["start"]])
     x, parts = speech(device, spans)
@@ -150,11 +151,10 @@ def score(device: str, a: int) -> int:
         return parts[p][1] + (k - parts[p][0]) * 1000 / SR
     joins = [i for (i, s), (i0, s0) in zip(parts[1:], parts) if abs(s - (s0 + (i - i0) * 1000 / SR)) > 1]  # not one stretch
     rows = [(device, round(at(i)), round(at(i + n - 1) + 1000 / SR), round(n * 1000 / SR), MODEL,
-             p808(w), float(np.mean(np.abs(x[i:i + n]) >= FULL)),
+             p808(w), float(np.mean(np.abs(x[i:i + n].astype(np.int32)) >= FULL)),  # int16 abs(-32768) wraps
              float(20 * np.log10(np.sqrt(np.mean(np.square(x[i:i + n], dtype=np.float64))) / 32768 + 1e-9)), int(time.time() * 1000))
             for i, n, w in windows(x, joins)]
     with db.tx() as c:
-        c.execute("DELETE FROM quality WHERE device = ? AND start_ms >= ? AND start_ms < ?", (device, a, a + H))
         c.executemany("INSERT OR REPLACE INTO quality VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
         db.put_kv(f"quality_to:{device}", a + H, c)
     if rows:
@@ -168,7 +168,7 @@ def todo() -> list[tuple[str, int]]:
     for (key,) in db.conn().execute("SELECT key FROM kv WHERE key LIKE 'finalized_to:%'").fetchall():
         device = key.split(":", 1)[1]
         a = max(db.kv(f"quality_to:{device}") or 0, since)
-        if a + H <= ms(db.kv(key)):
+        if (v := db.kv(key)) and a + H <= ms(v):  # null: not yet
             out.append((device, a))
     return out
 
@@ -222,5 +222,5 @@ def check():
     assert len(list(windows(x[:WIN + SR], []))) == 1
     y = list(windows(np.full(WIN, 1000, np.int16), [500]))[0][2]
     assert y[339] == 1000 and y[340] == 1000 and y[499] == 0 and y[500] == 0 and y[659] == 1000 and y[660] == 1000
-    assert stats([(9000, 2.5, 0.0), (6000, 3.5, 0.02), (3000, 4.0, 0.0)]) == \
+    assert stats([(9000, 2.0, 0.0), (6000, 3.5, 0.02), (3000, 4.0, 0.0)]) == \
         {"windows": 3, "speech_min": 0.3, "p808": 3.5, "low": 0.5, "clip_min": 0.1}

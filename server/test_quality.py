@@ -19,7 +19,8 @@ def ms(t: str) -> int:
 
 
 def square(a: int, s: float) -> np.ndarray:
-    return np.where(np.arange(round(s * SR)) % 32 < 16, a, -a).astype(np.int16)
+    """A 500 Hz square wave of amplitude a; at 32767 it is full scale both ways, its low half at -32768."""
+    return np.where(np.arange(round(s * SR)) % 32 < 16, a, -a - (a == 32767)).astype(np.int16)
 
 
 @pytest.fixture
@@ -59,9 +60,29 @@ def test_windows_of_an_hour(store):
     assert [x[2] for x in r] == [9010, 9010, 9010, 9010, 3960]
     assert r[0][0] == ms("10:00:00") and r[2][0] == ms("10:00:18.020") and abs(r[2][1] - ms("10:00:37.030")) <= 1
     assert [x[3] for x in r] == [2.0, 2.0, 4.0, 4.0, 4.0]
-    assert r[0][4] == 0 and abs(r[2][4] - 7.03 / 9.01) < 1e-3 and r[3][4] == r[4][4] == 1.0  # the full-scale half, as recorded
+    # the full-scale half as recorded, -32768 too (int16's abs of it wraps): all of it clipped
+    assert r[0][4] == 0 and abs(r[2][4] - 7.03 / 9.01) < 1e-3 and r[3][4] == r[4][4] == 1.0
     db.put_kv(f"finalized_to:{DEV}", f"{DAY}T12:00:00.000000")
     assert drain() == 0 and db.kv(f"quality_to:{DEV}") == ms("12:00:00")  # 11:00:05 has no piece: no window of zeros
+
+
+def test_a_sentence_over_the_hour(tmp_path, monkeypatch):
+    """A sentence 10:59:50-11:00:30 is 10:00's: its windows after 11:00 stay when 11:00 (no sentence) is scored."""
+    db.open_db(tmp_path / "live.db", tmp_path / "rec")
+    monkeypatch.setenv("QUALITY_SINCE", f"{DAY}T10:00")
+    monkeypatch.setattr(quality, "p808", lambda w: 3.0)
+    audio.save(DEV, ms("10:59:50"), flac(square(1000, 40)), "audio/flac")
+    with db.tx() as c:
+        db.insert_sentences(c, [dict(id="s", start=f"{DAY}T10:59:50.000", end=f"{DAY}T11:00:30.000", speaker="S1", text="x", source=DEV)])
+    db.put_kv(f"finalized_to:{DEV}", f"{DAY}T12:00:00.000000")
+    assert drain() == 5 and len(rows()) == 5 and rows()[-1][0] == ms("11:00:26.040")
+    assert db.kv(f"quality_to:{DEV}") == ms("12:00:00")
+
+
+def test_finalized_to_null(store):
+    """A device whose final layer has no time yet (null) is passed over, the rest go on."""
+    db.put_kv("finalized_to:other", None)
+    assert quality.todo() == [(DEV, ms("00:00:00"))]
 
 
 def test_report_media_apart(store):

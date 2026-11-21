@@ -160,7 +160,7 @@ Scores the sound quality of each device's speech and sums it up by day on the de
 |---|---|---|
 | `QUALITY` | `0` (off) | `1`: score every tenant's recordings in the background; `dnsmos-p808.onnx` is downloaded and checked at start (see [Model files](./models.md)) |
 | `QUALITY_SINCE` | midnight of the day it is first on | Score from this time on (ISO, the instance's time zone); never earlier |
-| `QUALITY_LOW` | `3.0` | Under this is a low score. **Provisional**: set from 35 clips the owner rated blind, not settled |
+| `QUALITY_LOW` | `2.5` | Under this is a low score. **Provisional**: of 35 clips the owner rated blind (3.8 on average), 3.0 put 69 % low, too strict; 2.5 is not settled either, until a week of real scores has been looked at |
 | `QUALITY_EVERY_S` | `600` | How often (seconds) to look for hours ready to score |
 
 - What is scored: the audio under each device's final sentences (`sentences`), an hour at a time, once that device's final layer is past the end of the hour; each hour once (sentences the late layer adds later are not scored). The hour's speech is joined in time order (10 ms fades at the joins) and cut into 9.01 s windows with no overlap; a last one shorter than 9.01 s is repeated to fill it when it is 3 s or more, else dropped. Audio that did not decode is left out.
