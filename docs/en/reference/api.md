@@ -115,6 +115,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | `POST` | A batch of a device's events, from the phone that read them; one sent again replaces the one kept. | `device` (query, string)<br>body: JSON DeviceEvent[] {`src`, `seq`, `at`, `data`} |
 | `GET` | A device's events, status reports and audio by the minute (audio.minutes) in [since, until). | `device` (query, string)<br>`since` (query, string)<br>`until?` (query, string) |
 
+### `/api/quality`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | A device's speech quality by day in [since, until] (YYYY-MM-DD, at most 31 days; quality.report): days with scores only, newest first. on: QUALITY=1; low, clip: the thresholds its shares go by (low is provisional). | `device` (query, string)<br>`since` (query, string)<br>`until` (query, string) |
+
 ### `/api/phone-spans`
 
 | Method | Description | Parameters |

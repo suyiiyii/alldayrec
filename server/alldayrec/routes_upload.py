@@ -19,6 +19,7 @@ from alldayrec import db
 from alldayrec import gain
 from alldayrec import late_store
 from alldayrec import perf
+from alldayrec import quality
 from alldayrec import threads
 from alldayrec import ws
 from alldayrec.core import iso
@@ -170,6 +171,21 @@ async def device_log(device: str, since: str, until: str | None = None):
     ms = lambda t: int(dt.datetime.fromisoformat(t).timestamp() * 1000)
     return {"events": db.device_log(device, since, until), "status": db.device_statuses(device, since, until),
             "audio": audio.minutes(device, ms(since), ms(until) if until else 1 << 62)}
+
+
+@router.get("/api/quality")
+async def quality_days(device: str, since: str, until: str):
+    """A device's speech quality by day in [since, until] (YYYY-MM-DD, at most 31 days; quality.report): days with
+    scores only, newest first. on: QUALITY=1; low, clip: the thresholds its shares go by (low is provisional)."""
+    try:
+        a, b = dt.date.fromisoformat(since), dt.date.fromisoformat(until)
+    except ValueError:
+        raise HTTPException(400, "since and until are YYYY-MM-DD")
+    if not 0 <= (b - a).days <= 30:
+        raise HTTPException(400, "since to until: 1 to 31 days")
+    days = [(d, await anyio.to_thread.run_sync(quality.report, device, d, limiter=threads.DB))
+            for d in (b - dt.timedelta(days=i) for i in range((b - a).days + 1))]
+    return {"on": quality.ON, "low": quality.LOW, "clip": quality.CLIP, "days": [{"day": d.isoformat(), **r} for d, r in days if r]}
 
 
 @router.get("/api/phone-spans")

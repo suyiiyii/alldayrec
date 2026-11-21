@@ -15,6 +15,8 @@ import {
   type AudioMinute,
   type DeviceEvent,
   type DeviceLog,
+  type Quality,
+  type QualityStats,
   type RecorderStatus,
   type Upgrade,
 } from "../lib/api";
@@ -50,6 +52,7 @@ const lo = ref(0),
   hi = ref(0);
 const local = (t: number) =>
   new Date(t - new Date(t).getTimezoneOffset() * 60000).toISOString().slice(0, 23);
+const quality = ref<Quality | null>(null); // the speech quality report, its own request: off or failing, no card
 let seq = 0;
 watch(
   [() => props.name, hours],
@@ -64,6 +67,14 @@ watch(
       get<Upgrade[]>("/api/upgrades", q),
     ]);
     if (my === seq) [log.value, ups.value] = got; // a range picked meanwhile: its answer, not this older one
+    get<Quality>("/api/quality", {
+      device: props.name,
+      since: q.since.slice(0, 10),
+      until: local(hi.value).slice(0, 10),
+    }).then(
+      (r) => my === seq && (quality.value = r),
+      () => my === seq && (quality.value = null),
+    );
   },
   { immediate: true },
 );
@@ -186,6 +197,14 @@ const phonePoints = computed(() =>
     })),
   ),
 );
+const pc = (x: number) => `${Math.round(x * 100)}%`;
+const qline = (s: QualityStats) =>
+  t("device.q.line", {
+    p: s.p808.toFixed(2),
+    low: pc(s.low),
+    clip: s.clip_min,
+    min: Math.round(s.speech_min),
+  });
 const secs = (s: number) =>
   s < 120 ? t("common.sec", { n: Math.round(s) }) : t("common.min", { n: Math.round(s / 60) });
 const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + at.slice(11, 19);
@@ -292,6 +311,24 @@ const when = (at: string) => (hours.value >= 24 ? `${at.slice(5, 10)} ` : "") + 
         />
         <div v-else class="muted">
           {{ measure < MEASURES.length ? t("device.noAudio") : t("device.noCardWrites") }}
+        </div>
+      </section>
+      <section v-if="quality?.days.length" class="card">
+        <div class="head">
+          <b>{{ t("device.q.title") }}</b
+          ><span class="muted">{{ t("device.q.sub", { low: quality.low.toFixed(1) }) }}</span>
+        </div>
+        <div v-for="d in quality.days" :key="d.day" class="qday">
+          <span class="at">{{ d.day.slice(5) }}</span>
+          <span>
+            <div>{{ qline(d.all) }}</div>
+            <div v-if="d.live && d.media" class="muted">
+              {{ t("device.q.live", { line: qline(d.live) }) }}
+            </div>
+            <div v-if="d.media" class="muted">
+              {{ t("device.q.media", { line: qline(d.media) }) }}
+            </div>
+          </span>
         </div>
       </section>
       <section class="card">
@@ -407,6 +444,14 @@ h2 {
 }
 .ev:lang(en) {
   grid-template-columns: auto 3.6em 1fr; /* Device, Update, App */
+}
+.qday {
+  display: grid;
+  grid-template-columns: 3.2em 1fr;
+  gap: 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
 }
 .at,
 .src,

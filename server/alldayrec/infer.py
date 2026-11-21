@@ -36,6 +36,7 @@ LEVEL_FRAMES = 1000  # 10 s of frames
 VAD, CMVN, EMB, YAMNET = "fireredvad-stream-vad.onnx", "fireredvad-cmvn.ark", "redimnet2-b6.onnx", "yamnet.onnx"  # YAMNET: music.py
 SEG = "pyannote-segmentation-3.0.onnx"  # transcript.turns
 MN10 = "mn10_as.onnx"  # sound.py's EfficientAT, only when SOUND_MODEL names mn10_as
+DNSMOS = "dnsmos-p808.onnx"  # quality.py's speech quality, only with QUALITY=1
 MODELS = {  # file: sha256 (sources and licenses: export_onnx.py)
     VAD: "b3c97836130dc34fc32d56fab551e88cf9454511de2b3c250a5e6578dee74b93",
     CMVN: "c87f6f13edf0f0ec7535ddfc9cc3387d9268cb234b70182d566c5e2edf3ca473",
@@ -43,6 +44,7 @@ MODELS = {  # file: sha256 (sources and licenses: export_onnx.py)
     YAMNET: "c114cb542a267e797c0d49cd3ad4ec7ede55d4328dc605f815d4474cec099d87",
     SEG: "220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079",
     MN10: "58d4c290739ef8f9d789cb5caa9ede47cef77866914984b9d5225e28de1fc069",
+    DNSMOS: "9246480c58567bc6affd4200938e77eef49468c8bc7ed3776d109c07456f6e91",
 }
 FIRERED = "https://raw.githubusercontent.com/FireRedTeam/FireRedVAD/71352f2c93c110410189e0ed98ab85ea24e8ad1c/pretrained_models/onnx_models/"
 SOURCES = {  # file: where fetch() downloads it from when it is missing
@@ -52,6 +54,8 @@ SOURCES = {  # file: where fetch() downloads it from when it is missing
     YAMNET: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/yamnet.onnx",  # made as export_onnx.py says
     SEG: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/pyannote-segmentation-3.0.onnx",  # sherpa-onnx's export
     MN10: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/mn10_as.onnx",  # made as export_onnx.py says
+    # DNS-Challenge's DNSMOS/DNSMOS/model_v8.onnx at 785ab12 as it is (CC BY 4.0, Microsoft)
+    DNSMOS: "https://github.com/suyiiyii/alldayrec/releases/download/models-v1/dnsmos-p808.onnx",
 }
 # export_onnx.py's ReDimNet2 differs byte for byte from machine to machine: only the release's file has the pinned sha256
 FIX = ("only the file at its URL is accepted: delete a wrong one and restart to download it again, or put it in {d} "
@@ -79,8 +83,9 @@ def download(url: str, dest: Path, sha256: str):
 
 
 def unused() -> set:
-    """The scene model files SOUND_MODEL does not name: never downloaded nor checked (sound.py off: as before it)."""
-    return {MN10} - ({MN10} if "mn10_as" in os.environ.get("SOUND_MODEL", "").replace(" ", "").split(",") else set())
+    """The scene model files SOUND_MODEL does not name, and DNSMOS without QUALITY=1: never downloaded nor checked."""
+    return ({MN10} - ({MN10} if "mn10_as" in os.environ.get("SOUND_MODEL", "").replace(" ", "").split(",") else set())
+            | (set() if os.environ.get("QUALITY", "0") == "1" else {DNSMOS}))
 
 
 def fetch(d: Path = DIR, skip=()):

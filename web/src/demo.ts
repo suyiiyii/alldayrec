@@ -41,6 +41,7 @@ const demo = () => json({ detail: "[demo] demo" }, 403); // api.ts says err.code
 const EMPTY = new Map<string, unknown>([
   ["device-log", { events: [], status: [], audio: [] }],
   ["upgrades", []],
+  ["quality", { on: false, low: 3, clip: 0.01, days: [] }],
   ["events", []],
   ["calls", { calls: [], balance: null }],
   ["voice-check", { card: null }],

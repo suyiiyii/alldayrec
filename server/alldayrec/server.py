@@ -44,6 +44,7 @@ from alldayrec import local_asr
 from alldayrec import monitor
 from alldayrec import music
 from alldayrec import perf
+from alldayrec import quality
 from alldayrec import routes_api
 from alldayrec import routes_audio
 from alldayrec import routes_pages
@@ -107,7 +108,7 @@ async def run_tenant(t: tenant.Tenant):
         async with anyio.create_task_group() as t.tg:
             for name, fn in (("pipeline", pipelines), ("status", status_loop), ("summary", summary_worker), ("voices", voices_loop), ("late", late_processor),
                              *((("recap", recap_loop),) if RECAP_AT else ()), *((("store", seal.loop),) if seal.on() else ()),
-                             *((("sound", sounds.loop),) if sounds.on() else ())):
+                             *((("sound", sounds.loop),) if sounds.on() else ()), *((("quality", quality.loop),) if quality.ON else ())):
                 t.tg.start_soon(supervised, name, fn, name=f"{name}:{t.id}")
 
 

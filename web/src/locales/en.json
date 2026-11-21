@@ -359,7 +359,14 @@
     "noTime": "time unknown",
     "srcRec": "Device",
     "srcUpgrade": "Update",
-    "noEvents": "No events in this period"
+    "noEvents": "No events in this period",
+    "q": {
+      "title": "Sound quality",
+      "sub": "DNSMOS P.808, a 1–5 score per 9 s of speech; under {low} is low (provisional)",
+      "line": "median {p} · low {low} · clipped {clip} min · speech {min} min",
+      "live": "in the room {line}",
+      "media": "played aloud {line}"
+    }
   },
   "deviceCard": {
     "standbyOf": "With {d}: {d} transcribes, this one keeps the audio",
