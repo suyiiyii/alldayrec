@@ -67,6 +67,7 @@ Each tenant has two directories, both set in `tenants.json`: `data` (the databas
 | `conversation_aliases` | Old conversation links and speaker labels mapped to the retained conversation (since v0.4.0) |
 | `walls` | Where long conversations were split (one row per device and time): late audio never merges the two sides back (since v0.5.0) |
 | `sounds` | Environmental sound scores (only with [environmental sound](./configuration.md#optional-environmental-sound) on): one row per device, model and stretch of decoded audio, see [Environmental sound](#environmental-sound-sounds) below |
+| `quality` | Daily sound quality's scores (only with [daily sound quality](./configuration.md#optional-daily-sound-quality) on): a row per 9 s of a device's speech, DNSMOS P.808's raw score, the clipped share, the level |
 | `sound_wrong` | 「不对」 (wrong) marks on sound tags: the device, start and end ms, the event, the model it came from, the conversation id (none for a stretch of the sound bar outside conversations); see [Sound events](#sound-events-sound-events) below |
 | `feedback` | Users' corrections to summaries |
 | `todo_marks` | 「完成」 (Done) or 「不对」 (Wrong) marks on to-dos (since v0.2.0) |

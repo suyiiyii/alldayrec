@@ -4,7 +4,7 @@ type: reference
 
 # Model files
 
-The server runs four models (five with `mn10_as` in `SOUND_MODEL`) on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
+The server runs four models (one more each with `mn10_as` in `SOUND_MODEL` and with `QUALITY=1`) on the local CPU (onnxruntime, no GPU needed). Their files live in `MODELS_DIR` (by default `DATA_DIR/models`, `data/models` in Docker).
 
 | File | Model | Use | License | Downloaded from |
 |---|---|---|---|---|
@@ -13,12 +13,13 @@ The server runs four models (five with `mn10_as` in `SOUND_MODEL`) on the local 
 | `pyannote-segmentation-3.0.onnx` | [pyannote segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0) (sherpa-onnx's ONNX export) | Finding where speakers change inside a sentence (`SPLIT_TURNS`) | MIT | This repository's `models-v1` release |
 | `yamnet.onnx` | [YAMNet](https://github.com/tensorflow/models/tree/master/research/audioset/yamnet) | Hearing music: songs played aloud get no voiceprint (`MUSIC_DETECT`); environmental sound (with `yamnet` in `SOUND_MODEL`) | Apache-2.0 | This repository's `models-v1` release |
 | `mn10_as.onnx` | [EfficientAT](https://github.com/fschmid56/EfficientAT) mn10_as | Environmental sound (downloaded only with `mn10_as` in [`SOUND_MODEL`](./configuration.md#optional-environmental-sound)) | MIT | This repository's `models-v1` release |
+| `dnsmos-p808.onnx` | [DNSMOS](https://github.com/microsoft/DNS-Challenge/tree/master/DNSMOS) P.808 (`DNSMOS/model_v8.onnx` as it is, upstream commit `785ab12`) | Daily sound quality (downloaded only with [`QUALITY=1`](./configuration.md#optional-daily-sound-quality)) | CC BY 4.0 (Microsoft) | This repository's `models-v1` release |
 
 With `ENGINE=local` there is one more: sherpa-onnx's X-ASR zh-en model (`x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03/`). At its first use, the server downloads the model tarball, about 136 MB, from the k2-fsa/sherpa-onnx GitHub Release (or `LOCAL_ASR_URL`) and unpacks it into the same directory.
 
 ## Download and verification
 
-- At startup the server downloads the missing files, about 76 MB at the first start (about 96 MB with `mn10_as.onnx`).
+- At startup the server downloads the missing files, about 76 MB at the first start (about 96 MB with `mn10_as.onnx`, `dnsmos-p808.onnx` 0.2 MB).
 - The sha256 of each file is pinned in [`server/alldayrec/infer.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/infer.py) and [`server/alldayrec/local_asr.py`](https://github.com/suyiiyii/alldayrec/blob/main/server/alldayrec/local_asr.py), and the server accepts only matching files. When a file doesn't match or is missing, the server refuses to start.
 - A file that is already there is never downloaded again.
 - `server/alldayrec/export_onnx.py` is how maintainers make new release files from the upstream weights. ReDimNet2's export differs byte for byte between machines, so the server refuses a file you export yourself. `mn10_as.onnx` is exported from EfficientAT's `mn10_as_mAP_471.pt` with the 16→32 kHz resampling, the mel spectrogram and the sigmoid inside the graph: 16 kHz waveform in (any length), 527 class scores out.

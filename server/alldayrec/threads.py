@@ -16,6 +16,7 @@ ASR = anyio.CapacityLimiter(int(os.environ.get("ASR_CALLS", "1")))  # local_asr 
 MEDIA = anyio.CapacityLimiter(int(os.environ.get("MEDIA_CALLS", "16")))  # decoding pieces, encoding windows (ffmpeg, base64)
 DB = anyio.CapacityLimiter(int(os.environ.get("DB_CALLS", "8")))  # reads over the whole store: speaker groups, MCP, ask's tools
 SOUND = anyio.CapacityLimiter(1)  # scene models (sound.py, sounds.py), every tenant's: one 1-thread call at a time, never the voiceprints'
+QUALITY = anyio.CapacityLimiter(1)  # quality.py's DNSMOS hours, every tenant's: one 1-thread call at a time
 VAD = anyio.CapacityLimiter(2)  # the segmenters' VAD (Segmenter.apush), one call per segmenter at a time: ~1.6 ms of a core per s of audio
 
 
