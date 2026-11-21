@@ -295,38 +295,14 @@ def save(device: str, start_ms: int, body: bytes, content_type: str, n: int | No
     hour file (an Android batch retried with more pieces after the answer to the first try was lost)."""
     if report is not None:
         report["late"] = False  # the upload's note uses the save transaction, not a cursor read after the await
-    kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
-                                     (device, start_ms, len(body))).fetchone()
-    if r := kept():
+    if r := _kept(device, start_ms, len(body)):
         return r[0]
-    ext = {"audio/ogg": "ogg", "audio/webm": "webm", "audio/aac": "aac"}.get(content_type.split(";")[0], "bin")
+    ext = _ext(content_type)
     x = decode(body, aac=ext == "aac", n=n, prev=before(device, start_ms) if ext == "ogg" else None)
     if x is None:  # the client drops it on the 400 that follows: its bytes stay here, for a look later
         store.local().write(rejected(device, start_ms, ext), body)
         return None
-    path = str(hour_file(device, start_ms, ext))
-    h = health(x)
-    with _append:
-        if r := kept():  # the same piece in two requests at once
-            return r[0]
-        whole = len(x) / SR > WHOLE_S
-        path = seal.place(path, start_ms, len(body), whole)
-        pos = store.of(path).append(path, body)
-        received = int(time.time() * 1000)
-        with db.tx(durable=True) as t:
-            seal.placed(t, path, start_ms, len(body), received, whole)
-            queued_late = late_store.record(t, device, start_ms, start_ms + round(len(x) * 1000 / SR), received)
-            if report is not None:
-                report["late"] = queued_late
-            t.execute("INSERT OR REPLACE INTO pieces (device, start_ms, seconds, path, pos, size, n, received_ms, rms, hum, zero_ms, full, env, samples) "
-                          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                          (device, start_ms, round(len(x) / SR, 3), path, pos, len(body), n, received, *h, envelope(x), len(x)))
-        with _holds:
-            held = db.kv(f"hold:{device}")
-            if held and start_ms < held["at"] and not held.get("released"):
-                held["progress"] = time.time()
-                db.put_kv(f"hold:{device}", held)
-    return len(x) / SR
+    return _index(device, start_ms, ext, body, len(body), len(x), n, health(x), envelope(x), report)
 
 
 BLOCK_S = 10  # long files: bounded decode/health/VAD working sets
@@ -453,11 +429,9 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
     if report is not None:
         report["late"] = False
     size = os.fstat(source.fileno()).st_size
-    kept = lambda: db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
-                                     (device, start_ms, size)).fetchone()
-    if r := kept():
+    if r := _kept(device, start_ms, size):
         return r[0]
-    ext = {"audio/ogg": "ogg", "audio/webm": "webm", "audio/aac": "aac"}.get(content_type.split(";")[0], "bin")
+    ext = _ext(content_type)
     prev = before(device, start_ms, COPY_BYTES) if ext == "ogg" and size <= COPY_BYTES else None
     with decoded_file(source, ext == "aac", n, prev) as decoded:
         if decoded is None:
@@ -467,13 +441,29 @@ def save_file(device, start_ms, source, content_type, n=None, report=None):
         env = []
         h = file_health(pcm, count, env)
         env = b"".join(env)
+    return _index(device, start_ms, ext, source, size, count, n, h, env, report)
+
+
+def _kept(device: str, start_ms: int, size: int):
+    """The row (seconds,) of a copy of this piece at least size bytes long, None when there is none."""
+    return db.conn().execute("SELECT seconds FROM pieces WHERE device = ? AND start_ms = ? AND size >= ?",
+                             (device, start_ms, size)).fetchone()
+
+
+def _ext(content_type: str) -> str:
+    return {"audio/ogg": "ogg", "audio/webm": "webm", "audio/aac": "aac"}.get(content_type.split(";")[0], "bin")
+
+
+def _index(device, start_ms, ext, data, size, count, n, h, env, report) -> float:
+    """save's and save_file's end: data (size bytes, count samples) appended to its hour file and indexed, its hold's
+    progress noted; its seconds, or the kept copy's when one as long came in meanwhile."""
     path = str(hour_file(device, start_ms, ext))
     with _append:
-        if r := kept():
+        if r := _kept(device, start_ms, size):  # the same piece in two requests at once
             return r[0]
         whole = count / SR > WHOLE_S
         path = seal.place(path, start_ms, size, whole)
-        pos = store.of(path).append(path, source)
+        pos = store.of(path).append(path, data)
         received = int(time.time() * 1000)
         with db.tx(durable=True) as t:
             seal.placed(t, path, start_ms, size, received, whole)

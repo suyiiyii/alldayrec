@@ -68,6 +68,21 @@ def test_ledger_predicate_duplicates_and_longer_resend(store, monkeypatch):
     assert db.conn().execute("SELECT count(*) FROM late_spans").fetchone()[0] == 1
 
 
+def test_save_reports_late_like_save_file(store, monkeypatch):
+    monkeypatch.setattr(audio, "decode", lambda body, **kw: np.zeros(len(body)*audio.SR, np.int16))
+    monkeypatch.setattr(audio, "health", lambda x: (0, 0, 0, 0))
+    report = {}
+    assert audio.save(D, ms(30), b"aaa", "audio/wav", report=report) == 3
+    assert report == {"late": False}
+    T().read_to[D] = ms(30)
+    assert audio.save(D, ms(0), b"aaa", "audio/wav", report=report) == 3
+    assert report == {"late": True}
+    assert audio.save(D, ms(0), b"aa", "audio/wav", report=report) == 3, "a shorter resend gets the kept copy's seconds"
+    assert report == {"late": False}
+    row = db.conn().execute("SELECT seconds, size, samples, env FROM pieces WHERE start_ms = ?", (ms(0),)).fetchone()
+    assert tuple(row) == (3, 3, 3 * audio.SR, audio.envelope(np.zeros(3 * audio.SR, np.int16)))
+
+
 def test_ledger_subtracts_all_prior_coverage_and_preserves_holes(store):
     for start, sec in [(10, 10), (30, 10), (15, 2)]:
         db.conn().execute("INSERT INTO pieces (device,start_ms,seconds,path,received_ms) VALUES (?,?,?,?,?)", (D, ms(start), sec, "x", 1))
