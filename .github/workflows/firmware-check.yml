@@ -30,7 +30,7 @@ jobs:
           cc -w -I$d -o $d/usb_check test/usb_check.c && $d/usb_check  # only a lent card's reads and writes that work keep it lent (src/usb.c)
           cc -o $d/led_check test/led_check.c && $d/led_check  # the one-LED boards' flash codes (src/led_code.h)
           cc -o $d/power_check test/power_check.c && $d/power_check  # when a low battery turns it off (src/lr_power.h)
-          cc -o $d/switch_check test/switch_check.c && $d/switch_check  # LR-P3's switch debounce (src/lr_switch.h)
+          cc -o $d/switch_check test/switch_check.c && $d/switch_check  # LR-P3's switch debounce, LR-N5-S's key (src/lr_switch.h)
           cc -o $d/card_check test/card_check.c && $d/card_check  # a card that does not mount: blank or a volume all the same (src/card_marks.h)
           cc -o $d/health_check test/health_check.c && $d/health_check  # the mic's HEALTH counts (src/mic_health.h)
           cc -o $d/mic_ring_check test/mic_ring_check.c && $d/mic_ring_check  # the mic's buffers left out are a gap in the frame numbers (src/mic_ring.h)
@@ -97,10 +97,13 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           c=build/lr-$VARIANT/zephyr/.config
-          grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON)?|LR_MIC_GAIN)[= ]' "$c"
-          # the switch only where one is fitted; LR-N5-S's SW1 is a momentary key: off till its behaviour is decided
-          case "${VARIANT%-rawpcm}" in n4|n5|promicro-p3) sw=y ;; *) sw=n ;; esac
+          grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON|_KEY|_KEY_LONG_MS|_KEY_OFF_MV)?|LR_MIC_GAIN)[= ]' "$c"
+          # the switch only where one is fitted; LR-N5-S's SW1 is a momentary key (lr_switch.c), on no other board
+          case "${VARIANT%-rawpcm}" in n4|n5|promicro-p3|n5s) sw=y ;; *) sw=n ;; esac
           if [ $sw = y ]; then grep -qx CONFIG_LR_SWITCH=y "$c"; elif grep -q '^CONFIG_LR_SWITCH=y' "$c"; then exit 1; fi
+          if [ "$VARIANT" = n5s ]; then grep -qx CONFIG_LR_SWITCH_KEY=y "$c"; grep -qx CONFIG_LR_SWITCH_KEY_LONG_MS=2000 "$c"
+            grep -qx CONFIG_LR_SWITCH_KEY_OFF_MV=3600 "$c"
+          elif grep -q '^CONFIG_LR_SWITCH_KEY=y' "$c"; then exit 1; fi
           if [ "${VARIANT%-rawpcm}" = n4 ]; then  # what lr_release.py checks before an LR-N4 upload
             python3 -c 'import lr_release, sys; sys.exit(lr_release.unfit("n4", open(sys.argv[1]).read()) or None)' "$c"
           elif [ "$VARIANT" = n5s ]; then  # LR-N5-S's first boards: LDOs, the buzzer silent by default

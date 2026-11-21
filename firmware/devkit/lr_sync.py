@@ -413,7 +413,8 @@ EVENTS = {
     26: ("READ", read_done),
     27: ("READ_TIME", lambda x, a, b: f"card {a} ms, notify {b} ms"),
     28: ("SWITCH", lambda x, a, b: f"{'on' if x else 'off'}: " + (
-        ["recording", "System OFF", "up on USB, not recording", "restart"][a] if a < 4 else str(a))),
+        ["recording", "System OFF", "up on USB, not recording", "restart"][a] if a < 4 else str(a)) +
+        (f", battery {b} mV" if a == 1 and b else "")),
     29: ("POWER", lambda x, a, b: {0: f"on battery, VDDH {x * 20} mV",
                                    1: "power-fail warning: VDDH under 3.3 V or VDD under 2.8 V",
                                    2: f"low battery ({x * 20} mV): recording ended, off (System OFF, or parked) until USB or the switch",

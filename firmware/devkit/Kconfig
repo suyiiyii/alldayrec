@@ -113,6 +113,26 @@ config LR_SWITCH
     help
         "Only on a board with the switch wired: elsewhere P1.15 is open and reads off, and the board would never record."
 
+config LR_SWITCH_KEY
+    bool "LR-N5-S's side key SW1 (sw-gpios, low = pressed) in place of the slide switch: a long press toggles recording and stopped (System OFF), a short one tells the state and wakes it (lr_switch.c)"
+    depends on LR_SWITCH && LR_BUZZER
+    default n
+
+config LR_SWITCH_KEY_LONG_MS
+    int "The key's long press, ms"
+    depends on LR_SWITCH_KEY
+    range 1000 5000
+    default 2000
+    help
+        "2 s: longer than any tap or knock in a pocket, so a stop is meant; it adds the 50 ms debounce."
+
+config LR_SWITCH_KEY_OFF_MV
+    int "The key's stop on battery goes to System OFF at this many mV and over; under it (or the battery not read) the park, LR_PARK (lr_switch.c)"
+    depends on LR_SWITCH_KEY
+    default 3600
+    help
+        "LR_PARK's reason: one LR-N4 sent to System OFF at 3.28 V never came back. 3.6 V is the park's battery-back mark (LR_PARK_UP_MV): a cell rested after the 3.3 V cut reads 3.35-3.45 V."
+
 config LR_SWITCH_OPEN_ON
     bool "The switch open = on, closed to GND = off (LR-N4 as built, its lever away from USB = on): lr_switch.c"
     depends on LR_SWITCH
@@ -128,7 +148,7 @@ config LR_LOW_BATTERY_MV
     default 3300
 
 config LR_PARK
-    bool "Park in System ON wherever System OFF would come (a low battery, the switch off, the cable gone), checking once a second: the switch moving or USB restarts it, and after a low battery also the charger charging (CHRG, chrg-gpios) or the battery back at 3.6 V (read every 10 s) (lr_power.c)"
+    bool "Park in System ON wherever System OFF would come (a low battery, the switch off, the cable gone; LR-N5-S's key stop only under LR_SWITCH_KEY_OFF_MV), checking once a second: the switch moving or USB restarts it, and after a low battery also the charger charging (CHRG, chrg-gpios) or the battery back at 3.6 V (read every 10 s) (lr_power.c)"
     default y if LR_BATTERY_AIN0
     help
         "LR-N4 and LR-N5 (the AIN0 builds): one LR-N4 sent to System OFF at 3.28 V lost VDD and never came back on its own; the other boards' low-battery System OFF has always woken."

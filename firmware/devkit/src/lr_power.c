@@ -109,7 +109,7 @@ void lr_power_stop(void)
 
 /* At boot, or up on USB with the cable gone (lr_switch.c): the radio and the mic's EasyDMA not started, as System OFF
  * wants (the mic's pins never set up). The log to flash first (System OFF keeps no RAM); outputs keep their level. */
-void lr_power_off(void)
+void lr_power_off(bool may_park)
 {
     lr_log_sync();
 #if DT_NODE_HAS_PROP(LR_USER, sd_pwr_gpios)
@@ -122,7 +122,9 @@ void lr_power_off(void)
     nrf_gpio_pin_clear(PDM_PWR_PIN);
     nrf_gpio_cfg_output(PDM_PWR_PIN);
 #ifdef CONFIG_LR_PARK
-    park();
+    if (may_park) {
+        park();
+    }
 #endif
 #ifdef CONFIG_LR_SWITCH
     lr_switch_arm();
@@ -178,7 +180,7 @@ void lr_power_init(void)
 #ifdef CONFIG_LR_PARK
         low_park = true;
 #endif
-        lr_power_off();
+        lr_power_off(true);
     }
 #ifdef CONFIG_LR_POWER_TRACE
     nrfx_power_pof_init(&pof);
