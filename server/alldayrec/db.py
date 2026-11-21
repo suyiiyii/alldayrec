@@ -112,6 +112,12 @@ CREATE TABLE IF NOT EXISTS sounds (            -- sounds.py: a scene model's raw
     at INTEGER NOT NULL,                            -- gain_db: the gain its input got before the model (none yet: 0)
     PRIMARY KEY (device, model, start_ms));         -- audio that would not decode has no row (a hole, tried again)
 CREATE INDEX IF NOT EXISTS sounds_end ON sounds(device, model, end_ms);
+CREATE TABLE IF NOT EXISTS quality (           -- quality.py (QUALITY=1): one window of a device's speech, its first and
+    device TEXT NOT NULL, start_ms INTEGER NOT NULL,  -- last sample's time (unix ms), speech_ms of it (the rest of the 9.01 s
+    end_ms INTEGER NOT NULL, speech_ms INTEGER NOT NULL,  -- repeated); model: dnsmos-p808@<sha256 12>; p808: its raw MOS;
+    model TEXT NOT NULL, p808 REAL NOT NULL,        -- clip: the share of samples at |x| >= 32700, rms_db the level, both as
+    clip REAL NOT NULL, rms_db REAL NOT NULL, at INTEGER NOT NULL,  -- recorded (offset undone); at: when scored
+    PRIMARY KEY (device, start_ms));
 CREATE TABLE IF NOT EXISTS sound_wrong (        -- sound_events.py: the owner's 不对 on a sound event (event) of [start_ms,
     id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- end_ms) of device (a conversation's tag: conv), as the model (its id,
     device TEXT NOT NULL, start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,  -- sounds.model) said it; at: when. For

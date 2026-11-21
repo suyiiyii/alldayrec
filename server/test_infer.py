@@ -15,7 +15,9 @@ def test_cmvn_and_check(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         infer.check(tmp_path)
     assert infer.MN10 not in str(e.value), "a scene model only when SOUND_MODEL names it"
+    assert infer.DNSMOS not in str(e.value), "the quality model only with QUALITY=1"
     monkeypatch.setenv("SOUND_MODEL", "mn10_as")
+    monkeypatch.setenv("QUALITY", "1")
     with pytest.raises(SystemExit) as e:
         infer.check(tmp_path)
     assert all(n in str(e.value) for n in infer.MODELS) and "another sha256" in str(e.value) and "is missing" in str(e.value)

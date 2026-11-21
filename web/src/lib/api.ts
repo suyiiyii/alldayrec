@@ -288,6 +288,27 @@ export interface AudioMinute {
   lag_s: number | null; // how long after its end it arrived (null: before 10-07)
 }
 
+// GET /api/quality: a device's speech quality by day (QUALITY=1 on the server; days with scores only, newest first)
+export interface QualityStats {
+  windows: number; // ~9 s windows of speech scored
+  speech_min: number;
+  p808: number; // DNSMOS P.808's median
+  low: number; // share of the speech in windows under low
+  clip_min: number; // minutes of speech in windows over clip clipped
+}
+export interface QualityDay {
+  day: string;
+  all: QualityStats;
+  live: QualityStats | null; // not media played aloud
+  media: QualityStats | null; // media and broadcasts played aloud (the summaries' spans)
+}
+export interface Quality {
+  on: boolean;
+  low: number; // provisional
+  clip: number;
+  days: QualityDay[];
+}
+
 // GET /api/upgrades: a device's firmware updates, an app's "dfu" events joined with the recorder's DFU and BOOT records
 export interface Upgrade {
   at: string; // begun: the app's start, else the recorder's DFU

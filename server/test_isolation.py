@@ -123,6 +123,7 @@ REQUESTS = {
     ("POST", "/api/device-status"): ("POST", "/api/device-status", dict(params={"device": DEV}, json={"battery": 1})),
     ("POST", "/api/device-log"): ("POST", "/api/device-log", dict(params={"device": DEV}, json=[{"src": "app", "seq": 2, "at": MS, "data": {"kind": "x"}}])),
     ("GET", "/api/device-log"): ("GET", "/api/device-log", dict(params={"device": DEV, "since": TODAY})),
+    ("GET", "/api/quality"): ("GET", "/api/quality", dict(params={"device": DEV, "since": TODAY, "until": TODAY})),
     ("GET", "/api/phone-spans"): ("GET", "/api/phone-spans", dict(params={"since": TODAY, "until": "9999"})),
     ("GET", "/api/calls"): ("GET", "/api/calls", dict(params={"since": TODAY})),
     ("GET", "/api/perf"): ("GET", "/api/perf", dict(params={"day": TODAY})),
@@ -457,7 +458,8 @@ def test_nothing_per_person_in_a_module():
                "local_asr": {"FILES"},  # the model files' hashes (its recognizer is one for everyone too, like the VAD)
                "perf": {"POOLS", "_minute", "_last"},  # the thread pools; the process's minute (its CPU, the loop's lag), no tenant's
                "music": {"@cache _yamnet"},  # the music model, loaded once for everyone like the VAD
-               "sound": {"MODELS", "@cache _session", "@cache _remote"},  # the scene models' settings and sessions, the service's client: everyone's
+               "sound": {"MODELS", "@cache _session", "@cache _remote"},
+               "quality": {"@cache _mel_basis", "@cache _session"},  # the model's filter bank and session: everyone's  # the scene models' settings and sessions, the service's client: everyone's
                "sound_events": {"CLASSES", "THRESH"},  # each model's AudioSet classes of an event and its thresholds, read only
                "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)

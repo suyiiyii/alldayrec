@@ -152,6 +152,22 @@ What turning on the background-music gate (`BG_GATE`, in [Other environment vari
 - **A voice changed by a merge, a split or late audio is not known to be free of music**, and is made again the next time a voiceprint learns from it.
 - **What the score lookups cost.** Each sentence is one query of the `sounds` table, and the older the sentence, the more rows it scans (on 100,000 synthetic rows, about 347 days: about 31 ms for the oldest sentence, 16 ms halfway).
 
+### Optional: daily sound quality
+
+Scores the sound quality of each device's speech and sums it up by day on the device page of the web app (the "Sound quality" card, not shown while there are no scores). Off by default.
+
+| Variable | Default | Description |
+|---|---|---|
+| `QUALITY` | `0` (off) | `1`: score every tenant's recordings in the background; `dnsmos-p808.onnx` is downloaded and checked at start (see [Model files](./models.md)) |
+| `QUALITY_SINCE` | midnight of the day it is first on | Score from this time on (ISO, the instance's time zone); never earlier |
+| `QUALITY_LOW` | `3.0` | Under this is a low score. **Provisional**: set from 35 clips the owner rated blind, not settled |
+| `QUALITY_EVERY_S` | `600` | How often (seconds) to look for hours ready to score |
+
+- What is scored: the audio under each device's final sentences (`sentences`), an hour at a time, once that device's final layer is past the end of the hour; each hour once (sentences the late layer adds later are not scored). The hour's speech is joined in time order (10 ms fades at the joins) and cut into 9.01 s windows with no overlap; a last one shorter than 9.01 s is repeated to fill it when it is 3 s or more, else dropped. Audio that did not decode is left out.
+- A row per window (the `quality` table, see [Data directory](./data.md)): DNSMOS P.808's raw score (1–5; the model hears the audio at −26 dBFS, the level is kept as `rms_db`) and the share of samples at |x| ≥ 32700 as recorded (calibration gain undone): clipping.
+- The report (`GET /api/quality?device=&since=&until=`, by day in the instance's time zone): P.808's median; the share of speech that scored low (speech time of windows under `QUALITY_LOW` over all speech time); minutes of speech in windows clipped over 1 %. Media played aloud (the summaries' `media_spans` and `broadcast_spans`) and the rest are also counted apart: a window is media when half or more of its sentences' time is inside those spans; conversations with no summary yet count as in the room.
+- Cost: one thread in the server process, one hour at a time for the whole process (tenants take turns), none of the transcription's or voiceprints' threads. About 70 CPU seconds per hour of speech (measured on one Apple M-series core, audio in 3 s Opus pieces: over 80 % of it is ffmpeg decoding piece by piece, the model itself about 10 ms per window).
+
 ### Advanced: only for `stepfun` and `stepfun-file`
 
 When `stepfun` or `stepfun-file` appears in `ENGINE`, `DRAFT_ENGINE` or `ENGINE_FALLBACK`, all four `ASR_*` variables below are required.

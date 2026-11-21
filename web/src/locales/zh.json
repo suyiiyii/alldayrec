@@ -359,7 +359,14 @@
     "noTime": "时间不明",
     "srcRec": "设备",
     "srcUpgrade": "汇总",
-    "noEvents": "这段时间没有事件"
+    "noEvents": "这段时间没有事件",
+    "q": {
+      "title": "音质",
+      "sub": "DNSMOS P.808，每 9 秒语音一个分（1–5），低于 {low} 算低分（门槛未定）",
+      "line": "中位 {p} · 低分 {low} · 削波 {clip} 分钟 · 语音 {min} 分钟",
+      "live": "现场 {line}",
+      "media": "外放 {line}"
+    }
   },
   "deviceCard": {
     "standbyOf": "和 {d} 在同一处：{d} 转写，这台只存音频",
