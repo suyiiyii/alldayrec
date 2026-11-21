@@ -33,11 +33,47 @@ static void key_check(void)
     assert(key(&boot, true, 60000) == 0);
     assert(key(&boot, false, 100) == 0);  // let go: no SHORT for it either
     assert(key(&boot, true, 2100) == 100);  // the next press counts
+    struct lr_key boot2 = {0};  // held at power-up for less than a long press: let go, no SHORT
+    assert(key(&boot2, true, 500) == 0 && key(&boot2, false, 100) == 0);
 
-    struct lr_key woken = LR_KEY_WOKEN;  // woken from System OFF by this press: let go at once, a SHORT
-    assert(key(&woken, false, 100) == 1);
+    struct lr_key woken = LR_KEY_WOKEN;  // woken by this press: let go, nothing (the wake has told the state)
+    assert(key(&woken, false, 100) == 0);
+    assert(key(&woken, true, 300) == 0 && key(&woken, false, 100) == 1);  // the next short press is one
     struct lr_key held = LR_KEY_WOKEN;  // held on from the wake: LONG at 2 s of reads, once
     assert(key(&held, true, 2000) == 100 && key(&held, true, 30000) == 0 && key(&held, false, 100) == 0);
+}
+
+// lr_key_wake's reads: the key down for the first `down`, and for 4 (200 ms) from `tap`; USB from `usb` on
+static int reads, beeps, down, tap, usb;
+static int script(void)
+{
+    int i = reads++;
+    return i >= usb ? -1 : i < down || (i >= tap && i < tap + 4);
+}
+static void count(int n)
+{
+    beeps += n;
+}
+static int wake(int down_reads, int tap_at, int usb_at)
+{
+    struct lr_key k;
+    reads = beeps = 0, down = down_reads, tap = tap_at, usb = usb_at;
+    return lr_key_wake(&k, script, count);
+}
+
+static void wake_check(void)
+{
+    int all = LR_KEY_WAKE_MS / LR_SWITCH_POLL_MS, never = 1 << 20;
+    // a tap wakes it (let go before the first read): 3 beeps in all, the 5 s from the wake on, then down again
+    assert(wake(0, never, never) == LR_KEY_NONE && beeps == 3 && reads == all);
+    // the wake's press let go only 0.6 s in: no SHORT, no more beeps, the 5 s not restarted
+    assert(wake(12, never, never) == LR_KEY_NONE && beeps == 3 && reads == all);
+    // held on from the wake: LONG at 2 s of reads, 3 + 2 beeps, recording
+    assert(wake(never, never, never) == LR_KEY_LONG && beeps == 5 && reads == 40);
+    // a second tap at 4 s: 3 more beeps, the 5 s still from the wake
+    assert(wake(0, 80, never) == LR_KEY_NONE && beeps == 6 && reads == all);
+    // USB 1 s in: up on USB
+    assert(wake(0, never, 20) == -1 && beeps == 3);
 }
 
 // reads of one position every LR_SWITCH_POLL_MS for ms -> what the last read says
@@ -64,6 +100,7 @@ int main(void)
     assert(hold(true, 550, &last, &n) == 1);
     assert(hold(false, 450, &last, &n) == -1 && hold(true, 600, &last, &n) == 1);  // running: off for less, back on
     key_check();
+    wake_check();
     puts("switch_check ok");
     return 0;
 }

@@ -31,9 +31,10 @@ struct lr_key {
     bool down;   // debounced
     bool armed;  // seen up since boot
     int held;    // ms down, stops at the long press
+    bool woke;   // this press woke it: held on it is a long press, let go no SHORT (the wake has told the state)
 };
-/* Woken from System OFF by the key: that press is down and counts */
-#define LR_KEY_WOKEN {.raw = true, .n = LR_KEY_READS, .down = true, .armed = true}
+/* Woken by the key (from System OFF or the park): that press is down and counts as a long one only */
+#define LR_KEY_WOKEN {.raw = true, .n = LR_KEY_READS, .down = true, .armed = true, .woke = true}
 
 static inline int lr_key_step(struct lr_key *k, bool pressed)
 {
@@ -43,9 +44,10 @@ static inline int lr_key_step(struct lr_key *k, bool pressed)
         return LR_KEY_NONE;
     }
     if (!pressed) {
-        int e = k->down && k->armed && k->held < CONFIG_LR_SWITCH_KEY_LONG_MS ? LR_KEY_SHORT : LR_KEY_NONE;
+        int e = k->down && k->armed && !k->woke && k->held < CONFIG_LR_SWITCH_KEY_LONG_MS ? LR_KEY_SHORT : LR_KEY_NONE;
         k->down = false;
         k->armed = true;
+        k->woke = false;
         k->held = 0;
         return e;
     }
@@ -55,6 +57,31 @@ static inline int lr_key_step(struct lr_key *k, bool pressed)
     }
     k->held += LR_SWITCH_POLL_MS;
     return k->armed && k->held >= CONFIG_LR_SWITCH_KEY_LONG_MS ? LR_KEY_LONG : LR_KEY_NONE;
+}
+
+#define LR_KEY_WAKE_MS 5000  // woken by the key: this long for a long press
+/* Woken by the key: hint(3) ("stopped"), then LR_KEY_WAKE_MS from the wake on, never restarted, for a long press:
+ * hint(2), LR_KEY_LONG (recording). read() waits LR_SWITCH_POLL_MS, then 1: the key down, 0: up, < 0: USB came (-1).
+ * The wake's own press let go is nothing; a later short press hint(3)s again. LR_KEY_NONE: the 5 s are over. */
+static inline int lr_key_wake(struct lr_key *k, int (*read)(void), void (*hint)(int))
+{
+    *k = (struct lr_key)LR_KEY_WOKEN;
+    hint(3);
+    for (int t = 0; t < LR_KEY_WAKE_MS; t += LR_SWITCH_POLL_MS) {
+        int r = read();
+        if (r < 0) {
+            return -1;
+        }
+        int e = lr_key_step(k, r);
+        if (e == LR_KEY_LONG) {
+            hint(2);
+            return LR_KEY_LONG;
+        }
+        if (e == LR_KEY_SHORT) {
+            hint(3);
+        }
+    }
+    return LR_KEY_NONE;
 }
 #endif
 

@@ -97,11 +97,12 @@ jobs:
           VARIANT: ${{ matrix.variant }}
         run: |
           c=build/lr-$VARIANT/zephyr/.config
-          grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON|_KEY|_KEY_LONG_MS)?|LR_MIC_GAIN)[= ]' "$c"
+          grep -E '^(# )?CONFIG_(SOC_DCDC_NRF52X(_HV)?|LR_SWITCH(_OPEN_ON|_KEY|_KEY_LONG_MS|_KEY_OFF_MV)?|LR_MIC_GAIN)[= ]' "$c"
           # the switch only where one is fitted; LR-N5-S's SW1 is a momentary key (lr_switch.c), on no other board
           case "${VARIANT%-rawpcm}" in n4|n5|promicro-p3|n5s) sw=y ;; *) sw=n ;; esac
           if [ $sw = y ]; then grep -qx CONFIG_LR_SWITCH=y "$c"; elif grep -q '^CONFIG_LR_SWITCH=y' "$c"; then exit 1; fi
           if [ "$VARIANT" = n5s ]; then grep -qx CONFIG_LR_SWITCH_KEY=y "$c"; grep -qx CONFIG_LR_SWITCH_KEY_LONG_MS=2000 "$c"
+            grep -qx CONFIG_LR_SWITCH_KEY_OFF_MV=3600 "$c"
           elif grep -q '^CONFIG_LR_SWITCH_KEY=y' "$c"; then exit 1; fi
           if [ "${VARIANT%-rawpcm}" = n4 ]; then  # what lr_release.py checks before an LR-N4 upload
             python3 -c 'import lr_release, sys; sys.exit(lr_release.unfit("n4", open(sys.argv[1]).read()) or None)' "$c"

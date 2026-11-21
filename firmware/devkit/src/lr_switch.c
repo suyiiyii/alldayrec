@@ -12,14 +12,19 @@
  *
  * LR-N5-S (CONFIG_LR_SWITCH_KEY): SW1 on P0.31 (sw-gpios) is a momentary key, low = pressed (lr_key_step). A long
  * press toggles recording and stopped; a short one tells the state. Stopped on battery is System OFF, not the park:
- * a press of any length wakes it in hardware (SENSE), where the park would read the key once a second. Woken by the
- * key it tells "stopped" and waits 5 s for a long press, then goes down again, once the key is up. Beeps (each one
- * buzzer_segment, <= 20 ms) with as many flashes of LED_G: 1 short press while recording, 2 recording, 3 stopped.
+ * a press of any length wakes it in hardware (SENSE), where the park would read the key once a second; only under
+ * CONFIG_LR_SWITCH_KEY_OFF_MV (3.6 V) it parks, as System OFF at a low cell may never come back (lr_power.c). Woken
+ * by the key it tells "stopped" once and waits 5 s from the wake for a long press (lr_key_wake), then goes down again,
+ * once the key is up. Beeps (each one buzzer_segment, <= 20 ms; silent while CONFIG_LR_BUZZER_DUTY_MAX is 0) with as
+ * many flashes of LED_G: 1 short press while recording, 2 recording, 3 stopped.
  *   recording:          short 1 | long 3, stopped | USB in/out: nothing changes
- *   stopped, battery:   System OFF; a press wakes it: 3, then 5 s for a long press (2, recording), else down again once
- *                       the key is up | USB in: wakes it, stopped on USB
- *   stopped, USB:       short 3 | long 2, recording | USB out: System OFF
- *   any other boot:     recording (a battery put in, a brown-out, a firmware); a key held then counts once let go
+ *   stopped, battery:   System OFF (>= 3.6 V) or the park; a press wakes it (the park: held over its 1 s read): 3,
+ *                       then 5 s for a long press (2, recording), else down again once the key is up | USB in: wakes
+ *                       it, stopped on USB
+ *   woken, the 5 s:     short 3, the 5 s go on | long 2, recording
+ *   stopped, USB:       short 3 | long 2, recording | USB out: System OFF or the park, as on battery
+ *   any other boot:     recording (a battery put in, a brown-out, a firmware, a watchdog); a key held then counts
+ *                       once let go
  *   low battery:        the park as before (lr_power.c): a key held over a 1 s read, or USB, restarts it */
 #include "lr_switch.h"
 
@@ -34,6 +39,7 @@
 #include "wdog_facade.h"
 #ifdef CONFIG_LR_SWITCH_KEY
 #include "buzzer.h"
+#include "lib/battery/battery.h"
 #endif
 
 #if DT_NODE_HAS_PROP(LR_USER, sw_gpios)  // LR-N5-S's key (lr_n5s.overlay)
@@ -71,9 +77,15 @@ void lr_switch_arm(void)
 {
     nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
     k_msleep(1);
+#ifdef CONFIG_LR_SWITCH_KEY
+    // a press only: one come since off() saw the key up wakes it at once and off() waits for it again, where SENSE_HIGH
+    // would hold a stuck key's 0.23 mA through the pull-up all through System OFF
+    nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+#else
     // wakes on the other level, whichever way round on is
     nrf_gpio_cfg_sense_input(SWITCH, NRF_GPIO_PIN_PULLUP,
                              nrf_gpio_pin_read(SWITCH) ? NRF_GPIO_PIN_SENSE_LOW : NRF_GPIO_PIN_SENSE_HIGH);
+#endif
 }
 
 /* The park (lr_power.c, CONFIG_LR_PARK): the pin's level, its pull-up on for this read only (on, the switch closed to
@@ -88,9 +100,11 @@ bool lr_switch_read(void)
 }
 
 #ifdef CONFIG_LR_SWITCH_KEY
-#define WAKE_MS 5000  // woken by the key: this long for a long press
 #define KEY_OFF 0x5703B0FF
-static __noinit uint32_t key_off;  // KEY_OFF: this restart is a long press's stop (a cold start's RAM fails it)
+#define KEY_PARKED 0x5703BA4C
+// KEY_OFF: this restart is a long press's stop; KEY_PARKED: the park's (off() under CONFIG_LR_SWITCH_KEY_OFF_MV), a
+// press or USB. A cold start's RAM fails both
+static __noinit uint32_t key_off;
 static struct lr_key key;
 
 /* n beeps (buzzer_segment, <= 20 ms each; silent while CONFIG_LR_BUZZER_DUTY_MAX is 0), each with a flash of led2
@@ -108,9 +122,15 @@ static void hint(int n)
 
 /* Stopped on battery: System OFF once the key has been up for two reads (read with its pull-up on for 10 us only, so a
  * key stuck down costs no 0.23 mA through it), then SENSE armed for the next press: never down, or it would wake at
- * once, again and again. USB coming meanwhile: up on USB instead. */
+ * once, again and again. The battery under CONFIG_LR_SWITCH_KEY_OFF_MV (or not read): the park instead (lr_power.c:
+ * one LR-N4 sent to System OFF at 3.28 V never came back), a press held over its 1 s read wakes it. USB coming
+ * meanwhile: up on USB instead. SWITCH's b: the battery, mV. */
 static void off(void)
 {
+    uint16_t mv = 0;
+    bool park = battery_get_millivolt(&mv) || mv < CONFIG_LR_SWITCH_KEY_OFF_MV;
+    lr_log(LR_SWITCH, 0, LR_SWITCH_SYSTEM_OFF, mv);
+    lr_log_sync();  // the flash write before the key is seen up: from then till SENSE is armed nothing slow
     for (int up = 0; up < LR_KEY_READS;) {
         k_msleep(LR_SWITCH_POLL_MS);
         watchdog_feed();
@@ -120,9 +140,9 @@ static void off(void)
         }
         up = lr_switch_read() ? up + 1 : 0;
     }
-    lr_log(LR_SWITCH, 0, LR_SWITCH_SYSTEM_OFF, 0);
     NRF_POWER->RESETREAS = NRF_POWER->RESETREAS;  // the next boot's OFF / VBUS are that wake's (BOOT has logged these)
-    lr_power_off(false);
+    key_off = park ? KEY_PARKED : 0;
+    lr_power_off(park);
 }
 
 /* Recording: SHORT 1 beep, LONG 3 and a restart into stopped (System OFF, or up on USB) */
@@ -144,6 +164,14 @@ static void poll(struct k_work *w)
 }
 static K_WORK_DELAYABLE_DEFINE(poll_work, poll);
 
+/* The wake's 5 s (lr_key_wake): a read each LR_SWITCH_POLL_MS, -1 once USB is there */
+static int wake_read(void)
+{
+    k_msleep(LR_SWITCH_POLL_MS);
+    watchdog_feed();
+    return vbus() ? -1 : on();
+}
+
 static bool record(void)
 {
     lr_log(LR_SWITCH, 1, LR_SWITCH_RECORDING, 0);
@@ -151,17 +179,17 @@ static bool record(void)
     return true;
 }
 
-/* A long press's restart, or a wake by USB (System OFF is only ever stopped): stopped. Woken by the key: "stopped",
- * then 5 s for a long press. Any other boot (a battery put in, a brown-out, a firmware's restart): recording, the key
- * not counted till it has been up. */
+/* A long press's restart, or a wake by USB (System OFF and the park are only ever stopped): stopped. Woken by the key:
+ * "stopped", then 5 s for a long press (lr_key_wake). Any other boot (a battery put in, a brown-out, a firmware's
+ * restart, a watchdog): recording, the key not counted till it has been up. */
 bool lr_switch_boot(void)
 {
     nrf_gpio_cfg_input(SWITCH, NRF_GPIO_PIN_PULLUP);
     k_msleep(1);
     uint32_t reas = NRF_POWER->RESETREAS;
-    bool stop = key_off == KEY_OFF;
+    bool stop = key_off == KEY_OFF, parked = key_off == KEY_PARKED;
     key_off = 0;
-    if (stop || reas & POWER_RESETREAS_VBUS_Msk) {
+    if (stop || reas & POWER_RESETREAS_VBUS_Msk || (parked && vbus())) {
         NRF_POWER->RESETREAS = reas;  // not recording: lr_store never clears it, and a stale VBUS would stop the next
         if (!vbus()) {
             off();
@@ -169,28 +197,20 @@ bool lr_switch_boot(void)
         lr_log(LR_SWITCH, 0, LR_SWITCH_PARKED, 0);
         return false;
     }
-    if (!(reas & POWER_RESETREAS_OFF_Msk)) {
+    // RESETREAS adds up till cleared: OFF with a reset since (a watchdog after a key wake) is that reset's boot
+    uint32_t resets = POWER_RESETREAS_RESETPIN_Msk | POWER_RESETREAS_DOG_Msk | POWER_RESETREAS_SREQ_Msk |
+                      POWER_RESETREAS_LOCKUP_Msk;
+    if (!parked && (reas & (POWER_RESETREAS_OFF_Msk | resets)) != POWER_RESETREAS_OFF_Msk) {
         return record();
     }
-    key = (struct lr_key)LR_KEY_WOKEN;
-    hint(3);
-    for (int t = 0; t < WAKE_MS; t += LR_SWITCH_POLL_MS) {
-        k_msleep(LR_SWITCH_POLL_MS);
-        watchdog_feed();
-        int e = lr_key_step(&key, on());
-        if (e == LR_KEY_LONG) {
-            hint(2);
-            return record();
-        }
-        if (e == LR_KEY_SHORT) {
-            hint(3);
-            t = 0;  // asked again: 5 s from now
-        }
-        if (vbus()) {
-            NRF_POWER->RESETREAS = reas;
-            lr_log(LR_SWITCH, 0, LR_SWITCH_PARKED, 0);
-            return false;
-        }
+    int e = lr_key_wake(&key, wake_read, hint);
+    if (e == LR_KEY_LONG) {
+        return record();
+    }
+    if (e < 0) {
+        NRF_POWER->RESETREAS = reas;
+        lr_log(LR_SWITCH, 0, LR_SWITCH_PARKED, 0);
+        return false;
     }
     off();
     return false;  // not reached

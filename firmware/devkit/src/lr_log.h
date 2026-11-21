@@ -58,7 +58,8 @@
  *                   0 recording, 1 System OFF (up on USB, the cable gone), 2 up on USB, not recording, 3 a restart
  *                   (switched while running or up on USB). A boot that finds it off, or not on for 0.5 s within 3 s,
  *                   goes to System OFF with no SWITCH: its BOOT is the only record. The wake from System OFF is the
- *                   next BOOT's RESETREAS (OFF: the switch, VBUS: USB)
+ *                   next BOOT's RESETREAS (OFF: the switch, VBUS: USB). LR-N5-S's key: b of a 1, the battery mV
+ *                   (under CONFIG_LR_SWITCH_KEY_OFF_MV parked, not System OFF)
  *    29 POWER       power (lr_power.c): x battery mV / 20 (LR-P3: VDDH), a 0: once a minute on battery (LR-P3), 1: the
  *                   chip's power-fail warning (LR-P3: VDDH under 3.3 V or VDD under 2.8 V; x 0, not measured in the
  *                   interrupt), 2: low battery, recording ended, System OFF next until USB (or LR-P3's switch) wakes it
