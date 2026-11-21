@@ -8,7 +8,7 @@
 #   ./lr.sh build n4                  LR-N4: our own board, a bare nRF52840 with LR-P3's parts plus a second mic and an IMU
 #   ./lr.sh build n5                  LR-N5: LR-N4 with a bare SPI NAND in place of the SD card (CONFIG_LR_NAND)
 #   ./lr.sh build n5s                 LR-N5-S (R1): LR-N5 with its own balls (overlay/lr_n5s.overlay), a buzzer, DCDC off,
-#                                     no side key yet (records from power-up); flashed over SWD only, not by flash or pkg below
+#                                     its side key (long press record / stop); flashed over SWD only, not by flash or pkg below
 #   ./lr.sh build promicro-nand       LR-PN: a ProMicro with a W25N NAND on the SD module's pins, for tests
 #   ./lr.sh flash [sdmod|expansion|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]   a running firmware is sent to the UF2 bootloader by a 1200 bps touch
 #   ./lr.sh pkg [sdmod|promicro|promicro-p2|promicro-p3|n4|n5|promicro-nand]    the build as a DFU package (build/lr-V/lr-V.zip) for lr_dfu.py; lr_release.py
@@ -64,9 +64,9 @@ case $V in
             # in place of the card (docs/nand-store.md 8): no FAT, no USB disk; SPIM3 wants errata 198's workaround
             [ -z "${N5:-}" ] || EXTRA+=(-DCONFIG_LR_POWER_TRACE=y
                                       -DCONFIG_BT_RX_STACK_SIZE=2816 -DCONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=2560)
-            # LR-N5-S's SW1 is a momentary key, not a slide switch: lr_switch.c would record only while it is held.
-            # Off till what the key does is decided; it records from power-up, VBUS still wakes System OFF
             [ "$V" != n5 ] || EXTRA+=(-DCONFIG_LR_SWITCH=y)
+            # LR-N5-S's SW1 is a momentary key, not a slide switch: long press record / stop, short press wake (lr_switch.c)
+            [ "$V" != n5s ] || EXTRA+=(-DCONFIG_LR_SWITCH=y -DCONFIG_LR_SWITCH_KEY=y)
             if [ -n "${N5:-}" ] || [ "$V" = promicro-nand ]; then
               OVL="$OVL;$D/overlay/lr_nand.overlay"
               [ "$V" != n5s ] || OVL="$OVL;$D/overlay/lr_n5s.overlay"  # last: its balls over N5's

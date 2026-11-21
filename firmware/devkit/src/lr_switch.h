@@ -18,6 +18,46 @@ static inline int lr_switch_debounce(bool on, bool *last, int *n)
     return (*n - 1) * LR_SWITCH_POLL_MS >= LR_SWITCH_STABLE_MS ? on : -1;
 }
 
+#ifdef CONFIG_LR_SWITCH_KEY_LONG_MS
+/* LR-N5-S's momentary key (CONFIG_LR_SWITCH_KEY), read every LR_SWITCH_POLL_MS: a level counts once LR_KEY_READS reads
+ * agree (contact bounce is a few ms). A press counts only once the key has been seen up since boot: one held at
+ * power-up, or stuck in the case, does nothing until it is let go. LONG comes once, while held, at
+ * CONFIG_LR_SWITCH_KEY_LONG_MS; SHORT on letting go of a shorter one. */
+enum { LR_KEY_NONE, LR_KEY_SHORT, LR_KEY_LONG };
+#define LR_KEY_READS 2
+struct lr_key {
+    bool raw;    // the last read
+    int n;       // reads in a row that agree with it
+    bool down;   // debounced
+    bool armed;  // seen up since boot
+    int held;    // ms down, stops at the long press
+};
+/* Woken from System OFF by the key: that press is down and counts */
+#define LR_KEY_WOKEN {.raw = true, .n = LR_KEY_READS, .down = true, .armed = true}
+
+static inline int lr_key_step(struct lr_key *k, bool pressed)
+{
+    k->n = pressed == k->raw ? k->n + 1 : 1;
+    k->raw = pressed;
+    if (k->n < LR_KEY_READS) {
+        return LR_KEY_NONE;
+    }
+    if (!pressed) {
+        int e = k->down && k->armed && k->held < CONFIG_LR_SWITCH_KEY_LONG_MS ? LR_KEY_SHORT : LR_KEY_NONE;
+        k->down = false;
+        k->armed = true;
+        k->held = 0;
+        return e;
+    }
+    k->down = true;
+    if (k->held >= CONFIG_LR_SWITCH_KEY_LONG_MS) {
+        return LR_KEY_NONE;
+    }
+    k->held += LR_SWITCH_POLL_MS;
+    return k->armed && k->held >= CONFIG_LR_SWITCH_KEY_LONG_MS ? LR_KEY_LONG : LR_KEY_NONE;
+}
+#endif
+
 /* At boot, after lr_log_init: true if on for 0.5 s (recording goes ahead, the switch watched from now on); off, or not
  * settled within 3 s, without USB it does not return (System OFF); on USB, false: start USB, then lr_switch_park(). */
 bool lr_switch_boot(void);

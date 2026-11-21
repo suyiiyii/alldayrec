@@ -113,6 +113,19 @@ config LR_SWITCH
     help
         "Only on a board with the switch wired: elsewhere P1.15 is open and reads off, and the board would never record."
 
+config LR_SWITCH_KEY
+    bool "LR-N5-S's side key SW1 (sw-gpios, low = pressed) in place of the slide switch: a long press toggles recording and stopped (System OFF), a short one tells the state and wakes it (lr_switch.c)"
+    depends on LR_SWITCH && LR_BUZZER
+    default n
+
+config LR_SWITCH_KEY_LONG_MS
+    int "The key's long press, ms"
+    depends on LR_SWITCH_KEY
+    range 1000 5000
+    default 2000
+    help
+        "2 s: longer than any tap or knock in a pocket, so a stop is meant; it adds the 50 ms debounce."
+
 config LR_SWITCH_OPEN_ON
     bool "The switch open = on, closed to GND = off (LR-N4 as built, its lever away from USB = on): lr_switch.c"
     depends on LR_SWITCH

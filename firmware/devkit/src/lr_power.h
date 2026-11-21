@@ -13,9 +13,10 @@ void lr_power_init(void);
 /* The open file written out and closed, the phone told: before a restart that stops recording */
 void lr_power_stop(void);
 /* The log to flash, then System OFF with the card's and the mic's supplies off; USB (VBUS) wakes it, and LR-P3's
- * switch moving. CONFIG_LR_PARK: parked in System ON instead, the same wakes as a restart (lr_power.c). Does not
- * return. */
-void lr_power_off(void);
+ * switch moving. CONFIG_LR_PARK and may_park: parked in System ON instead, the same wakes as a restart (lr_power.c);
+ * LR-N5-S's key stop (lr_switch.c) passes false: a press of any length wakes System OFF, the park reads once a second.
+ * Does not return. */
+void lr_power_off(bool may_park);
 
 /* What the board runs on, for the status read (lr_store.c, byte 47): the phone shows it next to the battery */
 enum { LR_ON_BATTERY, LR_CHARGING, LR_CHARGED };
