@@ -58,6 +58,9 @@ String formatFailText(AppLocalizations l, int err) => switch (err) {
 /// So many KB as KB, MB or GB.
 String sizeText(num kb) => kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '$kb KB';
 
+/// A transfer's progress: its percentage to a tenth, then so many KB of so many.
+String progressText(num doneKb, num totalKb) => '${(doneKb * 100 / totalKb).toStringAsFixed(1)}% · ${sizeText(doneKb)} / ${sizeText(totalKb)}';
+
 /// A battery glyph with as many bars as the level (unknown: a question mark).
 IconData batteryIcon(int? p) {
   if (p == null) return Icons.battery_unknown_rounded;

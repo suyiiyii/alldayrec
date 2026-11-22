@@ -40,6 +40,9 @@ enum Recorder {
         result(nil)
       case "slices": slices(a); result(nil)
       case "status": result(status())
+      case "progress":  // the device page's 0.1 s poll while a bean's Wi-Fi fast transfer runs: status() lists the upload queue
+        let b = bean
+        result(["wifi": b?.state["code"] as? String == "beanWifi", "syncDone": b?.syncDoneKb ?? 0, "syncTotal": b?.syncTotalKb ?? 0])
       case "version": result(DeviceLog.version)  // 我的 › 关于
       case "testflight": UIApplication.shared.open(URL(string: "itms-beta://")!); result(nil)  // 我的 › 检查更新: the app iPhone builds come from
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message

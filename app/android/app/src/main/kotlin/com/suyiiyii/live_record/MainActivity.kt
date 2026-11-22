@@ -119,6 +119,10 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "status" -> result.success(RecorderService.status(File(filesDir, "chunks")))
+                "progress" -> {  // the device page's 0.1 s poll while a bean's Wi-Fi fast transfer runs: status() lists the upload queue
+                    val b = RecorderService.bean
+                    result.success(mapOf("wifi" to (b?.state?.get("code") == "beanWifi"), "syncDone" to (b?.syncDoneKb ?: 0L), "syncTotal" to (b?.syncTotalKb ?: 0L)))
+                }
                 "version" -> result.success(DeviceLog.version)  // 我的 › 关于
                 "error" -> {  // an error the Flutter side did not catch: its type and first frames, no message
                     DeviceLog.app(DeviceLog.mine(), "app_error", "界面出错：${call.argument<String>("type")} ${call.argument<String>("stack")}", "error")

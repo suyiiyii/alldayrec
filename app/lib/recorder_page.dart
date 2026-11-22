@@ -22,9 +22,12 @@ class RecorderPage extends StatefulWidget {
   State<RecorderPage> createState() => _RecorderPageState();
 }
 
+/// How often the device page reads a bean's Wi-Fi fast transfer's progress.
+const fastEvery = Duration(milliseconds: 100);
+
 class _RecorderPageState extends State<RecorderPage> {
   Map r = {}, st = {};
-  Timer? timer;
+  Timer? timer, fast;  // fast: a bean's Wi-Fi fast transfer under way, its progress every [fastEvery]
   bool unbinding = false;
 
   @override
@@ -38,12 +41,30 @@ class _RecorderPageState extends State<RecorderPage> {
   @override
   void dispose() {
     timer?.cancel();
+    fast?.cancel();
     super.dispose();
   }
 
   Future<void> _load() async {
     final a = await Recorder.recorder(), b = await Recorder.status();
-    if (mounted) setState(() { r = a; st = b; });
+    if (!mounted) return;
+    setState(() { r = a; st = b; });
+    _fast((b['link'] as Map?)?['code'] == 'beanWifi');
+  }
+
+  /// The progress alone while a fast transfer runs (the owner, 11-23: refresh it faster so it shows how fast it goes);
+  /// back to the 2 s status once it is over or the page is left.
+  void _fast(bool on) {
+    if (on == (fast != null)) return;
+    fast?.cancel();
+    fast = on ? Timer.periodic(fastEvery, (_) => _progress()) : null;
+  }
+
+  Future<void> _progress() async {
+    final p = await Recorder.progress();
+    if (!mounted || fast == null) return;
+    if (p['wifi'] != true) { _fast(false); _load(); return; }  // over: the status at once, not up to 2 s later
+    setState(() => st = {...st, 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal']});
   }
 
   Future<void> _call(Future<void> Function() f) async {
@@ -240,7 +261,7 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
-              Text('${sizeText(syncDone)} / ${sizeText(syncTotal)}', style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+              Text(progressText(syncDone, syncTotal), style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
             ]),
             const SizedBox(height: 10),
             LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
