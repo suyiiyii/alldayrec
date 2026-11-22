@@ -22,6 +22,7 @@ final class BeanWifi {
   private let inbox = Inbox<[UInt8]?>()  // nil: the socket went
   @Shared private var seen: String?  // the certificate's pin, as it came
   @Shared private(set) var bytes: Int64 = 0
+  @Shared private var keptFailed = 0  // keep-alives iOS did not send (state())
   @Shared private var trail = ""  // a try's states, for its log
   @Shared private var lastVia = "?"  // a try's interfaces
   @Shared private var waitingWhy = ""  // why the socket's path is not there (localNetworkDenied: the permission refused)
@@ -167,6 +168,8 @@ final class BeanWifi {
       case .waiting(let e):  // no route yet, or the local network question unanswered or refused: wait on
         failure = e
         self?.waitingWhy = BeanWifi.why(c?.currentPath)
+        // once up, the socket's path gone (iOS off the hotspot?): units stop, the loop's idle check ends it
+        if self?.ws === c { self?.log("bean_wifi_socket", "豆子的 WebSocket 没了路：\(e)（\(BeanWifi.why(c?.currentPath))）", "warn", ["state": "waiting", "error": "\(e)"]) }
       case .cancelled: if self?.ws != nil { self?.inbox.put(nil) }
       default: break
       }
@@ -188,7 +191,9 @@ final class BeanWifi {
     udp = u
     let timer = DispatchSource.makeTimerSource(queue: q)
     timer.schedule(deadline: .now(), repeating: 0.1)  // ws/soundcore's 100 ms (1 s till 45)
-    timer.setEventHandler { [weak u] in u?.send(content: Data("soundcore-keep-alive-unicast".utf8), completion: .contentProcessed { _ in }) }
+    timer.setEventHandler { [weak self, weak u] in
+      u?.send(content: Data("soundcore-keep-alive-unicast".utf8), completion: .contentProcessed { if $0 != nil { self?.keptFailed += 1 } })
+    }
     timer.resume()
     keepAlive = timer
   }
@@ -283,6 +288,14 @@ final class BeanWifi {
     m.start(queue: q)
     monitor = m
     UploadPath.device = device
+  }
+
+  /// The socket's and the keep-alive's states and paths, the phone's Wi-Fi address (still the hotspot's 192.168.43.x?),
+  /// what came: for the log of a read that stopped (BeanSync.wifiLoop()).
+  func state() -> [String: Any] {
+    let s = { (c: NWConnection?) in c.map { "\($0.state)" } ?? "none" }
+    return ["socket": s(ws), "socket_path": BeanWifi.why(ws?.currentPath), "keepalive": s(udp), "keepalive_path": BeanWifi.why(udp?.currentPath),
+            "keepalive_failed": keptFailed, "ip": BeanWifi.wifiAddress() ?? "", "bytes": bytes]
   }
 
   /// Each message as it comes: binary frames, or frames as hex text (OK, ACK and the like are not).

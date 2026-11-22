@@ -280,12 +280,15 @@ protocol BeanIo: AnyObject {
   /// until wifiLeave() (FINISH, the hotspot forgotten).
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws
   func wifiLeave()
+  /// The socket's and the hotspot's state now, for the log of a Wi-Fi read that stopped (BeanWifi.state()).
+  func wifiState() -> [String: Any]
 }
 
 extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say otherwise)
   func wifiAsked() -> Bool { false }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws { throw Bean.Fail("no Wi-Fi") }
   func wifiLeave() {}
+  func wifiState() -> [String: Any] { [:] }
 }
 extension BeanIo { func phoneState() -> [String: Any] { [:] }; func notifications() -> [String: Any] { [:] } }
 
@@ -404,6 +407,7 @@ final class BeanSync {
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at BeanSync.tries (wifiOff())
   private var wifiUnits = 0, wifiDupes = 0  // over Wi-Fi: units come, and those the phone had already
+  private var wifiStalls = 0  // over Wi-Fi: reads that stopped mid-file in this fast transfer (wifiLoop())
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
@@ -630,7 +634,7 @@ final class BeanSync {
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
         fields: ["ms": opened, "reply": Bean.hex(a.payload), "endpoint": at, "ssid": ssid])
-    overWifi = true; wifiUnits = 0; wifiDupes = 0
+    overWifi = true; wifiUnits = 0; wifiDupes = 0; wifiStalls = 0
     files.values.forEach { $0.wifiTries = 0 }
     state = ["code": "beanWifi"]
     var t1 = io.monotonicNow(), why = "", rollover = false, note: String?
@@ -681,22 +685,31 @@ final class BeanSync {
         if let f = try next(1000) { try take(f) }
         guard let x = xfer else { return nil }
         let now = io.now()
-        if x.key == nil && now - x.at > 8000 {  // ws/soundcore: 3 asks 8 s apart
-          if x.asked < 3 {
+        if x.key == nil && now - x.at > 8000 {  // ws/soundcore: 3 asks 8 s apart; once after a stall (below)
+          if x.asked < (wifiStalls > 0 ? 1 : 3) {
             x.asked += 1; x.at = now
             log("bean_xfer", "补传文件 \(x.file) Wi-Fi 上 8 s 没回音，第 \(x.asked) 次再要", "warn",
                 ["file": x.file, "from": x.from, "asked": x.asked, "recording": recording])
             try send(Bean.wifiTransfer(x.file, x.from * Int64(Bean.unit)))
             return nil
           }
-          failed(x, "Wi-Fi 上要了 3 次都没回音")
+          failed(x, "Wi-Fi 上要了 \(x.asked) 次都没回音")
           return "豆子没回音"
         }
         // units came, then none: over Wi-Fi the bean sends far faster than real time, and 11-09 it stopped 16 units
         // short of the end, sending no 1A/0A either; BLE fills what is left (no 30 s wait for nothing)
         let idle: Int64 = x.last >= 0 ? 10_000 : 30_000
-        if now - x.seen > idle { complete(x, -1, "；\(idle / 1000) s 没收到单元"); return "\(idle / 1000) s 没收到单元" }
-        return nil
+        guard now - x.seen > idle else { return nil }
+        complete(x, -1, "；\(idle / 1000) s 没收到单元")
+        // iPhone 11-09..11-22: 14 such stops, 12 of them 2–9 s after the socket opened (11-09 waited 30 s: nothing more),
+        // the socket up and silent, iOS's default route on Wi-Fi, cellular or a VPN alike; the bean or iOS's link to the
+        // hotspot, not known yet. Once a fast transfer: what is missing asked again on the same socket, one ask (8 s), and
+        // the socket's and the hotspot's state logged; whether the bean answers says which
+        let again = x.last >= 0 && wifiStalls == 0
+        wifiStalls += 1
+        log("bean_wifi_stall", "Wi-Fi 上文件 \(x.file) 到单元 \(x.last) 后 \(idle / 1000) s 没收到单元，" + (again ? "同一条连接再要一次缺的" : "结束快传"), "warn",
+            ["file": x.file, "seq": x.last, "units": x.units, "stalls": wifiStalls, "again": again].merging(io.wifiState()) { $1 })
+        return again ? nil : "\(idle / 1000) s 没收到单元"
       }
       if let why { return why }
     }
