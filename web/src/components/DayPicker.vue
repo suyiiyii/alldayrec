@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, useTemplateRef, watch } from "vue";
 import Icon from "./Icon.vue";
 import MonthGrid from "./MonthGrid.vue";
-import { intl, lang, t } from "../i18n";
-import { calendar, dayLabel, loadCalendar, neighbour, today } from "../lib/calendar";
+import { t } from "../i18n";
+import { calendar, dayLabel, loadCalendar, monthLabel, neighbour, today } from "../lib/calendar";
 
 // < 10月1日 周三 >: the arrows go to the nearest day with sentences, the date opens a month of them
 const props = defineProps<{ day: string }>();
@@ -37,10 +37,6 @@ function shiftMonth(n: number) {
   const d = new Date(y, m - 1 + n, 1);
   month.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-const monthLabel = (m: string) =>
-  lang() === "zh"
-    ? m.replace("-", " 年 ") + " 月"
-    : new Date(m + "-01T12:00:00").toLocaleDateString(intl(), { year: "numeric", month: "long" });
 function pick(d: string) {
   open.value = false;
   emit("pick", d);

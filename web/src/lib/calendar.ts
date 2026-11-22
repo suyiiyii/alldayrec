@@ -47,3 +47,9 @@ export function dayLabel(day: string) {
     ? `${t.getMonth() + 1}月${t.getDate()}日 周${"日一二三四五六"[t.getDay()]}`
     : t.toLocaleDateString(intl(), { weekday: "short", month: "short", day: "numeric" });
 }
+
+/** A YYYY-MM month as the picker and 日历 head it: 2026 年 03 月, March 2026. */
+export const monthLabel = (m: string) =>
+  lang() === "zh"
+    ? m.replace("-", " 年 ") + " 月"
+    : new Date(m + "-01T12:00:00").toLocaleDateString(intl(), { year: "numeric", month: "long" });

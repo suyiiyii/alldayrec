@@ -5,9 +5,9 @@ import AppHeader from "../components/AppHeader.vue";
 import Icon from "../components/Icon.vue";
 import MonthGrid from "../components/MonthGrid.vue";
 import Skeleton from "../components/Skeleton.vue";
-import { intl, lang, t } from "../i18n";
+import { t } from "../i18n";
 import { errorTitle } from "../lib/api";
-import { calendar, loadCalendar } from "../lib/calendar";
+import { calendar, loadCalendar, monthLabel } from "../lib/calendar";
 
 // Every month with sentences, newest first: a day's conversations and speech minutes, a tap opens its conversations.
 // loaded: an instance with nothing recorded yet has no months, which is not loading
@@ -30,10 +30,6 @@ const months = computed(() => {
   return Object.entries(by).sort((a, b) => (a[0] < b[0] ? 1 : -1));
 });
 const open = (day: string) => router.push({ path: "/", query: { day } });
-const monthLabel = (m: string) =>
-  lang() === "zh"
-    ? m.replace("-", " 年 ") + " 月"
-    : new Date(m + "-01T12:00:00").toLocaleDateString(intl(), { year: "numeric", month: "long" });
 </script>
 
 <template>
