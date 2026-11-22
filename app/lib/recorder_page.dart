@@ -61,6 +61,7 @@ class _RecorderPageState extends State<RecorderPage> {
   }
 
   Future<void> _progress() async {
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;  // no frames behind: no reads
     final p = await Recorder.progress();
     if (!mounted || fast == null) return;
     if (p['wifi'] != true) { _fast(false); _load(); return; }  // over: the status at once, not up to 2 s later
