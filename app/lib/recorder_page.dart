@@ -261,7 +261,8 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
-              Text(progressText(syncDone, syncTotal), style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+              Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change every 0.1 s
+                  style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
             ]),
             const SizedBox(height: 10),
             LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
