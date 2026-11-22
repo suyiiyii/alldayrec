@@ -309,6 +309,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }
   func wifiLeave() { wifi?.close(); wifi = nil }
+  func wifiState() -> [String: Any] { wifi?.state() ?? [:] }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
   /// (category PlayAndRecord: this app's voice question too), and Wi-Fi; power, and whether the app is in front.

@@ -803,8 +803,39 @@ for drops in [1, BeanSync.tries] {
   check(bean.transfers.last!, [b, 0, 0], "then BLE as before")
 }
 
-/// Over Wi-Fi units came, then none (11-09: the bean stopped 16 units short of the end, no 1A/0A): 10 s on the fast
-/// transfer ends (the whole of it, not that file alone), and BLE reads the rest.
+/// Over Wi-Fi units came, then none (11-09: the bean stopped 16 units short of the end, no 1A/0A; iPhone 11-09..11-22: 14
+/// stops mid-file, mostly seconds in): 10 s on, what is missing is asked once more on the same socket. Answered, Wi-Fi
+/// goes on; not (one ask, 8 s), or a second stop, ends the fast transfer (the whole of it) and BLE reads the rest.
+for answers in [true, false] {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, from, _ in
+    if bean.onWifi && from > 0 && !answers { return }  // silent on the socket since it stopped
+    bean.header(file, 3000 * Int64(Bean.unit))
+    if bean.onWifi && from == 0 { bean.units(file, Array(from..<2984), ms: 1) } else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+  }
+  bean.script = Array(repeating: {}, count: 60)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains(answers ? "都取到了" : "豆子没回音"), true, again.description)
+  check(sync.wifiNote == nil, true, "units came: no failure for the page")
+  let stall = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_stall" }!]
+  check(stall["seq"] as? Int64, 2983, "where it stopped")
+  check(stall["again"] as? Bool, true, "asked again once")
+  check(bean.logs.filter { $0.0 == "bean_xfer" && $0.1.contains("8 s 没回音") }.count, 0, "after a stop, one ask")
+  check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "the rest asked for on the same socket")
+  if !answers {
+    bean.script = Array(repeating: {}, count: 5)
+    _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(bean.transfers.last!, [a, 2984, 0], "then BLE from where Wi-Fi stopped")
+  }
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
+  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+}
+
+/// A second stop in the same fast transfer ends it: no asking again and again.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -812,18 +843,15 @@ do {
   bean.list(a, 60_000); bean.wifiAsk = true
   bean.onTransfer = { file, from, _ in
     bean.header(file, 3000 * Int64(Bean.unit))
-    if bean.onWifi { bean.units(file, Array(from..<2984), ms: 1) } else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+    bean.units(file, Array(from..<(bean.onWifi ? from + 1000 : 3000)), last: 2999, ms: 1)
+    if !bean.onWifi { bean.complete(file) }
   }
-  bean.script = Array(repeating: {}, count: 40)
+  bean.script = Array(repeating: {}, count: 60)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("10 s 没收到单元"), true, again.description)
-  check(sync.wifiNote == nil, true, "units came: no failure for the page")
-  bean.script = Array(repeating: {}, count: 5)
-  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "then BLE from where Wi-Fi stopped")
-  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
-  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+  check(bean.transfers, [[a, 0, 0], [a, 1000, 0]], "asked again once, not after the second stop")
+  check(bean.logFields.filter { $0["again"] as? Bool == false }.count, 1, "the second stop logged as the end")
 }
 
 /// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496
