@@ -35,6 +35,8 @@ class Recorder {
       _ch.invokeMethod('bind', {'name': name, 'address': address, 'force': force});
   static Future<void> pause(int s) => _ch.invokeMethod('pause', {'s': s});  // 0: record again
   static Future<void> usbDisk(bool on) => _ch.invokeMethod('usbDisk', {'on': on});
+  /// A bean's Wi-Fi fast transfer: on still (wifi), and its syncDone / syncTotal KB, without status()'s queue listing.
+  static Future<Map> progress() async => (await _ch.invokeMethod('progress')) as Map;
   static Future<String?> beanWifi() => _ch.invokeMethod<String>('beanWifi');  // the bean's Wi-Fi fast transfer, once (#431): recording, vpn or ok; Android also permission (asked now: tap again once allowed)
   /// The connected recorder's card with no file system (hw card 'blank') formatted; code: its hw card_kb. The board's
   /// answer: 0 done, -17 it has a file system, -22 the card changed, -19 no card answers, -5 the format failed. Tens of
