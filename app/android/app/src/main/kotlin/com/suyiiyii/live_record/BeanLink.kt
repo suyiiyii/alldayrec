@@ -344,6 +344,8 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         set(value) { sync.wifiStep = value }
     val syncDoneKb get() = sync.syncDoneKb
     val syncTotalKb get() = sync.syncTotalKb
+    /** The sync summary (BeanSync.ledger()): the status's `sync`. */
+    val ledger get() = sync.sync
 
     fun start() = thread.start()
 

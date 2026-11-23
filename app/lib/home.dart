@@ -21,7 +21,7 @@ import 'settings_page.dart';
 import 'update.dart';
 import 'upload_page.dart';
 
-/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, beanHeld, beanWaiting, beanFilling, paused, disconnected, pausedAway, low,
+/// Debug builds: `--dart-define=FAKE_STATUS=recording` (or syncing, fetching, beanHeld, beanWaiting, beanFilling, beanWifi, paused, disconnected, pausedAway, low,
 /// charging, mic, warning) shows that canned status instead of the recorder's, for screenshots of the chip and its panel.
 const fakeStatus = kDebugMode ? String.fromEnvironment('FAKE_STATUS') : '';
 
@@ -30,15 +30,24 @@ Map cannedStatus(String name) {
   final now = DateTime.now().millisecondsSinceEpoch;
   final hw = {'name': 'LR-P3-0000', 'model': 'LR-P3', 'battery': 87, 'charge': 'battery', 'rssi': -62, 'store': 0,
     'free_kb': 25000000, 'total_kb': 31000000, 'backlog_kb': 0};
-  final ble = {'running': true, 'source': 'ble', 'connected': true, 'link': {'code': 'connected'}, 'hw': hw, 'pending': 0};
+  // the sync summary (BeanSync.ledger()) with each, as native sends it
+  Map sync(String phase, {num owed = 0, num? eta, String? held, num done = 0, num total = 0}) =>
+      {'phase': phase, 'owed_s': owed, 'eta_s': eta, 'held': held, 'stuck_s': 0, 'done_kb': done, 'total_kb': total};
+  final ble = {'running': true, 'source': 'ble', 'connected': true, 'link': {'code': 'connected'}, 'hw': hw, 'pending': 0, 'sync': sync('live')};
   final bean = {...ble, 'hw': {'name': 'D3200-0000', 'model': 'D3200', 'battery': 76, 'charge': 'battery', 'recording': true, 'rssi': -58}};
   return switch (name) {
     'recording' => ble,
-    'syncing' => {...ble, 'syncDone': 790500, 'syncTotal': 1254000, 'hw': {...hw, 'backlog_kb': 464000, 'backlog_eta_s': 1200}},
+    'syncing' => {...ble, 'syncDone': 790500, 'syncTotal': 1254000, 'hw': {...hw, 'backlog_kb': 464000, 'backlog_eta_s': 1200},
+      'sync': sync('catching', eta: 1200, done: 790500, total: 1254000)},
     'fetching' => {...cannedStatus('syncing'), 'connected': false, 'link': {'code': 'joining'}},  // the file being recorded, before LIVE
-    'beanHeld' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2529, 'backlog_held': 'live', 'backlog_eta_s': 1264}},
-    'beanWaiting' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 12843, 'backlog_held': 'recording'}},
-    'beanFilling' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2160, 'backlog_eta_s': 1080}},
+    'beanHeld' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2529, 'backlog_held': 'live', 'backlog_eta_s': null},
+      'sync': sync('catching', owed: 2529, held: 'live')},
+    'beanWaiting' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 12843, 'backlog_held': 'recording'},
+      'sync': sync('catching', owed: 12843, held: 'recording')},
+    'beanFilling' => {...bean, 'hw': {...bean['hw'] as Map, 'backlog_s': 2160, 'backlog_eta_s': 1080}, 'sync': sync('catching', owed: 2160, eta: 1080)},
+    'beanWifi' => {...bean, 'connected': false, 'link': {'code': 'beanWifi'}, 'wifiStep': {'step': 'transfer', 'reopen': 0},
+      'syncDone': 21811, 'syncTotal': 67891, 'hw': {...bean['hw'] as Map, 'recording': false, 'backlog_s': 4620},
+      'sync': sync('wifi', owed: 4620, done: 21811, total: 67891)},
     'paused' => {...ble, 'pausedUntil': now + 12 * 60000 - 1000},
     'disconnected' => {...ble, 'connected': false, 'link': {'code': 'away', 'lastSeen': now - 47 * 60000}},
     'pausedAway' => {...cannedStatus('disconnected'), 'pausedUntil': now + 12 * 60000 - 1000},
@@ -194,7 +203,6 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
 
   bool get running => status['running'] == true;
   bool get connected => status['connected'] == true;  // the BLE recorder's link
-  bool get syncing => ((status['syncTotal'] as num?) ?? 0) > 0;  // its card's backlog being read
 
   /// Bumped by every setState: the status sheet is a route of its own, outside this build, and rebuilds on it.
   final rev = ValueNotifier(0);
@@ -539,7 +547,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// What records, what it does in a few words (the chip's line), and what went wrong.
   Widget _panelHeader(BuildContext context) {
     final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context), t = Theme.of(context), cs = t.colorScheme;
-    final c = chipSpec(context, s, ble: ble, stopping: stopping);
+    final c = chipSpec(context, s, ble: ble, stopping: stopping), y = syncSpec(s);
     final away = ble && !connected && (s['link'] as Map?)?['code'] == 'away';
     final warn = [
       if (s['error'] != null) l.recordingError(nativeText(context, s['error'])),
@@ -558,9 +566,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               style: t.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
           Text(c.line, style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
           if (away && pauseLeftMin(s) == 0) Text(l.awayHelp, style: small),  // it records to its card meanwhile (not while paused)
-          if (ble && syncing) ...[  // LIVE goes on while the backlog is read; before LIVE only the file being recorded
+          if (ble && y.totalKb > 0) ...[  // LIVE goes on while the backlog is read; before LIVE only the file being recorded
             const SizedBox(height: 8),
-            LinearProgressIndicator(value: connected ? (status['syncDone'] ?? 0) / status['syncTotal'] : null, borderRadius: BorderRadius.circular(2)),
+            LinearProgressIndicator(value: connected ? y.doneKb / y.totalKb : null, borderRadius: BorderRadius.circular(2)),
           ],
           for (final w in warn) Text(w, style: small?.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
         ]),
@@ -572,9 +580,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   /// when known: the link keeps the last read, greyed while away), and its pause.
   List<Widget> _bleBody(BuildContext context) {
     final s = status, hw = (s['hw'] as Map?) ?? {}, l = AppLocalizations.of(context), cs = Theme.of(context).colorScheme;
-    final battery = hw['battery'] as int?, rssi = hw['rssi'] as int?, eta = hw['backlog_eta_s'] as num?;
-    final left = ((s['syncTotal'] as num?) ?? 0) - ((s['syncDone'] as num?) ?? 0), pending = (s['pending'] as num?) ?? 0;
-    final owed = (hw['backlog_s'] as num?) ?? 0;  // a bean's recording not on the phone yet (beanOwed)
+    final battery = hw['battery'] as int?, rssi = hw['rssi'] as int?, y = syncSpec(s), eta = y.etaS;
+    final left = y.totalKb - y.doneKb, pending = (s['pending'] as num?) ?? 0;
+    final owed = y.owedS > 0 ? y.owedS : y.stuckS;  // a bean's recording not on the phone yet (beanOwed)
+    final syncing = const ['catching', 'wifi', 'stuck'].contains(y.phase);  // as the top bar's chip
     final pausedMin = pauseLeftMin(s);
     final bean = (hw['name'] as String?)?.startsWith('D3200-') == true;  // a Feishu recorder bean: its own button, no pause of ours
     final tiles = [
@@ -587,12 +596,13 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         statTile(context,
             icon: Icons.cloud_upload_rounded, color: syncing || owed > 0 || pending > 0 ? cs.primary : Colors.green.shade600,
             label: l.backlog,
-            value: syncing ? sizeText(left) : owed > 0 ? durationText(l, owed)
+            value: y.totalKb > 0 ? sizeText(left) : owed > 0 ? durationText(l, owed)
                 : pending > 0 ? sizeText(((s['pendingBytes'] as num?) ?? 0) ~/ 1024) : l.allSynced,
             sub: [
-              if (owed > 0 && hw['backlog_held'] == 'recording') l.beanHeldRecording,  // on the bean till it stops (BeanSync.owe())
-              if (owed > 0 && hw['backlog_held'] == 'live') l.beanHeldLive,
-              if ((syncing || owed > 0) && eta != null && eta > 0) l.aboutTime(durationText(l, eta)),
+              if (y.held == 'recording') l.beanHeldRecording,  // on the bean till it stops (BeanSync.ledger())
+              if (y.held == 'live') l.beanHeldLive,
+              if (y.phase == 'stuck') l.beanStuck,
+              if (syncing && eta != null && eta > 0) l.aboutTime(durationText(l, eta)),
               if (pending > 0) l.piecesPending(pending),
             ].join(' · ')),
       if (connected && rssi != null)

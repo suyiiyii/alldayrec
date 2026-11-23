@@ -38,6 +38,15 @@
     <string name="notice_bean_catching_up">Fetching from the bean %1$.1f / %2$.1f MB</string>
     <string name="notice_fetching_current">Fetching the file being recorded before going live · %1$.1f MB left</string>
     <string name="notice_starting">Starting</string>
+    <!-- a bean's recording not on the phone yet: as the app's chip (app_en.arb beanBehind, beanHeld*, beanStuck, beanEta) -->
+    <string name="notice_bean_behind">%1$s still only on the bean</string>
+    <string name="notice_catching_up">Catching up</string>
+    <string name="notice_bean_held_live">the live page is open; fetched once it closes</string>
+    <string name="notice_bean_held_recording">fetched once the bean stops</string>
+    <string name="notice_bean_stuck">the bean would not give it; tried again tomorrow</string>
+    <string name="notice_bean_eta">about %1$s to fetch</string>
+    <string name="notice_minutes">%1$d min</string>
+    <string name="notice_hours_minutes">%1$d h %2$d min</string>
     <string name="notice_recording_error">Recording error: %1$s</string>
     <string name="notice_paused">Paused, %1$s min left</string>
     <string name="notice_battery">Battery %1$s%%</string>

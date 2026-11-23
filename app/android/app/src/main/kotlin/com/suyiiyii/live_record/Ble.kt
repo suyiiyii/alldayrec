@@ -521,6 +521,9 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     @Volatile var syncDoneKb = 0L           // the catch-up under way: taken of total (0 of 0: none)
     @Volatile var syncTotalKb = 0L
     @Volatile var syncLiveKb = 0L           // of it, what LIVE still waits for: the file being recorded
+    /** The sync summary as a bean's (BeanSync.ledger(): the status's `sync`): the card's files lacking, in bytes; it
+     *  records all the time. */
+    val ledger get() = BeanSync.ledger(0, 0, 0, 0, false, false, null, true, false, syncDoneKb, syncTotalKb, (hw["backlog_eta_s"] as Number?)?.toLong())
 
     /** The board's SD card as a USB disk on the computer it is plugged into (CTRL 0x06), or back. */
     fun usbDisk(on: Boolean) {

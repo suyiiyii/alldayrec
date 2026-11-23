@@ -51,7 +51,7 @@ class RecorderService : Service() {
                 "interruptedAt" to if (interruptedAt > 0) interruptedAt else null, "link" to (l?.state ?: b?.state),
                 "connected" to (l?.state?.get("code") == "connected" || b?.connected == true), "tag" to slicer?.tag, "hw" to (l?.hw ?: b?.hw),
                 "dfu" to Dfu.state, "dfuBusy" to Dfu.busy, "source" to (if (slicer == null) null else if (l != null || b != null) "ble" else "mic"), "usbNote" to l?.usbNote, "wifiNote" to b?.wifiNote, "wifiStep" to b?.wifiStep, "lastSync" to l?.syncNote,
-                "syncDone" to (l?.syncDoneKb ?: b?.syncDoneKb), "syncTotal" to (l?.syncTotalKb ?: b?.syncTotalKb), "syncLive" to l?.syncLiveKb, "pausedUntil" to l?.pausedUntil,
+                "syncDone" to (l?.syncDoneKb ?: b?.syncDoneKb), "syncTotal" to (l?.syncTotalKb ?: b?.syncTotalKb), "syncLive" to l?.syncLiveKb, "sync" to (l?.ledger ?: b?.ledger), "pausedUntil" to l?.pausedUntil,
                 "listen" to link?.listening?.lines)
         }
 
@@ -125,18 +125,27 @@ class RecorderService : Service() {
             fun t(id: Int, vararg a: Any?) = str(id, a)
             val note = said(s["note"] as Map<*, *>?, str)
             if (s["running"] != true) return t(R.string.notice_uploading, s["pending"]) to (note ?: "")
-            val total = s["syncTotal"] as Long? ?: 0L
+            // the sync summary (BeanSync.ledger()), as the app's chip, card and device page read it (recorder_status.dart syncSpec)
+            val y = s["sync"] as Map<*, *>? ?: emptyMap<String, Any?>()
+            fun n(k: String) = (y[k] as Number?)?.toLong() ?: 0L
+            val phase = y["phase"]; val done = n("done_kb"); val total = n("total_kb"); val owed = n("owed_s")
+            fun time(sec: Long) = ((sec + 30) / 60).let { m -> if (m >= 60) t(R.string.notice_hours_minutes, m / 60, m % 60) else t(R.string.notice_minutes, m) }
             val title = when {
                 s["source"] != "ble" -> t(R.string.notice_recording)
+                phase == "wifi" && total == 0L -> t(R.string.link_bean_wifi)  // from the tap to Bluetooth back, before the bytes
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
-                total > 0 -> if ((s["link"] as Map<*, *>?)?.get("code") in setOf("beanIdle", "beanWifi"))  // a bean's backlog: it is not recording
-                    t(R.string.notice_bean_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
+                total > 0 -> if (phase == "wifi" || (s["link"] as Map<*, *>?)?.get("code") == "beanIdle")  // a bean's backlog: it is not recording
+                    t(R.string.notice_bean_catching_up, done / 1024.0, total / 1024.0)
                 else if (s["connected"] == true)
-                    t(R.string.notice_live_catching_up, (s["syncDone"] as Long? ?: 0L) / 1024.0, total / 1024.0)
+                    t(R.string.notice_live_catching_up, done / 1024.0, total / 1024.0)
                 else t(R.string.notice_fetching_current, (s["syncLive"] as Long? ?: 0L) / 1024.0)
+                owed > 0 -> listOfNotNull(t(R.string.notice_bean_behind, time(owed)),
+                    when (y["held"]) { "live" -> t(R.string.notice_bean_held_live); "recording" -> t(R.string.notice_bean_held_recording); else -> t(R.string.notice_catching_up) },
+                    (y["eta_s"] as Number?)?.toLong()?.takeIf { it > 0 }?.let { t(R.string.notice_bean_eta, time(it)) }).joinToString(" · ")
+                phase == "stuck" -> t(R.string.notice_bean_behind, time(n("stuck_s"))) + " · " + t(R.string.notice_bean_stuck)
                 else -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
             }
-            val hw = (s["hw"] as Map<*, *>?).takeIf { s["connected"] == true || total > 0 }
+            val hw = (s["hw"] as Map<*, *>?).takeIf { s["connected"] == true || phase in setOf("catching", "wifi", "stuck") }
             val paused = (s["pausedUntil"] as Long? ?: 0L) - now
             val oldest = s["oldest"] as Long?
             return title to listOfNotNull(

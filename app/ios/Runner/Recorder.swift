@@ -43,7 +43,7 @@ enum Recorder {
       case "progress":  // the device page's 0.05 s poll from the tap to the fast transfer's end: status() lists the upload queue
         let b = bean, step = b?.wifiStep
         result(["wifi": step != nil && step?["step"] as? String != "done", "wifiStep": step ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(),
-                "syncDone": b?.syncDoneKb ?? 0, "syncTotal": b?.syncTotalKb ?? 0] as [String: Any])
+                "syncDone": b?.syncDoneKb ?? 0, "syncTotal": b?.syncTotalKb ?? 0, "sync": b?.ledger ?? NSNull()] as [String: Any])
       case "version": result(DeviceLog.version)  // 我的 › 关于
       case "testflight": UIApplication.shared.open(URL(string: "itms-beta://")!); result(nil)  // 我的 › 检查更新: the app iPhone builds come from
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message
@@ -157,7 +157,7 @@ enum Recorder {
             "source": (slicer != nil ? "mic" : l != nil || b != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? b?.state ?? NSNull(),
             "connected": l?.state["code"] as? String == "connected" || b?.connected == true, "tag": l?.tag ?? b?.name ?? NSNull(),
             "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(), "wifiStep": b?.wifiStep ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
-            "syncDone": l?.syncDoneKb ?? b?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? b?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
+            "syncDone": l?.syncDoneKb ?? b?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? b?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "sync": l?.ledger ?? b?.ledger ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
             "dfu": Dfu.state ?? NSNull(), "dfuBusy": Dfu.busy, "listen": l?.listening?.lines ?? NSNull()]
   }
 

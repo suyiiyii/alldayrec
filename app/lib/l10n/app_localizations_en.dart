@@ -1434,6 +1434,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get beanHeldRecording => 'fetched once the bean stops';
 
   @override
+  String get beanStuck => 'the bean would not give it; tried again tomorrow';
+
+  @override
   String beanEta(Object time) {
     return 'about $time to fetch';
   }

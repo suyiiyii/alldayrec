@@ -168,6 +168,12 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   @Shared var syncDoneKb: Int64 = 0    // the catch-up under way: taken of total (0 of 0: none)
   @Shared var syncTotalKb: Int64 = 0
   @Shared var syncLiveKb: Int64 = 0    // of it, what LIVE still waits for: the file being recorded
+  /// The sync summary as a bean's (BeanSync.ledger(): the status's `sync`): the card's files lacking, in bytes; it
+  /// records all the time
+  var ledger: [String: Any] {
+    BeanSync.ledger(now: 0, closed: 0, idle: 0, stuck: 0, watched: false, live: false, rate: nil, recording: true, wifi: false,
+                    doneKb: syncDoneKb, totalKb: syncTotalKb, kbEta: (hw["backlog_eta_s"] as? Int).map(Int64.init))
+  }
   @Shared private(set) var listening: Listen?  // the recorder's sound played on this phone too (Listen.swift)
 
   private let prefs = Recorder.defaults

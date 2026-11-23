@@ -57,7 +57,7 @@ void main() {
   });
 
   testWidgets('a bean connected and not recording: not 「Recording」', (tester) async {
-    await pump(tester, {...cannedStatus('recording'), 'link': {'code': 'beanIdle'}});
+    await pump(tester, {...cannedStatus('recording'), 'link': {'code': 'beanIdle'}, 'sync': {'phase': 'synced'}});
     expect(find.byIcon(Icons.mic_rounded), findsNothing);
     expect(colorOf(tester, Icons.bluetooth_connected_rounded), ThemeData().colorScheme.outline);
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, startsWith('Bean connected · not recording'));
@@ -94,14 +94,14 @@ void main() {
     await pump(tester, cannedStatus('beanHeld'), locale: const Locale('zh'));  // the live page holds the fill back
     expect(find.descendant(of: chip, matching: find.byIcon(Icons.sync_rounded)), findsOneWidget);
     expect(find.text('42 分钟'), findsOneWidget);
-    expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '豆子上还有 42 分钟没传到手机 · 实时页开着，关掉后自动补 · 补完约 21 分钟');
+    expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '豆子上还有 42 分钟没传到手机 · 实时页开着，关掉后自动补');  // held: no end said
     await pump(tester, cannedStatus('beanFilling'));  // being read
     expect(find.text('36 min'), findsOneWidget);
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '36 min still only on the bean · Catching up · about 18 min to fetch');
-    final bean = cannedStatus('beanFilling'), hw = bean['hw'] as Map;
-    await pump(tester, {...bean, 'hw': {...hw, 'backlog_held': 'recording', 'backlog_eta_s': null}});  // after the bean stops
+    final bean = cannedStatus('beanFilling'), sync = bean['sync'] as Map;
+    await pump(tester, {...bean, 'sync': {...sync, 'held': 'recording', 'eta_s': null}});  // after the bean stops
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, '36 min still only on the bean · fetched once the bean stops');
-    await pump(tester, {...bean, 'hw': {...hw}..remove('backlog_s')});  // none lacking
+    await pump(tester, {...bean, 'sync': {'phase': 'live'}});  // none lacking
     expect(find.byIcon(Icons.mic_rounded), findsOneWidget);
     expect(tester.widget<ActionChip>(find.byType(ActionChip)).tooltip, startsWith('Recording'));
   });

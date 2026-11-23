@@ -381,8 +381,21 @@ final class BeanSync {
   }
   @Shared var syncDoneKb: Int64 = 0
   @Shared var syncTotalKb: Int64 = 0
-  /// What of the bean's recording this phone lacks, for the status and its reports (owe())
+  /// What of the bean's recording this phone lacks, for the status and its reports (owe()): sync's fields as they were
+  /// before it (backlog_s, backlog_eta_s, backlog_held), read still by the web, the server and phones on older builds
   @Shared var owed: [String: Any] = [:]
+  /// What owe() counted last, ledger()'s facts but the fast transfer's step and the bytes read: units lacking of the
+  /// file being recorded (now), of closed files waiting for the stop (closed) or read now (idle), of closed files the
+  /// bean would not give (stuck, tried again in a day: tried()); the live page; the file read live only; the rate
+  @Shared private var counted: (now: Int64, closed: Int64, idle: Int64, stuck: Int64, watched: Bool, live: Bool, rate: Double?) =
+    (0, 0, 0, 0, false, false, nil)
+  /// The sync summary every page reads (the status's `sync`: Flutter's syncSpec(), Android's notification), afresh
+  var sync: [String: Any] {
+    let c = counted
+    return Self.ledger(now: c.now, closed: c.closed, idle: c.idle, stuck: c.stuck, watched: c.watched, live: c.live, rate: c.rate,
+                       recording: recording, wifi: wifiStep.map { $0["step"] as? String != "done" } ?? false,
+                       doneKb: syncDoneKb, totalKb: syncTotalKb)
+  }
   /// Why the last fast transfer got nothing, for the device page (recorder_status.dart): its end only, never a try of
   /// the join that a later one got past; nil once one starts
   @Shared var wifiNote: [String: Any]?
@@ -493,7 +506,7 @@ final class BeanSync {
       }
       return try block()
     }
-    defer { flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0; owed = [:] }
+    defer { flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0; owed = [:]; counted = (0, 0, 0, 0, false, false, nil) }
     do {
       let mine = Bean.keys()
       key = try step("encrypting", "密钥交换") { try Bean.session(mine, try ask(Bean.hello(Bean.pub(mine)), 0x2E01).payload) }
@@ -946,28 +959,40 @@ final class BeanSync {
     if open != 0 && open * 1000 >= since { now = max(0, edge(open) - (files[open].map(covered) ?? 0)) }
     if now <= BeanSync.watchedGapUnits { now = 0 }
     let closed = lacking(pending())
+    // closed files given up for a day (tried()): out of pending(), still lacking (11-19's file said 已同步)
+    let stuck = lacking(listing.files.filter { e in e.id * 1000 >= since && e.id != listing.open &&
+      files[e.id].map { gap($0) != nil && io.now() < $0.wait } == true })
     // the rate is the backlog's own over 1–3 min, reconnects and units had included (11-23 11:25: 3.3 times real time,
     // one read's speed said 6–10; after Wi-Fi, Wi-Fi's 116)
     let t = io.now()
     shrunk = shrunk.filter { t - $0.0 <= 180_000 } + [(t, now + closed)]
     let (at, was) = shrunk[0]
     let rate = t - at >= 60_000 ? Double((was - now - closed) * Bean.frameMs) / Double(t - at) : nil
-    owed = Self.owedFields(now: now, closed: recording ? closed : 0, idle: recording ? 0 : closed, watched: io.watched(),
-                           live: fills[open, default: 0] >= BeanSync.tries, rate: rate)
-    if owed["backlog_held"] as? String != nil || owed.isEmpty { shrunk = [] }  // the next catch-up measured afresh
+    counted = (now, recording ? closed : 0, recording ? 0 : closed, stuck, io.watched(), fills[open, default: 0] >= BeanSync.tries, rate)
+    let l = sync
+    owed = l["owed_s"] as! Int64 > 0 ? ["backlog_s": l["owed_s"]!, "backlog_eta_s": l["eta_s"]!, "backlog_held": l["held"]!] : [:]
+    if !(l["held"] is NSNull) || owed.isEmpty { shrunk = [] }  // the next catch-up measured afresh
   }
 
-  /// owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to
-  /// stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback);
-  /// `rate`: s of it gone a s lately (owe()).
-  static func owedFields(now: Int64, closed: Int64, idle: Int64, watched: Bool, live: Bool, rate: Double?) -> [String: Any] {
+  /// The sync summary from the three facts (what the bean has, the phone has, the server has: units lacking, owe()),
+  /// the fast transfer's step and the bytes of closed files read now; the one answer of the top bar's chip, the status
+  /// panel, the device page and Android's notification (11-23: the chip said 补传中, the device page 已连接). Units
+  /// lacking: `now` of the file being recorded, `closed` of files that wait for the bean to stop, `idle` of files read
+  /// now (the bean stopped), `stuck` of files the bean would not give (tried again in a day); `live`: the recorded file
+  /// is read live only (live_fallback); `rate`: s of it gone a s lately (owe()); `doneKb` / `totalKb`: closed files
+  /// read now (the LR recorder's card too), `kbEta` its own end. Same table: fixtures/sync-ledger.json.
+  /// phase: wifi (from the tap to Bluetooth back), catching (lacking: read now, or `held` back: live, recording), stuck
+  /// (lacking only what the bean would not give), live (recording, all here), synced (not recording, all here).
+  static func ledger(now: Int64, closed: Int64, idle: Int64, stuck: Int64, watched: Bool, live: Bool, rate: Double?,
+                     recording: Bool, wifi: Bool, doneKb: Int64, totalKb: Int64, kbEta: Int64? = nil) -> [String: Any] {
     let s = (now + closed + idle) * Bean.frameMs / 1000
-    guard s > 0 else { return [:] }
     // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
     let held: String? = now > 0 && live || closed > 0 ? "recording" : now > 0 && watched ? "live" : nil
     // held, or under 6 s a minute (live, or a read not gaining on the recording): no end in sight, none said
-    let eta: Double? = held == nil ? rate.flatMap { $0 >= 0.1 ? Double(s) / $0 : nil } : nil
-    return ["backlog_s": s, "backlog_eta_s": eta.map { Int64($0) } ?? NSNull(), "backlog_held": held ?? NSNull()]
+    let eta: Int64? = s > 0 ? held == nil ? rate.flatMap { $0 >= 0.1 ? Int64(Double(s) / $0) : nil } : nil : totalKb > 0 ? kbEta : nil
+    let phase = wifi ? "wifi" : s > 0 || totalKb > 0 ? "catching" : stuck > 0 ? "stuck" : recording ? "live" : "synced"
+    return ["phase": phase, "owed_s": s, "eta_s": eta ?? NSNull(), "held": held ?? NSNull(),
+            "stuck_s": stuck * Bean.frameMs / 1000, "done_kb": doneKb, "total_kb": totalKb]
   }
 
   /// The file being recorded, from where the phone lacks it (the owner, 10-27; Bean.kt's plan()). realtime=0 reads it
