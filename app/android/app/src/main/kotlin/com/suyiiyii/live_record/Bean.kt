@@ -315,6 +315,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun at(seq: Long) = (anchors.lastOrNull { it[0] <= seq }?.get(1) ?: anchor) + seq * Bean.FRAME_MS
         val latest get() = anchors.lastOrNull()?.get(1) ?: anchor
         var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
+        var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
     }
 
     /** live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
@@ -855,7 +856,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val from = f?.let(::gap) ?: 0
         // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
         // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
-        return Xfer(id, false, if ((f?.total ?: 0) < 0 && from > 0) from - 1 else from)
+        return Xfer(id, false, if ((f?.total ?: 0) < 0 && from > 0) (if (f!!.fromStart) 0 else from - 1) else from)
     }
 
     /** The file being recorded, from where the phone lacks it (the owner, 10-27). realtime=0 reads it from the offset at
@@ -1035,12 +1036,22 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 if (x.live) liveSeen = io.now()
                 if (!x.live || h.size != 0xFFFFFFFFL) {
                     if (h.size % Bean.UNIT != 0L) return failed(x, "file of ${h.size} B")
-                    file(x.file, x.file * 1000).let { f -> f.total = h.size / Bean.UNIT; if (!x.live && !overWifi) x.until = rest(f, x.from) }  // over Wi-Fi a cut would cost more than the rest
+                    file(x.file, x.file * 1000).let { f ->
+                        f.total = h.size / Bean.UNIT
+                        if (!x.live && !overWifi) x.until = rest(f, x.from)  // over Wi-Fi a cut would cost more than the rest
+                        // the phone has it all (a length-unknown file shorter on the bean, 11-08): cut now, not all of it sent again
+                        if (!x.live && !overWifi && gap(f) == null) { x.until = x.from; x.cut = true }
+                    }
                 }
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> if (x.live) failed(x, "code 3")  // the file being recorded goes on: never its end
                 else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
+            // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
+            2 -> if (!x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0) {
+                io.log("bean_xfer", "补传文件 ${x.file} 从单元 ${x.from} 要被拒（code 2），长度不明：从单元 0 再要一次取长度", fields = mapOf("file" to x.file, "from" to x.from))
+                files[x.file]!!.fromStart = true; xfer = null
+            } else failed(x, "code 2")
             1 -> { file(x.file, x.file * 1000).tries = DAY_TRIES - 1; failed(x, "no such file") }  // its last try today
             4 -> {  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
                 if (busy++ == 0) io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 豆子还忙（code 4），稍后再要", fields = mapOf("file" to x.file))
@@ -1210,7 +1221,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.at(x.last + 1))
         } else if (gap(f) == null) {
             pendingEnd = maxOf(pendingEnd, f.at(f.total))
-        } else if (!(x.cut && gap(f)!! > x.from)) tried(x.file, f)  // cut with the hole filled: not a try
+        } else if (!(x.cut && gap(f)!! > x.from)) {  // cut with the hole filled: not a try
+            if (x.units > x.dupes) f.tries = 0  // units new to the phone: only reads in a row that bring none count
+            tried(x.file, f)
+        }
         save()
     }
 

@@ -321,6 +321,7 @@ final class BeanSync {
     /// (seq, anchor): from that unit on the file is dated by that anchor instead (step()), in order
     var anchors: [(Int64, Int64)]
     var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
+    var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
     init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, wait: Int64 = 0, anchors: [(Int64, Int64)] = []) {
       self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.wait = wait; self.anchors = anchors
     }
@@ -853,7 +854,7 @@ final class BeanSync {
     let id = p[0].id, f = files[id], from = f.flatMap(gap) ?? 0
     // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
     // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
-    return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? from - 1 : from)
+    return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? (f!.fromStart ? 0 : from - 1) : from)
   }
 
   /// What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
@@ -1100,12 +1101,18 @@ final class BeanSync {
         // over Wi-Fi read through what the phone has (5,000–10,000 units/s): after its first socket closed the bean sent
         // nothing more on its hotspot (11-19, 11-20: 3 of 3 new sockets failed or got no answer to 1A/07), Wi-Fi ended
         if !x.live && !overWifi { x.until = rest(f, x.from) }
+        // the phone has it all (a length-unknown file shorter on the bean, 11-08): cut now, not all of it sent again
+        if !x.live && !overWifi && gap(f) == nil { x.until = x.from; x.cut = true }
       }
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
       let f = file(x.file, x.file * 1000)
       if f.total < 0 { f.total = max(x.from, gap(f) ?? 0) }  // asked from a unit had (backlog()): it ends after that
       xfer = nil; save()
+    // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
+    case 2 where !x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0:
+      log("bean_xfer", "补传文件 \(x.file) 从单元 \(x.from) 要被拒（code 2），长度不明：从单元 0 再要一次取长度", fields: ["file": x.file, "from": x.from])
+      files[x.file]!.fromStart = true; xfer = nil
     case 1: file(x.file, x.file * 1000).tries = BeanSync.dayTries - 1; failed(x, "no such file")  // its last try today
     case 4:  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
       if busy == 0 { log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 豆子还忙（code 4），稍后再要", fields: ["file": x.file]) }
@@ -1287,6 +1294,7 @@ final class BeanSync {
     } else if gap(f) == nil {
       pendingEnd = max(pendingEnd, f.at(f.total))
     } else if !(x.cut && gap(f)! > x.from) {  // cut with the hole filled: not a try
+      if x.units > x.dupes { f.tries = 0 }  // units new to the phone: only reads in a row that bring none count
       tried(x.file, f)
     }
     save()

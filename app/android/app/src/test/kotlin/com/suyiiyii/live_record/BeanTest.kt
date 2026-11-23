@@ -1851,9 +1851,52 @@ class BeanTest {
         }
         repeat(20) { bean.script += {} }
         val sync = wifiSync(bean, dir)
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }  // cut at the header: all here
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertEquals("from its last unit on the phone: its length, no code 2", listOf(Triple(a, n - 1, false)), bean.transfers)
         assertEquals("whole: off the bean", listOf(a), bean.deleted)
+    }
+
+    /** A closed file read live only, shorter on the bean than the phone has (11-08: live had 14,340 units, the bean's
+     *  file 12,000): the unit before the phone's end is refused (code 2), not a try; asked from unit 0, the header says
+     *  its length, the phone has it all: cut at once, whole, off the bean. */
+    @Test fun shorterOnTheBeanIsWhole() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val had = 3000L; val n = 2000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":-1,"h":[[0,$had]]}}""")
+        bean.onTransfer = { file, from, _ ->  // past its end: refused
+            if (from >= n) bean.header(file, 0, code = 2)
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1); bean.complete(file) }
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }  // cut at the header: all here
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("refused at its end, then from unit 0 for its length", listOf(Triple(a, had - 1, false), Triple(a, 0L, false)), bean.transfers)
+        assertEquals("whole: off the bean", listOf(a), bean.deleted)
+        assertEquals("not given up", false, bean.logs.any { "取不到" in it.second })
+        assertEquals("cut at the header, nothing sent again", 0, bean.logFields.last { it["cut"] == true }["units"])
+    }
+
+    /** A read that brings units new to the phone clears its tries (the review: ten slow reads, each with some, made a
+     *  file wait a day): 9 tries saved, a short read with new units, then the rest the same day. */
+    @Test fun newUnitsClearTries() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val n = 3000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":$n,"n":9,"h":[[0,1000]]}}""")
+        var short = true
+        bean.onTransfer = { file, from, _ ->
+            bean.header(file, n * Bean.UNIT)
+            if (short) { short = false; bean.units(file, (from until from + 100).toList(), ms = 1) } else bean.units(file, (from until n).toList(), last = n - 1, ms = 1)
+            bean.complete(file)
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("short with new units, then the rest", listOf(Triple(a, 1000L, false), Triple(a, 1100L, false)), bean.transfers)
+        assertNull("all of it on the phone", sync.gap(sync.files[a]!!))
     }
 
     /** A closed file the bean refuses (code 2) four times running, then gives (11-19: four in 0.27 s, then never asked

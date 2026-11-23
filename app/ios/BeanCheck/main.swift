@@ -1655,9 +1655,55 @@ do {
   bean.script = Array(repeating: {}, count: 20)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
   bean.confirmed = { sync.deletable }
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }  // cut at the header: all here
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, n - 1, 0]], "from its last unit on the phone: its length, no code 2")
   check(bean.deleted, [a], "whole: off the bean")
+}
+
+/// A closed file read live only, shorter on the bean than the phone has (11-08: live had 14,340 units, the bean's file
+/// 12,000): the unit before the phone's end is refused (code 2), not a try; asked from unit 0, the header says its
+/// length, the phone has it all: cut at once, whole, off the bean.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, had: Int64 = 3000, n: Int64 = 2000
+  bean.list(a, n * 20)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":-1,\"h\":[[0,\(had)]]}}".write(to: state, atomically: true, encoding: .utf8)
+  bean.onTransfer = { file, from, _ in  // past its end: refused
+    if from >= n { bean.header(file, 0, code: 2); return }
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }  // cut at the header: all here
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, had - 1, 0], [a, 0, 0]], "refused at its end, then from unit 0 for its length")
+  check(bean.deleted, [a], "whole: off the bean")
+  check(bean.logs.contains { $0.1.contains("取不到") }, false, "not given up")
+  check((bean.logFields.last { $0["cut"] as? Bool == true }?["units"] as? Int) ?? -1, 0, "cut at the header, nothing sent again")
+}
+
+/// A read that brings units new to the phone clears its tries (the review: ten slow reads, each with some, made a file
+/// wait a day): 9 tries saved, a short read with new units, then the rest the same day.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, n: Int64 = 3000
+  bean.list(a, n * 20)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":\(n),\"n\":9,\"h\":[[0,1000]]}}".write(to: state, atomically: true, encoding: .utf8)
+  var short = true
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, n * Int64(Bean.unit))
+    if short { short = false; bean.units(file, Array(from..<from + 100), ms: 1) } else { bean.units(file, Array(from..<n), last: n - 1, ms: 1) }
+    bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, 1000, 0], [a, 1100, 0]], "short with new units, then the rest")
+  check(sync.gap(sync.files[a]!), nil, "all of it on the phone")
 }
 
 /// A closed file the bean refuses (code 2) four times running, then gives (11-19: four in 0.27 s, then never asked for
