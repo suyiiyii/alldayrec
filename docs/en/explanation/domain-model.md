@@ -22,6 +22,8 @@ The code uses "piece" for two different things. They do not map to each other.
 
 The server joins a device's uploaded pieces into one time-ordered audio stream (`audio.stream`). The final layer finds its own cut points on that stream. So one final piece can span dozens of uploaded pieces, and one long imported piece becomes many final pieces.
 
+When a phone asks which of a device's audio the server has (`GET /api/coverage`, `audio.coverage`), the server merges the uploaded pieces into time spans: pieces at most 9 ms apart (`COVERAGE_GAP_MS`) are one span. A bean re-dates its audio by at most 9 ms a step and a recorder's frame is 10 ms, so even one missing frame comes back as a gap and the phone reads it again. A recorder's clock sync or a bean's large re-dating moves further and splits a span too; that only costs the phone a few seconds of reading again.
+
 ## Objects
 
 Almost every object carries a device (`device` or `source`) and a time range. The four tables below group the objects by audio, text, AI and people. Each row gives what the object is, its unique key, where it is stored, who creates it, who changes it, and when it ends.

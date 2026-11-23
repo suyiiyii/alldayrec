@@ -639,7 +639,10 @@ def covered(device: str, ms: int) -> float:
                              (device, ms, ms - 3600_000)).fetchone()[0] or 0.0
 
 
-COVERAGE_GAP_MS = 1000  # pieces this close are one span: the apps' back-to-back pieces are a few ms apart either way
+# Pieces this close are one span: a bean re-dates its live file by up to 9 ms a step (Bean.step), under a recorder's
+# 10 ms frame, so a hole of even one frame stays a gap a phone reads again. Bigger re-datings (a recorder's TIME, a
+# bean's jump) split a span too: harmless, the phone reads a few seconds again (11-23: no span under 8 s more).
+COVERAGE_GAP_MS = 9
 
 
 def coverage(device: str, lo_ms: int, hi_ms: int) -> list[list[int]]:
