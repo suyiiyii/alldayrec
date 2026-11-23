@@ -32,16 +32,18 @@ def get(device, since, until):
 
 def test_spans_merged_and_clipped():
     db.open_db(Path(tempfile.mkdtemp()) / "t.db")
-    for s in range(10):  # 10 back-to-back 1 s pieces, a few ms apart
-        piece(DEV, T0 + s * 1003, 1.0)
-    piece(DEV, T0 + 10_030 + 900, 2.0)    # 0.9 s gap: the same span
+    for s in range(10):  # 10 back-to-back 1 s pieces, each a bean's biggest re-dating step apart: 9 ms (Bean.step)
+        piece(DEV, T0 + s * 1009, 1.0)    # ends at T0 + 10_081
+    piece(DEV, T0 + 10_081 + 10, 2.0)     # one 10 ms frame of a recorder missing: a gap
     piece(DEV, T0 + 11_500, 0.5)          # inside the one before: once
+    piece(DEV, T0 + 12_091 + 30, 1.0)     # 30 ms missing: a gap
+    piece(DEV, T0 + 13_121 - 5, 1.0)      # 5 ms over the one before: the same span
     piece(DEV, T0 + 20_000, 5.0)          # 7 s gap: a span of its own
     piece(DEV, T0 - 3_000, 4.0)           # began before the range: clipped
     piece("LR-X1-0000", T0 + 1_000, 60.0)  # another device's
     got = get(DEV, T0, T0 + 24_000)
-    assert got["spans"] == [[T0, T0 + 12_930], [T0 + 20_000, T0 + 24_000]]
-    assert get(DEV, T0 + 13_000, T0 + 19_000)["spans"] == []
+    assert got["spans"] == [[T0, T0 + 10_081], [T0 + 10_091, T0 + 12_091], [T0 + 12_121, T0 + 14_116], [T0 + 20_000, T0 + 24_000]]
+    assert get(DEV, T0 + 14_200, T0 + 19_000)["spans"] == []
 
 
 def test_range_capped():
