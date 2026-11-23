@@ -55,11 +55,50 @@ String formatFailText(AppLocalizations l, int err) => switch (err) {
       _ => l.formatFailWrite,
     };
 
-/// So many KB as KB, MB or GB.
-String sizeText(num kb) => kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(1)} MB' : '$kb KB';
+/// So many KB as KB, MB (to [mb] decimals) or GB.
+String sizeText(num kb, [int mb = 1]) =>
+    kb >= 1048576 ? '${(kb / 1048576).toStringAsFixed(2)} GB' : kb >= 1024 ? '${(kb / 1024).toStringAsFixed(mb)} MB' : '$kb KB';
 
-/// A transfer's progress: its percentage to a tenth (0–100: the total can be an estimate), then so many KB of so many.
-String progressText(num doneKb, num totalKb) => '${(doneKb * 100 / totalKb).clamp(0, 100).toStringAsFixed(1)}% · ${sizeText(doneKb)} / ${sizeText(totalKb)}';
+/// A transfer's progress: so many KB of so many, the done part to a hundredth of a MB (the owner, 11-23: no percentage).
+String progressText(num doneKb, num totalKb) => '${sizeText(doneKb, 2)} / ${sizeText(totalKb)}';
+
+/// The steps of a bean's Wi-Fi fast transfer the device page counts: hotspot, join, socket, transfer, back to Bluetooth.
+const wifiSteps = 5;
+
+/// The hotspots a fast transfer opens anew at most after the bean stopped sending, since the tap (BeanSync.tries).
+const wifiReopens = 3;
+
+/// A fast transfer's step (BeanSync.wifiStep) on the device page: what goes on, its number of [wifiSteps] (null: before
+/// the first), the bytes while it transfers and which hotspot anew it is on (null: the tap's own); null once it is over
+/// or none was asked for.
+({String text, int? n, String? bytes, String? reopen})? wifiStepSpec(AppLocalizations l, Map? w, num doneKb, num totalKb) {
+  final n = (w?['try'] as num?)?.toInt() ?? 1, r = (w?['reopen'] as num?)?.toInt() ?? 0;
+  final reopen = r > 0 ? l.wifiStepReopened(r) : null;
+  return switch (w?['step']) {
+    'asked' => (text: l.wifiStepAsked, n: null, bytes: null, reopen: null),
+    'reopen' => (text: l.wifiStepReopen(r, wifiReopens), n: null, bytes: null, reopen: null),
+    'hotspot' => (text: l.wifiStepHotspot, n: 1, bytes: null, reopen: reopen),
+    'join' => (text: n > 1 ? l.wifiStepJoinAgain(n) : l.wifiStepJoin, n: 2, bytes: null, reopen: reopen),
+    'socket' => (text: n > 1 ? l.wifiStepSocketAgain(n) : l.wifiStepSocket, n: 3, bytes: null, reopen: reopen),
+    'transfer' => (text: l.wifiStepTransfer, n: 4, bytes: progressText(doneKb, totalKb), reopen: reopen),
+    'back' => (text: l.wifiStepBack, n: 5, bytes: null, reopen: reopen),
+    _ => null,
+  };
+}
+
+/// How a fast transfer ended (BeanSync.wifiStep's end: all its hotspots); a failure's reason is the wifiNote, when there
+/// is one.
+String? wifiEndText(AppLocalizations l, Map? w) {
+  final s = (w?['s'] as num?)?.toInt() ?? 0, took = ((w?['ms'] as num?)?.toInt() ?? 0) ~/ 1000;
+  final audio = s < 60 ? l.seconds(s) : durationText(l, s), time = took < 60 ? l.seconds(took) : l.minutesSeconds(took ~/ 60, took % 60);
+  return switch (w?['end']) {
+    'all' => l.wifiEndAll(audio, time),
+    'part' => (w?['reopen'] as num? ?? 0) >= wifiReopens ? l.wifiEndReopens(wifiReopens, audio, time) : l.wifiEndPart(audio, time),
+    'none' => l.wifiEndNone,
+    'fail' => l.wifiEndFail,
+    _ => null,
+  };
+}
 
 /// A battery glyph with as many bars as the level (unknown: a question mark).
 IconData batteryIcon(int? p) {
@@ -250,6 +289,7 @@ String nativeText(BuildContext context, Object? v) {
     'beanWifiRecording' => l.beanWifiRecording,
     'beanWifiLowBattery' => l.beanWifiLowBattery(v['battery']),
     'beanWifiNoHotspot' => l.beanWifiNoHotspot,
+    'beanWifiGone' => l.beanWifiGone,
     'beanWifiDenied' => l.beanWifiDenied,
     'beanWifiUnavailable' => l.beanWifiUnavailable,
     'beanWifiBackground' => l.beanWifiBackground,

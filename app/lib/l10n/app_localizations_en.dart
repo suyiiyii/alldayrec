@@ -1110,8 +1110,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String beanWifiLowBattery(Object battery) {
-    return 'The last Wi‑Fi fast transfer did not start: the bean is at $battery%, below 30% it opens no hotspot';
+    return 'The last Wi‑Fi fast transfer did not start: the bean is at $battery%, below 30% it opens no hotspot; charge it past 30%, then tap again';
   }
+
+  @override
+  String get beanWifiGone =>
+      'The last Wi‑Fi fast transfer did not start: the bean disconnected; tap again once it is back';
 
   @override
   String get beanWifiNoHotspot =>
@@ -1157,6 +1161,73 @@ class AppLocalizationsEn extends AppLocalizations {
   String beanWifiFailed(Object detail) {
     return 'The last Wi‑Fi fast transfer failed ($detail); back on Bluetooth';
   }
+
+  @override
+  String get wifiStepAsked => 'Getting the Wi‑Fi fast transfer ready…';
+
+  @override
+  String get wifiStepHotspot => 'Asking the bean to open its hotspot…';
+
+  @override
+  String get wifiStepJoin =>
+      'Joining the bean\'s Wi‑Fi (tap Join in the system\'s question)…';
+
+  @override
+  String wifiStepJoinAgain(Object n) {
+    return 'Joining the bean\'s Wi‑Fi… (try $n)';
+  }
+
+  @override
+  String get wifiStepSocket => 'Connecting to the bean…';
+
+  @override
+  String wifiStepSocketAgain(Object n) {
+    return 'Connecting to the bean… (try $n)';
+  }
+
+  @override
+  String get wifiStepTransfer => 'Transferring';
+
+  @override
+  String get wifiStepBack => 'Reconnecting over Bluetooth…';
+
+  @override
+  String wifiStepReopen(Object n, Object total) {
+    return 'The transfer stopped; asking the bean to open its hotspot again ($n of $total)…';
+  }
+
+  @override
+  String wifiStepReopened(Object n) {
+    return 'hotspot reopened ($n)';
+  }
+
+  @override
+  String wifiStepOf(Object n, Object total) {
+    return 'Step $n of $total';
+  }
+
+  @override
+  String wifiEndAll(Object audio, Object took) {
+    return 'Done: $audio of recording in $took';
+  }
+
+  @override
+  String wifiEndPart(Object audio, Object took) {
+    return 'Stopped half way: $audio of recording in $took; Bluetooth fetches the rest';
+  }
+
+  @override
+  String wifiEndReopens(Object n, Object audio, Object took) {
+    return 'Hotspot reopened $n times: Wi‑Fi got $audio of recording in $took; Bluetooth fetches the rest';
+  }
+
+  @override
+  String get wifiEndNone =>
+      'The phone has all the recordings: no fast transfer needed';
+
+  @override
+  String get wifiEndFail =>
+      'The Wi‑Fi fast transfer did not work; back on Bluetooth';
 
   @override
   String get beanUnbindAfterSync =>

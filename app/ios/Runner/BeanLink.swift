@@ -60,6 +60,10 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   var connected: Bool { inSession && ["beanIdle", "joining", "connected"].contains(sync.state["code"] as? String ?? "") }  // beanWifi: BLE is down
   var hw: [String: Any] { sync.hw.merging(sync.owed) { $1 }.merging(["name": name]) { $1 } }
   var wifiNote: [String: Any]? { sync.wifiNote }
+  var wifiStep: [String: Any]? {
+    get { sync.wifiStep }
+    set { sync.wifiStep = newValue }
+  }
   var syncDoneKb: Int64 { sync.syncDoneKb }
   var syncTotalKb: Int64 { sync.syncTotalKb }
 
@@ -305,6 +309,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
     let w = BeanWifi(device: name, ssid: ssid, password: password)
+    w.onStep = { [weak self] step, n in self?.sync.wifiAt(["step": step, "try": n]) }
     wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }

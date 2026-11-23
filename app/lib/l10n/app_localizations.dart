@@ -1925,8 +1925,14 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiLowBattery.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传没开始：豆子电量 {battery}%，低于 30% 时它不开热点'**
+  /// **'上次 Wi‑Fi 快传没开始：豆子电量 {battery}%，低于 30% 时它不开热点；充到 30% 以上再点'**
   String beanWifiLowBattery(Object battery);
+
+  /// No description provided for @beanWifiGone.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没开始：录音豆断开了；连回来后再点一次'**
+  String get beanWifiGone;
 
   /// No description provided for @beanWifiNoHotspot.
   ///
@@ -1993,6 +1999,102 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'上次 Wi‑Fi 快传没成（{detail}），已回到蓝牙'**
   String beanWifiFailed(Object detail);
+
+  /// No description provided for @wifiStepAsked.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在准备 Wi‑Fi 快传…'**
+  String get wifiStepAsked;
+
+  /// No description provided for @wifiStepHotspot.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在让录音豆开热点…'**
+  String get wifiStepHotspot;
+
+  /// No description provided for @wifiStepJoin.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）…'**
+  String get wifiStepJoin;
+
+  /// No description provided for @wifiStepJoinAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在加入录音豆的 Wi‑Fi…（第 {n} 次）'**
+  String wifiStepJoinAgain(Object n);
+
+  /// No description provided for @wifiStepSocket.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接录音豆…'**
+  String get wifiStepSocket;
+
+  /// No description provided for @wifiStepSocketAgain.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接录音豆…（第 {n} 次）'**
+  String wifiStepSocketAgain(Object n);
+
+  /// No description provided for @wifiStepTransfer.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在传输'**
+  String get wifiStepTransfer;
+
+  /// No description provided for @wifiStepBack.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连回蓝牙…'**
+  String get wifiStepBack;
+
+  /// No description provided for @wifiStepReopen.
+  ///
+  /// In zh, this message translates to:
+  /// **'传输中断，正在让录音豆重开热点（第 {n}/{total} 次）…'**
+  String wifiStepReopen(Object n, Object total);
+
+  /// No description provided for @wifiStepReopened.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {n} 次重开'**
+  String wifiStepReopened(Object n);
+
+  /// No description provided for @wifiStepOf.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {n}/{total} 步'**
+  String wifiStepOf(Object n, Object total);
+
+  /// No description provided for @wifiEndAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'传完了：{audio}录音，用时 {took}'**
+  String wifiEndAll(Object audio, Object took);
+
+  /// No description provided for @wifiEndPart.
+  ///
+  /// In zh, this message translates to:
+  /// **'停在半路：取回 {audio}录音，用时 {took}；剩下的由蓝牙接着取'**
+  String wifiEndPart(Object audio, Object took);
+
+  /// No description provided for @wifiEndReopens.
+  ///
+  /// In zh, this message translates to:
+  /// **'热点重开了 {n} 次：Wi‑Fi 传了 {audio}录音，用时 {took}；剩下的改用蓝牙'**
+  String wifiEndReopens(Object n, Object audio, Object took);
+
+  /// No description provided for @wifiEndNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音都在手机上了，不用快传'**
+  String get wifiEndNone;
+
+  /// No description provided for @wifiEndFail.
+  ///
+  /// In zh, this message translates to:
+  /// **'Wi‑Fi 快传没成，已回到蓝牙'**
+  String get wifiEndFail;
 
   /// No description provided for @beanUnbindAfterSync.
   ///

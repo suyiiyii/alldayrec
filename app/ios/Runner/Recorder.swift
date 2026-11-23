@@ -40,9 +40,10 @@ enum Recorder {
         result(nil)
       case "slices": slices(a); result(nil)
       case "status": result(status())
-      case "progress":  // the device page's 0.1 s poll while a bean's Wi-Fi fast transfer runs: status() lists the upload queue
-        let b = bean
-        result(["wifi": b?.state["code"] as? String == "beanWifi", "syncDone": b?.syncDoneKb ?? 0, "syncTotal": b?.syncTotalKb ?? 0])
+      case "progress":  // the device page's 0.05 s poll from the tap to the fast transfer's end: status() lists the upload queue
+        let b = bean, step = b?.wifiStep
+        result(["wifi": step != nil && step?["step"] as? String != "done", "wifiStep": step ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(),
+                "syncDone": b?.syncDoneKb ?? 0, "syncTotal": b?.syncTotalKb ?? 0] as [String: Any])
       case "version": result(DeviceLog.version)  // 我的 › 关于
       case "testflight": UIApplication.shared.open(URL(string: "itms-beta://")!); result(nil)  // 我的 › 检查更新: the app iPhone builds come from
       case "error":  // an error the Flutter side did not catch: its type and first frames, no message
@@ -114,6 +115,7 @@ enum Recorder {
       case "beanWifi":  // the bean's Wi-Fi fast transfer, by hand (#431): its session takes it before the next transfer
         guard let b = bean else { return result(FlutterError(code: "notStarted", message: nil, details: nil)) }
         b.wifiWanted = true  // while the bean records BeanSync logs bean_wifi_skip and goes on over BLE
+        b.wifiStep = ["step": "asked"]  // until BeanSync's loop takes it: a BLE transfer under way stops first
         let vpn = BeanWifi.vpn()  // Shadowrocket's tunnel can take the socket (11-08): say so at the tap
         let recording = b.hw["recording"] as? Bool == true
         DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）" + (vpn ? "；开着 VPN" : "") + (recording ? "；豆子在录音" : ""),
@@ -154,7 +156,7 @@ enum Recorder {
             "note": uploader?.note ?? NSNull(), "interruptedAt": interruptedAt ?? NSNull(),
             "source": (slicer != nil ? "mic" : l != nil || b != nil ? "ble" : nil) ?? NSNull(), "link": l?.state ?? b?.state ?? NSNull(),
             "connected": l?.state["code"] as? String == "connected" || b?.connected == true, "tag": l?.tag ?? b?.name ?? NSNull(),
-            "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
+            "hw": l?.hw ?? b?.hw ?? NSNull(), "usbNote": l?.usbNote ?? NSNull(), "wifiNote": b?.wifiNote ?? NSNull(), "wifiStep": b?.wifiStep ?? NSNull(), "lastSync": l?.syncNote ?? NSNull(),
             "syncDone": l?.syncDoneKb ?? b?.syncDoneKb ?? NSNull(), "syncTotal": l?.syncTotalKb ?? b?.syncTotalKb ?? NSNull(), "syncLive": l?.syncLiveKb ?? NSNull(), "pausedUntil": l?.pausedUntil ?? NSNull(),
             "dfu": Dfu.state ?? NSNull(), "dfuBusy": Dfu.busy, "listen": l?.listening?.lines ?? NSNull()]
   }

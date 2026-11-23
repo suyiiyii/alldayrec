@@ -27,6 +27,8 @@ final class BeanWifi {
   @Shared private var lastVia = "?"  // a try's interfaces
   @Shared private var waitingWhy = ""  // why the socket's path is not there (localNetworkDenied: the permission refused)
   private var monitor: NWPathMonitor?
+  /// The step open() is at, for the device page (BeanSync.wifiStep): join or socket, and its try
+  var onStep: (String, Int) -> Void = { _, _ in }
 
   init(device: String, ssid: String, password: String) { self.device = device; self.ssid = ssid; self.password = password }
 
@@ -55,6 +57,7 @@ final class BeanWifi {
     var away: Int64 = 0  // this fast transfer's waits for the app to come to the front, all of them
     for (n, wait) in [0.0, 2, 4, 8].enumerated() {
       if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+      onStep("join", n + 1)
       // iOS joins nothing for an app in the background (14 applicationIsNotInForeground: 11-11 14:00, gone 8 s before and
       // back 32 s later): a minute in all for it to come back, the hotspot open meanwhile. Inactive (iOS's own join
       // question, Control Center) is in front still: the question of the try before must not hold up this one
@@ -112,6 +115,7 @@ final class BeanWifi {
     // tries of 15 s went while it was unanswered, most likely)
     while BeanWifi.mono() - t0 < 90_000 + joined {
       tries += 1
+      onStep("socket", tries)
       do { try connect(); break } catch {
         why = "\(error)"
         log("bean_wifi_socket", "连豆子的 WebSocket 第 \(tries) 次没成：\(why)；状态 \(trail)；走 \(lastVia)", "warn",

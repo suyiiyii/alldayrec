@@ -22,12 +22,13 @@ class RecorderPage extends StatefulWidget {
   State<RecorderPage> createState() => _RecorderPageState();
 }
 
-/// How often the device page reads a bean's Wi-Fi fast transfer's progress.
-const fastEvery = Duration(milliseconds: 100);
+/// How often the device page reads a bean's Wi-Fi fast transfer's step and bytes (the owner, 11-23: 0.1 or 0.05 s,
+/// for it to show it goes on, and fast).
+const fastEvery = Duration(milliseconds: 50);
 
 class _RecorderPageState extends State<RecorderPage> {
   Map r = {}, st = {};
-  Timer? timer, fast;  // fast: a bean's Wi-Fi fast transfer under way, its progress every [fastEvery]
+  Timer? timer, fast;  // fast: a bean's Wi-Fi fast transfer asked for and not over, its step and bytes every [fastEvery]
   bool unbinding = false;
 
   @override
@@ -49,11 +50,12 @@ class _RecorderPageState extends State<RecorderPage> {
     final a = await Recorder.recorder(), b = await Recorder.status();
     if (!mounted) return;
     setState(() { r = a; st = b; });
-    _fast((b['link'] as Map?)?['code'] == 'beanWifi');
+    final step = (b['wifiStep'] as Map?)?['step'];
+    _fast(step != null && step != 'done');
   }
 
-  /// The progress alone while a fast transfer runs (the owner, 11-23: refresh it faster so it shows how fast it goes);
-  /// back to the 2 s status once it is over or the page is left.
+  /// The step and bytes alone from the tap to the fast transfer's end (the owner, 11-23: refresh it faster so it shows
+  /// how fast it goes, and say what it is at); back to the 2 s status once it is over or the page is left.
   void _fast(bool on) {
     if (on == (fast != null)) return;
     fast?.cancel();
@@ -65,7 +67,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final p = await Recorder.progress();
     if (!mounted || fast == null) return;
     if (p['wifi'] != true) { _fast(false); _load(); return; }  // over: the status at once, not up to 2 s later
-    setState(() => st = {...st, 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal']});
+    setState(() => st = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal']});
   }
 
   Future<void> _call(Future<void> Function() f) async {
@@ -162,6 +164,11 @@ class _RecorderPageState extends State<RecorderPage> {
     final dfuState = st['dfu'] ?? r['dfu'], dfu = dfuState == null ? null : nativeText(context, dfuState);
     final listen = st['listen'] as List?;  // listening on this phone: its lines
     final bean = name?.startsWith('D3200-') == true;  // a Feishu recorder bean: no pause, listening, USB disk or firmware of ours
+    final wifiStep = st['wifiStep'] as Map?, wifi = bean ? wifiStepSpec(l, wifiStep, syncDone, syncTotal) : null;
+    final wifiNote = st['wifiNote'] == null ? null : nativeText(context, st['wifiNote']);
+    // how it ended: what the hotspots got first (the last of them may have got nothing, its note), else why it failed
+    final wifiEnd = const ['all', 'part'].contains(wifiStep?['end']) ? wifiEndText(l, wifiStep) : wifiNote ?? wifiEndText(l, wifiStep);
+    final fetching = syncing || wifi != null;  // from a fast transfer's tap to Bluetooth back too: unbinding then strands the bean's hotspot
 
     // connection chip: what the link is doing, in one colour
     final (String chip, Color chipColor, IconData chipIcon) = !recording
@@ -257,12 +264,28 @@ class _RecorderPageState extends State<RecorderPage> {
           ),
         // offline sync
         section(l.offlineSync, Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          if (syncing) ...[
+          if (wifi != null) ...[  // a Wi-Fi fast transfer from the tap to Bluetooth back: each step, the bytes real ones only
+            Row(children: [
+              Icon(Icons.wifi_rounded, color: cs.tertiary),
+              const SizedBox(width: 8),
+              Expanded(child: Text(wifi.text, style: t.textTheme.bodyLarge)),
+              if (wifi.bytes != null)
+                Text(wifi.bytes!,  // tabular: the label does not shift as the digits change every 0.05 s
+                    style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
+            ]),
+            const SizedBox(height: 10),
+            // how long a step before the transfer takes is not known: no made-up share, only the transfer's bytes
+            LinearProgressIndicator(value: wifi.bytes != null && syncTotal > 0 ? (syncDone / syncTotal).clamp(0, 1).toDouble() : null,
+                minHeight: 8, borderRadius: BorderRadius.circular(4)),
+            const SizedBox(height: 6),
+            Text([if (wifi.n != null) l.wifiStepOf(wifi.n!, wifiSteps), wifi.reopen, if (wifiStep?['step'] == 'back') wifiEnd].nonNulls.join(' · '),
+                style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          ] else if (syncing) ...[
             Row(children: [
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
-              Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change every 0.1 s
+              Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change
                   style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
             ]),
             const SizedBox(height: 10),
@@ -302,13 +325,13 @@ class _RecorderPageState extends State<RecorderPage> {
             const Divider(height: 20),
           ],
           // #431: the bean's Wi-Fi fast transfer, by hand
-          if (bean && (Platform.isIOS || Platform.isAndroid)) ...[
+          if (bean && const [TargetPlatform.iOS, TargetPlatform.android].contains(t.platform)) ...[  // the tests' too
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.wifi_rounded),
               title: Text(l.beanWifi),
-              subtitle: Text(st['wifiNote'] == null ? l.beanWifiSub : nativeText(context, st['wifiNote'])),
-              onTap: live
+              subtitle: Text((wifiStep?['step'] == 'done' ? wifiEnd : wifiNote) ?? l.beanWifiSub),
+              onTap: live && wifi == null
                   ? () {
                       final m = ScaffoldMessenger.of(context);
                       _call(() async {
@@ -329,10 +352,10 @@ class _RecorderPageState extends State<RecorderPage> {
           ],
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.link_off_rounded, color: syncing ? cs.outline : cs.error),
-            title: Text(l.unbind, style: TextStyle(color: syncing ? cs.outline : cs.error)),
-            subtitle: Text(bean ? (syncing ? l.beanUnbindAfterSync : l.beanUnbindSub) : syncing ? l.unbindAfterSync : l.unbindSub),
-            onTap: syncing ? null : () => _unbind(name, linked, bean),
+            leading: Icon(Icons.link_off_rounded, color: fetching ? cs.outline : cs.error),
+            title: Text(l.unbind, style: TextStyle(color: fetching ? cs.outline : cs.error)),
+            subtitle: Text(bean ? (fetching ? l.beanUnbindAfterSync : l.beanUnbindSub) : fetching ? l.unbindAfterSync : l.unbindSub),
+            onTap: fetching ? null : () => _unbind(name, linked, bean),
           ),
         ])),
       ]),
