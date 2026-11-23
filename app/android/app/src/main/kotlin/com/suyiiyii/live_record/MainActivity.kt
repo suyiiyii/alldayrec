@@ -119,9 +119,10 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "status" -> result.success(RecorderService.status(File(filesDir, "chunks")))
-                "progress" -> {  // the device page's 0.1 s poll while a bean's Wi-Fi fast transfer runs: status() lists the upload queue
-                    val b = RecorderService.bean
-                    result.success(mapOf("wifi" to (b?.state?.get("code") == "beanWifi"), "syncDone" to (b?.syncDoneKb ?: 0L), "syncTotal" to (b?.syncTotalKb ?: 0L)))
+                "progress" -> {  // the device page's 0.05 s poll from the tap to the fast transfer's end: status() lists the upload queue
+                    val b = RecorderService.bean; val step = b?.wifiStep
+                    result.success(mapOf("wifi" to (step != null && step["step"] != "done"), "wifiStep" to step, "wifiNote" to b?.wifiNote,
+                        "syncDone" to (b?.syncDoneKb ?: 0L), "syncTotal" to (b?.syncTotalKb ?: 0L)))
                 }
                 "version" -> result.success(DeviceLog.version)  // 我的 › 关于
                 "error" -> {  // an error the Flutter side did not catch: its type and first frames, no message
@@ -223,6 +224,7 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler result.success("permission")
                     }
                     b.wifiWanted = true  // while the bean records BeanSync logs bean_wifi_skip and goes on over BLE
+                    b.wifiStep = mapOf("step" to "asked")  // until BeanSync's loop takes it: a BLE transfer under way stops first
                     val vpn = AndroidNet.vpn(this)  // a VPN may keep the bean's sockets off the hotspot: say so at the tap
                     val recording = b.hw["recording"] == true
                     DeviceLog.app(b.name, "bean_wifi_ask", "要 Wi-Fi 快传（手动）" + (if (vpn) "；开着 VPN" else "") + (if (recording) "；豆子在录音" else ""),

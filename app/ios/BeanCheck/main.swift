@@ -214,9 +214,11 @@ final class FakeBean: BeanIo {
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
+  var onJoin: () -> Void = {}
   var joinFails: [Error] = []  // the next joins' ends, one each (BeanWifi.open's, its own tries all done)
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
     joins.append((ssid, password, endpoint))
+    onJoin()
     if !joinFails.isEmpty { throw joinFails.removeFirst() }
     onWifi = true
   }
@@ -707,15 +709,22 @@ do {
   let bean = FakeBean(t0)
   let a = (t0 - 600_000) / 1000
   bean.list(a, 60_000); bean.wifiAsk = true
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  var steps: [String?] = []  // the device page's steps (wifiStep), in order
+  bean.onJoin = { steps.append(sync.wifiStep?["step"] as? String) }
   bean.onTransfer = { file, from, _ in
     check(bean.onWifi, true, "the backlog over Wi-Fi only")
+    steps.append(sync.wifiStep?["step"] as? String)
     bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
     bean.wifiAsk = true  // tapped again meanwhile (11-08): not another one after it
   }
   bean.script = Array(repeating: {}, count: 40)
-  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("都取到了"), true, again.description)
+  steps.append(sync.wifiStep?["step"] as? String)
+  check(steps, ["join", "transfer", "back"])
+  check(sync.wifiStep?["end"] as? String, "all")
+  check(sync.wifiStep?["s"] as? Int64, 60, "the minute of audio it got")
   check(bean.joins.count, 1)
   let on = bean.sentOf(0x1A05), ssid = Array(on[1..<(1 + Int(on[0]))]), pw = Array(on[(2 + Int(on[0]))...])
   check(String(decoding: ssid, as: UTF8.self), bean.joins[0].0); check(String(decoding: pw, as: UTF8.self), bean.joins[0].1)
@@ -729,6 +738,7 @@ do {
   let n = bean.sent.count
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }.prefix(4), [0x2E01, 0x0101, 0x01A6, 0x1A02])
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "all"], "Bluetooth back: done, how it ended kept")
   check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x05 }.count, 1, "the tap during it dropped")
   check(bean.logs.contains { $0.0 == "bean_wifi_ask" }, true)
   check(bean.transfers.count, 1, "all of it here: nothing more over BLE")
@@ -750,6 +760,7 @@ do {
     let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
     check(again.description.contains("豆子没回音"), true, again.description)
     check(sync.wifiNote?["code"] as? String, "beanWifiNoAnswer")
+    check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["back", "fail"])
   }
   check(bean.joins.count, 4)
   check(bean.transfers.count, 12, "three asks a tap, all over Wi-Fi")

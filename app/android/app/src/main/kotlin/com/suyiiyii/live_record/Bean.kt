@@ -359,6 +359,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** Why the last fast transfer got nothing, for the device page (recorder_status.dart), as on iOS: its end only;
      *  null once one starts. */
     @Volatile var wifiNote: Map<String, Any?>? = null
+    /** Where the fast transfer asked for last is, for the device page (recorder_status.dart), as on iOS: step asked, hotspot,
+     *  join and socket (with its try), transfer, then back (the way back to BLE) and done, with how it ended (end: all,
+     *  part, none, fail; s of audio it got, ms it took); null before the first. */
+    @Volatile var wifiStep: Map<String, Any?>? = null
     var recording: Boolean
         get() = hw["recording"] == true
         private set(value) { hw = hw + ("recording" to value) }
@@ -598,32 +602,40 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         owe()
         if (owed.isEmpty()) {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
             io.log("bean_wifi_skip", "没有积压，不开热点", fields = mapOf("battery" to battery, "recording" to recording))
+            wifiStep = mapOf("step" to "done", "end" to "none")
             return
         }
         if (battery != null && battery < 30) {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
             io.log("bean_wifi_fail", "电量 $battery% 低于 30%，不开热点，接着用蓝牙", "warn", mapOf("step" to "battery", "battery" to battery))
             wifiNote = say("beanWifiLowBattery", "battery" to battery)
+            wifiStep = mapOf("step" to "done", "end" to "fail")
             return
         }
         wifiBattery = battery
         val r = ByteArray(12).also(java.security.SecureRandom()::nextBytes)
         val ssid = "LR-" + Bean.hex(r.copyOfRange(0, 4)); val password = Bean.hex(r.copyOfRange(4, 12))
         val t0 = io.monotonicNow()
+        wifiStep = mapOf("step" to "hotspot")
         val a = try { hotspot = true; ask(Bean.wifiOn(ssid, password), 0x1A05, 45_000) }
         catch (e: IOException) {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
             wifiOpen = true
             io.log("bean_wifi_fail", "问热点时蓝牙先断了（$e），没拿到地址，回蓝牙", "warn", mapOf("step" to "hotspot"))
             wifiNote = say("beanWifiNoHotspot")
+            wifiStep = mapOf("step" to "back", "end" to "fail")  // the next session's wifiOff() says done
             throw Again("BLE went while asking for the hotspot")
         } catch (e: Again) { throw e } catch (e: InterruptedException) { throw e }
-        catch (e: Exception) { io.log("bean_wifi_fail", "豆子没开热点（$e），接着用蓝牙", "warn", mapOf("step" to "hotspot")); wifiNote = say("beanWifiNoHotspot"); return }
+        catch (e: Exception) {
+            io.log("bean_wifi_fail", "豆子没开热点（$e），接着用蓝牙", "warn", mapOf("step" to "hotspot"))
+            wifiNote = say("beanWifiNoHotspot"); wifiStep = mapOf("step" to "done", "end" to "fail")
+            return
+        }
         finally { hotspot = false }
         wifiOpen = true
         val opened = io.monotonicNow() - t0
         val at = Bean.endpoint(a.payload) ?: run {
             io.log("bean_wifi_fail", "豆子没开热点（回了 ${Bean.hex(a.payload)}，状态 ${a.status}），接着用蓝牙", "warn",
                 mapOf("step" to "hotspot", "ms" to opened, "reply" to Bean.hex(a.payload), "status" to a.status))
-            wifiNote = say("beanWifiNoHotspot")
+            wifiNote = say("beanWifiNoHotspot"); wifiStep = mapOf("step" to "done", "end" to "fail")
             return
         }
         io.log("bean_wifi_hotspot", "豆子开了热点 $ssid（$opened ms）：回复 ${Bean.hex(a.payload)}，地址 $at",
@@ -631,11 +643,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         overWifi = true; wifiUnits = 0
         files.values.forEach { it.wifiTries = 0 }
         state = say("beanWifi")
+        wifiStep = mapOf("step" to "join", "try" to 1)  // io.wifiJoin says its tries and the socket's
         var t1 = io.monotonicNow(); var why: String; var rollover = false; var note: String? = null
         try {
             try {
                 io.wifiJoin(ssid, password, a.payload)
                 t1 = io.monotonicNow()
+                wifiStep = mapOf("step" to "transfer")
                 reader = Bean.Reader(); inbox.clear()
                 why = wifiLoop()
             } catch (e: Again) { why = "豆子换了文件"; rollover = e.naturalRollover }
@@ -654,6 +668,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         io.log("bean_wifi_done", "Wi-Fi 快传结束（$why）：$wifiUnits 个单元（${audio / 1000} s 音频），$kb KB，用时 ${ms / 1000} s，" +
             "%.0f KB/s，%.1f 倍实时".format(Locale.US, kb * 1000.0 / ms, x) + "；上传队列还有 $q 块", if (wifiUnits == 0) "warn" else null,
             mapOf("why" to why, "units" to wifiUnits, "kb" to kb, "ms" to ms, "kbps" to kb * 1000.0 / ms, "x" to x, "queued" to q))
+        wifiStep = mapOf("step" to "back", "end" to if (wifiUnits == 0) "fail" else if (why == "都取到了") "all" else "part", "s" to audio / 1000, "ms" to ms)
         throw Again("Wi-Fi transfer over: $why", rollover)
     }
 
@@ -714,6 +729,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun wifiRecording() {
         io.log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields = mapOf("recording" to true, "backlog_s" to (owed["backlog_s"] ?: 0)))
         wifiNote = say("beanWifiRecording")
+        wifiStep = mapOf("step" to "done", "end" to "fail")
     }
 
     /** After a fast transfer: the hotspot off, in case it is on still. */
@@ -721,6 +737,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val back = if (wifiEnded > 0) io.monotonicNow() - wifiEnded else -1
         io.log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 ${back / 1000} s；电量 ${wifiBattery ?: "?"} → ${hw["battery"] ?: "?"}%",
             fields = mapOf("ms" to back, "battery_before" to wifiBattery, "battery" to hw["battery"], "recording" to recording))
+        wifiStep?.takeIf { it["step"] == "back" }?.let { wifiStep = it + ("step" to "done") }
         try {
             val f = try { hotspot = true; ask(Bean.wifiOff(), 0x1A02, 5000) } finally { hotspot = false }
             io.log("bean_wifi_off", "关了热点（1A/02，状态 ${f.status}，" + (if (f.payload.isEmpty()) "回复不带数据）" else "回复 ${Bean.hex(f.payload)}）"),

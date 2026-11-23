@@ -65,6 +65,8 @@ class BeanWifi(private val ssid: String, private val password: String, private v
     private var threads = listOf<Thread>()
     private val inbox = LinkedBlockingQueue<ByteArray>()
     @Volatile private var bytes = 0L
+    /** The step open() is at, for the device page (BeanSync.wifiStep): join or socket, and its try. */
+    var onStep: (String, Int) -> Unit = { _, _ -> }
 
     private fun mono() = System.nanoTime() / 1_000_000
 
@@ -80,6 +82,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         var joined = false
         for ((n, wait) in listOf(0L, 2000, 4000, 8000).withIndex()) {
             Thread.sleep(wait)
+            onStep("join", n + 1)
             val t1 = mono()
             when (net.join(ssid, password, JOIN_MS)) {
                 null -> {
@@ -118,6 +121,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         val said = mutableMapOf<String, Long>()  // each failure logged once in 10 s: a refused connect comes back at once
         while (mono() - joinedAt < 90_000) {
             tries++
+            onStep("socket", tries)
             try { connect(); break } catch (e: Pin) {
                 log("bean_wifi_fail", "豆子的证书不是认得的那张（${e.seen}）", "warn", mapOf("step" to "pin", "pin" to e.seen))
                 throw Bean.Fail("certificate ${e.seen}", "beanWifiNoSocket")

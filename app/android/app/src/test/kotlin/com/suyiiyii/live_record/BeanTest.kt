@@ -1441,14 +1441,21 @@ class BeanTest {
         val dir = Files.createTempDirectory("bean").toFile()
         val bean = wifiBean(); val a = wt0 / 1000 - 600
         bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        val steps = mutableListOf<Any?>()  // the device page's steps (wifiStep), in order
+        bean.onJoin = { steps += sync.wifiStep?.get("step") }
         bean.onTransfer = { file, from, _ ->
             assertTrue("the backlog over Wi-Fi only", bean.onWifi)
+            steps += sync.wifiStep?.get("step")
             bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file)
             bean.wifiAsk = true  // tapped again meanwhile (11-08): not another one after it
         }
-        val sync = wifiSync(bean, dir)
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertTrue(again.message, "都取到了" in again.message!!)
+        steps += sync.wifiStep?.get("step")
+        assertEquals(listOf("join", "transfer", "back"), steps)
+        assertEquals("all", sync.wifiStep?.get("end"))
+        assertEquals("the minute of audio it got", 60L, (sync.wifiStep?.get("s") as Number).toLong())
         assertEquals(1, bean.joins.size)
         val on = bean.sentOf(0x1A05); val n = on[0].toInt()
         assertEquals(String(on, 1, n), bean.joins[0].first); assertEquals(String(on, 2 + n, on.size - 2 - n), bean.joins[0].second)
@@ -1465,6 +1472,7 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertEquals(listOf(0x2E01, 0x0101, 0x01A6, 0x1A02), bean.sentCmds().drop(k).take(4))
         assertTrue(bean.logs.any { it.first == "bean_wifi_back" } && bean.logs.any { it.first == "bean_wifi_off" })
+        assertEquals("Bluetooth back: done, how it ended kept", listOf("done", "all"), listOf(sync.wifiStep?.get("step"), sync.wifiStep?.get("end")))
         assertEquals("the tap during it dropped", 1, bean.sentCmds().count { it == 0x1A05 })
         assertTrue(bean.logs.any { it.first == "bean_wifi_ask" })
         assertEquals("all of it here: nothing more over BLE", 1, bean.transfers.size)
@@ -1491,9 +1499,11 @@ class BeanTest {
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertTrue(again.message, "join: unavailable" in again.message!!)
         assertEquals("the device page says why", "beanWifiUnavailable", sync.wifiNote?.get("code"))
+        assertEquals(mapOf("step" to "back", "end" to "fail"), sync.wifiStep?.filterKeys { it in setOf("step", "end") })
         assertTrue(bean.transfers.isEmpty())
         assertTrue(bean.logs.any { it.first == "bean_wifi_done" })
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("done", sync.wifiStep?.get("step"))
         assertTrue(0x1A02 in bean.sentCmds())
         assertEquals(listOf(Triple(a, 0L, false)), bean.transfers)
         assertEquals("BLE read it all after", (0L until 3000L).toList(), seqs(File(dir, "chunks")))
@@ -1518,6 +1528,7 @@ class BeanTest {
         assertEquals("the live read not cut for it", 1, bean.transfers.size)
         assertTrue(bean.logs.any { it.first == "bean_wifi_skip" && "在录音" in it.second })
         assertEquals("beanWifiRecording", sync.wifiNote?.get("code"))
+        assertEquals(mapOf("step" to "done", "end" to "fail"), sync.wifiStep)
         sync.hw = sync.hw + ("recording" to false)
         assertNull("gone once the bean is not recording", sync.wifiNote)
     }
@@ -1532,6 +1543,7 @@ class BeanTest {
         repeat(2) { try { sync.session(wt0 - 3_600_000, "") } catch (_: Exception) {} }
         assertFalse("no hotspot for nothing", 0x1A05 in bean.sentCmds())
         assertTrue(bean.logs.any { it.first == "bean_wifi_skip" && "没有积压" in it.second })
+        assertEquals(mapOf("step" to "done", "end" to "none"), sync.wifiStep)
     }
 
     /** The bean answering no 1A/07 over Wi-Fi, tapped four times (iOS #262 review): those misses are Wi-Fi's, not the
@@ -1674,6 +1686,7 @@ class BeanTest {
             assertEquals("$pct%", pct >= 30, 0x1A05 in bean.sentCmds())
             if (pct < 30) {
                 assertEquals(mapOf("code" to "beanWifiLowBattery", "battery" to 20), sync.wifiNote)
+                assertEquals(mapOf("step" to "done", "end" to "fail"), sync.wifiStep)
                 bean.battery = 7; bean.wifiAsk = true; bean.script.clear(); repeat(40) { bean.script += {} }
                 try { sync.session(wt0 - 3_600_000, "") } catch (_: Exception) {}
                 assertNull("asked again: the note of the one before gone", sync.wifiNote)
@@ -1800,6 +1813,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var hotspot: () -> Boolean = { false }  // BeanSync.hotspot: 1A/05 and 1A/02 only while it is set
     var battery: Byte = 7  // 80% (Bean.pct)
     var wifiAsk = false  // the device page's button (Io.wifiAsked)
+    var onJoin: () -> Unit = {}
     var onWifi = false  // joined (wifiJoin) and not left yet
     var dropOnWifi = false
     var dropOnWifiOff = 0
@@ -1809,6 +1823,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun wifiAsked() = wifiAsk.also { wifiAsk = false }
     override fun wifiJoin(ssid: String, password: String, endpoint: ByteArray) {
         joins += Triple(ssid, password, endpoint)
+        onJoin()
         joinFails?.let { throw it }
         onWifi = true
     }

@@ -1070,7 +1070,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String beanWifiLowBattery(Object battery) {
-    return '上次 Wi‑Fi 快传没开始：豆子电量 $battery%，低于 30% 时它不开热点';
+    return '上次 Wi‑Fi 快传没开始：豆子电量 $battery%，低于 30% 时它不开热点；充到 30% 以上再点';
   }
 
   @override
@@ -1110,6 +1110,55 @@ class AppLocalizationsZh extends AppLocalizations {
   String beanWifiFailed(Object detail) {
     return '上次 Wi‑Fi 快传没成（$detail），已回到蓝牙';
   }
+
+  @override
+  String get wifiStepAsked => '正在准备 Wi‑Fi 快传…';
+
+  @override
+  String get wifiStepHotspot => '正在让录音豆开热点…';
+
+  @override
+  String get wifiStepJoin => '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）…';
+
+  @override
+  String wifiStepJoinAgain(Object n) {
+    return '正在加入录音豆的 Wi‑Fi…（第 $n 次）';
+  }
+
+  @override
+  String get wifiStepSocket => '正在连接录音豆…';
+
+  @override
+  String wifiStepSocketAgain(Object n) {
+    return '正在连接录音豆…（第 $n 次）';
+  }
+
+  @override
+  String get wifiStepTransfer => '正在传输';
+
+  @override
+  String get wifiStepBack => '正在连回蓝牙…';
+
+  @override
+  String wifiStepOf(Object n, Object total) {
+    return '第 $n/$total 步';
+  }
+
+  @override
+  String wifiEndAll(Object audio, Object took) {
+    return '传完了：$audio录音，用时 $took';
+  }
+
+  @override
+  String wifiEndPart(Object audio, Object took) {
+    return '停在半路：取回 $audio录音，用时 $took；剩下的由蓝牙接着取';
+  }
+
+  @override
+  String get wifiEndNone => '录音都在手机上了，不用快传';
+
+  @override
+  String get wifiEndFail => 'Wi‑Fi 快传没成，已回到蓝牙';
 
   @override
   String get beanUnbindAfterSync => '正在取回录音豆里的录音，取完再解除';
