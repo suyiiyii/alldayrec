@@ -307,6 +307,7 @@ final class BeanSync {
   struct Again: Error, CustomStringConvertible { let description: String; var naturalRollover = false }
 
   static let tries = 3
+  static let dayTries = 10  // reads of a closed file that left it short before it waits a day (tried())
   static let paceMs: Int64 = 200  // between transfers (ws/soundcore: the SDK's 200 ms)
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
@@ -316,11 +317,12 @@ final class BeanSync {
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
+    var wait: Int64  // not read before (tried()): `tries` were over
     /// (seq, anchor): from that unit on the file is dated by that anchor instead (step()), in order
     var anchors: [(Int64, Int64)]
     var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
-    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, anchors: [(Int64, Int64)] = []) {
-      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.anchors = anchors
+    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, wait: Int64 = 0, anchors: [(Int64, Int64)] = []) {
+      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.wait = wait; self.anchors = anchors
     }
     /// A unit's time on the phone's clock: by the anchor in force at its seq.
     func at(_ seq: Int64) -> Int64 { (anchors.last { $0.0 <= seq }?.1 ?? anchor) + seq * Bean.frameMs }
@@ -429,7 +431,9 @@ final class BeanSync {
         if k == "end" { pendingEnd = (v as? NSNumber)?.int64Value ?? 0; continue }
         guard let id = Int64(k), let f = v as? [String: Any], let h = f["h"] as? [[NSNumber]] else { throw Bean.Fail("file \(k)") }
         files[id] = F((f["a"] as? NSNumber)?.int64Value ?? id * 1000, have: h.map { ($0[0].int64Value, $0[1].int64Value) },
-                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["r"] as? NSNumber)?.intValue ?? 0,
+                      // "r", before: tries for good (11-19's file, given up), not read: such a file is read again
+                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["n"] as? NSNumber)?.intValue ?? 0,
+                      wait: (f["w"] as? NSNumber)?.int64Value ?? 0,
                       anchors: (f["p"] as? [[NSNumber]] ?? []).map { ($0[0].int64Value, $0[1].int64Value) })
       }
     } catch { log("bean_state", "手机上的录音豆文件记录读不了（\(error)），从头记", "warn") }
@@ -444,7 +448,7 @@ final class BeanSync {
   private func save() {
     var o: [String: Any] = [:]
     for (id, f) in files {
-      o["\(id)"] = ["a": f.anchor, "t": f.total, "r": f.tries, "h": f.have.map { [$0.0, $0.1] }, "p": f.anchors.map { [$0.0, $0.1] }]
+      o["\(id)"] = ["a": f.anchor, "t": f.total, "n": f.tries, "w": f.wait, "h": f.have.map { [$0.0, $0.1] }, "p": f.anchors.map { [$0.0, $0.1] }]
     }
     if pendingEnd > 0 { o["end"] = pendingEnd }
     try? FileManager.default.createDirectory(at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -846,8 +850,10 @@ final class BeanSync {
     if caught == 0 { caughtSince = io.now() }
     let left = lacking(p)
     syncTotalKb = (caught + left) * Int64(Bean.unit) / 1024; syncDoneKb = caught * Int64(Bean.unit) / 1024
-    let id = p[0].id
-    return Xfer(id, false, files[id].flatMap(gap) ?? 0)
+    let id = p[0].id, f = files[id], from = f.flatMap(gap) ?? 0
+    // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
+    // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
+    return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? from - 1 : from)
   }
 
   /// What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
@@ -1091,9 +1097,9 @@ final class BeanSync {
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
       let f = file(x.file, x.file * 1000)
-      if f.total < 0 { f.total = x.from }
+      if f.total < 0 { f.total = max(x.from, gap(f) ?? 0) }  // asked from a unit had (backlog()): it ends after that
       xfer = nil; save()
-    case 1: file(x.file, x.file * 1000).tries = BeanSync.tries + 1; failed(x, "no such file，不再取")
+    case 1: file(x.file, x.file * 1000).tries = BeanSync.dayTries - 1; failed(x, "no such file")  // its last try today
     case 4:  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
       if busy == 0 { log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 豆子还忙（code 4），稍后再要", fields: ["file": x.file]) }
       busy += 1
@@ -1114,11 +1120,16 @@ final class BeanSync {
   /// going wrong leaves BLE all of its tries (#262 review: four taps the bean did not answer over Wi-Fi left a file
   /// unread, and unsaid). Giving it up is logged.
   private func tried(_ id: Int64, _ f: F) {
-    if overWifi { f.wifiTries += 1 } else { f.tries += 1 }
+    if overWifi { f.wifiTries += 1 } else {
+      f.tries += 1
+      // 11-19: refused four times in 0.27 s, then never asked again: each ask waits longer, up to 5 s, as for code 4
+      quietUntil = max(quietUntil, io.now() + min(5000, BeanSync.paceMs * Int64(f.tries)))
+    }
     let n = overWifi ? f.wifiTries : f.tries
-    guard n == BeanSync.tries + 1 else { return }
+    guard n == (overWifi ? BeanSync.tries + 1 : BeanSync.dayTries) else { return }
+    if !overWifi { f.tries = 0; f.wait = io.now() + 86_400_000 }  // the next day, its tries anew
     log("bean_xfer", "文件 \(id) 从单元 \(gap(f) ?? -1) 起\(overWifi ? "在 Wi-Fi 上" : "")取了 \(n) 次仍不全，" +
-        (overWifi ? "这次快传不再取它，留给蓝牙" : "不再取"), overWifi ? "warn" : "error", ["file": id, "gap": gap(f) ?? -1, "wifi": overWifi])
+        (overWifi ? "这次快传不再取它，留给蓝牙" : "取不到，明天再试"), overWifi ? "warn" : "error", ["file": id, "gap": gap(f) ?? -1, "wifi": overWifi])
   }
 
   /// A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole where
@@ -1317,7 +1328,7 @@ final class BeanSync {
     return f.total >= 0 && f.total <= at ? nil : at
   }
 
-  private func done(_ f: F) -> Bool { gap(f) == nil || f.tries > BeanSync.tries || overWifi && f.wifiTries > BeanSync.tries }
+  private func done(_ f: F) -> Bool { gap(f) == nil || io.now() < f.wait || overWifi && f.wifiTries > BeanSync.tries }
 
   /// Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
   /// than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file). -1: take it all.

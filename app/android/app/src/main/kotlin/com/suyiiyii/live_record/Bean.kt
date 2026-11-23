@@ -310,7 +310,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
     class F(var anchor: Long, val have: MutableList<LongArray> = mutableListOf(), var total: Long = -1, var tries: Int = 0,
-            val anchors: MutableList<LongArray> = mutableListOf()) {
+            var wait: Long = 0, val anchors: MutableList<LongArray> = mutableListOf()) {  // wait: not read before (tried())
         /** A unit's time on the phone's clock: by the anchor in force at its seq. */
         fun at(seq: Long) = (anchors.lastOrNull { it[0] <= seq }?.get(1) ?: anchor) + seq * Bean.FRAME_MS
         val latest get() = anchors.lastOrNull()?.get(1) ?: anchor
@@ -424,14 +424,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 if (k == "end") { pendingEnd = o.getLong(k); continue }
                 val f = o.getJSONObject(k)
                 fun pairs(a: JSONArray) = MutableList(a.length()) { longArrayOf(a.getJSONArray(it).getLong(0), a.getJSONArray(it).getLong(1)) }
-                files[k.toLong()] = F(f.getLong("a"), pairs(f.getJSONArray("h")), f.getLong("t"), f.getInt("r"), pairs(f.optJSONArray("p") ?: JSONArray()))
+                // "r", before: tries for good (11-19's file, given up), not read: such a file is read again
+                files[k.toLong()] = F(f.getLong("a"), pairs(f.getJSONArray("h")), f.getLong("t"), f.optInt("n"), f.optLong("w"),
+                    pairs(f.optJSONArray("p") ?: JSONArray()))
             }
         } catch (e: Exception) { io.log("bean_state", "手机上的录音豆文件记录读不了（$e），从头记", "warn") }
     }
 
     private fun save() {
         val o = JSONObject()
-        for ((id, f) in files) o.put("$id", JSONObject().put("a", f.anchor).put("t", f.total).put("r", f.tries)
+        for ((id, f) in files) o.put("$id", JSONObject().put("a", f.anchor).put("t", f.total).put("n", f.tries).put("w", f.wait)
             .put("h", JSONArray(f.have.map { JSONArray(listOf(it[0], it[1])) })).put("p", JSONArray(f.anchors.map { JSONArray(listOf(it[0], it[1])) })))
         if (pendingEnd > 0) o.put("end", pendingEnd)
         stateFile.parentFile?.mkdirs()
@@ -841,7 +843,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val left = lacking(p)
         syncTotalKb = (caught + left) * Bean.UNIT / 1024; syncDoneKb = caught * Bean.UNIT / 1024
         val id = p.first().first
-        return Xfer(id, false, files[id]?.let(::gap) ?: 0)
+        val f = files[id]
+        val from = f?.let(::gap) ?: 0
+        // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
+        // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
+        return Xfer(id, false, if ((f?.total ?: 0) < 0 && from > 0) from - 1 else from)
     }
 
     /** The file being recorded, from where the phone lacks it (the owner, 10-27). realtime=0 reads it from the offset at
@@ -1026,8 +1032,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> if (x.live) failed(x, "code 3")  // the file being recorded goes on: never its end
-                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = x.from }; xfer = null; save() }  // nothing after `from`: all of it is here
-            1 -> { file(x.file, x.file * 1000).tries = TRIES + 1; failed(x, "no such file，不再取") }
+                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
+            1 -> { file(x.file, x.file * 1000).tries = DAY_TRIES - 1; failed(x, "no such file") }  // its last try today
             4 -> {  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
                 if (busy++ == 0) io.log("bean_xfer", "${if (x.live) "实时" else "补传"}文件 ${x.file} 豆子还忙（code 4），稍后再要", fields = mapOf("file" to x.file))
                 quietUntil = io.now() + minOf(5000L, PACE_MS * busy)
@@ -1048,11 +1054,16 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** A read of a closed file that left it short: a try. Over Wi-Fi one of its own for this fast transfer, so Wi-Fi going
      *  wrong leaves BLE all of its tries (iOS #262 review: four taps the bean did not answer over Wi-Fi left a file unread). */
     private fun tried(id: Long, f: F) {
-        if (overWifi) f.wifiTries++ else f.tries++
+        if (overWifi) f.wifiTries++ else {
+            f.tries++
+            // 11-19: refused four times in 0.27 s, then never asked again: each ask waits longer, up to 5 s, as for code 4
+            quietUntil = maxOf(quietUntil, io.now() + minOf(5000L, PACE_MS * f.tries))
+        }
         val n = if (overWifi) f.wifiTries else f.tries
-        if (n != TRIES + 1) return
+        if (n != if (overWifi) TRIES + 1 else DAY_TRIES) return
+        if (!overWifi) { f.tries = 0; f.wait = io.now() + 86_400_000 }  // the next day, its tries anew
         io.log("bean_xfer", "文件 $id 从单元 ${gap(f) ?: -1} 起${if (overWifi) "在 Wi-Fi 上" else ""}取了 $n 次仍不全，" +
-            (if (overWifi) "这次快传不再取它，留给蓝牙" else "不再取"), if (overWifi) "warn" else "error", mapOf("file" to id, "gap" to (gap(f) ?: -1), "wifi" to overWifi))
+            (if (overWifi) "这次快传不再取它，留给蓝牙" else "取不到，明天再试"), if (overWifi) "warn" else "error", mapOf("file" to id, "gap" to (gap(f) ?: -1), "wifi" to overWifi))
     }
 
     /** A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole
@@ -1230,7 +1241,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         return if (f.total in 0..at) null else at
     }
 
-    private fun done(f: F) = gap(f) == null || f.tries > TRIES || overWifi && f.wifiTries > TRIES
+    private fun done(f: F) = gap(f) == null || io.now() < f.wait || overWifi && f.wifiTries > TRIES
 
     /** Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
      *  than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file, 10-25: 1831
@@ -1272,6 +1283,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     companion object {
         const val TRIES = 3
+        const val DAY_TRIES = 10  // reads of a closed file that left it short before it waits a day (tried())
         /** wifiLoop()'s ends that, nothing read, the device page says (wifiNote), as on iOS */
         val WIFI_ENDS = mapOf("豆子没回音" to "beanWifiNoAnswer", "豆子开始录音，回蓝牙" to "beanWifiRecording",
             "豆子一直忙（code 4）" to "beanWifiBusy", "30 s 没收到单元" to "beanWifiNoUnits")

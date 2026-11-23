@@ -456,7 +456,7 @@ func rollover(late: Bool, manual: Bool = false, paused: Bool = false) {
         bean.recording = false; bean.open = 0; bean.list(b, 500)
       }
     case (false, a):
-      check(from, 25)
+      check(from, 24, "its length unknown: from the last unit had (backlog())")
       bean.header(file, 30 * Int64(Bean.unit))
       bean.units(file, Array(from...29), last: 29); bean.complete(file)
     default: check("asked for \(file) from \(from) live \(live)", "")
@@ -468,7 +468,7 @@ func rollover(late: Bool, manual: Bool = false, paused: Bool = false) {
   check(bean.transfers, [[a, 0, 0]], "no rejoin on the old connection")
   check(packets(queue(chunks)[0]).count - 2, 25)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers, [[a, 0, 0], [b, 0, 0], [a, 25, 0]])
+  check(bean.transfers, [[a, 0, 0], [b, 0, 0], [a, 24, 0]])
   var seen: [Int64: [Int64]] = [:]
   for piece in queue(chunks) {
     for (i, p) in packets(piece).dropFirst(2).enumerated() {
@@ -526,7 +526,7 @@ do {
   check(sync.files[a]!.have.map { [$0.0, $0.1] }, [[0, 100]])
   check(bean.logs.contains { $0.0 == "bean_xfer" && $0.1.contains("补传文件 \(a) 停在单元 100") }, true)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers.map { [$0[0], $0[1]] }, [[a, 0], [b, 0], [a, 100], [b, 30]])
+  check(bean.transfers.map { [$0[0], $0[1]] }, [[a, 0], [b, 0], [a, 100], [b, 29]], "b's length unknown: from its last unit")
   check(sync.files[b]!.have.map { [$0.0, $0.1] }, [[0, 30]], "live in the new file from its unit 0")
   check(sync.gap(sync.files[a]!), nil, "the rest after the stop")
   check(sync.files[a]!.tries, 0)
@@ -573,8 +573,8 @@ do {
   let since = t0 - 3_600_000
   let old = since / 1000 - 100, hole = t0 / 1000 - 900, refused = hole + 100, queued = hole + 200
   let whole = hole + 300, open = hole + 400, nay = hole + 500
-  func f(_ id: Int64, _ h: String, tries: Int = 0) -> String { "\"\(id)\":{\"a\":\(id * 1000),\"t\":10,\"r\":\(tries),\"h\":\(h)}" }
-  try ("{" + [f(old, "[[0,10]]"), f(hole, "[[0,4],[6,10]]", tries: 4), f(refused, "[[0,10]]"), f(queued, "[[0,10]]"),
+  func f(_ id: Int64, _ h: String, wait: Int64 = 0) -> String { "\"\(id)\":{\"a\":\(id * 1000),\"t\":10,\"w\":\(wait),\"h\":\(h)}" }
+  try ("{" + [f(old, "[[0,10]]"), f(hole, "[[0,4],[6,10]]", wait: t0 + 3_600_000), f(refused, "[[0,10]]"), f(queued, "[[0,10]]"),
               f(whole, "[[0,10]]"), f(open, "[[0,10]]"), f(nay, "[[0,10]]")].joined(separator: ",") + "}").write(to: state, atomically: true, encoding: .utf8)
   let q = chunks.appendingPathComponent("\(queued * 1000)@D3200-0A0B.ogg")
   try Data(count: 8).write(to: q)
@@ -797,18 +797,23 @@ do {
 }
 
 /// A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
-/// tries (code 1: at once), and said so (refused or not there, before #262's reviews it was not).
-for (code, asks) in [(UInt8(2), BeanSync.tries + 1), (0, BeanSync.tries + 1), (1, 1)] {
+/// tries of the day (code 1: at once), and said so (refused or not there, before #262's reviews it was not); the next
+/// day it is asked for again.
+for (code, asks) in [(UInt8(2), BeanSync.dayTries), (0, BeanSync.dayTries), (1, 1)] {
   let dir = tmp()
   let bean = FakeBean(t0)
   let a = (t0 - 600_000) / 1000
   bean.list(a, 60_000)
   bean.onTransfer = { file, _, _ in bean.header(file, 3000 * Int64(Bean.unit), code: code); if code == 0 { bean.complete(file) } }
-  bean.script = Array(repeating: {}, count: 10)
+  bean.script = Array(repeating: {}, count: 20)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers.count, asks, "code \(code)")
-  check(bean.logs.filter { $0.1.contains("不再取") }.count, 1, "code \(code)")
+  check(bean.logs.filter { $0.1.contains("取不到，明天再试") }.count, 1, "code \(code)")
+  bean.t += 86_400_000
+  bean.script = Array(repeating: {}, count: 20)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers.count, 2 * asks, "code \(code): the next day")
 }
 
 /// BLE gone before the bean answered 1A/02 after a fast transfer (#262 reviews P3-2, P3-3): the next session sends it
@@ -1529,7 +1534,7 @@ do {
   check(error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }.description, "link gone")
   bean.t += 30_000
   check(error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }.description, "app killed")
-  check(bean.transfers, [[c, 0, 0], [c, 1092, 0], [c, 5688, 0]])
+  check(bean.transfers, [[c, 0, 0], [c, 1092, 0], [c, 5687, 0]], "the tail from the last unit had: its length unknown")
   let anchor = sync.files[c]!.anchor
   check(bean.ends, [], "not yet: its pieces are not up")
   check(bean.deleted, [], "nothing off the bean before the server has it")
@@ -1561,8 +1566,8 @@ do {
   check(session(r, BeanSync.Again.self).description, "file \(r.id): the bean stopped, the rest as a catch-up")
   check(r.bean.logs.contains { $0.0 == "bean_xfer" && $0.1.contains("豆子停录时还没追上实时") }, true)
   _ = session(r, BeanSync.Gone.self)
-  check(r.bean.transfers, [[r.id, 0, 0], [r.id, 300, 0]])
-  check(r.bean.logs.contains { $0.0 == "bean_xfer" && $0.1.hasPrefix("补传文件 \(r.id) 开始：首单元 300") }, true)
+  check(r.bean.transfers, [[r.id, 0, 0], [r.id, 299, 0]], "from the last unit had: its length unknown")
+  check(r.bean.logs.contains { $0.0 == "bean_xfer" && $0.1.hasPrefix("补传文件 \(r.id) 开始：首单元 299") }, true)
   check(r.have, [[0, 30000]])
   check(r.sync.gap(r.f), nil)
   check(piecesIn(r.chunks).reduce(Int64(0)) { $0 + $1.n }, 30000, "each unit once")
@@ -1626,6 +1631,65 @@ do {
     check(p.seq < 1525 && p.seq + p.n > 1525, false, "a piece across 1525")
   }
   check(r.f.at(2600), a + 900 + 2600 * 20)
+}
+
+/// A closed file read live only, its length never come (11-19: four code 2s asked at the unit the phone had it to, then
+/// given up; the review: past its end): asked from a unit the phone has, the header says its length, all of it is
+/// here, and it goes off the bean as a whole one.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, n: Int64 = 3000
+  bean.list(a, n * 20)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":-1,\"r\":0,\"h\":[[0,\(n)]]}}".write(to: state, atomically: true, encoding: .utf8)
+  bean.onTransfer = { file, from, _ in  // past its end: refused
+    if from >= n { bean.header(file, 0, code: 2); return }
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, n - 1, 0]], "from its last unit on the phone: its length, no code 2")
+  check(bean.deleted, [a], "whole: off the bean")
+}
+
+/// A closed file the bean refuses (code 2) four times running, then gives (11-19: four in 0.27 s, then never asked for
+/// again): each ask waits longer than the one before, and it is read whole after.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, n: Int64 = 3000
+  bean.list(a, n * 20)
+  var refusals = 4, asked: [Int64] = []
+  bean.onTransfer = { file, from, _ in
+    asked.append(bean.t)
+    if refusals > 0 { refusals -= 1; bean.header(file, 0, code: 2); return }
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers.count, 5, "four refused, then read")
+  check(sync.gap(sync.files[a]!), nil, "all of it on the phone")
+  check(zip(asked, asked.dropFirst()).map { $1 - $0 }, [200, 400, 600, 800], "a pause that grows")
+}
+
+/// A state file from before, a file given up for good in it ("r": 4, 11-19's): read again after the update.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, n: Int64 = 3000
+  bean.list(a, n * 20)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":\(n),\"r\":4,\"h\":[[0,1000]]}}".write(to: state, atomically: true, encoding: .utf8)
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, 1000, 0]], "asked for again")
+  check(sync.gap(sync.files[a]!), nil)
 }
 
 print("bean check: all passed")
