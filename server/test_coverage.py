@@ -1,6 +1,6 @@
 """GET /api/coverage: a device's stored audio as merged spans, at most 31 days at once, from its own tenant's store only,
-with first_bind: backfilled from the earlier of its first piece and its first connect event, set once and kept through
-an unbind and later binds."""
+with first_bind: backfilled from its first connect event, else its first piece, set once and kept through an unbind and
+later binds."""
 import datetime as dt
 import tempfile
 from pathlib import Path
@@ -59,16 +59,17 @@ def test_first_bind_backfill_and_kept():
     anyio.run(device_log_upload, "LR-X1-0000", [app(1, T0 - 9 * DAY, "connect")])  # another device's connect
     anyio.run(device_log_upload, DEV, [app(2, T0 - 2 * DAY, "bean_scan")])         # not a connect: no first_bind
     assert db.kv(f"first_bind:{DEV}") is None
-    piece(DEV, T0 - DAY, 1.0)  # an older piece than the connect below: the earlier one wins
-    anyio.run(device_log_upload, DEV, [app(3, T0 - DAY // 2, "connect")])
+    piece(DEV, T0 - 400 * DAY, 1.0)  # a recorder's unset clock: older than the connect below, which still wins
+    anyio.run(device_log_upload, DEV, [app(3, T0 - DAY, "connect")])
     assert db.kv(f"first_bind:{DEV}") == T0 - DAY
     anyio.run(device_log_upload, DEV, [app(4, T0 - 5 * DAY, "connect"), app(5, T0 + DAY, "unbind")])  # older, then an unbind
     piece(DEV, T0 - 7 * DAY, 1.0)
     assert get(DEV, T0, T0 + DAY)["first_bind"] == T0 - DAY, "set once: neither older data nor an unbind moves it"
 
-    piece("LR-X1-0001", T0 - 3 * DAY, 1.0)  # an old device nobody asked about yet: its first piece
+    piece("LR-X1-0001", T0 - 3 * DAY, 1.0)  # an old device with no connect, nobody asked about yet: its first piece
     assert get("LR-X1-0001", T0, T0 + DAY)["first_bind"] == T0 - 3 * DAY
-    anyio.run(device_log_upload, "LR-X1-0002", [app(6, T0 - 4 * DAY, "connect")])  # bound, no audio yet: the connect
+    piece("LR-X1-0002", T0 - 9 * DAY, 1.0)
+    anyio.run(device_log_upload, "LR-X1-0002", [app(6, T0 - 4 * DAY, "connect")])  # a connect: it, not the older piece
     assert get("LR-X1-0002", T0, T0 + DAY)["first_bind"] == T0 - 4 * DAY
     before = int(dt.datetime.now().timestamp() * 1000)
     assert get("LR-X1-0003", T0, T0 + DAY)["first_bind"] >= before, "nothing of it yet: now"

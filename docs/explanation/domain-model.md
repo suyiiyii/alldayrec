@@ -47,7 +47,7 @@ description: "服务器里有哪些对象（上传块、定稿段、句子、对
 | `read_to:<d>`、`read_end:<d>` | 定稿层的读取器拿到的最后一块的开始和结束 | `audio.stream` |
 | `hold:<d>` | 手机说还有更早的音频要补传，定稿层在这一刻前等着 | `audio.hold`、`audio.held` |
 | `end_at:<d>` | 录音设备停录的时刻 | `POST /api/chunks/end` |
-| `first_bind:<d>` | 这台设备第一次绑定的时刻（unix ms）：从这一刻起它的音频都算这个账号的，换手机重新绑定、解除绑定都不改它。第一次用到时定下：这台设备最早一块音频和最早一条 App `connect` 事件里取更早的，都没有就取当时 | `db.first_bind`（`GET /api/coverage`、带 `connect` 的 `POST /api/device-log`） |
+| `first_bind:<d>` | 这台设备第一次绑定的时刻（unix ms）：从这一刻起它的音频都算这个账号的，换手机重新绑定、解除绑定都不改它。第一次用到时定下：这台设备最早一条 App `connect` 事件；没有 connect 才用最早一块音频（块的时间可能是豆子没对时的时钟），都没有就取当时 | `db.first_bind`（`GET /api/coverage`、带 `connect` 的 `POST /api/device-log`） |
 | `standby:<d>` | 这台设备在给哪台设备当备用，从什么时刻起（`since`） | `colocate.decide`、`colocate.take` |
 
 ### 文字侧
