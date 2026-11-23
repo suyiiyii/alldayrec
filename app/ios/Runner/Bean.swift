@@ -1047,7 +1047,14 @@ final class BeanSync {
       log("bean_file", "豆子开始录新文件 \(open)", fields: ["file": open, "pre": pre])
     case 0x1882:  // the bean's button: 0 stopped, 1 recording, 2 paused
       switch p.first {
-      case 0: liveFile = 0; paused = false; recording = false; startDone = true; log("bean_stop", "豆子停止录音")
+      case 0:
+        liveFile = 0; paused = false; recording = false; startDone = true; log("bean_stop", "豆子停止录音")
+        // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no syncTotal, no
+        // log, no stall guard. The file is closed now: the rest as its catch-up on a new connection (backlog()).
+        if let x, x.live, !x.realtime, x.first >= 0, x.lag == nil {  // a read from behind: units came, not caught up yet
+          complete(x, 0, "；豆子停录时还没追上实时，断开重连，剩下的按补传接着取")
+          throw Again(description: "file \(x.file): the bean stopped, the rest as a catch-up")
+        }
       case 1: if !recording { needList = true }; if paused { liveSeen = io.now() }; paused = false; recording = true; log("bean_record", "豆子开始录音")
       case 2: paused = true; startDone = true; log("bean_pause", "豆子暂停录音")
       default: break

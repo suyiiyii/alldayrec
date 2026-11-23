@@ -990,7 +990,15 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.log("bean_file", "豆子开始录新文件 ${listing.open}", fields = mapOf("file" to listing.open, "pre" to (p.getOrNull(if (p.size > 8) 8 else 4)?.toInt() ?: -1)))
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
-                0 -> { liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音") }
+                0 -> {
+                    liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音")
+                    // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no
+                    // syncTotal, no log, no stall guard. The file is closed now: the rest as its catch-up on a new connection.
+                    if (x != null && x.live && !x.realtime && x.first >= 0 && x.lag == null) {  // a read from behind: units came, not caught up yet
+                        complete(x, 0, "；豆子停录时还没追上实时，断开重连，剩下的按补传接着取")
+                        throw Again("file ${x.file}: the bean stopped, the rest as a catch-up")
+                    }
+                }
                 1 -> { if (!recording) needList = true; if (paused) liveSeen = io.now(); paused = false; recording = true; io.log("bean_record", "豆子开始录音") }
                 2 -> { paused = true; startDone = true; io.log("bean_pause", "豆子暂停录音") }
             }

@@ -753,7 +753,7 @@ do {
   let dir = tmp()
   let bean = FakeBean(t0)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
-  let b = t0 / 1000 - 60
+  let b = t0 / 1000  // its 100 units come as recorded: caught up when the button stops it
   bean.recording = true; bean.open = b; bean.list(b, 0)
   bean.onTransfer = { file, _, _ in  // live, until the button stops it: the file just closed, its length unknown yet
     bean.header(file, 0xFFFF_FFFF); bean.units(file, Array(0...99))
@@ -1541,6 +1541,32 @@ do {
   check(bean.ends, [anchor + 5699 * 20], "the end, once")
   check(bean.transfers.count, 3)
   check(bean.deleted, [c])
+}
+
+/// 11-23: the bean stops while a realtime=0 read of the file being recorded is still behind (from unit 0, hours of it);
+/// the bean goes on sending it. The session ends at the stop with a log, and the rest is read as the closed file's
+/// catch-up on the next connection (syncTotal, the device page's progress), from where the phone lacks it; each unit once.
+do {
+  let r = rec(600, [], watched: false)  // the bean at unit 30000, none of it here
+  r.bean.onTransfer = { file, from, realtime in
+    if file == r.bean.open {
+      r.bean.answer(file, from, realtime); r.bean.more(300)
+      r.bean.push(0x1882, [0]); r.bean.more(300)  // stopped: the read goes on
+      r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 30000 * 20)
+    } else {
+      check(r.sync.syncTotalKb > 0, true, "a catch-up: the device page's progress")
+      r.bean.header(file, 30000 * Int64(Bean.unit)); r.bean.units(file, Array(from...29999), last: 29999); r.bean.complete(file)
+    }
+  }
+  check(session(r, BeanSync.Again.self).description, "file \(r.id): the bean stopped, the rest as a catch-up")
+  check(r.bean.logs.contains { $0.0 == "bean_xfer" && $0.1.contains("豆子停录时还没追上实时") }, true)
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 0, 0], [r.id, 300, 0]])
+  check(r.bean.logs.contains { $0.0 == "bean_xfer" && $0.1.hasPrefix("补传文件 \(r.id) 开始：首单元 300") }, true)
+  check(r.have, [[0, 30000]])
+  check(r.sync.gap(r.f), nil)
+  check(piecesIn(r.chunks).reduce(Int64(0)) { $0 + $1.n }, 30000, "each unit once")
+  onlyReads(r.bean)
 }
 
 /// The pieces in the queue: start, first seq, units.

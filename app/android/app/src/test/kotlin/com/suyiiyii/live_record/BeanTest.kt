@@ -1069,6 +1069,36 @@ class BeanTest {
         }
     }
 
+    /** 11-23: the bean stops while a realtime=0 read of the file being recorded is still behind (from unit 0, hours of
+     *  it); the bean goes on sending it. The session ends at the stop with a log, and the rest is read as the closed
+     *  file's catch-up on the next connection (syncTotal, the device page's progress), from where the phone lacks it;
+     *  each unit once. */
+    @Test fun stopWhileBehindGoesOnAsCatchUp() {
+        val r = rec(600, emptyList(), watched = false)  // the bean at unit 30000, none of it here
+        var total = 0L
+        r.bean.onTransfer = { file, from, realtime ->
+            if (file == r.bean.open) {
+                r.bean.answer(file, from, realtime); r.bean.more(300)
+                r.bean.push(0x1882, byteArrayOf(0)); r.bean.more(300)  // stopped: the read goes on
+                r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 30000L * 20
+            } else {
+                total = r.sync.syncTotalKb
+                r.bean.header(file, 30000L * Bean.UNIT); r.bean.units(file, (from..29999L).toList(), last = 29999); r.bean.complete(file)
+            }
+        }
+        assertEquals("file ${r.id}: the bean stopped, the rest as a catch-up",
+            assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message)
+        assertTrue(r.bean.logs.any { it.first == "bean_xfer" && "豆子停录时还没追上实时" in it.second })
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertTrue("a catch-up: the device page's progress", total > 0)
+        assertEquals(listOf(Triple(r.id, 0L, false), Triple(r.id, 300L, false)), r.bean.transfers)
+        assertTrue(r.bean.logs.any { it.first == "bean_xfer" && it.second.startsWith("补传文件 ${r.id} 开始：首单元 300") })
+        assertEquals(listOf(0L, 30000L), r.f.have.single().toList())
+        assertNull(r.sync.gap(r.f))
+        assertEquals("each unit once", 30000L, piecesIn(r.chunks).sumOf { it.third })
+        onlyReads(r.bean)
+    }
+
     /** The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found
      *  it (FakeBean.answer): `units` of it a 1A/07, then the link goes. */
     private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long, val chunks: File) {
@@ -1538,7 +1568,7 @@ class BeanTest {
     @Test fun wifiGoneWhileListing() {
         val dir = Files.createTempDirectory("bean").toFile()
         val bean = FakeBean(wt0)
-        val b = wt0 / 1000 - 60
+        val b = wt0 / 1000  // its 100 units come as recorded: caught up when the button stops it
         bean.recording = true; bean.open = b; bean.listed[b] = 0
         bean.onTransfer = { file, _, _ ->  // live, until the button stops it: the file just closed, its length unknown yet
             bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..99L).toList())

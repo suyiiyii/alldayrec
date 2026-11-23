@@ -174,6 +174,15 @@ String durationText(AppLocalizations l, num s) {
   return (icon: Icons.mic_rounded, color: recordingRed, battery: glyph(), number: pct, numberColor: low, spin: false, line: l.recordingNow);
 }
 
+/// Whether a backlog is being read now, the top bar's chip (chipSpec) and the device page alike (11-23: the chip said
+/// 补传中 while the page said 已连接): the card's or a bean's closed files (syncTotal), or a bean's recording the phone
+/// lacks and reads now (beanOwed, not held back).
+bool catchingUp(Map s) {
+  final hw = (s['hw'] as Map?) ?? {};
+  return ((s['syncTotal'] as num?) ?? 0) > 0 ||
+      s['connected'] == true && ((hw['backlog_s'] as num?) ?? 0) > 0 && hw['backlog_held'] == null;
+}
+
 /// What of a bean's recording the phone lacks (BeanSync.owe(): backlog_s, backlog_held, backlog_eta_s): how much, being
 /// read or why it waits, and how long it takes.
 String beanOwed(AppLocalizations l, Map hw) {
