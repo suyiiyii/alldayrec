@@ -634,19 +634,24 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val r = mutableMapOf<Long, Long>()
         ctrl.removeIf { it[0] == 0x81.toByte() || it[0] == 0x80.toByte() }
         write(g, Ble.STORE, Ble.CTRL, byteArrayOf(1))  // LIST
-        var o = -1L
+        var o = -1L; var err = 0
         while (true) {
             val x = ctrl.poll(10, TimeUnit.SECONDS) ?: throw Exception("LIST timed out")
             if (x[0] == 0x81.toByte()) r[le(x).getInt(1).toLong() and 0xffffffffL] = le(x).getInt(5).toLong() and 0xffffffffL
             if (x[0] == 0x80.toByte()) {
-                if (x[1] != 0.toByte()) Log.w("live-record", "ble LIST error ${x[1]}")
+                err = x[1].toInt()
                 if (x.size >= 6) o = le(x).getInt(2).toLong() and 0xffffffffL
                 break
             }
         }
         if (o >= 0) open = o
         if (liveFloor < 0) liveFloor = open
-        for ((f, was, now) in m.listed(r, open)) {
+        if (err != 0) {  // the card failed (opendir, readdir): what it left out is still on it
+            Log.w("live-record", "ble LIST error $err")
+            DeviceLog.app(mirrorName, "list_error", "列录音设备上的文件出错（$err），只列到 ${r.size} 个：没列到的先不当成已删", "warn",
+                mapOf("err" to err, "files" to r.size))
+        }
+        for ((f, was, now) in m.listed(r, open, err != 0)) {
             DeviceLog.app(mirrorName, "list_size", "录音设备上的文件 ${f.toString(16)} 长度变了：${was / 1024} KB → ${now / 1024} KB",
                 fields = mapOf("file" to f, "from" to was, "to" to now))
         }
@@ -853,15 +858,20 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         if (noCard) return
         val done = m.done(chunks)
         if (done.isNotEmpty() && listFull) needList = true  // room in the next LIST for files it left out
+        val refused = mutableListOf<Long>(); var why = 0
         for (f in done) {
             ack()
-            val r = reply(g, le(ByteArray(5)).put(4).putInt(f.toInt()).array(), 0x84) ?: return  // DELETE
+            val r = reply(g, le(ByteArray(5)).put(4).putInt(f.toInt()).array(), 0x84) ?: break  // DELETE
             val err = r[5].toInt()
             Log.i("live-record", "ble DELETE %08X: $err".format(f))
-            DeviceLog.app(mirrorName, "delete", "删录音设备上的文件 ${f.toString(16)}（${m.have(f) / 1024} KB，已全部上传）：" + when (err) { 0 -> "删了"; -2 -> "卡上已经没有"; else -> "没删成（$err）" },
-                if (err == 0 || err == -2) null else "warn", mapOf("file" to f, "size" to m.have(f), "err" to err))
-            if (err == 0 || err == -2) m.drop(f)  // gone (-2: not on this card)
+            if (err != 0 && err != -2) { refused += f; why = err; continue }
+            DeviceLog.app(mirrorName, "delete", "删录音设备上的文件 ${f.toString(16)}（${m.have(f) / 1024} KB，已全部上传）：" + if (err == 0) "删了" else "卡上已经没有",
+                fields = mapOf("file" to f, "size" to m.have(f), "err" to err))
+            m.drop(f)  // gone (-2: not on this card)
         }
+        // once each time what is refused changes, not each minute (a card that fails refuses every file)
+        if (refused.isNotEmpty()) DeviceLog.appChanged(mirrorName, "delete_refused", "录音设备没删成 ${refused.size} 个已全部上传的文件（$why）：${refused.joinToString("、") { it.toString(16) }}",
+            mapOf("files" to refused, "err" to why), "warn")
     }
 
     private val cb = object : BluetoothGattCallback() {

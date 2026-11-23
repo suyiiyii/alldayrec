@@ -153,8 +153,8 @@ object DeviceLog {
 
     /** As [app], only when `fields` differ from the ones this install last logged as `kind` for `device`: kept in prefs,
      *  so a new recording or launch with the same values adds no event. */
-    fun appChanged(device: String, kind: String, text: String, fields: Map<String, Any?>) {
-        if (::file.isInitialized && changed(prefs, "logLast:$kind:$device", fields.toSortedMap().toString())) app(device, kind, text, fields = fields)
+    fun appChanged(device: String, kind: String, text: String, fields: Map<String, Any?>, level: String? = null) {
+        if (::file.isInitialized && changed(prefs, "logLast:$kind:$device", fields.toSortedMap().toString())) app(device, kind, text, level, fields)
     }
 
     /** `value` is not the one kept under `key`: it is now. */

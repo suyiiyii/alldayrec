@@ -303,6 +303,41 @@ class StoreTest {
         assertEquals(listOf(f), m.done(out))
     }
 
+    /** The cut kept over a reconnect (a new Mirror on the same dir, as each BLE session makes): that session's first
+     *  LIST, cut at LIST_MAX without the file, says nothing of it. */
+    @Test fun noMoreKept() {
+        val dir = tmp(); val out = tmp(); val undated = tmp()
+        val m = Mirror(dir)
+        val f = 1L shl 16; val g = 1L shl 16 or 1
+        val head = t(0, 1_000_000) + a(0, 10); val size = head.size + 32L
+        m.put(f, 0, head)
+        m.listed(mapOf(f to size, g to 0L), g)
+        assertEquals(size, m.noMore(f))
+        assertEquals(1, m.pieces(out, undated, "X", 15, 1))
+        out.listFiles()!!.forEach { it.delete() }
+        val m2 = Mirror(dir)
+        m2.listed(mapOf(g to 0L) + (2L..Mirror.LIST_MAX).associate { (1L shl 16 or it) to 100L }, g)
+        assertEquals("a full LIST without it", emptyList<Long>(), m2.done(out))
+        m2.listed(mapOf(f to size, g to 0L), g)
+        assertEquals(f to head.size.toLong(), m2.missing().first())  // listed again: READ the rest
+    }
+
+    /** A LIST the card failed (opendir: no files, an error) says nothing of the files it leaves out: a half-read file
+     *  is still READ, not deleted. */
+    @Test fun listFailed() {
+        val out = tmp(); val undated = tmp()
+        val m = Mirror(tmp())
+        val f = 1L shl 16; val g = 1L shl 16 or 1
+        val head = t(0, 1_000_000) + a(0, 10); val size = head.size + 32L
+        m.put(f, 0, head)
+        m.listed(mapOf(f to size, g to 0L), g)
+        m.listed(emptyMap(), g, failed = true)
+        assertEquals(listOf(f to head.size.toLong()), m.missing())
+        m.pieces(out, undated, "X", 15, 1)
+        out.listFiles()!!.forEach { it.delete() }
+        assertEquals("not deleted", emptyList<Long>(), m.done(out))
+    }
+
     @Test fun ogg() {
         val v = fixture.getJSONObject("ogg")
         val ogg = Store.oggOpus(List(v.getInt("count")) { hex(v.getString("packetHex")) })

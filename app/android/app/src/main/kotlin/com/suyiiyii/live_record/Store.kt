@@ -131,7 +131,8 @@ object Store {
  *                                  all of it in pieces, the pieces written
  *    T clock frame epochMs                         the 'T' records seen; clock: the boot, or the file for boot 0 (no
  *                                                  card to count boots: each such boot has its own files)
- *    C file cut [piece]                            a piece made since (or frames passed over): appended, see cut() */
+ *    C file cut [piece]                            a piece made since (or frames passed over): appended, see cut()
+ *    U file                                        cut by noMore(), no LIST since: kept on the card (done()) */
 class Mirror(private val dir: File) {
     companion object {
         const val LIST_MAX = 64
@@ -142,7 +143,7 @@ class Mirror(private val dir: File) {
     }
 
     class F(var closed: Boolean = false, var size: Long = -1, var cut: Long = 0, var tscan: Long = 0,
-            val pieces: MutableList<String> = mutableListOf(), var finished: Boolean = false)
+            val pieces: MutableList<String> = mutableListOf(), var finished: Boolean = false, var unsure: Boolean = false)
 
     val files = sortedMapOf<Long, F>()
     private val syncs = HashMap<Long, MutableList<LongArray>>()
@@ -156,6 +157,7 @@ class Mirror(private val dir: File) {
                 "F" -> files[p[1].toLong(16)] = F(p[2] == "1", p[3].toLong(), p[4].toLong(), p[5].toLong(),
                     p.getOrElse(7) { "" }.split(',').filter { it.isNotEmpty() }.toMutableList(), p[6] == "1")
                 "T" -> syncs.getOrPut(p[1].toLong(16)) { mutableListOf() } += longArrayOf(p[2].toLong(), p[3].toLong())
+                "U" -> files[p[1].toLong(16)]?.unsure = true
                 "C" -> if (p.size >= 3) files.getOrPut(p[1].toLong(16)) { F() }.apply { cut = p[2].toLong(); if (p.size > 3) pieces += p[3] }
             }
         }
@@ -164,7 +166,10 @@ class Mirror(private val dir: File) {
     private fun save() {
         val tmp = File(dir, "state.tmp")
         tmp.writeText(buildString {
-            for ((f, s) in files) append("F %08X %d %d %d %d %d %s\n".format(f, if (s.closed) 1 else 0, s.size, s.cut, s.tscan, if (s.finished) 1 else 0, s.pieces.joinToString(",")))
+            for ((f, s) in files) {
+                append("F %08X %d %d %d %d %d %s\n".format(f, if (s.closed) 1 else 0, s.size, s.cut, s.tscan, if (s.finished) 1 else 0, s.pieces.joinToString(",")))
+                if (s.unsure) append("U %08X\n".format(f))
+            }
             for ((c, ts) in syncs) for (t in ts) append("T %08X %d %d\n".format(c, t[0], t[1]))
         })
         tmp.renameTo(state)
@@ -196,18 +201,19 @@ class Mirror(private val dir: File) {
 
     /** What LIST says: files on the card with their sizes, and the one the stream goes on in (kept, listed or not). A
      *  LIST gives at most LIST_MAX files (firmware list()), so only a shorter one says that a file it leaves out is no
-     *  longer on the card (deleted elsewhere, another card): closed at what the mirror has. Returns the closed files
+     *  longer on the card (deleted elsewhere, another card): closed at what the mirror has. One that [failed] (the card
+     *  could not be read: its files are still there) says nothing of the files it leaves out. Returns the closed files
      *  whose size it changed: (file, was, now). */
-    fun listed(card: Map<Long, Long>, open: Long): List<Triple<Long, Long, Long>> {
+    fun listed(card: Map<Long, Long>, open: Long, failed: Boolean = false): List<Triple<Long, Long, Long>> {
         val changed = mutableListOf<Triple<Long, Long, Long>>()
         fun size(f: Long, s: F, n: Long) {
             if (s.closed && s.size >= 0 && s.size != n) changed += Triple(f, s.size, n)
             s.size = n
-            unsure -= f
+            s.unsure = false
         }
         for ((f, n) in card) files.getOrPut(f) { F() }.apply { size(f, this, n); closed = f != open }
         if (open >= 0) files.getOrPut(open) { F() }.closed = false
-        if (card.size < LIST_MAX) for ((f, s) in files) if (f !in card && f != open) { s.closed = true; size(f, s, have(f)) }
+        if (!failed && card.size < LIST_MAX) for ((f, s) in files) if (f !in card && f != open) { s.closed = true; size(f, s, have(f)) }
         save()
         return changed
     }
@@ -229,12 +235,10 @@ class Mirror(private val dir: File) {
         if (s.size <= have(f)) return null
         val was = s.size
         s.size = have(f)
-        unsure += f
+        s.unsure = true
         save()
         return was
     }
-
-    private val unsure = HashSet<Long>()  // cut by noMore(), no LIST since: every session's first LIST comes before a DELETE
 
     private fun bytes(f: Long, from: Long, max: Long = Long.MAX_VALUE): ByteArray = if (!bin(f).exists()) ByteArray(0) else RandomAccessFile(bin(f), "r").use { r ->
         r.seek(from); ByteArray(minOf(r.length() - from, max).toInt()).also { r.readFully(it) }
@@ -326,7 +330,7 @@ class Mirror(private val dir: File) {
     /** Closed files the mirror has whole (as the last LIST says: none cut by noMore() since), all turned into pieces,
      *  the pieces uploaded (gone from `out`): the card may delete them. */
     fun done(out: File): List<Long> = files.filter { (f, s) ->
-        s.closed && s.finished && s.size <= have(f) && f !in unsure && s.pieces.none { File(out, "$it.ogg").exists() || File(out, "$it.part").exists() }
+        s.closed && s.finished && s.size <= have(f) && !s.unsure && s.pieces.none { File(out, "$it.ogg").exists() || File(out, "$it.part").exists() }
     }.keys.toList()
 
     /** None of the pieces it cut that start before [until] is still in [out] waiting to go up. With [until] where LIVE

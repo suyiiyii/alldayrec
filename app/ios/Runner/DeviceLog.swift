@@ -125,11 +125,11 @@ enum DeviceLog {
 
   /// As app, only when `fields` differ from the ones this install last logged as `kind` for `device`: kept in prefs, so a
   /// new recording or launch with the same values adds no event.
-  static func appChanged(_ device: String, _ kind: String, _ text: String, fields: [String: Any]) {
+  static func appChanged(_ device: String, _ kind: String, _ text: String, level: String? = nil, fields: [String: Any]) {
     lock.lock(); let on = file != nil; lock.unlock()
     guard on, let j = try? JSONSerialization.data(withJSONObject: fields, options: .sortedKeys),
           changed(prefs, "logLast:\(kind):\(device)", String(decoding: j, as: UTF8.self)) else { return }
-    app(device, kind, text, fields: fields)
+    app(device, kind, text, level: level, fields: fields)
   }
 
   /// `value` is not the one kept under `key`: it is now.
