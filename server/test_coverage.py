@@ -1,6 +1,6 @@
 """GET /api/coverage: a device's stored audio as merged spans, at most 31 days at once, from its own tenant's store only,
 with first_bind: backfilled from its first connect event, else its first piece, set once and kept through an unbind and
-later binds."""
+later binds; with neither, now, not kept."""
 import datetime as dt
 import tempfile
 from pathlib import Path
@@ -47,7 +47,7 @@ def test_spans_merged_and_clipped():
 def test_range_capped():
     db.open_db(Path(tempfile.mkdtemp()) / "t.db")
     assert get(DEV, T0, T0 + 31 * DAY)["spans"] == []
-    for since, until in ((T0, T0 + 31 * DAY + 1), (T0, T0), (T0, T0 - 1)):
+    for since, until in ((T0, T0 + 31 * DAY + 1), (T0, T0), (T0, T0 - 1), (10**19, 10**19 + 5), (-(2**63), -(2**63) + 5)):
         with pytest.raises(HTTPException) as e:
             get(DEV, since, until)
         assert e.value.status_code == 400
@@ -73,6 +73,9 @@ def test_first_bind_backfill_and_kept():
     assert get("LR-X1-0002", T0, T0 + DAY)["first_bind"] == T0 - 4 * DAY
     before = int(dt.datetime.now().timestamp() * 1000)
     assert get("LR-X1-0003", T0, T0 + DAY)["first_bind"] >= before, "nothing of it yet: now"
+    assert db.kv("first_bind:LR-X1-0003") is None, "now is not kept"
+    anyio.run(device_log_upload, "LR-X1-0003", [app(7, T0 - 6 * DAY, "connect")])  # its connect batch, sent after the GET
+    assert get("LR-X1-0003", T0, T0 + DAY)["first_bind"] == T0 - 6 * DAY
 
 
 def test_other_tenant_sees_nothing(tmp_path):

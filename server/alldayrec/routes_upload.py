@@ -178,10 +178,13 @@ async def device_log(device: str, since: str, until: str | None = None):
 @router.get("/api/coverage")
 async def coverage(device: str, since: int, until: int):
     """What of a device's audio the server has in [since, until) (unix ms, at most 31 days): `spans`, its pieces merged
-    into [from, to) (audio.coverage), and `first_bind` (unix ms, db.first_bind). A phone that binds the recorder later
-    sends only what is missing from first_bind on, whichever phone sent the rest; a phone that never asks works as before."""
-    if not 0 < until - since <= 31 * 86400_000:
-        raise HTTPException(400, "since to until: more than 0, at most 31 days")
+    into [from, to) (audio.coverage; silence a trim dropped is a gap, so a phone may send it again, harmless: the server
+    goes by time and does not transcribe it twice), and `first_bind` (unix ms, db.first_bind). A phone that binds the
+    recorder later sends only what is missing from first_bind on, whichever phone sent the rest; a phone that never asks
+    works as before. A trimmed stretch sent again was transcribed already (processed_audio), so no late job takes it
+    again; only its bytes are kept again."""
+    if not (0 <= since and until <= 1 << 62 and 0 < until - since <= 31 * 86400_000):
+        raise HTTPException(400, "since to until: unix ms, more than 0, at most 31 days")
     spans = await anyio.to_thread.run_sync(audio.coverage, device, since, until, limiter=threads.DB)
     return {"first_bind": db.first_bind(device), "spans": spans}
 
