@@ -304,6 +304,7 @@ String nativeText(BuildContext context, Object? v) {
     'beanWifiBackground' => l.beanWifiBackground,
     'beanWifiNoJoin' => l.beanWifiNoJoin,
     'beanWifiJoinLate' => l.beanWifiJoinLate,
+    'beanWifiOff' => l.beanWifiOff,
     'beanWifiNoSocket' => l.beanWifiNoSocket,
     'beanWifiNoAnswer' => l.beanWifiNoAnswer,
     'beanWifiBusy' => l.beanWifiBusy,

@@ -155,7 +155,9 @@ final class FakeBean: BeanIo {
       push(0x2E01, Bean.pub(keys) + s)
     case 0x0101: push(0x0101, info())
     case 0x1A05:  // 192.168.43.1:443 (ws/soundcore's capture); dropOnWifi: BLE goes before the answer
-      if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) } else if let hotspot { push(0x1A05, hotspot) }
+      let name = String(decoding: p[1..<(1 + Int(p[0]))], as: UTF8.self)
+      if dropOnWifi { script.insert({ throw BeanSync.Gone("dropped for the hotspot") }, at: 0) }
+      else if !ssids.insert(name).inserted { push(0x1A05, []) } else if let hotspot { push(0x1A05, hotspot) }
     case 0x1A02:  // dropOnWifiOff: BLE goes before the answer, so many times
       if dropOnWifiOff > 0 { dropOnWifiOff -= 1; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
     case 0x01A6: push(0x01A6, [])
@@ -213,6 +215,7 @@ final class FakeBean: BeanIo {
   var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0, dropOnList = false
   var onSend: (Int) -> Void = { _ in }  // after the bean's answer to each command
   var hotspot: [UInt8]? = [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]  // 1A/05's answer (nil: none)
+  var ssids: Set<String> = []  // the names 1A/05 had: a repeated one gets an empty answer (Bean.wifiOn)
   var battery: UInt8 = 7  // 01/01's level: 7 is 80%
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
@@ -846,7 +849,7 @@ for drops in [1, BeanSync.tries] {
 
 /// Over Wi-Fi units came, then none, and none for the rest of that hotspot whatever is asked (11-23: the phone still on it,
 /// the same socket's ask unanswered): 10 s on, the hotspot off (1A/02) and a
-/// new one asked for (1A/05, the same name) in the next session, where the rest comes over Wi-Fi.
+/// new one asked for (1A/05, a new name) in the next session, where the rest comes over Wi-Fi.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -876,7 +879,7 @@ do {
   check(again.description.contains("都取到了"), true, again.description)
   let cmds = bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }
   check(cmds.firstIndex(of: 0x1A02)! < cmds.firstIndex(of: 0x1A05)!, true, "the old hotspot off before the new one")
-  check(bean.joins.count, 2); check(bean.joins[0] == bean.joins[1], true, "the tap's name and password again: iOS asks nothing")
+  check(bean.joins.count, 2); check(bean.joins[0].0 != bean.joins[1].0, true, "a new name")
   check(bean.logFields.last { $0["reason"] != nil && $0["reopens"] != nil }?["reason"] as? String, "reopen")
   check(bean.transfers, [[a, 0, 0], [a, 2000, 0]], "the rest from where it stopped, over the new hotspot")
   check(sync.wifiNote == nil, true, "units came: no failure for the page")
@@ -894,8 +897,17 @@ do {
   check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "all"], "Bluetooth back")
 }
 
-/// A join given up on a hotspot up 30 s (BeanWifi.open; 11-23 22:29: the person's 加入 at 74 s, no try after joined): a
-/// new hotspot of the same name and password next, the rest over it; `tries` such, then BLE, the page saying why.
+/// BeanWifi.open()'s tries iOS said joined, the phone not on the hotspot, as they came (apply ms, ms from the hotspot up
+/// to iOS's answer): Wi-Fi off (11-11 16:36, 16:38) ends it at once; 加入 tapped at 72 s (11-23 22:29) gives up on the
+/// hotspot; 加入 in time and the tries failing anyway (11-11 14:10, tries 3-4 past 30 s by the waits) go on to all 4.
+check([(0, 15, 5_015), (0, 8, 5_008)].map { Bean.joinMissed($0.0, applied: $0.1, answered: $0.2) }, ["beanWifiOff", "beanWifiOff"])
+check(Bean.joinMissed(0, applied: 72_157, answered: 77_167), "beanWifiJoinLate")
+check([(0, 5_769, 10_778), (1, 5_067, 27_956), (2, 4_157, 46_225), (3, 3_169, 67_505)].map {
+  Bean.joinMissed($0.0, applied: $0.1, answered: $0.2) }, [String?](repeating: nil, count: 4), "11-11 14:10: the 4 tries, beanWifiNoJoin")
+
+/// 加入 tapped late (BeanWifi.open(): beanWifiJoinLate): a new hotspot, of a new name (the bean opens none of a repeated
+/// one), the rest over it, the page told nothing meanwhile; `tries` such, then BLE and the page says why. Wi-Fi off
+/// (beanWifiOff) or tries all failed in time (beanWifiNoJoin): no new hotspot, the page says why.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -904,12 +916,13 @@ do {
   bean.onTransfer = { file, from, _ in
     bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
   }
-  let late = Bean.Fail("join: not on the hotspot after 1 tries, 30 s", note: "beanWifiJoinLate")
+  let late = Bean.Fail("join: answered 77 s after the hotspot opened", note: "beanWifiJoinLate")
   bean.joinFails = [late]
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   bean.script = Array(repeating: {}, count: 60)
   _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(sync.wifiStep?["step"] as? String, "reopen", "not over: a new hotspot next")
+  check(sync.wifiNote == nil, true, "reopening: no failure for the page yet")
   check(bean.transfers.count, 0)
   bean.script = Array(repeating: {}, count: 60)
   let n = bean.sent.count
@@ -917,21 +930,31 @@ do {
   check(again.description.contains("都取到了"), true, again.description)
   let cmds = bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }
   check(cmds.firstIndex(of: 0x1A02)! < cmds.firstIndex(of: 0x1A05)!, true, "the old hotspot off before the new one")
-  check(bean.joins.count, 2); check(bean.joins[0] == bean.joins[1], true, "the same name and password: iOS asks nothing")
+  check(bean.joins.count, 2); check(bean.joins[0].0 != bean.joins[1].0, true, "a new name")
   check(sync.wifiNote == nil, true, "joined after all: no failure for the page")
   check(sync.wifiStep?["end"] as? String, "all")
-  // a new tap: a new name; late on every hotspot: `tries` new ones, then the page says why
+  // late on every hotspot: `tries` new ones, the page told nothing till the last
   bean.list(a + 100, 60_000); bean.wifiAsk = true
   bean.joinFails = Array(repeating: late, count: 1 + BeanSync.tries)
-  for _ in 0...BeanSync.tries {
+  for i in 0...BeanSync.tries {
     bean.script = Array(repeating: {}, count: 60)
     _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    if i < BeanSync.tries { check(sync.wifiNote == nil, true, "reopen \(i + 1): no failure for the page yet") }
   }
   check(bean.joins.count, 3 + BeanSync.tries, "the tap's hotspot and `tries` new ones")
-  check(bean.joins[2].0 != bean.joins[1].0, true, "a new tap, a new name")
-  check(Set(bean.joins[2...].map { $0.0 }).count, 1, "one name all the tap")
+  check(Set(bean.joins.map { $0.0 }).count, bean.joins.count, "a new name each")
   check(sync.wifiNote?["code"] as? String, "beanWifiJoinLate")
   check(sync.wifiStep?["end"] as? String, "fail")
+  for code in ["beanWifiOff", "beanWifiNoJoin"] {
+    bean.list(a + 200, 60_000); bean.wifiAsk = true
+    bean.joinFails = [Bean.Fail("join: \(code)", note: code)]
+    let joins = bean.joins.count
+    bean.script = Array(repeating: {}, count: 60)
+    _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(bean.joins.count, joins + 1, code)
+    check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["back", "fail"], "\(code): no new hotspot")
+    check(sync.wifiNote?["code"] as? String, code)
+  }
 }
 
 /// A bean that stops on every hotspot: `tries` new ones since the tap, then the fast transfer ends and BLE reads the

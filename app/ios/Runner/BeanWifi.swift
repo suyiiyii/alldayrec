@@ -1,5 +1,5 @@
 // The Feishu recorder bean's Wi-Fi fast transfer (#431): its hotspot joined (NEHotspotConfiguration: iOS asks the
-// person once a tap, the name being new each tap), then a WebSocket over TLS to the bean, the one certificate the bean
+// person each time, the name being new each time), then a WebSocket over TLS to the bean, the one certificate the bean
 // has pinned (expired and not for its address: only for this endpoint, nothing else trusts it). Requests go as hex text,
 // answers come as binary 09 FF frames (ws/soundcore wifi.py, 0BSD; Eliqi797/open-feishu-recording-bean
 // PinnedRecorderLink.swift, MIT, for the endpoint, the pin, the keep-alive and the request headers; see
@@ -57,14 +57,6 @@ final class BeanWifi {
     var away: Int64 = 0  // this fast transfer's waits for the app to come to the front, all of them
     for (n, wait) in [0.0, 2, 4, 8].enumerated() {
       if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-      // a try that failed with the hotspot 30 s up: no later try on it joined (11-10 to 11-23 iPhone: 0 of 13 begun after
-      // 40 s, 23 of 23 joins begun by 27 s; 11-23 22:29 the person's 加入 came at 74 s, then 4 of 4 failed): a new
-      // hotspot of the same name (Bean.wifi(); iOS asks nothing again for it) does better than more of the same
-      if n > 0 && BeanWifi.mono() - t0 >= 30_000 {
-        log("bean_wifi_fail", "热点开了 \((BeanWifi.mono() - t0) / 1000) s 还没加入（\(n) 次），这个热点不再试", "warn",
-            ["step": "join", "tries": n, "ms": BeanWifi.mono() - t0].merging(BeanWifi.context()) { $1 })
-        throw Bean.Fail("join: not on the hotspot after \(n) tries, 30 s", note: "beanWifiJoinLate")
-      }
       onStep("join", n + 1)
       // iOS joins nothing for an app in the background (14 applicationIsNotInForeground: 11-11 14:00, gone 8 s before and
       // back 32 s later): a minute in all for it to come back, the hotspot open meanwhile. Inactive (iOS's own join
@@ -113,6 +105,14 @@ final class BeanWifi {
         log("bean_wifi_retry", "iOS 说加入了（\(applied) ms），之后 10 s 手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次）", "warn",
             ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
+        let answered = t1 + applied - t0
+        if let note = Bean.joinMissed(n, applied: applied, answered: answered) {  // Wi-Fi off, or 加入 tapped late
+          let off = note == "beanWifiOff"
+          log("bean_wifi_fail", off ? "iOS \(applied) ms 就说加入了、什么也没问：手机的 Wi-Fi 关着，不再试" :
+              "热点开了 \(answered / 1000) s 才加入（点「加入」晚了），这个热点不再试", "warn",
+              ["step": "join", "why": off ? "wifi_off" : "late", "ms": answered, "apply_ms": applied, "tries": n + 1].merging(BeanWifi.context()) { $1 })
+          throw Bean.Fail(off ? "join: Wi-Fi off" : "join: answered \(answered / 1000) s after the hotspot opened", note: note)
+        }
       }
     }
     guard joinedOnce else {

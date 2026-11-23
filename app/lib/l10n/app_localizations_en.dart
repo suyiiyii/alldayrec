@@ -1139,7 +1139,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiJoinLate =>
-      'The last Wi‑Fi fast transfer failed: the phone was not on the bean\'s hotspot 30 s after it opened, and after that it does not get on; 3 new hotspots went the same way; back on Bluetooth. Tap again and answer Join right away';
+      'The last Wi‑Fi fast transfer failed: Join was answered late, and 3 new hotspots from the bean went the same way; back on Bluetooth. Tap again and answer Join as soon as it is asked';
+
+  @override
+  String get beanWifiOff =>
+      'The last Wi‑Fi fast transfer failed: the phone\'s Wi‑Fi is off, so it cannot join the bean\'s hotspot; turn Wi‑Fi on, then tap again';
 
   @override
   String get beanWifiNoSocket =>
@@ -1197,7 +1201,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String wifiStepReopen(Object n, Object total) {
-    return 'Asking the bean to open its hotspot again ($n of $total)…';
+    return 'Asking the bean for a new hotspot ($n of $total); answer Join right away when asked…';
   }
 
   @override

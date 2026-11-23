@@ -1967,8 +1967,14 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiJoinLate.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传没成：豆子的热点开了 30 多秒手机还没加入，之后就加不进去了，重开了 3 次也一样；已回到蓝牙。再点一次，系统问要不要加入时马上点「加入」'**
+  /// **'上次 Wi‑Fi 快传没成：系统问要不要加入时点晚了，豆子换了 3 次新热点也没加入；已回到蓝牙。再点一次，弹框出来就马上点「加入」'**
   String get beanWifiJoinLate;
+
+  /// No description provided for @beanWifiOff.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没成：手机的 Wi‑Fi 关着，加入不了豆子的热点；先打开 Wi‑Fi，再点一次'**
+  String get beanWifiOff;
 
   /// No description provided for @beanWifiNoSocket.
   ///
@@ -2057,7 +2063,7 @@ abstract class AppLocalizations {
   /// No description provided for @wifiStepReopen.
   ///
   /// In zh, this message translates to:
-  /// **'正在让录音豆重开热点（第 {n}/{total} 次）…'**
+  /// **'正在让录音豆换个新热点（第 {n}/{total} 次），系统问要不要加入时请马上点「加入」…'**
   String wifiStepReopen(Object n, Object total);
 
   /// No description provided for @wifiStepReopened.

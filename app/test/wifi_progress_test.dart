@@ -50,14 +50,14 @@ void main() {
         {'step': 'transfer', 'reopen': 3}, {'step': 'back', 'end': 'part', 'reopen': 3}, {'step': 'transfer', 'reopen': 0},
       ]) line(zh, w)
     ], [
-      '正在让录音豆重开热点（第 1/3 次）…',
+      '正在让录音豆换个新热点（第 1/3 次），系统问要不要加入时请马上点「加入」…',
       '正在让录音豆开热点… | 第 1/5 步 | 第 1 次重开',
       '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）… | 第 2/5 步 | 第 2 次重开',
       '正在传输 | 21.30 MB / 66.3 MB | 第 4/5 步 | 第 3 次重开',
       '正在连回蓝牙… | 第 5/5 步 | 第 3 次重开',
       '正在传输 | 21.30 MB / 66.3 MB | 第 4/5 步',
     ]);
-    expect(line(en, {'step': 'reopen', 'reopen': 2}), 'Asking the bean to open its hotspot again (2 of 3)…');
+    expect(line(en, {'step': 'reopen', 'reopen': 2}), 'Asking the bean for a new hotspot (2 of 3); answer Join right away when asked…');
     expect(line(en, {'step': 'join', 'try': 2, 'reopen': 1}), 'Joining the bean\'s Wi‑Fi… (try 2) | Step 2 of 5 | hotspot reopened (1)');
     expect(line(en, {'step': 'socket', 'try': 2}), 'Connecting to the bean… (try 2) | Step 3 of 5');
     expect(line(en, {'step': 'transfer'}), 'Transferring | 21.30 MB / 66.3 MB | Step 4 of 5');
@@ -236,7 +236,7 @@ void main() {
     }
     expect(seen, [
       '正在传输 | 第 4/5 步',
-      '正在让录音豆重开热点（第 1/3 次）… | ',
+      '正在让录音豆换个新热点（第 1/3 次），系统问要不要加入时请马上点「加入」… | ',
       '正在让录音豆开热点… | 第 1/5 步 · 第 1 次重开',
       '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）… | 第 2/5 步 · 第 1 次重开',
       '正在连接录音豆… | 第 3/5 步 · 第 1 次重开',
