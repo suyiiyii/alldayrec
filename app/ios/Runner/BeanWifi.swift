@@ -99,10 +99,20 @@ final class BeanWifi {
         joinedOnce = true
         break
       } else {
+        // iOS's 「无法加入网络」: its answer came with the app leaving the front, 40–110 ms after (each such try 11-10 to
+        // 11-23, no join), the phone's path not changed. Its address comes 4–5 s after a join: 10 s is enough
         let other = BeanWifi.wifiAddress() != nil
         log("bean_wifi_retry", "iOS 说加入了（\(applied) ms），之后 10 s 手机没拿到热点的地址，当前 Wi-Fi \(other ? "是别的网络" : "没有")（第 \(n + 1) 次）", "warn",
             ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
+        let answered = t1 + applied - t0
+        if let note = Bean.joinMissed(n, applied: applied, answered: answered) {  // iOS asked nothing, or 加入 tapped late
+          let noAsk = note == "beanWifiNoAsk"
+          log("bean_wifi_fail", noAsk ? "iOS \(applied) ms 就说加入了、什么也没问，手机没连上热点：再试也一样，不再试" :
+              "热点开了 \(answered / 1000) s 才加入（点「加入」晚了），这个热点不再试", "warn",
+              ["step": "join", "why": noAsk ? "no_ask" : "late", "ms": answered, "apply_ms": applied, "tries": n + 1].merging(BeanWifi.context()) { $1 })
+          throw Bean.Fail(noAsk ? "join: iOS answered in \(applied) ms, asking nothing" : "join: answered \(answered / 1000) s after the hotspot opened", note: note)
+        }
       }
     }
     guard joinedOnce else {

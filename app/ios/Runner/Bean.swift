@@ -99,6 +99,17 @@ enum Bean {
   static func wifiOff() -> [UInt8] { build(0x1A, 0x02, []) }
   /// A 1A/05 answer's address, a.b.c.d:port; nil: no hotspot.
   static func endpoint(_ p: [UInt8]) -> String? { p.count < 6 ? nil : "\(p[3]).\(p[2]).\(p[1]).\(p[0]):\(u16(p, 4))" }
+  /// A try iOS said joined and the phone not on the hotspot (BeanWifi.open()): `n` the try (0: the one iOS asks the
+  /// person of), `applied` ms iOS took, `answered` ms from the hotspot up to its answer. 11-10 to 11-23 iPhone: iOS took
+  /// 3.1 s or more each try, but 7-15 ms asking nothing at 11-11 16:36, 16:38 (Wi-Fi on, on another network; why not
+  /// known): beanWifiNoAsk, no more tries. Every
+  /// join begun by 27 s went, none of 13 begun after 40 s (the person's 加入 at 52-114 s: 11-19 23:50, 11-23 22:29,
+  /// 22:33): the first answer 30 s on is beanWifiJoinLate, a new hotspot (BeanSync.wifi()). nil: the next try (11-11
+  /// 14:10, 加入 at 6 s, tries 3-4 past 30 s only by the waits between: 4 tries, beanWifiNoJoin).
+  static func joinMissed(_ n: Int, applied: Int64, answered: Int64) -> String? {
+    if applied < 1000 { return "beanWifiNoAsk" }
+    return n == 0 && answered >= 30_000 ? "beanWifiJoinLate" : nil
+  }
   /// Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable).
   static func delete(_ file: Int64, _ confirmed: Set<Int64>) throws -> [UInt8] {
     guard confirmed.contains(file) else { throw Fail("file \(file) is not whole on the server: never deleted") }
@@ -415,7 +426,7 @@ final class BeanSync {
   private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
   private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at BeanSync.tries (wifiOff())
   private var wifiUnits = 0, wifiDupes = 0  // over Wi-Fi: units come, and those the phone had already
-  private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file, since the last tap (wifiLoop())
+  private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file or a late join, since the last tap
   private var wifiGot = 0, wifiTook: Int64 = 0  // since the last tap, all its hotspots: units over Wi-Fi, ms they took (wifiEnd())
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
@@ -606,7 +617,7 @@ final class BeanSync {
   private func wifi() throws {
     if recording { return wifiRecording() }
     let battery = hw["battery"] as? Int
-    log("bean_wifi_start", "开始 Wi-Fi 快传（\(wifiReopens > 0 ? "断流后重开热点，第 \(wifiReopens) 次" : "手动")）：" +
+    log("bean_wifi_start", "开始 Wi-Fi 快传（\(wifiReopens > 0 ? "重开热点，第 \(wifiReopens) 次" : "手动")）：" +
         "电量 \(battery.map { "\($0)%" } ?? "?")，没在录音，积压 \(owed["backlog_s"] ?? 0) s",
         fields: ["reason": wifiReopens > 0 ? "reopen" : "manual", "reopens": wifiReopens, "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
                  "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
@@ -672,7 +683,9 @@ final class BeanSync {
       reader = Bean.Reader(); inbox = []
       why = try wifiLoop()
     } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)"; note = (error as? Bean.Fail)?.note ?? "beanWifiFailed" }
-    if wifiUnits == 0, let code = note ?? Bean.wifiEnds[why] { wifiNote = ["code": code, "detail": why] }
+    // joined late (BeanWifi.open()): a new hotspot, the page told nothing till they are all done
+    if note == "beanWifiJoinLate" && wifiReopens < BeanSync.tries { wifiReopens += 1; wifiNext = true }
+    else if wifiUnits == 0, let code = note ?? Bean.wifiEnds[why] { wifiNote = ["code": code, "detail": why] }
     if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
     overWifi = false; shrunk = []  // BLE's own rate from here
     io.wifiLeave()
