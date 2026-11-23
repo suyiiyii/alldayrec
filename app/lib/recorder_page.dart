@@ -159,7 +159,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final store = hw['store'] as int?, free = (hw['free_kb'] as num?) ?? 0, total = (hw['total_kb'] as num?) ?? 0;
     final battery = hw['battery'] as int?;
     final syncDone = (st['syncDone'] as num?) ?? 0, syncTotal = (st['syncTotal'] as num?) ?? 0, syncLive = (st['syncLive'] as num?) ?? 0;
-    final syncing = recording && syncTotal > 0;
+    final syncing = recording && catchingUp(st);  // as the top bar's chip
     final lent = store == -16;
     final dfuState = st['dfu'] ?? r['dfu'], dfu = dfuState == null ? null : nativeText(context, dfuState);
     final listen = st['listen'] as List?;  // listening on this phone: its lines
@@ -285,13 +285,14 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
-              Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change
-                  style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
+              if (syncTotal > 0)  // else a bean's file read from behind: its length in time, below
+                Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change
+                    style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
             ]),
             const SizedBox(height: 10),
             LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
-            Text(bean ? l.beanSyncHelp : live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
+            Text(syncTotal == 0 ? beanOwed(l, hw) : bean ? l.beanSyncHelp : live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
                 style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           ] else
             Row(children: [
