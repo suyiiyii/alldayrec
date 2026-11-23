@@ -1192,6 +1192,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get wifiStepBack => 'Reconnecting over Bluetooth…';
 
   @override
+  String wifiStepReopen(Object n, Object total) {
+    return 'The transfer stopped; asking the bean to open its hotspot again ($n of $total)…';
+  }
+
+  @override
+  String wifiStepReopened(Object n) {
+    return 'hotspot reopened ($n)';
+  }
+
+  @override
   String wifiStepOf(Object n, Object total) {
     return 'Step $n of $total';
   }
@@ -1204,6 +1214,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String wifiEndPart(Object audio, Object took) {
     return 'Stopped half way: $audio of recording in $took; Bluetooth fetches the rest';
+  }
+
+  @override
+  String wifiEndReopens(Object n, Object audio, Object took) {
+    return 'Hotspot reopened $n times: Wi‑Fi got $audio of recording in $took; Bluetooth fetches the rest';
   }
 
   @override

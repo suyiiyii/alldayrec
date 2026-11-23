@@ -366,8 +366,9 @@ final class BeanSync {
   /// the join that a later one got past; nil once one starts
   @Shared var wifiNote: [String: Any]?
   /// Where the fast transfer asked for last is, for the device page (recorder_status.dart): step asked, hotspot, join and socket
-  /// (with its try), transfer, then back (the way back to BLE) and done, with how it ended (end: all, part, none, fail; s
-  /// of audio it got, ms it took); nil before the first
+  /// (with its try), transfer, reopen (a new hotspot asked for after a stop: wifiLoop()), then back (the way back to BLE)
+  /// and done, with how it ended (end: all, part, none, fail; s of audio it got, ms it took, all the tap's hotspots); each
+  /// with the hotspot anew it is at (reopen: 0 the tap's own, wifiAt()); nil before the first
   @Shared var wifiStep: [String: Any]?
   var recording: Bool {
     get { hw["recording"] as? Bool == true }
@@ -412,6 +413,7 @@ final class BeanSync {
   private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at BeanSync.tries (wifiOff())
   private var wifiUnits = 0, wifiDupes = 0  // over Wi-Fi: units come, and those the phone had already
   private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file, since the last tap (wifiLoop())
+  private var wifiGot = 0, wifiTook: Int64 = 0  // since the last tap, all its hotspots: units over Wi-Fi, ms they took (wifiEnd())
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
@@ -493,8 +495,9 @@ final class BeanSync {
       // every 5 s, each piece and the state written) would stay until it ends (Ble.swift's session loop, 10-06)
       try autoreleasepool {
         if io.wifiAsked() {  // a transfer cannot be stopped but by the link going: Wi-Fi first in the next session
+          wifiReopens = 0; wifiGot = 0; wifiTook = 0
           if recording { wifiRecording() } else {
-            wifiNext = true; wifiReopens = 0
+            wifiNext = true
             if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
           }
         }
@@ -606,20 +609,20 @@ final class BeanSync {
     if needList {  // a file just closed: its length
       do { listing = try list() } catch let e as Gone {  // the page's step ends, not stuck at asked with its button off
         log("bean_wifi_fail", "读文件列表时蓝牙断了（\(e)），没开热点", "warn", ["step": "list"])
-        wifiNote = ["code": "beanWifiGone"]; wifiStep = ["step": "done", "end": "fail"]
+        wifiNote = ["code": "beanWifiGone"]; wifiEnd("done", "fail")
         throw e
       }
     }
     owe()
     if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
       log("bean_wifi_skip", "没有积压，不开热点", fields: ["battery": battery ?? NSNull(), "recording": recording])
-      wifiStep = ["step": "done", "end": "none"]
+      wifiEnd("done", "none")
       return
     }
     if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
       log("bean_wifi_fail", "电量 \(battery)% 低于 30%，不开热点，接着用蓝牙", "warn", ["step": "battery", "battery": battery])
       wifiNote = ["code": "beanWifiLowBattery", "battery": battery]
-      wifiStep = ["step": "done", "end": "fail"]
+      wifiEnd("done", "fail")
       return
     }
     wifiBattery = battery ?? NSNull()
@@ -627,19 +630,19 @@ final class BeanSync {
     for i in r.indices { r[i] = UInt8.random(in: 0...255) }
     let ssid = "LR-" + Bean.hex(Array(r[0..<4])), password = Bean.hex(Array(r[4...]))
     let t0 = io.monotonicNow()
-    wifiStep = ["step": "hotspot"]
+    wifiAt(["step": "hotspot"])
     let a: Bean.Frame
     do { a = try ask(Bean.wifiOn(ssid, password), 0x1A05, 45_000) }
     catch let e as Gone {  // the bean dropped BLE for its hotspot before the answer came: not a link lost (a stop by hand holds)
       wifiOpen = true
       log("bean_wifi_fail", "问热点时蓝牙先断了（\(e)），没拿到地址，回蓝牙", "warn", ["step": "hotspot"])
       wifiNote = ["code": "beanWifiNoHotspot"]
-      wifiStep = ["step": "back", "end": "fail"]  // the next session's wifiOff() says done
+      wifiEnd("back", "fail")  // the next session's wifiOff() says done
       throw Again(description: "BLE went while asking for the hotspot")
     } catch let e as Again { throw e }
     catch {
       log("bean_wifi_fail", "豆子没开热点（\(error)），接着用蓝牙", "warn", ["step": "hotspot"])
-      wifiNote = ["code": "beanWifiNoHotspot"]; wifiStep = ["step": "done", "end": "fail"]
+      wifiNote = ["code": "beanWifiNoHotspot"]; wifiEnd("done", "fail")
       return
     }
     wifiOpen = true
@@ -647,7 +650,7 @@ final class BeanSync {
     guard let at = Bean.endpoint(a.payload) else {
       log("bean_wifi_fail", "豆子没开热点（回了 \(Bean.hex(a.payload))，状态 \(a.status)），接着用蓝牙", "warn",
           ["step": "hotspot", "ms": opened, "reply": Bean.hex(a.payload), "status": a.status])
-      wifiNote = ["code": "beanWifiNoHotspot"]; wifiStep = ["step": "done", "end": "fail"]
+      wifiNote = ["code": "beanWifiNoHotspot"]; wifiEnd("done", "fail")
       return
     }
     log("bean_wifi_hotspot", "豆子开了热点 \(ssid)（\(opened) ms）：回复 \(Bean.hex(a.payload))，地址 \(at)",
@@ -655,12 +658,12 @@ final class BeanSync {
     overWifi = true; wifiUnits = 0; wifiDupes = 0
     files.values.forEach { $0.wifiTries = 0 }
     state = ["code": "beanWifi"]
-    wifiStep = ["step": "join", "try": 1]  // io.wifiJoin says its tries and the socket's
+    wifiAt(["step": "join", "try": 1])  // io.wifiJoin says its tries and the socket's
     var t1 = io.monotonicNow(), why = "", rollover = false, note: String?
     do {
       try io.wifiJoin(ssid, password, a.payload)
       t1 = io.monotonicNow()
-      wifiStep = ["step": "transfer"]
+      wifiAt(["step": "transfer"])
       reader = Bean.Reader(); inbox = []
       why = try wifiLoop()
     } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)"; note = (error as? Bean.Fail)?.note ?? "beanWifiFailed" }
@@ -676,7 +679,9 @@ final class BeanSync {
     log("bean_wifi_done", "Wi-Fi 快传结束（\(why)）：\(wifiUnits) 个单元（\(audio / 1000) s 音频，手机没有的 \(fresh) s，已有的 \(wifiDupes) 个），\(kb) KB，用时 \(ms / 1000) s，" +
         String(format: "%.0f KB/s，%.1f 倍实时", Double(kb) * 1000 / Double(ms), x) + "；上传队列还有 \(q) 块", wifiUnits == 0 ? "warn" : nil,
         ["why": why, "units": wifiUnits, "dupes": wifiDupes, "new_s": fresh, "kb": kb, "ms": ms, "kbps": Double(kb) * 1000 / Double(ms), "x": x, "queued": q])
-    wifiStep = ["step": "back", "end": wifiUnits == 0 ? "fail" : why == "都取到了" ? "all" : "part", "s": audio / 1000, "ms": ms]
+    if wifiUnits > 0 { wifiGot += wifiUnits; wifiTook += ms }
+    // a new hotspot next (wifiLoop()): not over yet, the page goes on (the next session's wifiOff() leaves it)
+    if wifiNext { wifiAt(["step": "reopen"]) } else { wifiEnd("back", wifiUnits == 0 ? "fail" : why == "都取到了" ? "all" : "part") }
     throw Again(description: "Wi-Fi transfer over: \(why)", naturalRollover: rollover)
   }
 
@@ -743,7 +748,17 @@ final class BeanSync {
   private func wifiRecording() {
     log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields: ["recording": true, "backlog_s": owed["backlog_s"] ?? 0])
     wifiNote = ["code": "beanWifiRecording"]
-    wifiStep = ["step": "done", "end": "fail"]
+    wifiEnd("done", "fail")
+  }
+
+  /// The device page's step (wifiStep), with the hotspot anew it is at since the tap (reopen: 0 the tap's own)
+  func wifiAt(_ step: [String: Any]) { wifiStep = step.merging(["reopen": wifiReopens]) { $1 } }
+
+  /// How the tap's fast transfer ended: all its hotspots' audio and time. One that got some ended all (nothing left) or
+  /// part, whatever the last hotspot did.
+  private func wifiEnd(_ step: String, _ end: String) {
+    wifiAt(["step": step, "end": wifiGot == 0 ? end : ["all", "none"].contains(end) ? "all" : "part",
+            "s": Int64(wifiGot) * Bean.frameMs / 1000, "ms": wifiTook])
   }
 
   /// After a fast transfer: the hotspot off, in case it is on still.

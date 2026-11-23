@@ -2048,6 +2048,18 @@ abstract class AppLocalizations {
   /// **'正在连回蓝牙…'**
   String get wifiStepBack;
 
+  /// No description provided for @wifiStepReopen.
+  ///
+  /// In zh, this message translates to:
+  /// **'传输中断，正在让录音豆重开热点（第 {n}/{total} 次）…'**
+  String wifiStepReopen(Object n, Object total);
+
+  /// No description provided for @wifiStepReopened.
+  ///
+  /// In zh, this message translates to:
+  /// **'第 {n} 次重开'**
+  String wifiStepReopened(Object n);
+
   /// No description provided for @wifiStepOf.
   ///
   /// In zh, this message translates to:
@@ -2065,6 +2077,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'停在半路：取回 {audio}录音，用时 {took}；剩下的由蓝牙接着取'**
   String wifiEndPart(Object audio, Object took);
+
+  /// No description provided for @wifiEndReopens.
+  ///
+  /// In zh, this message translates to:
+  /// **'热点重开了 {n} 次：Wi‑Fi 传了 {audio}录音，用时 {took}；剩下的改用蓝牙'**
+  String wifiEndReopens(Object n, Object audio, Object took);
 
   /// No description provided for @wifiEndNone.
   ///

@@ -766,7 +766,7 @@ do {
   check(bean.dropOnList, true, "the info that says it came")
   check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x05 }, false)
   check(sync.wifiNote?["code"] as? String, "beanWifiGone")
-  check(sync.wifiStep as? [String: String], ["step": "done", "end": "fail"])
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "fail"])
 }
 
 /// The bean answering no 1A/07 over Wi-Fi, tapped four times (#262 review P2-1): those misses are Wi-Fi's, not the
@@ -854,8 +854,13 @@ do {
   }
   bean.script = Array(repeating: {}, count: 60)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  var steps: [String] = []  // the device page's steps (wifiStep) and their hotspot anew, in order
+  func step() { steps.append("\(sync.wifiStep?["step"] as? String ?? "nil")/\(sync.wifiStep?["reopen"] as? Int ?? -1)") }
+  bean.onJoin = step
+  bean.onSend = { cmd in if cmd == 0x1A02 || cmd == 0x1A05 { step() } }
   let stop = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(stop.description.contains("10 s 没收到单元"), true, stop.description)
+  step()
   let stall = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_stall" }!]
   check(stall["seq"] as? Int64, 1999, "where it stopped")
   check(stall["reopen"] as? Bool, true, "a new hotspot next")
@@ -872,6 +877,16 @@ do {
   check(sync.wifiNote == nil, true, "units came: no failure for the page")
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
   check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+  step()
+  // #405 on #406: from the stop to the new hotspot not done (the page goes on, its buttons off), each step its reopen
+  check(steps, ["hotspot/0", "join/0", "reopen/1", "reopen/1", "hotspot/1", "join/1", "back/1"])
+  check(sync.wifiStep?["end"] as? String, "all")
+  check(sync.wifiStep?["s"] as? Int64, 60, "both hotspots' minute of audio")
+  let took = zip(bean.logs, bean.logFields).filter { $0.0.0 == "bean_wifi_done" }.compactMap { $0.1["ms"] as? Int64 }
+  check(took.count, 2); check(sync.wifiStep?["ms"] as? Int64, took.reduce(0, +), "both hotspots' time")
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "all"], "Bluetooth back")
 }
 
 /// A bean that stops on every hotspot: `tries` new ones since the tap, then the fast transfer ends and BLE reads the
@@ -889,11 +904,15 @@ do {
     else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
   }
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
-  for _ in 0...BeanSync.tries {
+  for n in 0...BeanSync.tries {
     bean.script = Array(repeating: {}, count: 60)
     let stop = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
     check(stop.description.contains("10 s 没收到单元"), true, stop.description)
+    // a new hotspot next, its number; the last: back, part, all four hotspots' audio (500 units each)
+    check("\(sync.wifiStep?["step"] as? String ?? "nil")/\(sync.wifiStep?["reopen"] as? Int ?? -1)", n < BeanSync.tries ? "reopen/\(n + 1)" : "back/\(BeanSync.tries)")
   }
+  check(sync.wifiStep?["end"] as? String, "part")
+  check(sync.wifiStep?["s"] as? Int64, Int64(500 * (1 + BeanSync.tries)) * Bean.frameMs / 1000)
   check(bean.joins.count, 1 + BeanSync.tries, "the tap's hotspot and `tries` new ones")
   check(bean.logFields.filter { $0["reopen"] as? Bool == true }.count, BeanSync.tries)
   check(bean.logFields.last { $0["reopen"] != nil }?["reopen"] as? Bool, false, "the last stop ends it")

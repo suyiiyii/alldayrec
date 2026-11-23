@@ -309,7 +309,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
     let w = BeanWifi(device: name, ssid: ssid, password: password)
-    w.onStep = { [weak self] step, n in self?.sync.wifiStep = ["step": step, "try": n] }
+    w.onStep = { [weak self] step, n in self?.sync.wifiAt(["step": step, "try": n]) }
     wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }

@@ -1143,6 +1143,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get wifiStepBack => '正在连回蓝牙…';
 
   @override
+  String wifiStepReopen(Object n, Object total) {
+    return '传输中断，正在让录音豆重开热点（第 $n/$total 次）…';
+  }
+
+  @override
+  String wifiStepReopened(Object n) {
+    return '第 $n 次重开';
+  }
+
+  @override
   String wifiStepOf(Object n, Object total) {
     return '第 $n/$total 步';
   }
@@ -1155,6 +1165,11 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String wifiEndPart(Object audio, Object took) {
     return '停在半路：取回 $audio录音，用时 $took；剩下的由蓝牙接着取';
+  }
+
+  @override
+  String wifiEndReopens(Object n, Object audio, Object took) {
+    return '热点重开了 $n 次：Wi‑Fi 传了 $audio录音，用时 $took；剩下的改用蓝牙';
   }
 
   @override

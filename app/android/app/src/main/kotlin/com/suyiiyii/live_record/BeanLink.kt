@@ -316,7 +316,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun wifiJoin(ssid: String, password: String, endpoint: ByteArray) {
             // the BLE link goes meanwhile (the bean drops it): its GONE waits in `notes` for the way back, which ends the session
             val w = BeanWifi(ssid, password, AndroidNet(ctx) { k, t, l, f -> log(k, t, l, f, null) }) { k, t, l, f -> log(k, t, l, f, null) }
-            w.onStep = { step, n -> sync.wifiStep = mapOf("step" to step, "try" to n) }
+            w.onStep = { step, n -> sync.wifiAt(mapOf("step" to step, "try" to n)) }
             wifi = w
             try { w.open(endpoint) } catch (e: Exception) { wifiLeave(); throw e }
         }

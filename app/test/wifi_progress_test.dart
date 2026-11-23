@@ -26,7 +26,7 @@ void main() {
     final zh = AppLocalizationsZh(), en = AppLocalizationsEn();
     String line(AppLocalizations l, Map w) {
       final s = wifiStepSpec(l, w, 21811, 67891)!;
-      return [s.text, ?s.bytes, if (s.n != null) l.wifiStepOf(s.n!, wifiSteps)].join(' | ');
+      return [s.text, ?s.bytes, if (s.n != null) l.wifiStepOf(s.n!, wifiSteps), ?s.reopen].join(' | ');
     }
     expect([
       for (final w in [
@@ -43,6 +43,22 @@ void main() {
       '正在传输 | 21.30 MB / 66.3 MB | 第 4/5 步',
       '正在连回蓝牙… | 第 5/5 步',
     ]);
+    // a new hotspot after the bean stopped sending (#406): its own step, then the steps again, each with its number
+    expect([
+      for (final w in [
+        {'step': 'reopen', 'reopen': 1}, {'step': 'hotspot', 'reopen': 1}, {'step': 'join', 'try': 1, 'reopen': 2},
+        {'step': 'transfer', 'reopen': 3}, {'step': 'back', 'end': 'part', 'reopen': 3}, {'step': 'transfer', 'reopen': 0},
+      ]) line(zh, w)
+    ], [
+      '传输中断，正在让录音豆重开热点（第 1/3 次）…',
+      '正在让录音豆开热点… | 第 1/5 步 | 第 1 次重开',
+      '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）… | 第 2/5 步 | 第 2 次重开',
+      '正在传输 | 21.30 MB / 66.3 MB | 第 4/5 步 | 第 3 次重开',
+      '正在连回蓝牙… | 第 5/5 步 | 第 3 次重开',
+      '正在传输 | 21.30 MB / 66.3 MB | 第 4/5 步',
+    ]);
+    expect(line(en, {'step': 'reopen', 'reopen': 2}), 'The transfer stopped; asking the bean to open its hotspot again (2 of 3)…');
+    expect(line(en, {'step': 'join', 'try': 2, 'reopen': 1}), 'Joining the bean\'s Wi‑Fi… (try 2) | Step 2 of 5 | hotspot reopened (1)');
     expect(line(en, {'step': 'socket', 'try': 2}), 'Connecting to the bean… (try 2) | Step 3 of 5');
     expect(line(en, {'step': 'transfer'}), 'Transferring | 21.30 MB / 66.3 MB | Step 4 of 5');
     expect(wifiStepSpec(zh, {'step': 'done', 'end': 'all'}, 0, 0), isNull);  // over: no step line
@@ -54,6 +70,11 @@ void main() {
     expect(wifiEndText(zh, {'end': 'none'}), '录音都在手机上了，不用快传');
     expect(wifiEndText(zh, {'end': 'fail'}), 'Wi‑Fi 快传没成，已回到蓝牙');
     expect(wifiEndText(en, {'end': 'all', 's': 2100, 'ms': 16400}), 'Done: 35 min of recording in 16 s');
+    // the three new hotspots used up: what Wi-Fi got, Bluetooth the rest; fewer, the usual half way
+    expect(wifiEndText(zh, {'end': 'part', 's': 40, 'ms': 41000, 'reopen': 3}), '热点重开了 3 次：Wi‑Fi 传了 40 秒录音，用时 41 秒；剩下的改用蓝牙');
+    expect(wifiEndText(en, {'end': 'part', 's': 40, 'ms': 41000, 'reopen': 3}),
+        'Hotspot reopened 3 times: Wi‑Fi got 40 s of recording in 41 s; Bluetooth fetches the rest');
+    expect(wifiEndText(zh, {'end': 'part', 's': 720, 'ms': 16000, 'reopen': 1}), '停在半路：取回 12 分钟录音，用时 16 秒；剩下的由蓝牙接着取');
     expect(wifiEndText(zh, null), isNull);
   });
 
@@ -193,13 +214,62 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a stop on Wi-Fi, a new hotspot (#406): never done meanwhile, buttons off, the whole tap summed up', (tester) async {
+    ListTile tile(String t) => tester.widget<ListTile>(find.ancestor(of: find.text(t), matching: find.byType(ListTile)));
+    List<String> texts() => tester.widgetList<Text>(find.byType(Text)).map((t) => t.data ?? '').toList();
+    await open(tester, at: {'step': 'transfer', 'reopen': 0}, locale: const Locale('zh'));
+    final seen = <String>[];
+    for (final w in <Map<String, Object?>>[
+      {'step': 'transfer', 'reopen': 0}, {'step': 'reopen', 'reopen': 1}, {'step': 'hotspot', 'reopen': 1},
+      {'step': 'join', 'try': 1, 'reopen': 1}, {'step': 'socket', 'try': 1, 'reopen': 1}, {'step': 'transfer', 'reopen': 1},
+      {'step': 'back', 'end': 'all', 's': 2100, 'ms': 30000, 'reopen': 1},  // both hotspots' 35 minutes and 30 s
+    ]) {
+      step = w;
+      calls.clear();
+      await tester.pump(fastEvery);
+      await tester.pump();
+      expect(count('progress'), 1, reason: '$w');  // read at 0.05 s throughout, the reopen too
+      expect(tile('Wi‑Fi 快传').onTap, isNull, reason: '$w');
+      expect(tile('解除绑定').onTap, isNull, reason: '$w');
+      final all = texts(), at = all.indexWhere((s) => s.startsWith('正在') || s.startsWith('传输中断'));
+      seen.add([all[at], all.skip(at + 1).firstWhere((s) => s.startsWith('第 ') || s.isEmpty)].join(' | '));  // the step, the line under the bar
+    }
+    expect(seen, [
+      '正在传输 | 第 4/5 步',
+      '传输中断，正在让录音豆重开热点（第 1/3 次）… | ',
+      '正在让录音豆开热点… | 第 1/5 步 · 第 1 次重开',
+      '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）… | 第 2/5 步 · 第 1 次重开',
+      '正在连接录音豆… | 第 3/5 步 · 第 1 次重开',
+      '正在传输 | 第 4/5 步 · 第 1 次重开',
+      '正在连回蓝牙… | 第 5/5 步 · 第 1 次重开 · 传完了：35 分钟录音，用时 30 秒',
+    ]);
+    step = {'step': 'done', 'end': 'all', 's': 2100, 'ms': 30000, 'reopen': 1};
+    await tester.pump(fastEvery);
+    await tester.pump();
+    expect(find.text('传完了：35 分钟录音，用时 30 秒'), findsOneWidget);
+    expect(tile('Wi‑Fi 快传').onTap, isNotNull);
+
+    // the three used up: back over Bluetooth with what Wi-Fi got, the last hotspot's failure not the summary
+    await tester.pumpWidget(const SizedBox());
+    await open(tester, at: {'step': 'back', 'end': 'part', 's': 40, 'ms': 41000, 'reopen': 3}, locale: const Locale('zh'));
+    note = {'code': 'beanWifiNoUnits'};
+    await tester.pump(fastEvery);
+    await tester.pump();
+    expect(find.text('第 5/5 步 · 第 3 次重开 · 热点重开了 3 次：Wi‑Fi 传了 40 秒录音，用时 41 秒；剩下的改用蓝牙'), findsOneWidget);
+    step = {...step!, 'step': 'done'};
+    await tester.pump(fastEvery);
+    await tester.pump();
+    expect(find.text('热点重开了 3 次：Wi‑Fi 传了 40 秒录音，用时 41 秒；剩下的改用蓝牙'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('unbinding is off from the tap to Bluetooth back, each step, said as for the transfer (#405 review)', (tester) async {
     ListTile unbind() => tester.widget<ListTile>(find.ancestor(of: find.text('解除绑定'), matching: find.byType(ListTile)));
     await open(tester, at: null, locale: const Locale('zh'));
     expect(unbind().onTap, isNotNull);
     for (final w in <Map<String, Object?>>[
       {'step': 'asked'}, {'step': 'hotspot'}, {'step': 'join', 'try': 1}, {'step': 'socket', 'try': 2}, {'step': 'transfer'},
-      {'step': 'back', 'end': 'fail'},
+      {'step': 'reopen', 'reopen': 1}, {'step': 'back', 'end': 'fail'},
     ]) {
       step = w;
       await tester.pump(const Duration(seconds: 2));  // the 2 s status says the step

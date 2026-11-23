@@ -673,6 +673,19 @@
   },
   "wifiStepTransfer": "正在传输",
   "wifiStepBack": "正在连回蓝牙…",
+  "wifiStepReopen": "传输中断，正在让录音豆重开热点（第 {n}/{total} 次）…",
+  "@wifiStepReopen": {
+    "placeholders": {
+      "n": {},
+      "total": {}
+    }
+  },
+  "wifiStepReopened": "第 {n} 次重开",
+  "@wifiStepReopened": {
+    "placeholders": {
+      "n": {}
+    }
+  },
   "wifiStepOf": "第 {n}/{total} 步",
   "@wifiStepOf": {
     "placeholders": {
@@ -690,6 +703,14 @@
   "wifiEndPart": "停在半路：取回 {audio}录音，用时 {took}；剩下的由蓝牙接着取",
   "@wifiEndPart": {
     "placeholders": {
+      "audio": {},
+      "took": {}
+    }
+  },
+  "wifiEndReopens": "热点重开了 {n} 次：Wi‑Fi 传了 {audio}录音，用时 {took}；剩下的改用蓝牙",
+  "@wifiEndReopens": {
+    "placeholders": {
+      "n": {},
       "audio": {},
       "took": {}
     }

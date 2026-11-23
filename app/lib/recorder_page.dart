@@ -166,6 +166,8 @@ class _RecorderPageState extends State<RecorderPage> {
     final bean = name?.startsWith('D3200-') == true;  // a Feishu recorder bean: no pause, listening, USB disk or firmware of ours
     final wifiStep = st['wifiStep'] as Map?, wifi = bean ? wifiStepSpec(l, wifiStep, syncDone, syncTotal) : null;
     final wifiNote = st['wifiNote'] == null ? null : nativeText(context, st['wifiNote']);
+    // how it ended: what the hotspots got first (the last of them may have got nothing, its note), else why it failed
+    final wifiEnd = const ['all', 'part'].contains(wifiStep?['end']) ? wifiEndText(l, wifiStep) : wifiNote ?? wifiEndText(l, wifiStep);
     final fetching = syncing || wifi != null;  // from a fast transfer's tap to Bluetooth back too: unbinding then strands the bean's hotspot
 
     // connection chip: what the link is doing, in one colour
@@ -276,7 +278,7 @@ class _RecorderPageState extends State<RecorderPage> {
             LinearProgressIndicator(value: wifi.bytes != null && syncTotal > 0 ? (syncDone / syncTotal).clamp(0, 1).toDouble() : null,
                 minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
-            Text([if (wifi.n != null) l.wifiStepOf(wifi.n!, wifiSteps), if (wifiStep?['step'] == 'back') wifiNote ?? wifiEndText(l, wifiStep)].nonNulls.join(' · '),
+            Text([if (wifi.n != null) l.wifiStepOf(wifi.n!, wifiSteps), wifi.reopen, if (wifiStep?['step'] == 'back') wifiEnd].nonNulls.join(' · '),
                 style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
           ] else if (syncing) ...[
             Row(children: [
@@ -328,7 +330,7 @@ class _RecorderPageState extends State<RecorderPage> {
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.wifi_rounded),
               title: Text(l.beanWifi),
-              subtitle: Text(wifiNote ?? (wifiStep?['step'] == 'done' ? wifiEndText(l, wifiStep) : null) ?? l.beanWifiSub),
+              subtitle: Text((wifiStep?['step'] == 'done' ? wifiEnd : wifiNote) ?? l.beanWifiSub),
               onTap: live && wifi == null
                   ? () {
                       final m = ScaffoldMessenger.of(context);
