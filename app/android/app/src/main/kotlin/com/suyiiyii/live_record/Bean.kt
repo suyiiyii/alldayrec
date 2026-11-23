@@ -332,7 +332,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var at = 0L
         var asked = 1  // over Wi-Fi: how often its 1A/07 went (the bean may ignore the first on a fresh socket, ws/soundcore)
         var seen = 0L  // when its last unit came
-        var firstAt = 0L  // when its first unit came (pace)
+        var firstAt = 0L  // when its first unit came (bean_lag: units a second)
         var half = -1L  // reanchor(): this half minute's first seq and fastest, the last one's
         var fastest = Long.MAX_VALUE
         var before: Long? = null
@@ -396,7 +396,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                                  // is not run again for a file that is whole)
     private var caught = 0L      // backlog units taken since the backlog began
     private var caughtSince = 0L
-    private var pace = 2.0  // a realtime=0 read's speed, times real time: the last one measured (10-27 probe: about 2)
+    private val shrunk = ArrayDeque<LongArray>()  // owe(): (when, units lacking), the last 3 min of this catch-up and channel
     private var marked = false
     private val unknown = mutableSetOf<Int>()
     private val run = mutableListOf<ByteArray>()
@@ -667,7 +667,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (wifiUnits == 0) (note ?: WIFI_ENDS[why])?.let { wifiNote = say(it, "detail" to why) }
             xfer?.let { complete(it, -1, "；Wi-Fi 快传结束") }
         } finally {  // complete() writes files and may throw (a full disk): the hotspot is left all the same
-            overWifi = false
+            overWifi = false; shrunk.clear()  // BLE's own rate from here
             io.wifiLeave()
         }
         wifiEnded = io.monotonicNow()
@@ -819,8 +819,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         p.sumOf { (id, ms) -> files[id]?.let { f -> maxOf(0L, (if (f.total >= 0) f.total else ms / Bean.FRAME_MS) - covered(f)) } ?: (ms / Bean.FRAME_MS) }
 
     /** What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
-     *  back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the measured
-     *  pace (`backlog_eta_s`; the file being recorded grows meanwhile) and why it waits (`backlog_held`: `live`, the live
+     *  back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the rate it
+     *  went down lately (`backlog_eta_s`) and why it waits (`backlog_held`: `live`, the live
      *  page is open, plan()'s live_now; `recording`, it goes after the bean stops: files closed meanwhile, a file read
      *  live only); none: being read. A minute or less behind is no backlog (WATCHED_GAP_UNITS: the live page's own line). */
     private fun owe() {
@@ -829,7 +829,15 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var now = if (open != 0L && open * 1000 >= since) maxOf(0L, edge(open) - (files[open]?.let(::covered) ?: 0L)) else 0L
         if (now <= WATCHED_GAP_UNITS) now = 0
         val closed = lacking(pending())
-        owed = owedFields(now, if (recording) closed else 0, if (recording) 0 else closed, io.watched(), (fills[open] ?: 0) >= TRIES, pace)
+        // the rate is the backlog's own over 1–3 min, reconnects and units had included (iOS 11-23 11:25: 3.3 times real
+        // time, one read's speed said 6–10; after Wi-Fi, Wi-Fi's 116)
+        val t = io.now()
+        while (shrunk.isNotEmpty() && t - shrunk.first()[0] > 180_000) shrunk.removeFirst()
+        shrunk.addLast(longArrayOf(t, now + closed))
+        val (at, was) = shrunk.first()
+        val rate = if (t - at >= 60_000) (was - now - closed) * Bean.FRAME_MS.toDouble() / (t - at) else null
+        owed = owedFields(now, if (recording) closed else 0, if (recording) 0 else closed, io.watched(), (fills[open] ?: 0) >= TRIES, rate)
+        if (owed["backlog_held"] != null || owed.isEmpty()) shrunk.clear()  // the next catch-up measured afresh
     }
 
     private fun backlog(): Xfer? {
@@ -1097,9 +1105,6 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
         x.units++; x.last = maxOf(x.last, s.seq); x.seen = now
         if (overWifi) wifiUnits++
-        // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
-        if (!x.realtime && x.lag == null && s.seq - x.first >= REST_UNITS && now > x.firstAt)
-            pace = (s.seq - x.first) * Bean.FRAME_MS.toDouble() / (now - x.firstAt)
         if (x.live) {
             liveSeen = now; liveStalled = false; busy = 0
             // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
@@ -1290,18 +1295,15 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         /** owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to
-         *  stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback). */
-        fun owedFields(now: Long, closed: Long, idle: Long, watched: Boolean, live: Boolean, pace: Double): Map<String, Any?> {
+         *  stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback);
+         *  `rate`: s of it gone a s lately (owe()). */
+        fun owedFields(now: Long, closed: Long, idle: Long, watched: Boolean, live: Boolean, rate: Double?): Map<String, Any?> {
             val s = (now + closed + idle) * Bean.FRAME_MS / 1000
             if (s <= 0) return emptyMap()
             // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
             val held = if (now > 0 && live || closed > 0) "recording" else if (now > 0 && watched) "live" else null
-            // the recorded file grows by real time while it is read: it comes nearer at pace - 1
-            val eta = when {
-                held == "recording" -> null
-                now > 0 -> if (pace > 1.05) now * Bean.FRAME_MS / 1000.0 / (pace - 1) else null
-                else -> idle * Bean.FRAME_MS / 1000.0 / pace
-            }
+            // held, or under 6 s a minute (live, or a read not gaining on the recording): no end in sight, none said
+            val eta = if (held == null && rate != null && rate >= 0.1) s / rate else null
             return mapOf("backlog_s" to s, "backlog_eta_s" to eta?.toLong(), "backlog_held" to held)
         }
         const val WATCHED_GAP_UNITS = 3000L  // the owner, 10-27: a hole of up to a minute is read first even while /live watches

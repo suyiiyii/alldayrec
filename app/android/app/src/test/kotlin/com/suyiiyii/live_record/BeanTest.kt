@@ -1175,31 +1175,32 @@ class BeanTest {
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(Triple(r.id, 100L, false), Triple(r.id, read, true)), r.bean.transfers)
         assertEquals(listOf("fill_tail", "watched_abort", "live_now"), r.reasons)
-        // being read at first (the 10-27 pace until one is measured: 200 s nearer at 1 s a second), then held by the page
-        assertEquals(listOf(200L, null, 200L), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"], it["backlog_eta_s"]) })
+        // being read at first (no estimate before a minute of it: owe()), then held by the page
+        assertEquals(listOf(200L, null, null), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"], it["backlog_eta_s"]) })
         assertEquals("live", r.bean.reports.last()["backlog_held"])
         assertEquals("the hole stays", 2, r.f.have.size)
         onlyReads(r.bean)
     }
 
-    /** What is lacking, why it waits and how long it takes (owe()): the recorded file comes nearer at pace - 1, a stopped
-     *  bean's files at pace; what waits for the bean to stop has no estimate. */
+    /** What is lacking, why it waits and how long it takes (owe()): at the rate the backlog went down lately; none
+     *  measured yet, under 6 s a minute or held back, no estimate. */
     @Test fun owedFields() {
-        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, pace = 3.0))
-        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to "live"),
-            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, pace = 3.0))
+        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, rate = 3.0))
+        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to null, "backlog_held" to "live"),
+            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to null),
-            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, pace = 3.0))
+            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, rate = 2.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, pace = 3.0))
+            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, pace = 3.0))
+            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to 40L, "backlog_held" to null),
-            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, pace = 3.0))
-        assertNull("no faster than real time: no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 1.0)["backlog_eta_s"])
+            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, rate = 3.0))
+        assertNull("none measured yet", BeanSync.owedFields(0, 0, 6000, false, false, null)["backlog_eta_s"])
+        assertNull("not gaining (live): no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 0.05)["backlog_eta_s"])
         // closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h said 补传中)
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, pace = 2.0)["backlog_held"])
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, pace = 2.0)["backlog_held"])
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, rate = 2.0)["backlog_held"])
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, rate = 2.0)["backlog_held"])
     }
 
     /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by
@@ -1887,6 +1888,36 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertEquals("asked for again", listOf(Triple(a, 1000L, false)), bean.transfers)
         assertNull(sync.gap(sync.files[a]!!))
+    }
+
+    /** Back on BLE after a fast transfer (iOS 11-23 11:24: 5,555 s left said 48 s, by Wi-Fi's speed; BLE then cut every
+     *  30 s at a stretch the phone had, so no read was long enough to be measured): the estimate is how fast the backlog
+     *  went down over the last minutes on BLE, reconnects and all. */
+    @Test fun etaAfterWifiIsBles() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 2000; val b = wt0 / 1000 - 1000; val n = 50_000L
+        bean.listed[a] = 3000L * 20; bean.listed[b] = n * 20; bean.wifiAsk = true; bean.wifiIgnore[b] = 3
+        // b: holes of 1,000 units (20 s), each before a stretch of 1,500 the phone has
+        val have = (0 until 20).joinToString(",") { "[${it * 2500 + 1000},${(it + 1) * 2500}]" }
+        File(dir, "state.json").writeText("""{"$b":{"a":${b * 1000},"t":$n,"r":0,"h":[$have]}}""")
+        bean.onTransfer = { file, from, _ ->
+            if (file == a) { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until from + 1000).toList(), ms = 10) }  // twice real time, cut at the stretch
+        }
+        repeat(200) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        val wifi = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(wifi.message, "没回音" in wifi.message!!)
+        assertNull("a over Wi-Fi, at 20 times real time", sync.gap(sync.files[a]!!))
+        repeat(12) {
+            bean.now += 2500  // a new connection
+            assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        }
+        assertEquals("b's holes one a connection over BLE", Triple(b, 11L * 2500, false), bean.transfers.last())
+        val last = bean.reports.last()
+        val s = (last["backlog_s"] as Number).toDouble(); val eta = (last["backlog_eta_s"] as Number?)?.toDouble() ?: 0.0
+        // 20 s of audio a connection: 10 s of units at twice real time, 2.5 s to connect again
+        assertTrue("$s s left in $eta s", s / maxOf(1.0, eta) in 1.4..1.8)
     }
 
     private fun packets(f: File): List<ByteArray> {

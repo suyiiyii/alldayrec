@@ -1472,10 +1472,16 @@ do {
 
 /// Closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h of a closed file
 /// said 补传中); the open file's hole alone says why it waits.
-check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: false, live: false, pace: 2)["backlog_held"] as? String, "recording")
-check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: true, live: false, pace: 2)["backlog_held"] as? String, "recording")
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, pace: 2)["backlog_held"] as? String, "live")
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, pace: 2)["backlog_held"] is NSNull, true)
+check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: false, live: false, rate: 2)["backlog_held"] as? String, "recording")
+check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: true, live: false, rate: 2)["backlog_held"] as? String, "recording")
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, rate: 2)["backlog_held"] as? String, "live")
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, rate: 2)["backlog_held"] is NSNull, true)
+// how long, at the rate the backlog went down lately: none measured yet, or under 6 s a minute, none said
+check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: 2)["backlog_eta_s"] as? Int64, 60)
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, rate: 0.5)["backlog_eta_s"] as? Int64, 240)
+check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: nil)["backlog_eta_s"] is NSNull, true)
+check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: 0.05)["backlog_eta_s"] is NSNull, true)
+check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, rate: 2)["backlog_eta_s"] is NSNull, true, "held: none")
 
 /// The open file with its length known and all of it on the phone (a live header that carried a size, or a unit with the
 /// end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() crashed the app here
@@ -1690,6 +1696,37 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 1000, 0]], "asked for again")
   check(sync.gap(sync.files[a]!), nil)
+}
+
+/// Back on BLE after a fast transfer (11-23 11:24: 5,555 s left said 48 s, by Wi-Fi's speed; BLE then cut every 30 s
+/// at a stretch the phone had, so no read was long enough to be measured): the estimate is how fast the backlog went
+/// down over the last minutes on BLE, reconnects and all.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 2_000_000) / 1000, b = (t0 - 1_000_000) / 1000, n: Int64 = 50_000
+  bean.list(a, 3000 * 20); bean.list(b, n * 20); bean.wifiAsk = true; bean.wifiIgnore = [b: 3]
+  // b: holes of 1,000 units (20 s), each before a stretch of 1,500 the phone has
+  let have = (0..<20).map { "[\($0 * 2500 + 1000),\(($0 + 1) * 2500)]" }.joined(separator: ",")
+  try! "{\"\(b)\":{\"a\":\(b * 1000),\"t\":\(n),\"r\":0,\"h\":[\(have)]}}".write(to: state, atomically: true, encoding: .utf8)
+  bean.onTransfer = { file, from, _ in
+    if file == a { bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file); return }
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<(from + 1000)), ms: 10)  // twice real time, cut at the stretch
+  }
+  bean.script = Array(repeating: {}, count: 200)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  let wifi = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(wifi.description.contains("没回音"), true, wifi.description)
+  check(sync.gap(sync.files[a]!), nil, "a over Wi-Fi, at 20 times real time")
+  for _ in 0..<12 {
+    bean.t += 2500  // a new connection
+    _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  }
+  check(bean.transfers.last!, [b, Int64(11 * 2500), 0], "b's holes one a connection over BLE")
+  let last = bean.reports.last!
+  let s = last["backlog_s"] as! Int64, eta = last["backlog_eta_s"] as? Int64 ?? 0
+  // 20 s of audio a connection: 10 s of units at twice real time, 2.5 s to connect again
+  check((1.4...1.8).contains(Double(s) / Double(max(1, eta))), true, "\(s) s left in \(eta) s")
 }
 
 print("bean check: all passed")
