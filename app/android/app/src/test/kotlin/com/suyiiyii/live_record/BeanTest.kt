@@ -234,7 +234,7 @@ class BeanTest {
         val sync = BeanSync("D3200-0A0B", File(dir, "state.json"), File(dir, "chunks"), bean)
         assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
         assertEquals(0, bean.logs.count { it.first == "bean_stall" })
-        assertEquals(listOf(Triple(a, 0L, false), Triple(a, 25L, false), Triple(b, 0L, false)), bean.transfers)
+        assertEquals("a's tail from its last unit had: its length unknown", listOf(Triple(a, 0L, false), Triple(a, 24L, false), Triple(b, 0L, false)), bean.transfers)
         assertEquals("the button alone restarts recording", 0, bean.starts)
     }
 
@@ -393,12 +393,12 @@ class BeanTest {
                     bean.push(0x1882, byteArrayOf(0)); bean.complete(b)
                 }
             } else {
-                assertEquals(a, file); assertEquals("only the real tail is fetched", 25L, from)
-                bean.header(a, 30L * Bean.UNIT); bean.units(a, (25L..29L).toList(), last = 29); bean.complete(a)
+                assertEquals(a, file); assertEquals("only the real tail is fetched, from the last unit had: its length unknown", 24L, from)
+                bean.header(a, 30L * Bean.UNIT); bean.units(a, (from..29L).toList(), last = 29); bean.complete(a)
             }
         }
         assertThrows(IOException::class.java) { sync.session(t0 - 1000, "") }
-        assertEquals(listOf(Triple(b, 0L, false), Triple(a, 25L, false)), bean.transfers)
+        assertEquals(listOf(Triple(b, 0L, false), Triple(a, 24L, false)), bean.transfers)
         assertNull(sync.gap(sync.files[a]!!))
     }
 
@@ -443,7 +443,7 @@ class BeanTest {
                     }
                 }
                 file != bean.open && file == a -> {
-                    assertEquals(25L, from)
+                    assertEquals("its length unknown: from the last unit had (backlog())", 24L, from)
                     bean.header(file, 30L * Bean.UNIT)
                     bean.units(file, (from..29L).toList(), last = 29); bean.complete(file)
                 }
@@ -456,7 +456,7 @@ class BeanTest {
         assertEquals("no rejoin on the old connection", listOf(Triple(a, 0L, false)), bean.transfers)
         assertEquals(25, packets(Uploader.queue(chunks).single()).size - 2)
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false), Triple(a, 25L, false)), bean.transfers)
+        assertEquals(listOf(Triple(a, 0L, false), Triple(b, 0L, false), Triple(a, 24L, false)), bean.transfers)
         val seen = mutableMapOf<Long, MutableList<Long>>()
         for (piece in Uploader.queue(chunks)) for ((i, p) in packets(piece).drop(2).withIndex()) {
             val file = if (p[5] == (a % 251).toByte()) a else b
@@ -512,7 +512,7 @@ class BeanTest {
         assertEquals(listOf(listOf(0L, 100L)), sync.files[a]!!.have.map { it.toList() })
         assertTrue(bean.logs.any { it.first == "bean_xfer" && "补传文件 $a 停在单元 100" in it.second })
         assertThrows(IOException::class.java) { sync.session(t0 - 3_600_000, "") }
-        assertEquals(listOf(a to 0L, b to 0L, a to 100L, b to 30L), bean.transfers.map { it.first to it.second })
+        assertEquals("b's length unknown: from its last unit", listOf(a to 0L, b to 0L, a to 100L, b to 29L), bean.transfers.map { it.first to it.second })
         assertEquals("live in the new file from its unit 0", listOf(listOf(0L, 30L)), sync.files[b]!!.have.map { it.toList() })
         assertNull("the rest after the stop", sync.gap(sync.files[a]!!))
         assertEquals(0, sync.files[a]!!.tries)
@@ -777,7 +777,7 @@ class BeanTest {
         assertEquals("link gone", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
         bean.now += 30_000
         assertEquals("app killed", assertThrows(IOException::class.java) { sync.session(since, "") }.message)
-        assertEquals(listOf(Triple(c, 0L, false), Triple(c, 1092L, false), Triple(c, 5688L, false)), bean.transfers)
+        assertEquals(listOf(Triple(c, 0L, false), Triple(c, 1092L, false), Triple(c, 5687L, false)), bean.transfers)  // the tail from the last unit had: its length unknown
         val anchor = sync.files[c]!!.anchor
         assertEquals("not yet: its pieces are not up", emptyList<Long>(), bean.ends)
         assertTrue("nothing off the bean before the server has it", bean.deleted.isEmpty())
@@ -1009,8 +1009,8 @@ class BeanTest {
         val since = t0 - 3_600_000
         val old = since / 1000 - 100; val hole = t0 / 1000 - 900; val refused = hole + 100; val queued = hole + 200
         val whole = hole + 300; val open = hole + 400; val nay = hole + 500
-        fun f(id: Long, h: String, tries: Int = 0) = "\"$id\":{\"a\":${id * 1000},\"t\":10,\"r\":$tries,\"h\":$h}"
-        state.writeText("{" + listOf(f(old, "[[0,10]]"), f(hole, "[[0,4],[6,10]]", tries = 4), f(refused, "[[0,10]]"), f(queued, "[[0,10]]"),
+        fun f(id: Long, h: String, wait: Long = 0) = "\"$id\":{\"a\":${id * 1000},\"t\":10,\"w\":$wait,\"h\":$h}"
+        state.writeText("{" + listOf(f(old, "[[0,10]]"), f(hole, "[[0,4],[6,10]]", wait = t0 + 3_600_000), f(refused, "[[0,10]]"), f(queued, "[[0,10]]"),
             f(whole, "[[0,10]]"), f(open, "[[0,10]]"), f(nay, "[[0,10]]")).joinToString(",") + "}")
         File(chunks, "${queued * 1000}@D3200-0A0B.ogg").writeBytes(ByteArray(8))
         val bean = FakeBean(t0)
@@ -1091,8 +1091,8 @@ class BeanTest {
         assertTrue(r.bean.logs.any { it.first == "bean_xfer" && "豆子停录时还没追上实时" in it.second })
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertTrue("a catch-up: the device page's progress", total > 0)
-        assertEquals(listOf(Triple(r.id, 0L, false), Triple(r.id, 300L, false)), r.bean.transfers)
-        assertTrue(r.bean.logs.any { it.first == "bean_xfer" && it.second.startsWith("补传文件 ${r.id} 开始：首单元 300") })
+        assertEquals("from the last unit had: its length unknown", listOf(Triple(r.id, 0L, false), Triple(r.id, 299L, false)), r.bean.transfers)
+        assertTrue(r.bean.logs.any { it.first == "bean_xfer" && it.second.startsWith("补传文件 ${r.id} 开始：首单元 299") })
         assertEquals(listOf(0L, 30000L), r.f.have.single().toList())
         assertNull(r.sync.gap(r.f))
         assertEquals("each unit once", 30000L, piecesIn(r.chunks).sumOf { it.third })
@@ -1175,31 +1175,32 @@ class BeanTest {
         assertThrows(IOException::class.java) { r.sync.session(0, "") }
         assertEquals(listOf(Triple(r.id, 100L, false), Triple(r.id, read, true)), r.bean.transfers)
         assertEquals(listOf("fill_tail", "watched_abort", "live_now"), r.reasons)
-        // being read at first (the 10-27 pace until one is measured: 200 s nearer at 1 s a second), then held by the page
-        assertEquals(listOf(200L, null, 200L), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"], it["backlog_eta_s"]) })
+        // being read at first (no estimate before a minute of it: owe()), then held by the page
+        assertEquals(listOf(200L, null, null), r.bean.reports.first().let { listOf(it["backlog_s"], it["backlog_held"], it["backlog_eta_s"]) })
         assertEquals("live", r.bean.reports.last()["backlog_held"])
         assertEquals("the hole stays", 2, r.f.have.size)
         onlyReads(r.bean)
     }
 
-    /** What is lacking, why it waits and how long it takes (owe()): the recorded file comes nearer at pace - 1, a stopped
-     *  bean's files at pace; what waits for the bean to stop has no estimate. */
+    /** What is lacking, why it waits and how long it takes (owe()): at the rate the backlog went down lately; none
+     *  measured yet, under 6 s a minute or held back, no estimate. */
     @Test fun owedFields() {
-        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, pace = 3.0))
-        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to "live"),
-            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, pace = 3.0))
+        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, rate = 3.0))
+        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to null, "backlog_held" to "live"),
+            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to null),
-            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, pace = 3.0))
+            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, rate = 2.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, pace = 3.0))
+            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, pace = 3.0))
+            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, rate = 3.0))
         assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to 40L, "backlog_held" to null),
-            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, pace = 3.0))
-        assertNull("no faster than real time: no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 1.0)["backlog_eta_s"])
+            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, rate = 3.0))
+        assertNull("none measured yet", BeanSync.owedFields(0, 0, 6000, false, false, null)["backlog_eta_s"])
+        assertNull("not gaining (live): no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 0.05)["backlog_eta_s"])
         // closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h said 补传中)
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, pace = 2.0)["backlog_held"])
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, pace = 2.0)["backlog_held"])
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, rate = 2.0)["backlog_held"])
+        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, rate = 2.0)["backlog_held"])
     }
 
     /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by
@@ -1817,19 +1818,149 @@ class BeanTest {
     }
 
     /** A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
-     *  tries (code 1: at once), and said so once. */
+     *  tries of the day (code 1: at once), and said so once; the next day it is asked for again. */
     @Test fun givingUpIsSaid() {
-        for ((code, asks) in listOf(2 to BeanSync.TRIES + 1, 0 to BeanSync.TRIES + 1, 1 to 1)) {
+        for ((code, asks) in listOf(2 to BeanSync.DAY_TRIES, 0 to BeanSync.DAY_TRIES, 1 to 1)) {
             val dir = Files.createTempDirectory("bean").toFile()
             val bean = FakeBean(wt0)
             bean.listed[wt0 / 1000 - 600] = 60_000
             bean.onTransfer = { file, _, _ -> bean.header(file, 3000L * Bean.UNIT, code = code); if (code == 0) bean.complete(file) }
-            repeat(10) { bean.script += {} }
+            repeat(20) { bean.script += {} }
             val sync = wifiSync(bean, dir)
             assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
             assertEquals("code $code", asks, bean.transfers.size)
-            assertEquals("code $code", 1, bean.logs.count { "不再取" in it.second })
+            assertEquals("code $code", 1, bean.logs.count { "取不到，明天再试" in it.second })
+            bean.now += 86_400_000
+            repeat(20) { bean.script += {} }
+            assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+            assertEquals("code $code: the next day", 2 * asks, bean.transfers.size)
         }
+    }
+
+    /** A closed file read live only, its length never come (11-19: four code 2s asked at the unit the phone had it to,
+     *  then given up; the review: past its end): asked from a unit the phone has, the header says its length, all of
+     *  it is here, and it goes off the bean as a whole one. */
+    @Test fun lengthUnknownIsAskedFromALastUnit() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val n = 3000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":-1,"r":0,"h":[[0,$n]]}}""")
+        bean.onTransfer = { file, from, _ ->  // past its end: refused
+            if (from >= n) bean.header(file, 0, code = 2)
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1); bean.complete(file) }
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }  // cut at the header: all here
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("from its last unit on the phone: its length, no code 2", listOf(Triple(a, n - 1, false)), bean.transfers)
+        assertEquals("whole: off the bean", listOf(a), bean.deleted)
+    }
+
+    /** A closed file read live only, shorter on the bean than the phone has (11-08: live had 14,340 units, the bean's
+     *  file 12,000): the unit before the phone's end is refused (code 2), not a try; asked from unit 0, the header says
+     *  its length, the phone has it all: cut at once, whole, off the bean. */
+    @Test fun shorterOnTheBeanIsWhole() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val had = 3000L; val n = 2000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":-1,"h":[[0,$had]]}}""")
+        bean.onTransfer = { file, from, _ ->  // past its end: refused
+            if (from >= n) bean.header(file, 0, code = 2)
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1); bean.complete(file) }
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }  // cut at the header: all here
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("refused at its end, then from unit 0 for its length", listOf(Triple(a, had - 1, false), Triple(a, 0L, false)), bean.transfers)
+        assertEquals("whole: off the bean", listOf(a), bean.deleted)
+        assertEquals("not given up", false, bean.logs.any { "取不到" in it.second })
+        assertEquals("cut at the header, nothing sent again", 0, bean.logFields.last { it["cut"] == true }["units"])
+    }
+
+    /** A read that brings units new to the phone clears its tries (the review: ten slow reads, each with some, made a
+     *  file wait a day): 9 tries saved, a short read with new units, then the rest the same day. */
+    @Test fun newUnitsClearTries() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val n = 3000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":$n,"n":9,"h":[[0,1000]]}}""")
+        var short = true
+        bean.onTransfer = { file, from, _ ->
+            bean.header(file, n * Bean.UNIT)
+            if (short) { short = false; bean.units(file, (from until from + 100).toList(), ms = 1) } else bean.units(file, (from until n).toList(), last = n - 1, ms = 1)
+            bean.complete(file)
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("short with new units, then the rest", listOf(Triple(a, 1000L, false), Triple(a, 1100L, false)), bean.transfers)
+        assertNull("all of it on the phone", sync.gap(sync.files[a]!!))
+    }
+
+    /** A closed file the bean refuses (code 2) four times running, then gives (11-19: four in 0.27 s, then never asked
+     *  for again): each ask waits longer than the one before, and it is read whole after. */
+    @Test fun refusedFourTimesIsReadAfter() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val n = 3000L
+        bean.listed[a] = n * 20
+        var refusals = 4; val asked = mutableListOf<Long>()
+        bean.onTransfer = { file, from, _ ->
+            asked += bean.now
+            if (refusals > 0) { refusals--; bean.header(file, 0, code = 2) }
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("four refused, then read", 5, bean.transfers.size)
+        assertNull("all of it on the phone", sync.gap(sync.files[a]!!))
+        assertEquals("a pause that grows", listOf(200L, 400L, 600L, 800L), asked.zipWithNext { x, y -> y - x })
+    }
+
+    /** A state file from before, a file given up for good in it ("r": 4, 11-19's): read again after the update. */
+    @Test fun oldGivenUpIsReadAgain() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val n = 3000L
+        bean.listed[a] = n * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":$n,"r":4,"h":[[0,1000]]}}""")
+        bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("asked for again", listOf(Triple(a, 1000L, false)), bean.transfers)
+        assertNull(sync.gap(sync.files[a]!!))
+    }
+
+    /** Back on BLE after a fast transfer (iOS 11-23 11:24: 5,555 s left said 48 s, by Wi-Fi's speed; BLE then cut every
+     *  30 s at a stretch the phone had, so no read was long enough to be measured): the estimate is how fast the backlog
+     *  went down over the last minutes on BLE, reconnects and all. */
+    @Test fun etaAfterWifiIsBles() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 2000; val b = wt0 / 1000 - 1000; val n = 50_000L
+        bean.listed[a] = 3000L * 20; bean.listed[b] = n * 20; bean.wifiAsk = true; bean.wifiIgnore[b] = 3
+        // b: holes of 1,000 units (20 s), each before a stretch of 1,500 the phone has
+        val have = (0 until 20).joinToString(",") { "[${it * 2500 + 1000},${(it + 1) * 2500}]" }
+        File(dir, "state.json").writeText("""{"$b":{"a":${b * 1000},"t":$n,"r":0,"h":[$have]}}""")
+        bean.onTransfer = { file, from, _ ->
+            if (file == a) { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until from + 1000).toList(), ms = 10) }  // twice real time, cut at the stretch
+        }
+        repeat(200) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        val wifi = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(wifi.message, "没回音" in wifi.message!!)
+        assertNull("a over Wi-Fi, at 20 times real time", sync.gap(sync.files[a]!!))
+        repeat(12) {
+            bean.now += 2500  // a new connection
+            assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        }
+        assertEquals("b's holes one a connection over BLE", Triple(b, 11L * 2500, false), bean.transfers.last())
+        val last = bean.reports.last()
+        val s = (last["backlog_s"] as Number).toDouble(); val eta = (last["backlog_eta_s"] as Number?)?.toDouble() ?: 0.0
+        // 20 s of audio a connection: 10 s of units at twice real time, 2.5 s to connect again
+        assertTrue("$s s left in $eta s", s / maxOf(1.0, eta) in 1.4..1.8)
     }
 
     private fun packets(f: File): List<ByteArray> {

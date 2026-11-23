@@ -307,6 +307,7 @@ final class BeanSync {
   struct Again: Error, CustomStringConvertible { let description: String; var naturalRollover = false }
 
   static let tries = 3
+  static let dayTries = 10  // reads of a closed file that left it short before it waits a day (tried())
   static let paceMs: Int64 = 200  // between transfers (ws/soundcore: the SDK's 200 ms)
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
@@ -316,11 +317,13 @@ final class BeanSync {
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
+    var wait: Int64  // not read before (tried()): `tries` were over
     /// (seq, anchor): from that unit on the file is dated by that anchor instead (step()), in order
     var anchors: [(Int64, Int64)]
     var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
-    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, anchors: [(Int64, Int64)] = []) {
-      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.anchors = anchors
+    var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
+    init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, wait: Int64 = 0, anchors: [(Int64, Int64)] = []) {
+      self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.wait = wait; self.anchors = anchors
     }
     /// A unit's time on the phone's clock: by the anchor in force at its seq.
     func at(_ seq: Int64) -> Int64 { (anchors.last { $0.0 <= seq }?.1 ?? anchor) + seq * Bean.frameMs }
@@ -340,7 +343,7 @@ final class BeanSync {
     var lost: Int64 = 0, at: Int64 = 0
     var asked = 1  // over Wi-Fi: how often its 1A/07 went (the bean may ignore the first on a fresh socket, ws/soundcore)
     var seen: Int64 = 0  // when its last unit came
-    var firstAt: Int64 = 0  // when its first unit came (pace)
+    var firstAt: Int64 = 0  // when its first unit came (bean_lag: units a second)
     var half: Int64 = -1, fastest = Int64.max, before: Int64?  // reanchor(): this half minute's first seq and fastest, the last's
     var target: Int64?  // the anchor the units' timing says, live (reanchor()); pieces go there a step at a time (step())
     var clockSaid: Int64 = 0  // when bean_clock was last logged
@@ -400,7 +403,7 @@ final class BeanSync {
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
   private var caught: Int64 = 0      // backlog units taken since the backlog began
   private var caughtSince: Int64 = 0
-  private var pace = 2.0  // a realtime=0 read's speed, times real time: the last one measured (10-27 probe: about 2)
+  private var shrunk: [(Int64, Int64)] = []  // owe(): (when, units lacking), the last 3 min of this catch-up and channel
   private var marked = false
   private var unknown: Set<Int> = []
   private var run: [Data] = []
@@ -429,7 +432,9 @@ final class BeanSync {
         if k == "end" { pendingEnd = (v as? NSNumber)?.int64Value ?? 0; continue }
         guard let id = Int64(k), let f = v as? [String: Any], let h = f["h"] as? [[NSNumber]] else { throw Bean.Fail("file \(k)") }
         files[id] = F((f["a"] as? NSNumber)?.int64Value ?? id * 1000, have: h.map { ($0[0].int64Value, $0[1].int64Value) },
-                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["r"] as? NSNumber)?.intValue ?? 0,
+                      // "r", before: tries for good (11-19's file, given up), not read: such a file is read again
+                      total: (f["t"] as? NSNumber)?.int64Value ?? -1, tries: (f["n"] as? NSNumber)?.intValue ?? 0,
+                      wait: (f["w"] as? NSNumber)?.int64Value ?? 0,
                       anchors: (f["p"] as? [[NSNumber]] ?? []).map { ($0[0].int64Value, $0[1].int64Value) })
       }
     } catch { log("bean_state", "手机上的录音豆文件记录读不了（\(error)），从头记", "warn") }
@@ -444,7 +449,7 @@ final class BeanSync {
   private func save() {
     var o: [String: Any] = [:]
     for (id, f) in files {
-      o["\(id)"] = ["a": f.anchor, "t": f.total, "r": f.tries, "h": f.have.map { [$0.0, $0.1] }, "p": f.anchors.map { [$0.0, $0.1] }]
+      o["\(id)"] = ["a": f.anchor, "t": f.total, "n": f.tries, "w": f.wait, "h": f.have.map { [$0.0, $0.1] }, "p": f.anchors.map { [$0.0, $0.1] }]
     }
     if pendingEnd > 0 { o["end"] = pendingEnd }
     try? FileManager.default.createDirectory(at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -669,7 +674,7 @@ final class BeanSync {
     } catch let e as Again { why = "豆子换了文件"; rollover = e.naturalRollover } catch { why = "\(error)"; note = (error as? Bean.Fail)?.note ?? "beanWifiFailed" }
     if wifiUnits == 0, let code = note ?? Bean.wifiEnds[why] { wifiNote = ["code": code, "detail": why] }
     if let x = xfer { complete(x, -1, "；Wi-Fi 快传结束") }
-    overWifi = false
+    overWifi = false; shrunk = []  // BLE's own rate from here
     io.wifiLeave()
     wifiEnded = io.monotonicNow()
     let ms = max(1, wifiEnded - t1), kb = Int64(wifiUnits) * Int64(Bean.unit) / 1024
@@ -846,13 +851,15 @@ final class BeanSync {
     if caught == 0 { caughtSince = io.now() }
     let left = lacking(p)
     syncTotalKb = (caught + left) * Int64(Bean.unit) / 1024; syncDoneKb = caught * Int64(Bean.unit) / 1024
-    let id = p[0].id
-    return Xfer(id, false, files[id].flatMap(gap) ?? 0)
+    let id = p[0].id, f = files[id], from = f.flatMap(gap) ?? 0
+    // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
+    // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
+    return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? (f!.fromStart ? 0 : from - 1) : from)
   }
 
   /// What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
-  /// back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the measured
-  /// pace (`backlog_eta_s`; the file being recorded grows meanwhile) and why it waits (`backlog_held`: `live`, the live
+  /// back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the rate it
+  /// went down lately (`backlog_eta_s`) and why it waits (`backlog_held`: `live`, the live
   /// page is open, plan()'s live_now; `recording`, it goes after the bean stops: files closed meanwhile, a file read
   /// live only); none: being read. A minute or less behind is no backlog (watchedGapUnits: the live page's own line).
   private func owe() {
@@ -861,20 +868,27 @@ final class BeanSync {
     if open != 0 && open * 1000 >= since { now = max(0, edge(open) - (files[open].map(covered) ?? 0)) }
     if now <= BeanSync.watchedGapUnits { now = 0 }
     let closed = lacking(pending())
+    // the rate is the backlog's own over 1–3 min, reconnects and units had included (11-23 11:25: 3.3 times real time,
+    // one read's speed said 6–10; after Wi-Fi, Wi-Fi's 116)
+    let t = io.now()
+    shrunk = shrunk.filter { t - $0.0 <= 180_000 } + [(t, now + closed)]
+    let (at, was) = shrunk[0]
+    let rate = t - at >= 60_000 ? Double((was - now - closed) * Bean.frameMs) / Double(t - at) : nil
     owed = Self.owedFields(now: now, closed: recording ? closed : 0, idle: recording ? 0 : closed, watched: io.watched(),
-                           live: fills[open, default: 0] >= BeanSync.tries, pace: pace)
+                           live: fills[open, default: 0] >= BeanSync.tries, rate: rate)
+    if owed["backlog_held"] as? String != nil || owed.isEmpty { shrunk = [] }  // the next catch-up measured afresh
   }
 
   /// owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to
-  /// stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback).
-  static func owedFields(now: Int64, closed: Int64, idle: Int64, watched: Bool, live: Bool, pace: Double) -> [String: Any] {
+  /// stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback);
+  /// `rate`: s of it gone a s lately (owe()).
+  static func owedFields(now: Int64, closed: Int64, idle: Int64, watched: Bool, live: Bool, rate: Double?) -> [String: Any] {
     let s = (now + closed + idle) * Bean.frameMs / 1000
     guard s > 0 else { return [:] }
     // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
     let held: String? = now > 0 && live || closed > 0 ? "recording" : now > 0 && watched ? "live" : nil
-    // the recorded file grows by real time while it is read: it comes nearer at pace - 1
-    let eta: Double? = held == "recording" ? nil : now > 0 ? (pace > 1.05 ? Double(now * Bean.frameMs) / 1000 / (pace - 1) : nil)
-      : Double(idle * Bean.frameMs) / 1000 / pace
+    // held, or under 6 s a minute (live, or a read not gaining on the recording): no end in sight, none said
+    let eta: Double? = held == nil ? rate.flatMap { $0 >= 0.1 ? Double(s) / $0 : nil } : nil
     return ["backlog_s": s, "backlog_eta_s": eta.map { Int64($0) } ?? NSNull(), "backlog_held": held ?? NSNull()]
   }
 
@@ -1087,13 +1101,19 @@ final class BeanSync {
         // over Wi-Fi read through what the phone has (5,000–10,000 units/s): after its first socket closed the bean sent
         // nothing more on its hotspot (11-19, 11-20: 3 of 3 new sockets failed or got no answer to 1A/07), Wi-Fi ended
         if !x.live && !overWifi { x.until = rest(f, x.from) }
+        // the phone has it all (a length-unknown file shorter on the bean, 11-08): cut now, not all of it sent again
+        if !x.live && !overWifi && gap(f) == nil { x.until = x.from; x.cut = true }
       }
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
       let f = file(x.file, x.file * 1000)
-      if f.total < 0 { f.total = x.from }
+      if f.total < 0 { f.total = max(x.from, gap(f) ?? 0) }  // asked from a unit had (backlog()): it ends after that
       xfer = nil; save()
-    case 1: file(x.file, x.file * 1000).tries = BeanSync.tries + 1; failed(x, "no such file，不再取")
+    // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
+    case 2 where !x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0:
+      log("bean_xfer", "补传文件 \(x.file) 从单元 \(x.from) 要被拒（code 2），长度不明：从单元 0 再要一次取长度", fields: ["file": x.file, "from": x.from])
+      files[x.file]!.fromStart = true; xfer = nil
+    case 1: file(x.file, x.file * 1000).tries = BeanSync.dayTries - 1; failed(x, "no such file")  // its last try today
     case 4:  // still at the transfer before (10-25: asked 2 ms after its end): again in a moment, not a try
       if busy == 0 { log("bean_xfer", "\(x.live ? "实时" : "补传")文件 \(x.file) 豆子还忙（code 4），稍后再要", fields: ["file": x.file]) }
       busy += 1
@@ -1114,11 +1134,16 @@ final class BeanSync {
   /// going wrong leaves BLE all of its tries (#262 review: four taps the bean did not answer over Wi-Fi left a file
   /// unread, and unsaid). Giving it up is logged.
   private func tried(_ id: Int64, _ f: F) {
-    if overWifi { f.wifiTries += 1 } else { f.tries += 1 }
+    if overWifi { f.wifiTries += 1 } else {
+      f.tries += 1
+      // 11-19: refused four times in 0.27 s, then never asked again: each ask waits longer, up to 5 s, as for code 4
+      quietUntil = max(quietUntil, io.now() + min(5000, BeanSync.paceMs * Int64(f.tries)))
+    }
     let n = overWifi ? f.wifiTries : f.tries
-    guard n == BeanSync.tries + 1 else { return }
+    guard n == (overWifi ? BeanSync.tries + 1 : BeanSync.dayTries) else { return }
+    if !overWifi { f.tries = 0; f.wait = io.now() + 86_400_000 }  // the next day, its tries anew
     log("bean_xfer", "文件 \(id) 从单元 \(gap(f) ?? -1) 起\(overWifi ? "在 Wi-Fi 上" : "")取了 \(n) 次仍不全，" +
-        (overWifi ? "这次快传不再取它，留给蓝牙" : "不再取"), overWifi ? "warn" : "error", ["file": id, "gap": gap(f) ?? -1, "wifi": overWifi])
+        (overWifi ? "这次快传不再取它，留给蓝牙" : "取不到，明天再试"), overWifi ? "warn" : "error", ["file": id, "gap": gap(f) ?? -1, "wifi": overWifi])
   }
 
   /// A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole where
@@ -1165,10 +1190,6 @@ final class BeanSync {
     }
     x.units += 1; x.last = max(x.last, s.seq); x.seen = now; linkUnits += 1
     if overWifi { wifiUnits += 1 }
-    // a read behind (not caught up to live yet): how fast the bean sends, for owe()'s estimate
-    if !x.realtime && x.lag == nil && s.seq - x.first >= BeanSync.restUnits && now > x.firstAt {
-      pace = Double((s.seq - x.first) * Bean.frameMs) / Double(now - x.firstAt)
-    }
     if x.live {
       liveSeen = now; liveStalled = false; busy = 0
       // the link can slow to a fraction of real time and stay up (iOS in the background, 10-28): how far behind, once
@@ -1273,6 +1294,7 @@ final class BeanSync {
     } else if gap(f) == nil {
       pendingEnd = max(pendingEnd, f.at(f.total))
     } else if !(x.cut && gap(f)! > x.from) {  // cut with the hole filled: not a try
+      if x.units > x.dupes { f.tries = 0 }  // units new to the phone: only reads in a row that bring none count
       tried(x.file, f)
     }
     save()
@@ -1317,7 +1339,7 @@ final class BeanSync {
     return f.total >= 0 && f.total <= at ? nil : at
   }
 
-  private func done(_ f: F) -> Bool { gap(f) == nil || f.tries > BeanSync.tries || overWifi && f.wifiTries > BeanSync.tries }
+  private func done(_ f: F) -> Bool { gap(f) == nil || io.now() < f.wait || overWifi && f.wifiTries > BeanSync.tries }
 
   /// Where the first range the phone has after `from` that is long enough to skip begins: a new connection costs less
   /// than taking it again (the bean sends from the offset to the end and cannot be stopped mid-file). -1: take it all.
