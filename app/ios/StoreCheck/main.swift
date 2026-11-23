@@ -802,10 +802,11 @@ do {
 }
 
 // The server's coverage (GET /api/coverage; the owner, 11-23: from the first bind on, whichever phone sent it): of a
-// closed file of three 60 s pieces, those the server has are not written (the first dated 2 s apart by another phone),
-// and the file goes off the card once the rest is up; one that ends before the first bind is not written and the file
+// closed file of three 60 s pieces, those the server has are not written (the first dated 2 s apart by another phone,
+// inside a longer span), and the file goes off the card once the rest is up; one that ends before the first bind is not written and the file
 // stays on the card, after a restart too; no coverage: all written, as before; a file noMore() cut stays though the
-// server has it all (#409); `wait`: nothing of a closed file cut. StoreTest.coverage's case
+// server has it all (#409); `wait`: nothing of a closed file cut; another recorder's coverage (a re-bind) judges
+// nothing; what the server lacks some of is sent (#414's review: these were taken as had). StoreTest.coverage's case
 do {
   let e: Int64 = 1_000_000_000
   let f: Int64 = 1 << 16, g: Int64 = 1 << 16 | 1
@@ -816,7 +817,7 @@ do {
     m.listed([f: Int64(size ?? body.count), g: 0], open: g)
     return m
   }
-  let other = Coverage(bind: e - 1000, spans: [(e + 2000, e + 62_000), (e + 120_000, e + 180_000)])
+  let other = Coverage(device: "X", bind: e - 1000, spans: [(e - 8000, e + 66_000), (e + 116_000, e + 190_000)])
   do {
     let out = tmp(), m = try closed(tmp())
     check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: other, wait: true), 0, "waits for the coverage")
@@ -829,7 +830,7 @@ do {
   }
   do {
     let dir = tmp(), out = tmp(), m = try closed(dir)
-    check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: Coverage(bind: e + 60_000, spans: [])), 2, "after the first bind")
+    check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: Coverage(device: "X", bind: e + 60_000, spans: [])), 2, "after the first bind")
     check(names(out), ["\(e + 60_000)@X.ogg", "\(e + 120_000)@X.ogg"], "")
     check(m.before, 60_000, "")
     clear(out)
@@ -845,11 +846,31 @@ do {
   do {
     let out = tmp(), m = try closed(tmp(), size: body.count + 32)
     check(m.noMore(f), Int64(body.count + 32), "cut")
-    check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: Coverage(bind: 0, spans: [(e, e + 180_000)])), 0, "all had")
+    check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: Coverage(device: "X", bind: 0, spans: [(e - 4000, e + 184_000)])), 0, "all had")
     check(m.done(out), [], "cut, not listed again: kept although the server has it")
   }
-  check(Coverage(bind: 0, spans: []).has(e, e + 1000), false, "a second with nothing of it had")
-  check(Coverage(bind: 0, spans: [(e, e + 10_000), (e + 15_000, e + 30_000)]).has(e, e + 30_000), false, "5 s missing between")
+  do {
+    let out = tmp(), m = try closed(tmp())
+    check(try m.pieces(out, tmp(), tag: "B", liveFrames: 15, boot: 1, cover: Coverage(device: "A", bind: e + 200_000, spans: [(e - 4000, e + 184_000)])), 3,
+          "recorder A's coverage, recorder B's file of the same minutes: all of it")
+    check(m.done(out), [], "not off B's card before its pieces are up")
+  }
+  do {
+    let out = tmp(), m = try closed(tmp())
+    let some = Coverage(device: "X", bind: 0, spans: (0..<Int64(36)).map { (e + $0 * 5000, e + $0 * 5000 + 1100) })
+    check(try m.pieces(out, tmp(), tag: "X", liveFrames: 15, boot: 1, cover: some), 3, "1.1 s of every 5 s had (22 %): all of it")
+    check(m.done(out), [], "not off the card before its pieces are up")
+  }
+  func has(_ spans: [(Int64, Int64)], _ ms: Int64 = 60_000) -> Bool { Coverage(device: "X", bind: 0, spans: spans).has(e, e + ms) }
+  check(has([]), false, "nothing of it had")
+  check(has([(e - 5000, e + 28_500), (e + 31_500, e + 65_000)]), false, "3 s missing mid-way")
+  check(has([(e + 3500, e + 56_500)]), false, "3.5 s missing at each end")
+  check(has([(e + 3400, e + 3600)], 7000), false, "0.2 s of 7 s had (3 %)")
+  check(has((0..<Int64(6)).map { (e + $0 * 10_000, e + $0 * 10_000 + 6100) }), false, "6.1 s of every 10 s had (61 %)")
+  check(has((0..<Int64(12)).map { (e + $0 * 5000, e + $0 * 5000 + 1100) }), false, "1.1 s of every 5 s had (22 %)")
+  check(has([(e + 2000, e + 62_000)]), false, "dated 2 s apart at a span's end: sent again")
+  check(has([(e - 4000, e + 64_000)]), true, "inside a span, 4 s in from both ends: had")
+  check(has([(e - 8000, e + 72_000)]), true, "dated 2 s apart inside a longer span: had")
 }
 
 print("storecheck ok")

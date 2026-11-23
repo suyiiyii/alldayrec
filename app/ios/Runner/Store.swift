@@ -161,20 +161,15 @@ enum Ogg {
 ///                                                card to count boots: each such boot has its own files)
 ///   C file cut [piece]                           a piece made since (or frames passed over): appended, see cut()
 ///   U file                                       cut by noMore(), no LIST since: kept on the card (done())
-/// GET /api/coverage of a recorder (Mirror.pieces): its first bind, and the spans [from, to) of its audio the server has.
+/// GET /api/coverage of a recorder (Mirror.pieces): which one, its first bind, and the spans [from, to) of its audio the
+/// server has.
 struct Coverage {
-  let bind: Int64, spans: [(Int64, Int64)]
-  static let marginMs: Int64 = 4000  // what it lacks this short next to what it has: two phones' clocks apart (1–3 s)
+  let device: String, bind: Int64, spans: [(Int64, Int64)]
+  static let marginMs: Int64 = 4000  // in from each end of what the server has: two phones' clocks apart (1–3 s)
 
-  /// The server has [a, b): some of it, and nothing missing of it longer than the margin.
-  func has(_ a: Int64, _ b: Int64) -> Bool {
-    var at = a, any = false
-    for (x, y) in spans where y > at && x < b {
-      if x - at > Coverage.marginMs { return false }
-      at = max(at, y); any = true
-    }
-    return any && b - at <= Coverage.marginMs
-  }
+  /// The server has [a, b): it lies in one of its spans, marginMs in from both ends. At worst a piece at a span's end
+  /// goes up again; one the server lacks any of is never taken as had.
+  func has(_ a: Int64, _ b: Int64) -> Bool { spans.contains { $0.0 + Coverage.marginMs <= a && b <= $0.1 - Coverage.marginMs } }
 }
 
 final class Mirror {
@@ -369,6 +364,7 @@ final class Mirror {
   /// Returns the number of pieces written.
   func pieces(_ out: URL, _ undated: URL, tag: String, liveFrames: Int, boot: Int, cover: Coverage? = nil, wait: Bool = false) throws -> Int {
     scanSyncs()
+    let cover = cover?.device == tag ? cover : nil  // another recorder's (a re-bind) never judges this one's
     var n = 0
     for f in files.keys.sorted() {
       let s = files[f]!

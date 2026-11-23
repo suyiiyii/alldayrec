@@ -386,6 +386,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             open = -1; liveFloor = -1; ahead = -1; reading = null; needList = true; listFull = false; liveRead = true; stalls.clear()
             holeAt = -1; refollow = false; abandoned = -1; liveGaps = 0; settleUntil = android.os.SystemClock.elapsedRealtime() + 3000
             caught = 0; caughtSince = 0
+            cover = null; coverAt = 0  // asked anew: the recorder may be another one now (a re-bind)
             state = say("joining")
             var live0 = false  // LIVE taken since the file it goes on in was caught up
             var lastStatus = android.os.SystemClock.elapsedRealtime()
@@ -627,7 +628,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     private val stalls = HashMap<Long, Int>()
     private var caught = 0L       // a catch-up under way: bytes taken since (elapsedRealtime; 0: none)
     private var caughtSince = 0L
-    @Volatile private var cover: Coverage? = null  // the server's, for pieces() (coverage()); null: none, or no answer
+    @Volatile private var cover: Coverage? = null  // the server's, for pieces() (coverage()), of cover.device only; null: none, or no answer
     @Volatile private var covering = false
     private var coverAt = 0L
     @Volatile private var coverFailed = false
@@ -852,7 +853,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     }
 
     private val HOLD_MARGIN_MS = 60_000L  // the hold before where LIVE began: the clock's drift
-    private var mirrorName = ""  // the session's: the board's name as pieces carry it, its boot now
+    @Volatile private var mirrorName = ""  // the session's: the board's name as pieces carry it, its boot now
     private var boot = 0
 
     /** The mirror into dated pieces (Mirror.pieces): the live file in pieces as long as the app's slice. */
@@ -863,7 +864,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val n = m.pieces(chunks, undated, mirrorName, sliceS() * 100, boot, cover, coverWait)
         if (n > 0) onPiece(n)
     }
-    private val coverWait get() = covering && cover == null && !coverFailed  // the first answer still to come
+    private val coverWait get() = covering && cover?.device != mirrorName && !coverFailed  // the first answer still to come
 
     /** GET /api/coverage, off the link's thread (the board wants an ACK within 8 s): once a closed file is still to be
      *  cut and five minutes after the last, for the 31 days before now (the server's limit). No answer: no cover, all sent. */
@@ -874,7 +875,8 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val tag = mirrorName; val t = System.currentTimeMillis()
         Thread {
             val c = RecorderService.uploader?.coverage(tag, t - 31 * 86_400_000L + 60_000, t + 60_000)
-            cover = c?.let { Coverage(it.first, it.second) }
+            if (mirrorName != tag) { covering = false; return@Thread }  // re-bound meanwhile: not the recorder's now
+            cover = c?.let { Coverage(tag, it.first, it.second) }
             if (c == null && !coverFailed) DeviceLog.app(tag, "coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧都上传", "warn")
             if (c != null && (coverFailed || !coverSaid)) {
                 coverSaid = true

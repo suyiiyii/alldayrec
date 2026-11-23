@@ -507,6 +507,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       open = -1; liveFloor = -1; ahead = -1; reading = nil; needList = true; listFull = false; liveRead = true; stalls = [:]
       holeAt = -1; refollow = false; abandoned = -1; liveGaps = 0; settleUntil = Date(timeIntervalSinceNow: 3)
       caught = 0; caughtSince = nil
+      cover = nil; coverAt = .distantPast  // asked anew: the recorder may be another one now (a re-bind)
       state = ["code": "joining"]
       var live0 = false  // LIVE taken since the file it goes on in was caught up
       var lastStatus = Date(), lastPieces = Date.distantPast, lastCharge = Date(), lastAck = Date.distantPast
@@ -745,7 +746,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
   private var settleUntil = Date.distantPast  // after a subscribe: LIVE still sends the file before the new one, from mid-way
   private var caught: Int64 = 0     // a catch-up under way: bytes taken since
   private var caughtSince: Date?
-  @Shared private var cover: Coverage?  // the server's, for pieces() (coverage()); nil: none, or no answer
+  @Shared private var cover: Coverage?  // the server's, for pieces() (coverage()), of cover.device only; nil: none, or no answer
   @Shared private var covering = false
   private var coverAt = Date.distantPast
   @Shared private var coverFailed = false
@@ -990,7 +991,7 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     coverage(m)
     files += try m.pieces(chunks, undated, tag: tag ?? "recorder", liveFrames: sliceS() * 100, boot: boot, cover: cover, wait: coverWait)
   }
-  private var coverWait: Bool { covering && cover == nil && !coverFailed }  // the first answer still to come
+  private var coverWait: Bool { covering && cover?.device != tag && !coverFailed }  // the first answer still to come
 
   /// GET /api/coverage, off the link's thread (the board wants an ACK within 8 s): once a closed file is still to be cut
   /// and five minutes after the last, for the 31 days before now (the server's limit). No answer: no cover, all sent.
@@ -1000,7 +1001,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     let now = Recorder.now()
     Thread.detachNewThread { [self] in
       let c = Recorder.uploader?.coverage(tag, now - 31 * 86_400_000 + 60_000, now + 60_000)
-      cover = c.map { Coverage(bind: $0.bind, spans: $0.spans) }
+      guard self.tag == tag else { covering = false; return }  // re-bound meanwhile: not the recorder's now
+      cover = c.map { Coverage(device: tag, bind: $0.bind, spans: $0.spans) }
       if c == nil && !coverFailed { DeviceLog.app(tag, "coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧都上传", level: "warn") }
       if let c, coverFailed || !coverSaid {
         coverSaid = true

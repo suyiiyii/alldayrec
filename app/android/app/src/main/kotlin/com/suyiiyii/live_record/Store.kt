@@ -133,18 +133,13 @@ object Store {
  *                                                  card to count boots: each such boot has its own files)
  *    C file cut [piece]                            a piece made since (or frames passed over): appended, see cut()
  *    U file                                        cut by noMore(), no LIST since: kept on the card (done()) */
-/** GET /api/coverage of a recorder (Mirror.pieces): its first bind, and the spans [from, to) of its audio the server has. */
-class Coverage(val bind: Long, val spans: List<LongArray>) {
-    /** The server has [a, b): some of it, and nothing missing of it longer than the margin. */
-    fun has(a: Long, b: Long): Boolean {
-        var at = a; var any = false
-        for (s in spans) if (s[1] > at && s[0] < b) {
-            if (s[0] - at > MARGIN_MS) return false
-            at = maxOf(at, s[1]); any = true
-        }
-        return any && b - at <= MARGIN_MS
-    }
-    companion object { const val MARGIN_MS = 4000L }  // what it lacks this short next to what it has: two phones' clocks apart (1–3 s)
+/** GET /api/coverage of a recorder (Mirror.pieces): which one, its first bind, and the spans [from, to) of its audio the
+ *  server has. */
+class Coverage(val device: String, val bind: Long, val spans: List<LongArray>) {
+    /** The server has [a, b): it lies in one of its spans, MARGIN_MS in from both ends. At worst a piece at a span's end
+     *  goes up again; one the server lacks any of is never taken as had. */
+    fun has(a: Long, b: Long) = spans.any { it[0] + MARGIN_MS <= a && b <= it[1] - MARGIN_MS }
+    companion object { const val MARGIN_MS = 4000L }  // in from each end of what the server has: two phones' clocks apart (1–3 s)
 }
 
 class Mirror(private val dir: File) {
@@ -304,6 +299,7 @@ class Mirror(private val dir: File) {
      *  Returns the number of pieces written. */
     fun pieces(out: File, undated: File, tag: String, liveFrames: Int, boot: Int, cover: Coverage? = null, wait: Boolean = false): Int {
         scanSyncs()
+        @Suppress("NAME_SHADOWING") val cover = cover?.takeIf { it.device == tag }  // another recorder's (a re-bind) never judges this one's
         var n = 0
         for ((f, s) in files) {
             if (wait && s.closed) continue

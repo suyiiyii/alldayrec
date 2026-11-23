@@ -305,15 +305,16 @@ class StoreTest {
 
     /** The server's coverage (GET /api/coverage; the owner, 11-23: from the first bind on, whichever phone sent it): of
      *  a closed file of three 60 s pieces, those the server has are not written (the first dated 2 s apart by another
-     *  phone), and the file goes off the card once the rest is up; one that ends before the first bind is not written and
+     *  phone, inside a longer span), and the file goes off the card once the rest is up; one that ends before the first bind is not written and
      *  the file stays on the card, after a restart too; no coverage: all written, as before; a file noMore() cut stays
-     *  though the server has it all (#409); `wait`: nothing of a closed file cut. StoreCheck's case. */
+     *  though the server has it all (#409); `wait`: nothing of a closed file cut; another recorder's coverage (a re-bind)
+     *  judges nothing; what the server lacks some of is sent (#414's review: these were taken as had). StoreCheck's case. */
     @Test fun coverage() {
         val e = 1_000_000_000L
         val f = 1L shl 16; val g = 1L shl 16 or 1
         val body = (0 until 72).fold(t(0, e)) { acc, k -> acc + a(k * 250, 250) }  // 18,000 frames: 180 s
         fun closed(dir: File, size: Int = body.size) = Mirror(dir).apply { put(f, 0, body); listed(mapOf(f to size.toLong(), g to 0L), g) }
-        val other = Coverage(e - 1000, listOf(longArrayOf(e + 2000, e + 62_000), longArrayOf(e + 120_000, e + 180_000)))
+        val other = Coverage("X", e - 1000, listOf(longArrayOf(e - 8000, e + 66_000), longArrayOf(e + 116_000, e + 190_000)))
         run {
             val out = tmp(); val m = closed(tmp())
             assertEquals("waits for the coverage", 0, m.pieces(out, tmp(), "X", 15, 1, other, wait = true))
@@ -326,7 +327,7 @@ class StoreTest {
         }
         run {
             val dir = tmp(); val out = tmp(); val m = closed(dir)
-            assertEquals("after the first bind", 2, m.pieces(out, tmp(), "X", 15, 1, Coverage(e + 60_000, emptyList())))
+            assertEquals("after the first bind", 2, m.pieces(out, tmp(), "X", 15, 1, Coverage("X", e + 60_000, emptyList())))
             assertEquals(listOf("${e + 60_000}@X.ogg", "${e + 120_000}@X.ogg"), names(out))
             assertEquals(60_000L, m.before)
             out.listFiles()!!.forEach { it.delete() }
@@ -342,11 +343,31 @@ class StoreTest {
         run {
             val out = tmp(); val m = closed(tmp(), body.size + 32)
             assertEquals((body.size + 32).toLong(), m.noMore(f))
-            assertEquals("all had", 0, m.pieces(out, tmp(), "X", 15, 1, Coverage(0, listOf(longArrayOf(e, e + 180_000)))))
+            assertEquals("all had", 0, m.pieces(out, tmp(), "X", 15, 1, Coverage("X", 0, listOf(longArrayOf(e - 4000, e + 184_000)))))
             assertEquals("cut, not listed again: kept although the server has it", emptyList<Long>(), m.done(out))
         }
-        assertFalse("a second with nothing of it had", Coverage(0, emptyList()).has(e, e + 1000))
-        assertFalse("5 s missing between", Coverage(0, listOf(longArrayOf(e, e + 10_000), longArrayOf(e + 15_000, e + 30_000))).has(e, e + 30_000))
+        run {
+            val out = tmp(); val m = closed(tmp())
+            assertEquals("recorder A's coverage, recorder B's file of the same minutes: all of it", 3,
+                m.pieces(out, tmp(), "B", 15, 1, Coverage("A", e + 200_000, listOf(longArrayOf(e - 4000, e + 184_000)))))
+            assertEquals("not off B's card before its pieces are up", emptyList<Long>(), m.done(out))
+        }
+        run {
+            val out = tmp(); val m = closed(tmp())
+            val some = Coverage("X", 0, (0 until 36L).map { longArrayOf(e + it * 5000, e + it * 5000 + 1100) })
+            assertEquals("1.1 s of every 5 s had (22 %): all of it", 3, m.pieces(out, tmp(), "X", 15, 1, some))
+            assertEquals("not off the card before its pieces are up", emptyList<Long>(), m.done(out))
+        }
+        fun has(spans: List<LongArray>, ms: Long = 60_000) = Coverage("X", 0, spans).has(e, e + ms)
+        assertFalse("nothing of it had", has(emptyList()))
+        assertFalse("3 s missing mid-way", has(listOf(longArrayOf(e - 5000, e + 28_500), longArrayOf(e + 31_500, e + 65_000))))
+        assertFalse("3.5 s missing at each end", has(listOf(longArrayOf(e + 3500, e + 56_500))))
+        assertFalse("0.2 s of 7 s had (3 %)", has(listOf(longArrayOf(e + 3400, e + 3600)), 7000))
+        assertFalse("6.1 s of every 10 s had (61 %)", has((0 until 6L).map { longArrayOf(e + it * 10_000, e + it * 10_000 + 6100) }))
+        assertFalse("1.1 s of every 5 s had (22 %)", has((0 until 12L).map { longArrayOf(e + it * 5000, e + it * 5000 + 1100) }))
+        assertFalse("dated 2 s apart at a span's end: sent again", has(listOf(longArrayOf(e + 2000, e + 62_000))))
+        assertTrue("inside a span, 4 s in from both ends: had", has(listOf(longArrayOf(e - 4000, e + 64_000))))
+        assertTrue("dated 2 s apart inside a longer span: had", has(listOf(longArrayOf(e - 8000, e + 72_000))))
     }
 
     /** The cut kept over a reconnect (a new Mirror on the same dir, as each BLE session makes): that session's first
