@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -1568,24 +1569,70 @@ class BeanTest {
         assertEquals(2, bean.logs.count { "次再要" in it.second })
     }
 
-    /** Over Wi-Fi units came, then none (iOS 11-09: the bean stopped 16 units short of the end, no 1A/0A): 10 s on the
-     *  fast transfer ends, and BLE reads the rest. */
-    @Test fun wifiIdleEndsAndBleFills() {
+    /** Over Wi-Fi units came, then none for the rest of that hotspot whatever is asked (iOS 11-23: the phone still on it,
+     *  the same socket's ask unanswered): 10 s on, the hotspot off (1A/02) and a new one (1A/05, a new name) in the next
+     *  session, where the rest comes over Wi-Fi. */
+    @Test fun wifiStopReopensTheHotspot() {
         val dir = Files.createTempDirectory("bean").toFile()
         val bean = wifiBean(); val a = wt0 / 1000 - 600
         bean.wifiAsk = true
         bean.onTransfer = { file, from, _ ->
-            bean.header(file, 3000L * Bean.UNIT)
-            if (bean.onWifi) bean.units(file, (from until 2984L).toList(), ms = 1)
-            else { bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            if (!(bean.onWifi && bean.joins.size == 1 && from > 0)) {  // the first hotspot: silent since it stopped
+                bean.header(file, 3000L * Bean.UNIT)
+                if (bean.joins.size == 1) bean.units(file, (from until 2000L).toList(), ms = 1)
+                else { bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            }
         }
         val sync = wifiSync(bean, dir)
+        val stop = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(stop.message, "10 s 没收到单元" in stop.message!!)
+        val stall = bean.logFields[bean.logs.indexOfFirst { it.first == "bean_wifi_stall" }]
+        assertEquals("where it stopped", 1999L, stall["seq"])
+        assertEquals("a new hotspot next", true, stall["reopen"])
+        bean.script.clear(); repeat(60) { bean.script += {} }
+        val n = bean.sent.size
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertTrue(again.message, "10 s 没收到单元" in again.message!!)
+        assertTrue(again.message, "都取到了" in again.message!!)
+        val cmds = bean.sentCmds().drop(n)
+        assertTrue("the old hotspot off before the new one", cmds.indexOf(0x1A02) in 0 until cmds.indexOf(0x1A05))
+        assertEquals(2, bean.joins.size); assertNotEquals("a new name", bean.joins[0].first, bean.joins[1].first)
+        assertEquals("reopen", bean.logFields.last { it["reopens"] != null && it["reason"] != null }["reason"])
+        assertEquals("the rest from where it stopped, over the new hotspot", listOf(Triple(a, 0L, false), Triple(a, 2000L, false)), bean.transfers)
+        assertNull("units came: no failure for the page", sync.wifiNote)
+        assertEquals("each unit once", (0L until 3000L).toList(), seqs(File(dir, "chunks")))
+    }
+
+    /** A bean that stops on every hotspot: TRIES new ones since the tap, then the fast transfer ends and BLE reads the
+     *  rest; a tap after it starts the count again. */
+    @Test fun wifiStopsOnEveryHotspot() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val a = wt0 / 1000 - 600
+        bean.wifiAsk = true
+        val heard = mutableSetOf<Int>()  // the hotspots that sent: each one once, then silent
+        bean.onTransfer = { file, from, _ ->
+            if (!(bean.onWifi && bean.joins.size in heard)) {
+                bean.header(file, 3000L * Bean.UNIT)
+                if (bean.onWifi) { heard += bean.joins.size; bean.units(file, (from until from + 500).toList(), ms = 1) }
+                else { bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            }
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(1 + BeanSync.TRIES) {
+            bean.script.clear(); repeat(60) { bean.script += {} }
+            val stop = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+            assertTrue(stop.message, "10 s 没收到单元" in stop.message!!)
+        }
+        assertEquals("the tap's hotspot and TRIES new ones", 1 + BeanSync.TRIES, bean.joins.size)
+        assertEquals(BeanSync.TRIES, bean.logFields.count { it["reopen"] == true })
+        assertEquals("the last stop ends it", false, bean.logFields.last { it["reopen"] != null }["reopen"])
         bean.script.clear(); repeat(5) { bean.script += {} }
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertEquals("then BLE from where Wi-Fi stopped", listOf(Triple(a, 0L, false), Triple(a, 2984L, false)), bean.transfers)
+        assertEquals("no more hotspots", 1 + BeanSync.TRIES, bean.joins.size)
+        assertEquals("then BLE from where Wi-Fi stopped", Triple(a, 500L * (1 + BeanSync.TRIES), false), bean.transfers.last())
         assertEquals("each unit once", (0L until 3000L).toList(), seqs(File(dir, "chunks")))
+        bean.listed[a + 100] = 60_000; bean.wifiAsk = true; bean.script.clear(); repeat(60) { bean.script += {} }
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("a tap: new hotspots again", true, bean.logFields.last { it["reopen"] != null }["reopen"])
     }
 
     /** Writing the last piece fails as the fast transfer ends (a full disk): the hotspot is left all the same, so BLE

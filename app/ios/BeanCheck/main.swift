@@ -803,55 +803,73 @@ for drops in [1, BeanSync.tries] {
   check(bean.transfers.last!, [b, 0, 0], "then BLE as before")
 }
 
-/// Over Wi-Fi units came, then none (11-09: the bean stopped 16 units short of the end, no 1A/0A; iPhone 11-09..11-22: 14
-/// stops mid-file, mostly seconds in): 10 s on, what is missing is asked once more on the same socket. Answered, Wi-Fi
-/// goes on; not (one ask, 8 s), or a second stop, ends the fast transfer (the whole of it) and BLE reads the rest.
-for answers in [true, false] {
-  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
-  let bean = FakeBean(t0)
-  let a = (t0 - 600_000) / 1000
-  bean.list(a, 60_000); bean.wifiAsk = true
-  bean.onTransfer = { file, from, _ in
-    if bean.onWifi && from > 0 && !answers { return }  // silent on the socket since it stopped
-    bean.header(file, 3000 * Int64(Bean.unit))
-    if bean.onWifi && from == 0 { bean.units(file, Array(from..<2984), ms: 1) } else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
-  }
-  bean.script = Array(repeating: {}, count: 60)
-  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
-  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(again.description.contains(answers ? "都取到了" : "豆子没回音"), true, again.description)
-  check(sync.wifiNote == nil, true, "units came: no failure for the page")
-  let stall = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_stall" }!]
-  check(stall["seq"] as? Int64, 2983, "where it stopped")
-  check(stall["again"] as? Bool, true, "asked again once")
-  check(bean.logs.filter { $0.0 == "bean_xfer" && $0.1.contains("8 s 没回音") }.count, 0, "after a stop, one ask")
-  check(bean.transfers, [[a, 0, 0], [a, 2984, 0]], "the rest asked for on the same socket")
-  if !answers {
-    bean.script = Array(repeating: {}, count: 5)
-    _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-    check(bean.transfers.last!, [a, 2984, 0], "then BLE from where Wi-Fi stopped")
-  }
-  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
-  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
-}
-
-/// A second stop in the same fast transfer ends it: no asking again and again.
+/// Over Wi-Fi units came, then none, and none for the rest of that hotspot whatever is asked (11-23: the phone still on it,
+/// the same socket's ask unanswered): 10 s on, the hotspot off (1A/02) and a
+/// new one asked for (1A/05, a new name) in the next session, where the rest comes over Wi-Fi.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
   let a = (t0 - 600_000) / 1000
   bean.list(a, 60_000); bean.wifiAsk = true
   bean.onTransfer = { file, from, _ in
+    if bean.onWifi && bean.joins.count == 1 && from > 0 { return }  // the first hotspot: silent since it stopped
     bean.header(file, 3000 * Int64(Bean.unit))
-    bean.units(file, Array(from..<(bean.onWifi ? from + 1000 : 3000)), last: 2999, ms: 1)
-    if !bean.onWifi { bean.complete(file) }
+    if bean.joins.count == 1 { bean.units(file, Array(from..<2000), ms: 1) } else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
   }
   bean.script = Array(repeating: {}, count: 60)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  let stop = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(stop.description.contains("10 s 没收到单元"), true, stop.description)
+  let stall = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_stall" }!]
+  check(stall["seq"] as? Int64, 1999, "where it stopped")
+  check(stall["reopen"] as? Bool, true, "a new hotspot next")
+  check(bean.transfers, [[a, 0, 0]], "nothing asked again on that socket")
+  bean.script = Array(repeating: {}, count: 60)
+  let n = bean.sent.count
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(again.description.contains("10 s 没收到单元"), true, again.description)
-  check(bean.transfers, [[a, 0, 0], [a, 1000, 0]], "asked again once, not after the second stop")
-  check(bean.logFields.filter { $0["again"] as? Bool == false }.count, 1, "the second stop logged as the end")
+  check(again.description.contains("都取到了"), true, again.description)
+  let cmds = bean.sent[n...].map { Int($0[5]) << 8 | Int($0[6]) }
+  check(cmds.firstIndex(of: 0x1A02)! < cmds.firstIndex(of: 0x1A05)!, true, "the old hotspot off before the new one")
+  check(bean.joins.count, 2); check(bean.joins[0].0 != bean.joins[1].0, true, "a new name")
+  check(bean.logFields.last { $0["reason"] != nil && $0["reopens"] != nil }?["reason"] as? String, "reopen")
+  check(bean.transfers, [[a, 0, 0], [a, 2000, 0]], "the rest from where it stopped, over the new hotspot")
+  check(sync.wifiNote == nil, true, "units came: no failure for the page")
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
+  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+}
+
+/// A bean that stops on every hotspot: `tries` new ones since the tap, then the fast transfer ends and BLE reads the
+/// rest; a tap after it starts the count again.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  var heard = Set<Int>()  // the hotspots that sent: each one once, then silent
+  bean.onTransfer = { file, from, _ in
+    if bean.onWifi && heard.contains(bean.joins.count) { return }
+    bean.header(file, 3000 * Int64(Bean.unit))
+    if bean.onWifi { heard.insert(bean.joins.count); bean.units(file, Array(from..<(from + 500)), ms: 1) }
+    else { bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  for _ in 0...BeanSync.tries {
+    bean.script = Array(repeating: {}, count: 60)
+    let stop = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(stop.description.contains("10 s 没收到单元"), true, stop.description)
+  }
+  check(bean.joins.count, 1 + BeanSync.tries, "the tap's hotspot and `tries` new ones")
+  check(bean.logFields.filter { $0["reopen"] as? Bool == true }.count, BeanSync.tries)
+  check(bean.logFields.last { $0["reopen"] != nil }?["reopen"] as? Bool, false, "the last stop ends it")
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.joins.count, 1 + BeanSync.tries, "no more hotspots")
+  check(bean.transfers.last!, [a, Int64(500 * (1 + BeanSync.tries)), 0], "then BLE from where Wi-Fi stopped")
+  let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
+  check(got == Array(0..<3000), true, "each unit once: \(got.count)")
+  bean.list(a + 100, 60_000); bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 60)
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.logFields.last { $0["reopen"] != nil }?["reopen"] as? Bool, true, "a tap: new hotspots again")
 }
 
 /// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496

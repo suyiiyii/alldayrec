@@ -403,6 +403,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
     private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at TRIES (wifiOff())
     private var wifiUnits = 0
+    private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file, since the last tap (wifiLoop())
     private var wifiEnded = 0L
     private var wifiBattery: Any? = null  // for the log of the way back (wifiOff())
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
@@ -480,7 +481,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         while (true) {
             if (io.wifiAsked()) {  // a transfer cannot be stopped but by the link going: Wi-Fi first in the next session
                 if (recording) wifiRecording() else {
-                    wifiNext = true
+                    wifiNext = true; wifiReopens = 0
                     if (xfer != null) { flush(); xfer = null; throw Again("Wi-Fi asked for: the transfer stops") }
                 }
             }
@@ -588,8 +589,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun wifi() {
         if (recording) return wifiRecording()
         val battery = hw["battery"] as Int?
-        io.log("bean_wifi_start", "开始 Wi-Fi 快传（手动）：电量 ${battery?.let { "$it%" } ?: "?"}，没在录音，积压 ${owed["backlog_s"] ?: 0} s",
-            fields = mapOf("reason" to "manual", "battery" to battery, "recording" to recording, "open" to listing.open,
+        io.log("bean_wifi_start", "开始 Wi-Fi 快传（${if (wifiReopens > 0) "断流后重开热点，第 $wifiReopens 次" else "手动"}）：" +
+            "电量 ${battery?.let { "$it%" } ?: "?"}，没在录音，积压 ${owed["backlog_s"] ?: 0} s",
+            fields = mapOf("reason" to (if (wifiReopens > 0) "reopen" else "manual"), "reopens" to wifiReopens, "battery" to battery, "recording" to recording, "open" to listing.open,
                 "backlog_s" to (owed["backlog_s"] ?: 0), "files" to listing.files.size))
         wifiNote = null
         if (needList) listing = list()  // a file just closed: its length
@@ -691,9 +693,19 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 return "豆子没回音"
             }
             // units came, then none: over Wi-Fi the bean sends far faster than real time, and 11-09 (iOS) it stopped 16
-            // units short of the end, sending no 1A/0A either; BLE fills what is left (no 30 s wait for nothing)
+            // units short of the end, sending no 1A/0A either; a new hotspot or BLE fills what is left (no 30 s wait for nothing)
             val idle = if (x.last >= 0) 10_000L else 30_000L
-            if (now - x.seen > idle) { complete(x, -1, "；${idle / 1000} s 没收到单元"); return "${idle / 1000} s 没收到单元" }
+            if (now - x.seen <= idle) continue
+            complete(x, -1, "；${idle / 1000} s 没收到单元")
+            // the bean's (iOS 11-19..23, as on iOS: Bean.swift): neither the same socket nor a new one on the same hotspot
+            // got it going again, a new hotspot did each time. So the hotspot off and a new one (the next session: 1A/02,
+            // then wifi()), up to TRIES times since the last tap
+            val reopen = x.last >= 0 && wifiReopens < TRIES
+            if (reopen) { wifiReopens++; wifiNext = true }
+            io.log("bean_wifi_stall", "Wi-Fi 上文件 ${x.file} 到单元 ${x.last} 后 ${idle / 1000} s 没收到单元，" +
+                (if (reopen) "关掉热点，新开一个再要（第 $wifiReopens 次）" else "结束快传"), "warn",
+                mapOf("file" to x.file, "seq" to x.last, "units" to x.units, "reopen" to reopen, "reopens" to wifiReopens))
+            return "${idle / 1000} s 没收到单元"
         }
     }
 
