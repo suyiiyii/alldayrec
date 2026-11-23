@@ -822,17 +822,25 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     /** What the server has of the bean's closed files (GET /api/coverage; the owner, 11-23: only the first bind starts the
      *  account's audio, a later one is the bean handed between phones): had here too, so not read, not sent, and a file
-     *  it has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). A
-     *  stretch it lacks of up to MARGIN_UNITS next to one it has counts as had (anchors apart); a longer one is read,
-     *  whatever its cause (a trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped. */
+     *  it has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). Of
+     *  each span the server has, only what lies MARGIN_UNITS in from both its ends counts as had (two phones' anchors apart):
+     *  at worst a few seconds are read again, never one the server lacks taken as had. All it lacks is read, whatever its
+     *  cause (a trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped. */
     private fun cover() {
         coverAt = io.now()
         val closed = listing.files.filter { it.first != listing.open }
         val hi = closed.maxOfOrNull { (id, ms) -> id * 1000 + ms } ?: return
         val lo = closed.minOf { (id, _) -> files[id]?.at(0) ?: (id * 1000) }
         val margin = MARGIN_UNITS * Bean.FRAME_MS
-        // shortcut: files begun over 31 days before the newest (the server's limit) are read as before; ask twice if that matters
-        val (b, spans) = io.coverage(maxOf(lo - margin, hi - 31 * 86_400_000L), hi + margin) ?: run {
+        // shortcut: files begun over a year before the newest (a bean's clock unset) are read as before; ask further if that matters
+        var c: Pair<Long, List<LongArray>>? = null; var from = maxOf(lo - margin, hi + margin - 12 * 31 * 86_400_000L)
+        do {  // the server answers 31 days at most at a time
+            val to = minOf(from + 31 * 86_400_000L, hi + margin)
+            val p = io.coverage(from, to)
+            c = p?.let { it.first to c?.second.orEmpty() + it.second }
+            from = to
+        } while (c != null && from < hi + margin)
+        val (b, spans) = c ?: run {
             if (!coverFailed) io.log("bean_coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧读、照旧删", "warn")
             coverFailed = true
             return
@@ -844,16 +852,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (id * 1000 < since) continue
             val f = files[id] ?: F(id * 1000)
             val n = if (f.total >= 0) f.total else ms / Bean.FRAME_MS
-            val had = mutableListOf<LongArray>()
-            for (s in spans) for (r in units(f, s[0], s[1], n)) {
-                val l = had.lastOrNull()
-                if (l != null && r[0] - l[1] <= MARGIN_UNITS) l[1] = maxOf(l[1], r[1]) else had += r
-            }
-            if (had.isEmpty()) continue
-            if (had.first()[0] <= MARGIN_UNITS) had.first()[0] = 0
-            if (had.last()[1] >= n - MARGIN_UNITS) had.last()[1] = n
             val was = covered(f)
-            for (r in had) add(f, r[0], r[1])
+            for (r in spans.flatMap { units(f, it[0] + margin, it[1] - margin, n) }) add(f, r[0], r[1])
             if (covered(f) > was) { files[id] = f; served += id; got += covered(f) - was }
         }
         if (got > 0) save()
@@ -1393,6 +1393,6 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val STEP_UNITS = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
         const val COVER_MS = 300_000L  // the server's coverage asked again after (cover())
-        const val MARGIN_UNITS = 200L  // 4 s: what the server lacks next to what it has, this short, is two phones' anchors apart (1–3 s)
+        const val MARGIN_UNITS = 200L  // 4 s in from each end of what the server has: two phones' anchors apart (1–3 s) (cover())
     }
 }

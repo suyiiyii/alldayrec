@@ -330,7 +330,7 @@ final class BeanSync {
   static let clockUnits: Int64 = 1500  // half a minute of live units: the fastest of each dates the file (reanchor())
   static let stepUnits = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
   static let coverMs: Int64 = 300_000  // the server's coverage asked again after (cover())
-  static let marginUnits: Int64 = 200  // 4 s: what the server lacks next to what it has, this short, is two phones' anchors apart (1–3 s)
+  static let marginUnits: Int64 = 200  // 4 s in from each end of what the server has: two phones' anchors apart (1–3 s) (cover())
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
@@ -854,16 +854,23 @@ final class BeanSync {
 
   /// What the server has of the bean's closed files (GET /api/coverage; the owner, 11-23: only the first bind starts the
   /// account's audio, a later one is the bean handed between phones): had here too, so not read, not sent, and a file it
-  /// has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). A stretch it
-  /// lacks of up to marginUnits next to one it has counts as had (anchors apart); a longer one is read, whatever its
-  /// cause (a trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped.
+  /// has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). Of each span
+  /// the server has, only what lies marginUnits in from both its ends counts as had (two phones' anchors apart): at worst
+  /// a few seconds are read again, never one the server lacks taken as had. All it lacks is read, whatever its cause (a
+  /// trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped.
   private func cover() {
     coverAt = io.now()
     let closed = listing.files.filter { $0.id != listing.open }
     guard let hi = closed.map({ $0.id * 1000 + $0.ms }).max(), let lo = closed.map({ files[$0.id]?.at(0) ?? $0.id * 1000 }).min() else { return }
     let margin = BeanSync.marginUnits * Bean.frameMs
-    // shortcut: files begun over 31 days before the newest (the server's limit) are read as before; ask twice if that matters
-    guard let c = io.coverage(max(lo - margin, hi - 31 * 86_400_000), hi + margin) else {
+    // shortcut: files begun over a year before the newest (a bean's clock unset) are read as before; ask further if that matters
+    var c: (bind: Int64, spans: [(Int64, Int64)])?, from = max(lo - margin, hi + margin - 12 * 31 * 86_400_000)
+    repeat {  // the server answers 31 days at most at a time
+      let to = min(from + 31 * 86_400_000, hi + margin)
+      guard let p = io.coverage(from, to) else { c = nil; break }
+      c = (p.bind, (c?.spans ?? []) + p.spans); from = to
+    } while from < hi + margin
+    guard let c else {
       if !coverFailed { log("bean_coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧读、照旧删", "warn") }
       coverFailed = true
       return
@@ -874,17 +881,8 @@ final class BeanSync {
     for e in closed where e.id * 1000 >= since {
       let f = files[e.id] ?? F(e.id * 1000)
       let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs
-      var had: [(Int64, Int64)] = []
-      for (a, b) in c.spans {
-        for r in units(f, a, b, n) {
-          if let l = had.last, r.0 - l.1 <= BeanSync.marginUnits { had[had.count - 1].1 = max(l.1, r.1) } else { had.append(r) }
-        }
-      }
-      guard !had.isEmpty else { continue }
-      if had[0].0 <= BeanSync.marginUnits { had[0].0 = 0 }
-      if had[had.count - 1].1 >= n - BeanSync.marginUnits { had[had.count - 1].1 = n }
       let was = covered(f)
-      for r in had { add(f, r.0, r.1) }
+      for r in c.spans.flatMap({ units(f, $0.0 + margin, $0.1 - margin, n) }) { add(f, r.0, r.1) }
       if covered(f) > was { files[e.id] = f; served.insert(e.id); got += covered(f) - was }
     }
     if got > 0 { save() }
