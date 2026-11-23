@@ -130,8 +130,9 @@ class RecorderService : Service() {
             fun n(k: String) = (y[k] as Number?)?.toLong() ?: 0L
             val phase = y["phase"]; val done = n("done_kb"); val total = n("total_kb"); val owed = n("owed_s")
             fun time(sec: Long) = ((sec + 30) / 60).let { m -> if (m >= 60) t(R.string.notice_hours_minutes, m / 60, m % 60) else t(R.string.notice_minutes, m) }
-            // on the way back to Bluetooth the link's own state, as the chip (a bean gone meanwhile: 正在找 …)
-            val back = phase == "wifi" && s["connected"] != true && (s["wifiStep"] as Map<*, *>?)?.get("step") == "back"
+            // a fast transfer waiting for Bluetooth (asked, between hotspots, on the way back): the link's own state, as
+            // the chip (syncSpec's reading; a bean gone meanwhile: 正在找 …)
+            val back = phase == "wifi" && s["connected"] != true && (s["wifiStep"] as Map<*, *>?)?.get("step") in setOf("asked", "reopen", "back")
             val title = when {
                 s["source"] != "ble" -> t(R.string.notice_recording)
                 back -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
