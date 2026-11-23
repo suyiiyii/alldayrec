@@ -152,6 +152,67 @@ do {
   check(m.files[old]!.closed, true, "short LIST: old closed")
 }
 
+// READs of a closed file that send nothing (Ble's stalls): noMore() takes what the mirror has, but the card may still
+// hold the rest: no DELETE until a LIST says its size again; that LIST sends the READ on to the end. StoreTest.noMore's case
+do {
+  let out = tmp(), undated = tmp()
+  let m = Mirror(tmp())
+  let f: Int64 = 1 << 16, g: Int64 = 1 << 16 | 1  // a closed file half read; the one the stream goes on in
+  let head = t(0, 1_000_000) + a(0, 10), rest = a(10, 10), size = Int64(head.count + rest.count)
+  _ = try m.put(f, 0, head)
+  m.listed([f: size, g: 0], open: g)
+  check(m.missing().map { [$0.0, $0.1] }, [[f, Int64(head.count)]], "the rest to READ")
+  check(m.noMore(f), size, "the fourth empty READ: cut")
+  check(m.missing().map { [$0.0, $0.1] }, [], "no more READs of it this session")
+  check(try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 1), 1, "what the mirror has, in a piece")
+  clear(out)  // the uploader took it
+  check(m.done(out), [], "not deleted: no LIST since the cut")
+  check(m.listed([f: size, g: 0], open: g).map { [$0.0, $0.1, $0.2] }, [[f, Int64(head.count), size]], "the next LIST: size back")
+  check(m.done(out), [], "not deleted: the card has more")
+  check(m.missing().map { [$0.0, $0.1] }, [[f, Int64(head.count)]], "READ again from where the mirror ends")
+  check(try m.put(f, Int64(head.count), rest), nil, "the rest")
+  check(try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 1), 1, "its piece")
+  clear(out)
+  check(m.done(out), [f], "whole and up: deletable")
+}
+
+// the cut kept over a reconnect (a new Mirror on the same dir, as each BLE session makes): that session's first LIST,
+// cut at listMax without the file, says nothing of it. StoreTest.noMoreKept's case
+do {
+  let dir = tmp(), out = tmp(), undated = tmp()
+  let m = Mirror(dir)
+  let f: Int64 = 1 << 16, g: Int64 = 1 << 16 | 1
+  let head = t(0, 1_000_000) + a(0, 10), size = Int64(head.count) + 32
+  _ = try m.put(f, 0, head)
+  m.listed([f: size, g: 0], open: g)
+  check(m.noMore(f), size, "cut")
+  check(try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 1), 1, "what the mirror has, in a piece")
+  clear(out)
+  let m2 = Mirror(dir)
+  var full: [Int64: Int64] = [g: 0]
+  for i in 2..<Int64(Mirror.listMax + 1) { full[1 << 16 | i] = 100 }
+  m2.listed(full, open: g)
+  check(m2.done(out), [], "not deleted: a full LIST without it")
+  m2.listed([f: size, g: 0], open: g)
+  check(m2.missing().first.map { [$0.0, $0.1] }, [f, Int64(head.count)], "listed again: READ the rest")
+}
+
+// a LIST the card failed (opendir: no files, an error) says nothing of the files it leaves out: a half-read file is
+// still READ, not deleted. StoreTest.listFailed's case
+do {
+  let out = tmp(), undated = tmp()
+  let m = Mirror(tmp())
+  let f: Int64 = 1 << 16, g: Int64 = 1 << 16 | 1
+  let head = t(0, 1_000_000) + a(0, 10), size = Int64(head.count) + 32
+  _ = try m.put(f, 0, head)
+  m.listed([f: size, g: 0], open: g)
+  m.listed([:], open: g, failed: true)
+  check(m.missing().map { [$0.0, $0.1] }, [[f, Int64(head.count)]], "the rest still to READ")
+  _ = try m.pieces(out, undated, tag: "X", liveFrames: 15, boot: 1)
+  clear(out)
+  check(m.done(out), [], "not deleted")
+}
+
 // a boot number counted before. 10-10's boot 1 (StoreTest.bootReused's case): file 3 uploaded, file 4 cut but
 // for its last frames; boot 1 again on 10-13 (the card's count read as 0), at frame 1000. The mirror's boot 1, read
 // back from its state.txt, is that earlier boot's: file 4's last frames go up by 10-10's 'T', both files and the 'T'

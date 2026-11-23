@@ -751,20 +751,28 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     var r: [Int64: Int64] = [:]
     ctrl.clear { $0.first == 0x81 || $0.first == 0x80 }
     try write(p, Ble.ctrl, [1])  // LIST
-    var o: Int64 = -1
+    var o: Int64 = -1, err: Int8 = 0
     for waited in 0... {
       guard alive(p) else { throw Gone() }
       guard let x = ctrl.poll(1) else { if waited >= 10 { throw Fail(description: "LIST timed out") }; continue }
       if x.first == 0x81 && x.count >= 9 { r[Ble.u32(x, 1)] = Ble.u32(x, 5) }
       if x.first == 0x80 {
-        if x.count > 1 && x[1] != 0 { Ble.log("LIST error \(Int8(bitPattern: x[1]))") }
+        if x.count > 1 { err = Int8(bitPattern: x[1]) }
         if x.count >= 6 { o = Ble.u32(x, 2) }
         break
       }
     }
     if o >= 0 { open = o }
     if liveFloor < 0 { liveFloor = open }
-    m.listed(r, open: open)
+    if err != 0 {  // the card failed (opendir, readdir): what it left out is still on it
+      Ble.log("LIST error \(err)")
+      DeviceLog.app(tag ?? "", "list_error", "列录音设备上的文件出错（\(err)），只列到 \(r.count) 个：没列到的先不当成已删", level: "warn",
+                    fields: ["err": Int(err), "files": r.count])
+    }
+    for (f, was, now) in m.listed(r, open: open, failed: err != 0) {
+      DeviceLog.app(tag ?? "", "list_size", "录音设备上的文件 \(String(f, radix: 16)) 长度变了：\(was / 1024) KB → \(now / 1024) KB",
+                    fields: ["file": f, "from": was, "to": now])
+    }
     needList = false
     listFull = r.count >= Mirror.listMax
     Ble.log("LIST: \(r.count) files, open \(String(open, radix: 16)), missing \(m.missing().map { String($0.0, radix: 16) })")
@@ -877,7 +885,10 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     } else if got > 0 || stopped {
       stalls[r.f] = nil
     } else if (stalls[r.f] ?? 0) >= 3 {
-      m.noMore(r.f)  // the card has no more of it
+      if let was = m.noMore(r.f) {  // the card has no more of it
+        DeviceLog.app(tag ?? "", "read_short", "录音设备上的文件 \(String(r.f, radix: 16)) 连续几次没读出东西：这次先按手机已有的 \(m.have(r.f) / 1024) KB 算（列表上是 \(was / 1024) KB），再列一次文件之前不删",
+                      level: "warn", fields: ["file": r.f, "size": was, "have": m.have(r.f)])
+      }
     } else {
       stalls[r.f, default: 0] += 1
     }
@@ -975,12 +986,20 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     if noCard { return }
     let done = m.done(chunks)
     if !done.isEmpty && listFull { needList = true }  // room in the next LIST for files it left out
+    var refused: [Int64] = [], why: Int8 = 0
     for f in done {
       try ack()
-      guard let r = try reply(p, [4] + Store.le(UInt32(f)), 0x84), r.count >= 6 else { return }  // DELETE
+      guard let r = try reply(p, [4] + Store.le(UInt32(f)), 0x84), r.count >= 6 else { break }  // DELETE
       let err = Int8(bitPattern: r[5])
       Ble.log("DELETE \(String(f, radix: 16)): \(err)")
-      if err == 0 || err == -2 { m.drop(f) }  // gone (-2: not on this card)
+      guard err == 0 || err == -2 else { refused.append(f); why = err; continue }
+      DeviceLog.app(tag ?? "", "delete", "删录音设备上的文件 \(String(f, radix: 16))（\(m.have(f) / 1024) KB，已全部上传）：" + (err == 0 ? "删了" : "卡上已经没有"),
+                    fields: ["file": f, "size": m.have(f), "err": Int(err)])
+      m.drop(f)  // gone (-2: not on this card)
+    }
+    if !refused.isEmpty {  // once each time what is refused changes, not each minute (a card that fails refuses every file)
+      DeviceLog.appChanged(tag ?? "", "delete_refused", "录音设备没删成 \(refused.count) 个已全部上传的文件（\(why)）：\(refused.map { String($0, radix: 16) }.joined(separator: "、"))",
+                           level: "warn", fields: ["files": refused, "err": Int(why)])
     }
   }
 }

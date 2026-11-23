@@ -160,11 +160,13 @@ enum Ogg {
 ///   T clock frame epochMs                        the 'T' records seen; clock: the boot, or the file for boot 0 (no
 ///                                                card to count boots: each such boot has its own files)
 ///   C file cut [piece]                           a piece made since (or frames passed over): appended, see cut()
+///   U file                                       cut by noMore(), no LIST since: kept on the card (done())
 final class Mirror {
   static let listMax = 64
 
   final class F {
     var closed = false, size: Int64 = -1, cut: Int64 = 0, tscan: Int64 = 0, pieces: [String] = [], finished = false
+    var unsure = false
   }
 
   private(set) var files: [Int64: F] = [:]
@@ -189,6 +191,8 @@ final class Mirror {
         let s = file(f)
         s.cut = c
         if p.count > 3 { s.pieces.append(p[3]) }
+      } else if p[0] == "U", p.count >= 2, let f = Int64(p[1], radix: 16) {
+        files[f]?.unsure = true
       }
     }
   }
@@ -203,6 +207,7 @@ final class Mirror {
     for f in files.keys.sorted() {
       let s = files[f]!
       t += "F \(Mirror.hex(f)) \(s.closed ? 1 : 0) \(s.size) \(s.cut) \(s.tscan) \(s.finished ? 1 : 0) \(s.pieces.joined(separator: ","))\n"
+      if s.unsure { t += "U \(Mirror.hex(f))\n" }
     }
     for (c, ts) in syncs { for x in ts { t += "T \(Mirror.hex(c)) \(x.frame) \(x.epochMs)\n" } }
     try? Data(t.utf8).write(to: state, options: .atomic)
@@ -255,24 +260,40 @@ final class Mirror {
 
   /// What LIST says: files on the card with their sizes, and the one the stream goes on in (kept, listed or not). A
   /// LIST gives at most listMax files (firmware list()), so only a shorter one says that a file it leaves out is no
-  /// longer on the card (deleted elsewhere, another card): closed at what the mirror has.
-  func listed(_ card: [Int64: Int64], open: Int64) {
-    for (f, size) in card { let s = file(f); s.size = size; s.closed = f != open }
+  /// longer on the card (deleted elsewhere, another card): closed at what the mirror has. One that `failed` (the card
+  /// could not be read: its files are still there) says nothing of the files it leaves out.
+  /// Returns the closed files whose size it changed: (file, was, now).
+  @discardableResult
+  func listed(_ card: [Int64: Int64], open: Int64, failed: Bool = false) -> [(Int64, Int64, Int64)] {
+    var changed: [(Int64, Int64, Int64)] = []
+    func size(_ f: Int64, _ s: F, _ n: Int64) {
+      if s.closed && s.size >= 0 && s.size != n { changed.append((f, s.size, n)) }
+      s.size = n
+      s.unsure = false
+    }
+    for (f, n) in card { let s = file(f); size(f, s, n); s.closed = f != open }
     if open >= 0 { file(open).closed = false }
-    if card.count < Mirror.listMax {
-      for (f, s) in files where card[f] == nil && f != open { s.closed = true; s.size = have(f) }
+    if !failed && card.count < Mirror.listMax {
+      for (f, s) in files where card[f] == nil && f != open { s.closed = true; size(f, s, have(f)) }
     }
     save()
+    return changed
   }
 
   /// Files with bytes on the card the mirror lacks: (file, from).
   func missing() -> [(Int64, Int64)] { files.keys.sorted().filter { files[$0]!.size > have($0) }.map { ($0, have($0)) } }
 
-  /// A file whose card copy cannot give more (its READ ends where the mirror does): take what the mirror has.
-  func noMore(_ f: Int64) {
-    guard let s = files[f] else { return }
-    s.size = min(s.size, have(f))
+  /// A file whose card copy cannot give more (its READ ends where the mirror does): take what the mirror has. Returns the
+  /// size it had when that cut it. A card that fails READs may still hold the rest: not deleted (done()) until a LIST
+  /// says its size again.
+  @discardableResult
+  func noMore(_ f: Int64) -> Int64? {
+    guard let s = files[f], s.size > have(f) else { return nil }
+    let was = s.size
+    s.size = have(f)
+    s.unsure = true
     save()
+    return was
   }
 
   private func bytes(_ f: Int64, _ from: Int64, max: Int? = nil) -> Data {
@@ -375,12 +396,12 @@ final class Mirror {
     return n
   }
 
-  /// Closed files the mirror has whole, all turned into pieces, the pieces uploaded (gone from `out`): the card may
-  /// delete them.
+  /// Closed files the mirror has whole (as the last LIST says: none cut by noMore() since), all turned into pieces, the
+  /// pieces uploaded (gone from `out`): the card may delete them.
   func done(_ out: URL) -> [Int64] {
     files.keys.sorted().filter { f in
       let s = files[f]!
-      return s.closed && s.finished && !s.pieces.contains {
+      return s.closed && s.finished && s.size <= have(f) && !s.unsure && !s.pieces.contains {
         fm.fileExists(atPath: out.appendingPathComponent("\($0).ogg").path) || fm.fileExists(atPath: out.appendingPathComponent("\($0).part").path)
       }
     }
