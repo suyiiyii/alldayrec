@@ -100,13 +100,14 @@ enum Bean {
   /// A 1A/05 answer's address, a.b.c.d:port; nil: no hotspot.
   static func endpoint(_ p: [UInt8]) -> String? { p.count < 6 ? nil : "\(p[3]).\(p[2]).\(p[1]).\(p[0]):\(u16(p, 4))" }
   /// A try iOS said joined and the phone not on the hotspot (BeanWifi.open()): `n` the try (0: the one iOS asks the
-  /// person of), `applied` ms iOS took, `answered` ms from the hotspot up to its answer. 11-10 to 11-23 iPhone: Wi-Fi on,
-  /// iOS took 3.1 s or more each try; off (11-11 16:36, 16:38) 7-15 ms, asking nothing: beanWifiOff, no more tries. Every
+  /// person of), `applied` ms iOS took, `answered` ms from the hotspot up to its answer. 11-10 to 11-23 iPhone: iOS took
+  /// 3.1 s or more each try, but 7-15 ms asking nothing at 11-11 16:36, 16:38 (Wi-Fi on, on another network; why not
+  /// known): beanWifiNoAsk, no more tries. Every
   /// join begun by 27 s went, none of 13 begun after 40 s (the person's 加入 at 52-114 s: 11-19 23:50, 11-23 22:29,
   /// 22:33): the first answer 30 s on is beanWifiJoinLate, a new hotspot (BeanSync.wifi()). nil: the next try (11-11
   /// 14:10, 加入 at 6 s, tries 3-4 past 30 s only by the waits between: 4 tries, beanWifiNoJoin).
   static func joinMissed(_ n: Int, applied: Int64, answered: Int64) -> String? {
-    if applied < 1000 { return "beanWifiOff" }
+    if applied < 1000 { return "beanWifiNoAsk" }
     return n == 0 && answered >= 30_000 ? "beanWifiJoinLate" : nil
   }
   /// Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable).

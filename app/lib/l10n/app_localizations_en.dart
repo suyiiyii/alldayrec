@@ -1142,8 +1142,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'The last Wi‑Fi fast transfer failed: Join was answered late, and 3 new hotspots from the bean went the same way; back on Bluetooth. Tap again and answer Join as soon as it is asked';
 
   @override
-  String get beanWifiOff =>
-      'The last Wi‑Fi fast transfer failed: the phone\'s Wi‑Fi is off, so it cannot join the bean\'s hotspot; turn Wi‑Fi on, then tap again';
+  String get beanWifiNoAsk =>
+      'The last Wi‑Fi fast transfer failed: the iPhone asked nothing and did not get onto the bean\'s hotspot; back on Bluetooth. Turn Wi‑Fi off and on in Settings → Wi‑Fi, then tap again';
 
   @override
   String get beanWifiNoSocket =>

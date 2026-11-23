@@ -106,12 +106,12 @@ final class BeanWifi {
             ["step": "join_unverified", "ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "wifi": other].merging(BeanWifi.context()) { $1 })
         NEHotspotConfigurationManager.shared.removeConfiguration(forSSID: ssid)
         let answered = t1 + applied - t0
-        if let note = Bean.joinMissed(n, applied: applied, answered: answered) {  // Wi-Fi off, or 加入 tapped late
-          let off = note == "beanWifiOff"
-          log("bean_wifi_fail", off ? "iOS \(applied) ms 就说加入了、什么也没问：手机的 Wi-Fi 关着，不再试" :
+        if let note = Bean.joinMissed(n, applied: applied, answered: answered) {  // iOS asked nothing, or 加入 tapped late
+          let noAsk = note == "beanWifiNoAsk"
+          log("bean_wifi_fail", noAsk ? "iOS \(applied) ms 就说加入了、什么也没问，手机没连上热点：再试也一样，不再试" :
               "热点开了 \(answered / 1000) s 才加入（点「加入」晚了），这个热点不再试", "warn",
-              ["step": "join", "why": off ? "wifi_off" : "late", "ms": answered, "apply_ms": applied, "tries": n + 1].merging(BeanWifi.context()) { $1 })
-          throw Bean.Fail(off ? "join: Wi-Fi off" : "join: answered \(answered / 1000) s after the hotspot opened", note: note)
+              ["step": "join", "why": noAsk ? "no_ask" : "late", "ms": answered, "apply_ms": applied, "tries": n + 1].merging(BeanWifi.context()) { $1 })
+          throw Bean.Fail(noAsk ? "join: iOS answered in \(applied) ms, asking nothing" : "join: answered \(answered / 1000) s after the hotspot opened", note: note)
         }
       }
     }

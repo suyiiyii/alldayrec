@@ -1097,8 +1097,8 @@ class AppLocalizationsZh extends AppLocalizations {
       '上次 Wi‑Fi 快传没成：系统问要不要加入时点晚了，豆子换了 3 次新热点也没加入；已回到蓝牙。再点一次，弹框出来就马上点「加入」';
 
   @override
-  String get beanWifiOff =>
-      '上次 Wi‑Fi 快传没成：手机的 Wi‑Fi 关着，加入不了豆子的热点；先打开 Wi‑Fi，再点一次';
+  String get beanWifiNoAsk =>
+      '上次 Wi‑Fi 快传没成：iPhone 没问要不要加入，也没连上豆子的热点；已回到蓝牙。到设置 → Wi‑Fi 里关掉再打开，再点一次';
 
   @override
   String get beanWifiNoSocket =>

@@ -898,16 +898,16 @@ do {
 }
 
 /// BeanWifi.open()'s tries iOS said joined, the phone not on the hotspot, as they came (apply ms, ms from the hotspot up
-/// to iOS's answer): Wi-Fi off (11-11 16:36, 16:38) ends it at once; 加入 tapped at 72 s (11-23 22:29) gives up on the
+/// to iOS's answer): iOS answering at once, asking nothing (11-11 16:36, 16:38) ends it; 加入 tapped at 72 s (11-23 22:29) gives up on the
 /// hotspot; 加入 in time and the tries failing anyway (11-11 14:10, tries 3-4 past 30 s by the waits) go on to all 4.
-check([(0, 15, 5_015), (0, 8, 5_008)].map { Bean.joinMissed($0.0, applied: $0.1, answered: $0.2) }, ["beanWifiOff", "beanWifiOff"])
+check([(0, 15, 5_015), (0, 8, 5_008)].map { Bean.joinMissed($0.0, applied: $0.1, answered: $0.2) }, ["beanWifiNoAsk", "beanWifiNoAsk"])
 check(Bean.joinMissed(0, applied: 72_157, answered: 77_167), "beanWifiJoinLate")
 check([(0, 5_769, 10_778), (1, 5_067, 27_956), (2, 4_157, 46_225), (3, 3_169, 67_505)].map {
   Bean.joinMissed($0.0, applied: $0.1, answered: $0.2) }, [String?](repeating: nil, count: 4), "11-11 14:10: the 4 tries, beanWifiNoJoin")
 
 /// 加入 tapped late (BeanWifi.open(): beanWifiJoinLate): a new hotspot, of a new name (the bean opens none of a repeated
-/// one), the rest over it, the page told nothing meanwhile; `tries` such, then BLE and the page says why. Wi-Fi off
-/// (beanWifiOff) or tries all failed in time (beanWifiNoJoin): no new hotspot, the page says why.
+/// one), the rest over it, the page told nothing meanwhile; `tries` such, then BLE and the page says why. iOS asking
+/// nothing (beanWifiNoAsk) or tries all failed in time (beanWifiNoJoin): no new hotspot, the page says why.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -945,7 +945,7 @@ do {
   check(Set(bean.joins.map { $0.0 }).count, bean.joins.count, "a new name each")
   check(sync.wifiNote?["code"] as? String, "beanWifiJoinLate")
   check(sync.wifiStep?["end"] as? String, "fail")
-  for code in ["beanWifiOff", "beanWifiNoJoin"] {
+  for code in ["beanWifiNoAsk", "beanWifiNoJoin"] {
     bean.list(a + 200, 60_000); bean.wifiAsk = true
     bean.joinFails = [Bean.Fail("join: \(code)", note: code)]
     let joins = bean.joins.count
