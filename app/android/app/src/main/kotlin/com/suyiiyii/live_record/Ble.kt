@@ -646,7 +646,10 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         }
         if (o >= 0) open = o
         if (liveFloor < 0) liveFloor = open
-        m.listed(r, open)
+        for ((f, was, now) in m.listed(r, open)) {
+            DeviceLog.app(mirrorName, "list_size", "录音设备上的文件 ${f.toString(16)} 长度变了：${was / 1024} KB → ${now / 1024} KB",
+                fields = mapOf("file" to f, "from" to was, "to" to now))
+        }
         needList = false
         listFull = r.size >= Mirror.LIST_MAX
         Log.i("live-record", "ble LIST: ${r.size} files, open %08X, missing ${m.missing().map { "%08X".format(it.first) }}".format(open))
@@ -766,7 +769,10 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
                 liveRead = false  // LIVE goes on from where this READ ended
             }
             got > 0 || stopped -> stalls.remove(r.f)
-            (stalls[r.f] ?: 0) >= 3 -> m.noMore(r.f)  // the card has no more of it
+            (stalls[r.f] ?: 0) >= 3 -> m.noMore(r.f)?.let { was ->  // the card has no more of it
+                DeviceLog.app(mirrorName, "read_short", "录音设备上的文件 ${r.f.toString(16)} 连续几次没读出东西：这次先按手机已有的 ${m.have(r.f) / 1024} KB 算（列表上是 ${was / 1024} KB），再列一次文件之前不删",
+                    "warn", mapOf("file" to r.f, "size" to was, "have" to m.have(r.f)))
+            }
             else -> stalls[r.f] = (stalls[r.f] ?: 0) + 1
         }
         behind(m)
@@ -852,6 +858,8 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             val r = reply(g, le(ByteArray(5)).put(4).putInt(f.toInt()).array(), 0x84) ?: return  // DELETE
             val err = r[5].toInt()
             Log.i("live-record", "ble DELETE %08X: $err".format(f))
+            DeviceLog.app(mirrorName, "delete", "删录音设备上的文件 ${f.toString(16)}（${m.have(f) / 1024} KB，已全部上传）：" + when (err) { 0 -> "删了"; -2 -> "卡上已经没有"; else -> "没删成（$err）" },
+                if (err == 0 || err == -2) null else "warn", mapOf("file" to f, "size" to m.have(f), "err" to err))
             if (err == 0 || err == -2) m.drop(f)  // gone (-2: not on this card)
         }
     }

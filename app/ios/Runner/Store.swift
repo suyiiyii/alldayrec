@@ -256,24 +256,41 @@ final class Mirror {
   /// What LIST says: files on the card with their sizes, and the one the stream goes on in (kept, listed or not). A
   /// LIST gives at most listMax files (firmware list()), so only a shorter one says that a file it leaves out is no
   /// longer on the card (deleted elsewhere, another card): closed at what the mirror has.
-  func listed(_ card: [Int64: Int64], open: Int64) {
-    for (f, size) in card { let s = file(f); s.size = size; s.closed = f != open }
+  /// Returns the closed files whose size it changed: (file, was, now).
+  @discardableResult
+  func listed(_ card: [Int64: Int64], open: Int64) -> [(Int64, Int64, Int64)] {
+    var changed: [(Int64, Int64, Int64)] = []
+    func size(_ f: Int64, _ s: F, _ n: Int64) {
+      if s.closed && s.size >= 0 && s.size != n { changed.append((f, s.size, n)) }
+      s.size = n
+      unsure.remove(f)
+    }
+    for (f, n) in card { let s = file(f); size(f, s, n); s.closed = f != open }
     if open >= 0 { file(open).closed = false }
     if card.count < Mirror.listMax {
-      for (f, s) in files where card[f] == nil && f != open { s.closed = true; s.size = have(f) }
+      for (f, s) in files where card[f] == nil && f != open { s.closed = true; size(f, s, have(f)) }
     }
     save()
+    return changed
   }
 
   /// Files with bytes on the card the mirror lacks: (file, from).
   func missing() -> [(Int64, Int64)] { files.keys.sorted().filter { files[$0]!.size > have($0) }.map { ($0, have($0)) } }
 
-  /// A file whose card copy cannot give more (its READ ends where the mirror does): take what the mirror has.
-  func noMore(_ f: Int64) {
-    guard let s = files[f] else { return }
-    s.size = min(s.size, have(f))
+  /// A file whose card copy cannot give more (its READ ends where the mirror does): take what the mirror has. Returns the
+  /// size it had when that cut it. A card that fails READs may still hold the rest: not deleted (done()) until a LIST
+  /// says its size again.
+  @discardableResult
+  func noMore(_ f: Int64) -> Int64? {
+    guard let s = files[f], s.size > have(f) else { return nil }
+    let was = s.size
+    s.size = have(f)
+    unsure.insert(f)
     save()
+    return was
   }
+
+  private var unsure: Set<Int64> = []  // cut by noMore(), no LIST since: every session's first LIST comes before a DELETE
 
   private func bytes(_ f: Int64, _ from: Int64, max: Int? = nil) -> Data {
     guard let h = FileHandle(forReadingAtPath: bin(f).path) else { return Data() }
@@ -375,12 +392,12 @@ final class Mirror {
     return n
   }
 
-  /// Closed files the mirror has whole, all turned into pieces, the pieces uploaded (gone from `out`): the card may
-  /// delete them.
+  /// Closed files the mirror has whole (as the last LIST says: none cut by noMore() since), all turned into pieces, the
+  /// pieces uploaded (gone from `out`): the card may delete them.
   func done(_ out: URL) -> [Int64] {
     files.keys.sorted().filter { f in
       let s = files[f]!
-      return s.closed && s.finished && !s.pieces.contains {
+      return s.closed && s.finished && s.size <= have(f) && !unsure.contains(f) && !s.pieces.contains {
         fm.fileExists(atPath: out.appendingPathComponent("\($0).ogg").path) || fm.fileExists(atPath: out.appendingPathComponent("\($0).part").path)
       }
     }

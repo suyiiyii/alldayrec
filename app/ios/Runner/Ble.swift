@@ -764,7 +764,10 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     }
     if o >= 0 { open = o }
     if liveFloor < 0 { liveFloor = open }
-    m.listed(r, open: open)
+    for (f, was, now) in m.listed(r, open: open) {
+      DeviceLog.app(tag ?? "", "list_size", "录音设备上的文件 \(String(f, radix: 16)) 长度变了：\(was / 1024) KB → \(now / 1024) KB",
+                    fields: ["file": f, "from": was, "to": now])
+    }
     needList = false
     listFull = r.count >= Mirror.listMax
     Ble.log("LIST: \(r.count) files, open \(String(open, radix: 16)), missing \(m.missing().map { String($0.0, radix: 16) })")
@@ -877,7 +880,10 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     } else if got > 0 || stopped {
       stalls[r.f] = nil
     } else if (stalls[r.f] ?? 0) >= 3 {
-      m.noMore(r.f)  // the card has no more of it
+      if let was = m.noMore(r.f) {  // the card has no more of it
+        DeviceLog.app(tag ?? "", "read_short", "录音设备上的文件 \(String(r.f, radix: 16)) 连续几次没读出东西：这次先按手机已有的 \(m.have(r.f) / 1024) KB 算（列表上是 \(was / 1024) KB），再列一次文件之前不删",
+                      level: "warn", fields: ["file": r.f, "size": was, "have": m.have(r.f)])
+      }
     } else {
       stalls[r.f, default: 0] += 1
     }
@@ -980,6 +986,8 @@ final class BleLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
       guard let r = try reply(p, [4] + Store.le(UInt32(f)), 0x84), r.count >= 6 else { return }  // DELETE
       let err = Int8(bitPattern: r[5])
       Ble.log("DELETE \(String(f, radix: 16)): \(err)")
+      DeviceLog.app(tag ?? "", "delete", "删录音设备上的文件 \(String(f, radix: 16))（\(m.have(f) / 1024) KB，已全部上传）：" + (err == 0 ? "删了" : err == -2 ? "卡上已经没有" : "没删成（\(err)）"),
+                    level: err == 0 || err == -2 ? nil : "warn", fields: ["file": f, "size": m.have(f), "err": Int(err)])
       if err == 0 || err == -2 { m.drop(f) }  // gone (-2: not on this card)
     }
   }

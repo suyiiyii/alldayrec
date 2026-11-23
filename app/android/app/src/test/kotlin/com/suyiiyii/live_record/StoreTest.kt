@@ -279,6 +279,30 @@ class StoreTest {
         assertEquals(true, m.files[old]!!.closed)
     }
 
+    /** READs of a closed file that send nothing (Ble's stalls): noMore() takes what the mirror has, but the card may
+     *  still hold the rest: no DELETE until a LIST says its size again; that LIST sends the READ on to the end. */
+    @Test fun noMore() {
+        val out = tmp(); val undated = tmp()
+        val m = Mirror(tmp())
+        val f = 1L shl 16; val g = 1L shl 16 or 1  // a closed file half read; the one the stream goes on in
+        val head = t(0, 1_000_000) + a(0, 10); val rest = a(10, 10); val size = (head.size + rest.size).toLong()
+        m.put(f, 0, head)
+        m.listed(mapOf(f to size, g to 0L), g)
+        assertEquals(listOf(f to head.size.toLong()), m.missing())
+        assertEquals(size, m.noMore(f))  // the fourth empty READ: cut
+        assertEquals(emptyList<Pair<Long, Long>>(), m.missing())  // no more READs of it this session
+        assertEquals(1, m.pieces(out, undated, "X", 15, 1))
+        out.listFiles()!!.forEach { it.delete() }  // the uploader took it
+        assertEquals("no LIST since the cut", emptyList<Long>(), m.done(out))
+        assertEquals(listOf(Triple(f, head.size.toLong(), size)), m.listed(mapOf(f to size, g to 0L), g))  // size back
+        assertEquals("the card has more", emptyList<Long>(), m.done(out))
+        assertEquals(listOf(f to head.size.toLong()), m.missing())  // READ again from where the mirror ends
+        assertNull(m.put(f, head.size.toLong(), rest))
+        assertEquals(1, m.pieces(out, undated, "X", 15, 1))
+        out.listFiles()!!.forEach { it.delete() }
+        assertEquals(listOf(f), m.done(out))
+    }
+
     @Test fun ogg() {
         val v = fixture.getJSONObject("ogg")
         val ogg = Store.oggOpus(List(v.getInt("count")) { hex(v.getString("packetHex")) })
