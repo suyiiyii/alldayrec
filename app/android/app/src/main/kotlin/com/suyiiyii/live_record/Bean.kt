@@ -319,6 +319,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val latest get() = anchors.lastOrNull()?.get(1) ?: anchor
         var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
         var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
+        var pausedMs = 0L  // paused this long while recorded, the anchor not past it yet (edge()); not saved
     }
 
     /** live: the file being recorded (pieces of the app's slice, the stall guard); realtime: the wire's flag (plan());
@@ -390,6 +391,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var quietUntil = 0L  // no 1A/07 before: the bean has just ended a transfer (code 4 when asked at once)
     private var busy = 0         // code 4s in a row
     private var paused = false  // only the bean's button state can suspend the live silence guard
+    private var pausedAt = 0L  // when it paused: edge() stays there
     private var liveFile = 0L
     private var liveSeen = 0L   // includes waiting for a header and gaps between code-4 retries
     private var liveStalled = false  // one warning until audio resumes, across reconnects
@@ -985,7 +987,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         listOf("battery", "charge", "case_battery", "case_charging").associate { "bean_$it" to hw[it] } +
         ("units_s" to Math.round(unitsS * 10) / 10.0)
 
-    private fun edge(file: Long) = maxOf(0L, (io.now() - (files[file]?.latest ?: (file * 1000))) / Bean.FRAME_MS)
+    /** The unit the bean is at in the file it records, by the phone's clock less its pauses seen (one before the
+     *  connection would put it early). */
+    private fun edge(file: Long): Long {
+        val f = files[file]
+        return maxOf(0L, ((if (paused) pausedAt else io.now()) - (f?.latest ?: (file * 1000)) - (f?.pausedMs ?: 0)) / Bean.FRAME_MS)
+    }
 
     private fun begin(x: Xfer) {
         xfer = x; x.at = io.now(); x.seen = x.at; marked = false
@@ -1075,6 +1082,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
                 0 -> {
                     liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音")
+                    needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
                     // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no
                     // syncTotal, no log, no stall guard. The file is closed now: the rest as its catch-up on a new connection.
                     if (x != null && x.live && !x.realtime && x.first >= 0 && x.lag == null) {  // a read from behind: units came, not caught up yet
@@ -1082,8 +1090,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                         throw Again("file ${x.file}: the bean stopped, the rest as a catch-up")
                     }
                 }
-                1 -> { if (!recording) needList = true; if (paused) liveSeen = io.now(); paused = false; recording = true; io.log("bean_record", "豆子开始录音") }
-                2 -> { paused = true; startDone = true; io.log("bean_pause", "豆子暂停录音") }
+                1 -> {
+                    if (!recording) needList = true
+                    if (paused) { liveSeen = io.now(); files[listing.open]?.let { it.pausedMs += io.now() - pausedAt } }
+                    paused = false; recording = true; io.log("bean_record", "豆子开始录音")
+                }
+                2 -> { if (!paused) pausedAt = io.now(); paused = true; startDone = true; io.log("bean_pause", "豆子暂停录音") }
             }
             0x0103 -> if (p.size >= 2) hw = hw + mapOf("battery" to Bean.pct(p[0]), "case_battery" to Bean.pct(p[1]))
             0x0104 -> if (p.isNotEmpty()) {
@@ -1250,7 +1262,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val t = x.target ?: return
         if (seq <= (f.anchors.lastOrNull()?.get(0) ?: 0)) return
         val d = t - f.latest
-        if (kotlin.math.abs(d) >= 5) f.anchors += longArrayOf(seq, f.latest + if (kotlin.math.abs(d) >= 200) d else d.coerceIn(-9L, 9L))
+        if (kotlin.math.abs(d) < 5) return
+        val move = if (kotlin.math.abs(d) >= 200) d else d.coerceIn(-9L, 9L)
+        if (move > 0) f.pausedMs = maxOf(0L, f.pausedMs - move)  // the anchor past a pause: edge() goes by it alone
+        f.anchors += longArrayOf(seq, f.latest + move)
     }
 
     /** A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop. */

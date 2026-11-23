@@ -1648,6 +1648,42 @@ do {
   onlyReads(r.bean)
 }
 
+/// The bean stops while no read is on (here a refused live read's 30 s wait): the file just closed is listed anew and
+/// read as a catch-up in this connection, not the next.
+do {
+  let r = rec(100, [(0, 5000)], watched: false)
+  r.bean.onTransfer = { file, from, _ in
+    if file == r.bean.open { r.bean.header(file, 0xFFFF_FFFF, code: 2); return }  // refused: liveAgain
+    r.bean.header(file, 5050 * Int64(Bean.unit)); r.bean.units(file, Array(from...5049), last: 5049); r.bean.complete(file)
+  }
+  r.bean.script = [{}, { r.bean.push(0x1882, [0]); r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 5050 * 20) }]
+  _ = session(r, BeanSync.Gone.self)
+  check(r.bean.transfers, [[r.id, 5000, 0], [r.id, 4999, 0]], "the closed file's tail in the same connection")
+  check(r.have, [[0, 5050]])
+  check(r.sync.gap(r.f), nil)
+  onlyReads(r.bean)
+}
+
+/// The bean paused 3 min in the file it records, then on in it: the edge stays where the pause began (no backlog said
+/// meanwhile), the read goes on after it in the same transfer (not too_slow, not behind by the pause), each unit once.
+do {
+  let r = rec(100, [(0, 5000)], watched: false, units: 1500)  // fill_tail, caught up: live at unit 6500
+  var during: [[String: Any]] = []
+  r.bean.script.append { r.bean.push(0x1882, [2]) }
+  for _ in 0..<180 { r.bean.script.append { during.append(r.sync.owed) } }
+  r.bean.script.append { r.bean.push(0x1882, [1]); r.bean.openAt += 180_000; r.bean.more(7500) }
+  r.bean.script.append { during = [r.sync.owed] + during }
+  _ = session(r, BeanSync.Gone.self)
+  check(during.allSatisfy { $0["backlog_s"] == nil }, true, "no backlog while paused nor after: \(during.compactMap { $0["backlog_s"] })")
+  check(r.bean.transfers, [[r.id, 5000, 0]], "one read across the pause")
+  check(r.reasons, ["fill_tail"])
+  check(r.have, [[0, 14000]])
+  check((179_900...180_100).contains(r.f.latest - r.f.anchor), true, "units after it dated by the new anchor")
+  check(r.f.pausedMs, 0, "the anchor past the pause: edge() by it alone")
+  check(piecesIn(r.chunks).reduce(Int64(0)) { $0 + $1.n }, 9000, "each unit once")
+  onlyReads(r.bean)
+}
+
 /// The pieces in the queue: start, first seq, units.
 func piecesIn(_ chunks: URL) -> [(start: Int64, seq: Int64, n: Int64)] {
   queue(chunks).map { f in let a = packets(f).dropFirst(2); return (startMs(f), seqOf(a.first!), Int64(a.count)) }
