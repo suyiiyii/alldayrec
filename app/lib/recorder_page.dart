@@ -22,14 +22,58 @@ class RecorderPage extends StatefulWidget {
   State<RecorderPage> createState() => _RecorderPageState();
 }
 
-/// How often the device page reads a bean's Wi-Fi fast transfer's step and bytes (the owner, 11-23: 0.1 or 0.05 s,
-/// for it to show it goes on, and fast).
+/// How often the device page and the home page's chip read a bean's Wi-Fi fast transfer's step and bytes (the owner,
+/// 11-23: 0.1 or 0.05 s, for it to show it goes on, and fast).
 const fastEvery = Duration(milliseconds: 50);
 
-class _RecorderPageState extends State<RecorderPage> {
+/// The step and bytes alone from the tap to the fast transfer's end (the owner, 11-23: refresh it faster so it shows
+/// how fast it goes, and say what it is at), merged into the page's status; back to its 2 s status once it is over or
+/// the page is left.
+mixin FastProgress<T extends StatefulWidget> on State<T> {
+  Timer? fast;
+  Map get fastStatus;
+  set fastStatus(Map s);
+  void fastOver();  // over: the status at once, not up to 2 s later
+
+  /// After each status read: on from the tap (a step) until the step is done.
+  void fastFor(Map status) {
+    final step = (status['wifiStep'] as Map?)?['step'];
+    _fast(step != null && step != 'done');
+  }
+
+  void _fast(bool on) {
+    if (on == (fast != null)) return;
+    fast?.cancel();
+    fast = on ? Timer.periodic(fastEvery, (_) => _progress()) : null;
+  }
+
+  Future<void> _progress() async {
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;  // no frames behind: no reads
+    final p = await Recorder.progress();
+    if (!mounted || fast == null) return;
+    if (p['wifi'] != true) { _fast(false); fastOver(); return; }
+    final st = fastStatus;
+    setState(() => fastStatus = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'],
+        'syncTotal': p['syncTotal'], 'sync': p['sync']});
+  }
+
+  @override
+  void dispose() {
+    fast?.cancel();
+    super.dispose();
+  }
+}
+
+class _RecorderPageState extends State<RecorderPage> with FastProgress {
   Map r = {}, st = {};
-  Timer? timer, fast;  // fast: a bean's Wi-Fi fast transfer asked for and not over, its step and bytes every [fastEvery]
+  Timer? timer;
   bool unbinding = false;
+  @override
+  Map get fastStatus => st;
+  @override
+  set fastStatus(Map s) => st = s;
+  @override
+  void fastOver() => _load();
 
   @override
   void initState() {
@@ -42,7 +86,6 @@ class _RecorderPageState extends State<RecorderPage> {
   @override
   void dispose() {
     timer?.cancel();
-    fast?.cancel();
     super.dispose();
   }
 
@@ -50,25 +93,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final a = await Recorder.recorder(), b = await Recorder.status();
     if (!mounted) return;
     setState(() { r = a; st = b; });
-    final step = (b['wifiStep'] as Map?)?['step'];
-    _fast(step != null && step != 'done');
-  }
-
-  /// The step and bytes alone from the tap to the fast transfer's end (the owner, 11-23: refresh it faster so it shows
-  /// how fast it goes, and say what it is at); back to the 2 s status once it is over or the page is left.
-  void _fast(bool on) {
-    if (on == (fast != null)) return;
-    fast?.cancel();
-    fast = on ? Timer.periodic(fastEvery, (_) => _progress()) : null;
-  }
-
-  Future<void> _progress() async {
-    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;  // no frames behind: no reads
-    final p = await Recorder.progress();
-    if (!mounted || fast == null) return;
-    if (p['wifi'] != true) { _fast(false); _load(); return; }  // over: the status at once, not up to 2 s later
-    setState(() => st = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal'],
-        'sync': p['sync']});
+    fastFor(b);
   }
 
   Future<void> _call(Future<void> Function() f) async {
