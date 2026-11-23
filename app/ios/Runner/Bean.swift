@@ -603,7 +603,13 @@ final class BeanSync {
         fields: ["reason": wifiReopens > 0 ? "reopen" : "manual", "reopens": wifiReopens, "battery": battery ?? NSNull(), "recording": recording, "open": listing.open,
                  "backlog_s": owed["backlog_s"] ?? 0, "files": listing.files.count])
     wifiNote = nil
-    if needList { listing = try list() }  // a file just closed: its length
+    if needList {  // a file just closed: its length
+      do { listing = try list() } catch let e as Gone {  // the page's step ends, not stuck at asked with its button off
+        log("bean_wifi_fail", "读文件列表时蓝牙断了（\(e)），没开热点", "warn", ["step": "list"])
+        wifiNote = ["code": "beanWifiGone"]; wifiStep = ["step": "done", "end": "fail"]
+        throw e
+      }
+    }
     owe()
     if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
       log("bean_wifi_skip", "没有积压，不开热点", fields: ["battery": battery ?? NSNull(), "recording": recording])

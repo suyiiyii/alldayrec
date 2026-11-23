@@ -1533,6 +1533,28 @@ class BeanTest {
         assertNull("gone once the bean is not recording", sync.wifiNote)
     }
 
+    /** BLE gone as the fast transfer lists a file just closed, before the hotspot (#405 review): the device page's step
+     *  ends with why, not stuck at asked (its button off, read every 0.05 s); no hotspot asked for. */
+    @Test fun wifiGoneWhileListing() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0)
+        val b = wt0 / 1000 - 60
+        bean.recording = true; bean.open = b; bean.listed[b] = 0
+        bean.onTransfer = { file, _, _ ->  // live, until the button stops it: the file just closed, its length unknown yet
+            bean.header(file, 0xFFFFFFFFL); bean.units(file, (0L..99L).toList())
+            bean.push(0x1882, byteArrayOf(0)); bean.complete(file)
+            bean.recording = false; bean.open = 0; bean.listed[file] = 100 * Bean.FRAME_MS
+            bean.onSend = { cmd -> if (cmd == 0x0101) { bean.wifiAsk = true; bean.dropOnList = true } }  // tapped as it asks the info
+        }
+        repeat(10) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue("the info that says it came", bean.dropOnList)
+        assertFalse(0x1A05 in bean.sentCmds())
+        assertEquals("beanWifiGone", sync.wifiNote?.get("code"))
+        assertEquals(mapOf("step" to "done", "end" to "fail"), sync.wifiStep)
+    }
+
     /** Nothing lacking: no hotspot. */
     @Test fun wifiNothingLacking() {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -1817,6 +1839,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var onWifi = false  // joined (wifiJoin) and not left yet
     var dropOnWifi = false
     var dropOnWifiOff = 0
+    var dropOnList = false
     val wifiIgnore = mutableMapOf<Long, Int>()  // 1A/07s over Wi-Fi left unanswered: so many
     var joinFails: Exception? = null  // what wifiJoin throws: the person cancelling the system's dialog, no answer
     val joins = mutableListOf<Triple<String, String, ByteArray>>()
@@ -1845,7 +1868,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
             }
             0x0101 -> push(0x0101, info())
             0x01A6 -> push(0x01A6, ByteArray(0))
-            0x1A0E -> push(0x1A0E, if (Bean.u16(p, 0) > 0) Bean.u16le(0) + Bean.le32(open) + ByteArray(4)
+            0x1A0E -> if (dropOnList) script.addFirst { throw IOException("gone while listing") }  // BLE goes before the answer
+                else push(0x1A0E, if (Bean.u16(p, 0) > 0) Bean.u16le(0) + Bean.le32(open) + ByteArray(4)
                 else listed.entries.fold(Bean.u16le(listed.size)) { acc, (id, ms) -> acc + Bean.le32(id) + Bean.le32(ms) } + Bean.le32(open) + ByteArray(4))
             0x1A10 -> Bean.u32(p, 0).let {
                 deleted += it

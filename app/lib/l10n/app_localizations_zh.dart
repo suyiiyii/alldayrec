@@ -1074,6 +1074,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get beanWifiGone => '上次 Wi‑Fi 快传没开始：录音豆断开了；连回来后再点一次';
+
+  @override
   String get beanWifiNoHotspot => '上次 Wi‑Fi 快传没成：没等到豆子的热点，已接着用蓝牙';
 
   @override

@@ -282,6 +282,7 @@ String nativeText(BuildContext context, Object? v) {
     'beanWifiRecording' => l.beanWifiRecording,
     'beanWifiLowBattery' => l.beanWifiLowBattery(v['battery']),
     'beanWifiNoHotspot' => l.beanWifiNoHotspot,
+    'beanWifiGone' => l.beanWifiGone,
     'beanWifiDenied' => l.beanWifiDenied,
     'beanWifiUnavailable' => l.beanWifiUnavailable,
     'beanWifiBackground' => l.beanWifiBackground,

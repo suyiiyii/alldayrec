@@ -1928,6 +1928,12 @@ abstract class AppLocalizations {
   /// **'上次 Wi‑Fi 快传没开始：豆子电量 {battery}%，低于 30% 时它不开热点；充到 30% 以上再点'**
   String beanWifiLowBattery(Object battery);
 
+  /// No description provided for @beanWifiGone.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传没开始：录音豆断开了；连回来后再点一次'**
+  String get beanWifiGone;
+
   /// No description provided for @beanWifiNoHotspot.
   ///
   /// In zh, this message translates to:

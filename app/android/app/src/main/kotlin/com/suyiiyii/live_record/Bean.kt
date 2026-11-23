@@ -598,7 +598,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             fields = mapOf("reason" to (if (wifiReopens > 0) "reopen" else "manual"), "reopens" to wifiReopens, "battery" to battery, "recording" to recording, "open" to listing.open,
                 "backlog_s" to (owed["backlog_s"] ?: 0), "files" to listing.files.size))
         wifiNote = null
-        if (needList) listing = list()  // a file just closed: its length
+        if (needList) listing = try { list() } catch (e: IOException) {  // a file just closed: its length; gone: the page's step ends, not stuck at asked with its button off
+            io.log("bean_wifi_fail", "读文件列表时蓝牙断了（$e），没开热点", "warn", mapOf("step" to "list"))
+            wifiNote = say("beanWifiGone"); wifiStep = mapOf("step" to "done", "end" to "fail")
+            throw e
+        }
         owe()
         if (owed.isEmpty()) {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
             io.log("bean_wifi_skip", "没有积压，不开热点", fields = mapOf("battery" to battery, "recording" to recording))

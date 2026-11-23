@@ -160,6 +160,7 @@ final class FakeBean: BeanIo {
       if dropOnWifiOff > 0 { dropOnWifiOff -= 1; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
     case 0x01A6: push(0x01A6, [])
     case 0x1A0E:
+      if dropOnList { script.insert({ throw BeanSync.Gone("gone while listing") }, at: 0); break }  // BLE goes before the answer
       let page: [UInt8] = Bean.u16(p, 0) > 0 ? Bean.u16le(0) : listed.reduce(Bean.u16le(listed.count)) { $0 + Bean.le32($1.0) + Bean.le32($1.1) }
       push(0x1A0E, [page, Bean.le32(open), [0, 0, 0, 0]].flatMap { $0 })
     case 0x1A10:
@@ -178,6 +179,7 @@ final class FakeBean: BeanIo {
       onTransfer(t[0], t[1], t[2] == 1)
     default: break
     }
+    onSend(Int(frame[5]) << 8 | Int(frame[6]))
   }
 
   func receive(_ ms: Int64) throws -> [UInt8]? {
@@ -208,7 +210,8 @@ final class FakeBean: BeanIo {
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
-  var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0
+  var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0, dropOnList = false
+  var onSend: (Int) -> Void = { _ in }  // after the bean's answer to each command
   var hotspot: [UInt8]? = [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]  // 1A/05's answer (nil: none)
   var battery: UInt8 = 7  // 01/01's level: 7 is 80%
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
@@ -742,6 +745,28 @@ do {
   check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x05 }.count, 1, "the tap during it dropped")
   check(bean.logs.contains { $0.0 == "bean_wifi_ask" }, true)
   check(bean.transfers.count, 1, "all of it here: nothing more over BLE")
+}
+
+/// BLE gone as the fast transfer lists a file just closed, before the hotspot (#405 review): the device page's step ends
+/// with why, not stuck at asked (its button off, read every 0.05 s); no hotspot asked for.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  let b = t0 / 1000 - 60
+  bean.recording = true; bean.open = b; bean.list(b, 0)
+  bean.onTransfer = { file, _, _ in  // live, until the button stops it: the file just closed, its length unknown yet
+    bean.header(file, 0xFFFF_FFFF); bean.units(file, Array(0...99))
+    bean.push(0x1882, [0]); bean.complete(file)
+    bean.recording = false; bean.open = 0; bean.list(file, 100 * Bean.frameMs)
+    bean.onSend = { cmd in if cmd == 0x0101 { bean.wifiAsk = true; bean.dropOnList = true } }  // tapped as it asks the info
+  }
+  bean.script = Array(repeating: {}, count: 10)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.dropOnList, true, "the info that says it came")
+  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x05 }, false)
+  check(sync.wifiNote?["code"] as? String, "beanWifiGone")
+  check(sync.wifiStep as? [String: String], ["step": "done", "end": "fail"])
 }
 
 /// The bean answering no 1A/07 over Wi-Fi, tapped four times (#262 review P2-1): those misses are Wi-Fi's, not the

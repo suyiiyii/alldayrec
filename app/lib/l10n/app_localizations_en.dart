@@ -1114,6 +1114,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get beanWifiGone =>
+      'The last Wi‑Fi fast transfer did not start: the bean disconnected; tap again once it is back';
+
+  @override
   String get beanWifiNoHotspot =>
       'The last Wi‑Fi fast transfer failed: the bean\'s hotspot did not come up; Bluetooth goes on';
 
