@@ -213,6 +213,7 @@ def test_mcp_sounds_tool(store):
     assert f"10:00-10:03 有人说话、有音乐 `{c['id']}`" in text and "10:03-10:07 在交通工具上" in text
     assert "环境声音（模型从声音猜的，可能不对）：在交通工具上 4 分钟、有音乐 3 分钟、安静 3 分钟" in mcp_server.call("conversation", {"id": c["id"]})[0]
     assert "没有声音数据" in mcp_server.call("sounds", {"date": DAY, "start": "13:00", "end": "14:00"})[0]
+    assert mcp_server.call("sounds", {"date": DAY, "end": "14"})[:2] == ("start、end 要写成 HH:MM，不是 '14'", True)
     T().sound = False
     assert mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "sounds", "arguments": {"date": DAY}}}, {})[1]["error"]
 

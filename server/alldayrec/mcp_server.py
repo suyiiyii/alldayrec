@@ -55,6 +55,13 @@ def day_of(s: str, what: str = "date") -> str:
         raise Bad(f"{what} 要写成 YYYY-MM-DD，不是 {s!r}")
 
 
+def check_hm(*ts: str) -> None:
+    """start / end, each checked to be HH:MM."""
+    for t in ts:
+        if not re.fullmatch(r"\d{1,2}:\d{2}", t):
+            raise Bad(f"start、end 要写成 HH:MM，不是 {t!r}")
+
+
 def todo(t: dict) -> str:
     due = (t.get("due") or "") + ("，暂定" if t.get("due") and t.get("due_certainty") == "tentative" else "")
     return f"[{t.get('owner') or '未知'}{' → ' + t['to'] if t.get('to') else ''}] {t.get('text', '')}{'（' + due + '）' if due else ''}"
@@ -171,9 +178,7 @@ def transcript_at(date: str, start: str, end: str) -> str:
     """Every device's rows: two recorders in one room both have the minute, each under its own heading."""
     # shortcut: no （外放）（广播） marks here (media_view): rows of several conversations; look each one's summary up to add them
     d = day_of(date)
-    for t in (start, end):
-        if not re.fullmatch(r"\d{1,2}:\d{2}", t):
-            raise Bad(f"start、end 要写成 HH:MM，不是 {t!r}")
+    check_hm(start, end)
     rows = db.sentences(f"{d}T{start:0>5}", f"{d}T{end:0>5}:59.999", inclusive=True)
     out = [f"# {d} {start}-{end} 原文 {len(rows)} 句（最近几分钟还没定稿的不在里面）"]
     by = {}
@@ -187,9 +192,7 @@ def transcript_at(date: str, start: str, end: str) -> str:
 def sounds(date: str, start: str = "00:00", end: str = "23:59") -> str:
     """Each device's minutes of [start, end] of the day as runs of the same sound events (sound_events.runs)."""
     d = day_of(date)
-    for t in (start, end):
-        if not re.fullmatch(r"\d{1,2}:\d{2}", t):
-            raise Bad(f"start、end 要写成 HH:MM，不是 {t!r}")
+    check_hm(start, end)
     a, b = sound_events.ms(f"{d}T{start:0>5}"), sound_events.ms(f"{d}T{end:0>5}") + 60000
     out = [f"# {d} {start}-{end} 的环境声音：模型从声音猜的，每一条都是「可能」，会错；外放的视频和电话也算「有人说话」。没列出的时间没有声音数据（没录，或者还没算）"]
     for x in sound_events.devices(a, b):

@@ -119,6 +119,7 @@ def test_tools_and_paging():
     at, _ = tool("transcript_at", date="2026-10-01", start="10:00", end="10:00")
     assert "## phone" in at and "## LR-X1-567E" in at and "原文 61 句" in at, at[:200]
     assert tool("transcript_at", date="2026-10-01", start="10", end="11")[1] and tool("day")[1], "missing / malformed arguments"
+    assert tool("transcript_at", date="2026-10-01", start="10:00", end="1100") == ("start、end 要写成 HH:MM，不是 '1100'", True)
 
     page1, _ = tool("transcript", id=CID)
     assert len(page1) <= m.PAGE + 60 and page1.endswith("下一页：参数不变，加 cursor=\"2\"）") and "[10:00:00] 我: 第 0 句" in page1
