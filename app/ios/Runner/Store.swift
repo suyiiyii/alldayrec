@@ -161,13 +161,35 @@ enum Ogg {
 ///                                                card to count boots: each such boot has its own files)
 ///   C file cut [piece]                           a piece made since (or frames passed over): appended, see cut()
 ///   U file                                       cut by noMore(), no LIST since: kept on the card (done())
+/// GET /api/coverage of a recorder (Mirror.pieces): its first bind, and the spans [from, to) of its audio the server has.
+struct Coverage {
+  let bind: Int64, spans: [(Int64, Int64)]
+  static let marginMs: Int64 = 4000  // what it lacks this short next to what it has: two phones' clocks apart (1–3 s)
+
+  /// The server has [a, b): some of it, and nothing missing of it longer than the margin.
+  func has(_ a: Int64, _ b: Int64) -> Bool {
+    var at = a, any = false
+    for (x, y) in spans where y > at && x < b {
+      if x - at > Coverage.marginMs { return false }
+      at = max(at, y); any = true
+    }
+    return any && b - at <= Coverage.marginMs
+  }
+}
+
 final class Mirror {
   static let listMax = 64
 
   final class F {
     var closed = false, size: Int64 = -1, cut: Int64 = 0, tscan: Int64 = 0, pieces: [String] = [], finished = false
     var unsure = false
+    var foreign = false  // some of it recorded before the first bind (Coverage): not sent, so never deleted (done())
   }
+
+  /// ms of closed files' audio pieces() did not write, the server having it or it being from before the first bind
+  /// (the app's log of a catch-up resets them), and the files of the first
+  var had: Int64 = 0, before: Int64 = 0
+  private(set) var served: Set<Int64> = []
 
   private(set) var files: [Int64: F] = [:]
   private var syncs: [Int64: [(frame: Int64, epochMs: Int64)]] = [:]
@@ -193,6 +215,8 @@ final class Mirror {
         if p.count > 3 { s.pieces.append(p[3]) }
       } else if p[0] == "U", p.count >= 2, let f = Int64(p[1], radix: 16) {
         files[f]?.unsure = true
+      } else if p[0] == "N", p.count >= 2, let f = Int64(p[1], radix: 16) {
+        files[f]?.foreign = true
       }
     }
   }
@@ -208,6 +232,7 @@ final class Mirror {
       let s = files[f]!
       t += "F \(Mirror.hex(f)) \(s.closed ? 1 : 0) \(s.size) \(s.cut) \(s.tscan) \(s.finished ? 1 : 0) \(s.pieces.joined(separator: ","))\n"
       if s.unsure { t += "U \(Mirror.hex(f))\n" }
+      if s.foreign { t += "N \(Mirror.hex(f))\n" }
     }
     for (c, ts) in syncs { for x in ts { t += "T \(Mirror.hex(c)) \(x.frame) \(x.epochMs)\n" } }
     try? Data(t.utf8).write(to: state, options: .atomic)
@@ -338,12 +363,16 @@ final class Mirror {
   /// for more. Frames of a boot with no 'T' yet wait for one; a file of a boot that is over (`boot` is the live one)
   /// and never had one goes to `undated` once the mirror has it whole, as one Ogg of all its frames (its runs back to
   /// back: no time to put them at anyway).
+  /// A closed file's piece the server has (`cover`, the owner 11-23: from the first bind on, whichever phone sent it) is
+  /// not written, nor one that ends before the first bind (not this account's: the file stays on the card). Without
+  /// `cover` (no answer) all are written; `wait`: the closed files wait for it.
   /// Returns the number of pieces written.
-  func pieces(_ out: URL, _ undated: URL, tag: String, liveFrames: Int, boot: Int) throws -> Int {
+  func pieces(_ out: URL, _ undated: URL, tag: String, liveFrames: Int, boot: Int, cover: Coverage? = nil, wait: Bool = false) throws -> Int {
     scanSyncs()
     var n = 0
     for f in files.keys.sorted() {
       let s = files[f]!
+      if wait && s.closed { continue }
       let whole = s.closed && s.size >= 0 && s.size <= have(f)
       if s.finished || (have(f) <= s.cut && !whole) { continue }
       let max = s.closed ? Store.oldPieceFrames : liveFrames
@@ -356,10 +385,16 @@ final class Mirror {
       func emit(_ end: Int64) throws {
         var piece: String?
         if !run.isEmpty {
+          let at = ts.isEmpty ? 0 : Store.at(ts, first), to = ts.isEmpty ? 0 : Store.at(ts, first + Int64(run.count))
           if ts.isEmpty {
             lost += run
+          } else if s.closed, let cover, to <= cover.bind {
+            before += to - at
+            if !s.foreign { s.foreign = true; save() }  // before its cut moves past it: a kill then must not let it go
+          } else if s.closed, let cover, cover.has(at, to) {
+            had += to - at; served.insert(f)
           } else {
-            let name = "\(Store.at(ts, first))@\(tag)"
+            let name = "\(at)@\(tag)"
             let part = out.appendingPathComponent("\(name).part"), ogg = out.appendingPathComponent("\(name).ogg")
             try Store.oggOpus(run).write(to: part)
             try? fm.removeItem(at: ogg)  // the same piece again (a kill before the state was saved)
@@ -401,7 +436,7 @@ final class Mirror {
   func done(_ out: URL) -> [Int64] {
     files.keys.sorted().filter { f in
       let s = files[f]!
-      return s.closed && s.finished && s.size <= have(f) && !s.unsure && !s.pieces.contains {
+      return s.closed && s.finished && s.size <= have(f) && !s.unsure && !s.foreign && !s.pieces.contains {
         fm.fileExists(atPath: out.appendingPathComponent("\($0).ogg").path) || fm.fileExists(atPath: out.appendingPathComponent("\($0).part").path)
       }
     }

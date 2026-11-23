@@ -48,6 +48,8 @@ Unbinding only makes this phone forget the bean and switch to its own mic. Nothi
 
 ## Old recordings on the card after a phone change
 
-To be added: whether the audio recorded on the card before the binding gets uploaded after the recorder is rebound to another phone.
+When the recorder is bound to another phone (or bound again after an unbind), that phone reads all the recordings still on the card and uploads what the server does not have yet: a recorder's audio belongs to the account from the first time it was bound to it. What the server has already (the old phone sent it) is not uploaded again; files read and sent are deleted from the card.
+
+Audio recorded before that first binding (the recorder was someone else's, say) is not uploaded, and those files stay on the card.
 
 If you don't have a recorder, you can build an LR-P3 yourself by following [`hardware/lr-p3/README.md`](https://github.com/suyiiyii/alldayrec/blob/main/hardware/lr-p3/README.md).

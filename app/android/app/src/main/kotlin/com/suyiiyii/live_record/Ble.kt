@@ -627,6 +627,11 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     private val stalls = HashMap<Long, Int>()
     private var caught = 0L       // a catch-up under way: bytes taken since (elapsedRealtime; 0: none)
     private var caughtSince = 0L
+    @Volatile private var cover: Coverage? = null  // the server's, for pieces() (coverage()); null: none, or no answer
+    @Volatile private var covering = false
+    private var coverAt = 0L
+    @Volatile private var coverFailed = false
+    @Volatile private var coverSaid = false
     private var fastAt = -60_000L
 
     /** LIST: the card's files with their sizes into the mirror, and the file the stream goes on in. */
@@ -700,7 +705,12 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             val s = (android.os.SystemClock.elapsedRealtime() - caughtSince) / 1000
             Log.i("live-record", "ble caught up: $caught B in $s s")
             syncNote = say("synced", "at" to System.currentTimeMillis(), "kb" to caught / 1024)
-            if (caught > 0) DeviceLog.app(mirrorName, "sync", "补传 ${caught / 1024} KB，用时 $s s")
+            if (caught > 0) {
+                DeviceLog.app(mirrorName, "sync", "补传 ${caught / 1024} KB，用时 $s s" +
+                    (if (m.had + m.before > 0) "；没上传的：服务端已有 ${m.had / 1000} s，第一次绑定之前录的 ${m.before / 1000} s" else ""),
+                    fields = mapOf("kb" to caught / 1024, "had_s" to m.had / 1000, "before_s" to m.before / 1000))
+                m.had = 0; m.before = 0
+            }
             caught = 0; caughtSince = 0; ahead = -1
             unhold(m)
         }
@@ -836,7 +846,7 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
         val h = prefs.getLong("hold:$mirrorName", -1)
         if (h < 0 || behind(m) > 0) return
         pieces(m)
-        if (!m.up(chunks, h + HOLD_MARGIN_MS)) return
+        if (coverWait || !m.up(chunks, h + HOLD_MARGIN_MS)) return  // the closed files not cut yet
         prefs.edit().remove("hold:$mirrorName").apply()
         Log.i("live-record", "ble hold $mirrorName let go")
     }
@@ -846,10 +856,34 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
     private var boot = 0
 
     /** The mirror into dated pieces (Mirror.pieces): the live file in pieces as long as the app's slice. */
+    /** The mirror into dated pieces (Mirror.pieces): of the closed files only what the server lacks, from the first bind on (coverage()). */
     private fun pieces(m: Mirror) {
         holdAhead(m)
-        val n = m.pieces(chunks, undated, mirrorName, sliceS() * 100, boot)
+        coverage(m)
+        val n = m.pieces(chunks, undated, mirrorName, sliceS() * 100, boot, cover, coverWait)
         if (n > 0) onPiece(n)
+    }
+    private val coverWait get() = covering && cover == null && !coverFailed  // the first answer still to come
+
+    /** GET /api/coverage, off the link's thread (the board wants an ACK within 8 s): once a closed file is still to be
+     *  cut and five minutes after the last, for the 31 days before now (the server's limit). No answer: no cover, all sent. */
+    private fun coverage(m: Mirror) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (covering || (coverAt > 0 && now - coverAt < 300_000) || m.files.values.none { it.closed && !it.finished }) return
+        covering = true; coverAt = now
+        val tag = mirrorName; val t = System.currentTimeMillis()
+        Thread {
+            val c = RecorderService.uploader?.coverage(tag, t - 31 * 86_400_000L + 60_000, t + 60_000)
+            cover = c?.let { Coverage(it.first, it.second) }
+            if (c == null && !coverFailed) DeviceLog.app(tag, "coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧都上传", "warn")
+            if (c != null && (coverFailed || !coverSaid)) {
+                coverSaid = true
+                DeviceLog.app(tag, "coverage", "服务端近 31 天已有 ${c.second.size} 段：卡上录完的文件里，服务端已有的、第一次绑定之前录的都不再上传",
+                    fields = mapOf("spans" to c.second.size, "first_bind" to c.first))
+            }
+            coverFailed = c == null
+            covering = false
+        }.start()
     }
 
     /** Files mirrored whole and uploaded: off the card (DELETE) and out of the mirror. An ACK before each: a DELETE
@@ -865,8 +899,9 @@ class BleLink(private val ctx: Context, private val prefs: SharedPreferences, pr
             val err = r[5].toInt()
             Log.i("live-record", "ble DELETE %08X: $err".format(f))
             if (err != 0 && err != -2) { refused += f; why = err; continue }
-            DeviceLog.app(mirrorName, "delete", "删录音设备上的文件 ${f.toString(16)}（${m.have(f) / 1024} KB，已全部上传）：" + if (err == 0) "删了" else "卡上已经没有",
-                fields = mapOf("file" to f, "size" to m.have(f), "err" to err))
+            val other = f in m.served  // some of it the server had already: not sent again
+            DeviceLog.app(mirrorName, "delete", "删录音设备上的文件 ${f.toString(16)}（${m.have(f) / 1024} KB，已全部上传${if (other) "，有的服务端原来就有" else ""}）：" + if (err == 0) "删了" else "卡上已经没有",
+                fields = mapOf("file" to f, "size" to m.have(f), "err" to err, "coverage" to other))
             m.drop(f)  // gone (-2: not on this card)
         }
         // once each time what is refused changes, not each minute (a card that fails refuses every file)

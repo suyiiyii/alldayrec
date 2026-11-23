@@ -303,6 +303,52 @@ class StoreTest {
         assertEquals(listOf(f), m.done(out))
     }
 
+    /** The server's coverage (GET /api/coverage; the owner, 11-23: from the first bind on, whichever phone sent it): of
+     *  a closed file of three 60 s pieces, those the server has are not written (the first dated 2 s apart by another
+     *  phone), and the file goes off the card once the rest is up; one that ends before the first bind is not written and
+     *  the file stays on the card, after a restart too; no coverage: all written, as before; a file noMore() cut stays
+     *  though the server has it all (#409); `wait`: nothing of a closed file cut. StoreCheck's case. */
+    @Test fun coverage() {
+        val e = 1_000_000_000L
+        val f = 1L shl 16; val g = 1L shl 16 or 1
+        val body = (0 until 72).fold(t(0, e)) { acc, k -> acc + a(k * 250, 250) }  // 18,000 frames: 180 s
+        fun closed(dir: File, size: Int = body.size) = Mirror(dir).apply { put(f, 0, body); listed(mapOf(f to size.toLong(), g to 0L), g) }
+        val other = Coverage(e - 1000, listOf(longArrayOf(e + 2000, e + 62_000), longArrayOf(e + 120_000, e + 180_000)))
+        run {
+            val out = tmp(); val m = closed(tmp())
+            assertEquals("waits for the coverage", 0, m.pieces(out, tmp(), "X", 15, 1, other, wait = true))
+            assertEquals("nothing cut meanwhile", 0L, m.files[f]!!.cut)
+            assertEquals("the minute the server lacks", 1, m.pieces(out, tmp(), "X", 15, 1, other))
+            assertEquals(listOf("${e + 60_000}@X.ogg"), names(out))
+            assertEquals(listOf(120_000L, 0L), listOf(m.had, m.before))
+            out.listFiles()!!.forEach { it.delete() }
+            assertEquals("the rest up: off the card", listOf(f), m.done(out))
+        }
+        run {
+            val dir = tmp(); val out = tmp(); val m = closed(dir)
+            assertEquals("after the first bind", 2, m.pieces(out, tmp(), "X", 15, 1, Coverage(e + 60_000, emptyList())))
+            assertEquals(listOf("${e + 60_000}@X.ogg", "${e + 120_000}@X.ogg"), names(out))
+            assertEquals(60_000L, m.before)
+            out.listFiles()!!.forEach { it.delete() }
+            assertEquals("not this account's minute: kept on the card", emptyList<Long>(), m.done(out))
+            assertEquals("after a restart too", emptyList<Long>(), Mirror(dir).done(out))
+        }
+        run {
+            val out = tmp(); val m = closed(tmp())
+            assertEquals("no coverage: all of it", 3, m.pieces(out, tmp(), "X", 15, 1))
+            out.listFiles()!!.forEach { it.delete() }
+            assertEquals(listOf(f), m.done(out))
+        }
+        run {
+            val out = tmp(); val m = closed(tmp(), body.size + 32)
+            assertEquals((body.size + 32).toLong(), m.noMore(f))
+            assertEquals("all had", 0, m.pieces(out, tmp(), "X", 15, 1, Coverage(0, listOf(longArrayOf(e, e + 180_000)))))
+            assertEquals("cut, not listed again: kept although the server has it", emptyList<Long>(), m.done(out))
+        }
+        assertFalse("a second with nothing of it had", Coverage(0, emptyList()).has(e, e + 1000))
+        assertFalse("5 s missing between", Coverage(0, listOf(longArrayOf(e, e + 10_000), longArrayOf(e + 15_000, e + 30_000))).has(e, e + 30_000))
+    }
+
     /** The cut kept over a reconnect (a new Mirror on the same dir, as each BLE session makes): that session's first
      *  LIST, cut at LIST_MAX without the file, says nothing of it. */
     @Test fun noMoreKept() {
