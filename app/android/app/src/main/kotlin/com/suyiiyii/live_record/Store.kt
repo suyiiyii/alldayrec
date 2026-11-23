@@ -133,6 +133,15 @@ object Store {
  *                                                  card to count boots: each such boot has its own files)
  *    C file cut [piece]                            a piece made since (or frames passed over): appended, see cut()
  *    U file                                        cut by noMore(), no LIST since: kept on the card (done()) */
+/** GET /api/coverage of a recorder (Mirror.pieces): which one, its first bind, and the spans [from, to) of its audio the
+ *  server has. */
+class Coverage(val device: String, val bind: Long, val spans: List<LongArray>) {
+    /** The server has [a, b): it lies in one of its spans, MARGIN_MS in from both ends. At worst a piece at a span's end
+     *  goes up again; one the server lacks any of is never taken as had. */
+    fun has(a: Long, b: Long) = spans.any { it[0] + MARGIN_MS <= a && b <= it[1] - MARGIN_MS }
+    companion object { const val MARGIN_MS = 4000L }  // in from each end of what the server has: two phones' clocks apart (1–3 s)
+}
+
 class Mirror(private val dir: File) {
     companion object {
         const val LIST_MAX = 64
@@ -143,7 +152,15 @@ class Mirror(private val dir: File) {
     }
 
     class F(var closed: Boolean = false, var size: Long = -1, var cut: Long = 0, var tscan: Long = 0,
-            val pieces: MutableList<String> = mutableListOf(), var finished: Boolean = false, var unsure: Boolean = false)
+            val pieces: MutableList<String> = mutableListOf(), var finished: Boolean = false, var unsure: Boolean = false) {
+        var foreign = false  // some of it recorded before the first bind (Coverage): not sent, so never deleted (done())
+    }
+
+    /** ms of closed files' audio pieces() did not write, the server having it or it being from before the first bind
+     *  (the app's log of a catch-up resets them), and the files of the first */
+    var had = 0L
+    var before = 0L
+    val served = mutableSetOf<Long>()
 
     val files = sortedMapOf<Long, F>()
     private val syncs = HashMap<Long, MutableList<LongArray>>()
@@ -158,6 +175,7 @@ class Mirror(private val dir: File) {
                     p.getOrElse(7) { "" }.split(',').filter { it.isNotEmpty() }.toMutableList(), p[6] == "1")
                 "T" -> syncs.getOrPut(p[1].toLong(16)) { mutableListOf() } += longArrayOf(p[2].toLong(), p[3].toLong())
                 "U" -> files[p[1].toLong(16)]?.unsure = true
+                "N" -> files[p[1].toLong(16)]?.foreign = true
                 "C" -> if (p.size >= 3) files.getOrPut(p[1].toLong(16)) { F() }.apply { cut = p[2].toLong(); if (p.size > 3) pieces += p[3] }
             }
         }
@@ -169,6 +187,7 @@ class Mirror(private val dir: File) {
             for ((f, s) in files) {
                 append("F %08X %d %d %d %d %d %s\n".format(f, if (s.closed) 1 else 0, s.size, s.cut, s.tscan, if (s.finished) 1 else 0, s.pieces.joinToString(",")))
                 if (s.unsure) append("U %08X\n".format(f))
+                if (s.foreign) append("N %08X\n".format(f))
             }
             for ((c, ts) in syncs) for (t in ts) append("T %08X %d %d\n".format(c, t[0], t[1]))
         })
@@ -274,11 +293,16 @@ class Mirror(private val dir: File) {
      *  otherwise wait for more. Frames of a boot with no 'T' yet wait for one; a file of a boot that is over (`boot` is
      *  the live one) and never had one goes to `undated` once the mirror has it whole, as one Ogg of all its frames
      *  (its runs back to back: no time to put them at anyway).
+     *  A closed file's piece the server has (`cover`, the owner 11-23: from the first bind on, whichever phone sent it)
+     *  is not written, nor one that ends before the first bind (not this account's: the file stays on the card). Without
+     *  `cover` (no answer) all are written; `wait`: the closed files wait for it.
      *  Returns the number of pieces written. */
-    fun pieces(out: File, undated: File, tag: String, liveFrames: Int, boot: Int): Int {
+    fun pieces(out: File, undated: File, tag: String, liveFrames: Int, boot: Int, cover: Coverage? = null, wait: Boolean = false): Int {
         scanSyncs()
+        @Suppress("NAME_SHADOWING") val cover = cover?.takeIf { it.device == tag }  // another recorder's (a re-bind) never judges this one's
         var n = 0
         for ((f, s) in files) {
+            if (wait && s.closed) continue
             val whole = s.closed && s.size in 0..have(f)
             if (s.finished || (have(f) <= s.cut && !whole)) continue
             val max = if (s.closed) Store.OLD_PIECE_FRAMES else liveFrames
@@ -291,10 +315,17 @@ class Mirror(private val dir: File) {
             fun emit(end: Long) {
                 var piece: String? = null
                 if (run.isNotEmpty()) {
+                    val at = if (ts.isNullOrEmpty()) 0 else Store.at(ts, first)
+                    val to = if (ts.isNullOrEmpty()) 0 else Store.at(ts, first + run.size)
                     if (ts.isNullOrEmpty()) {
                         lost += run
+                    } else if (s.closed && cover != null && to <= cover.bind) {
+                        before += to - at
+                        if (!s.foreign) { s.foreign = true; save() }  // before its cut moves past it: a kill then must not let it go
+                    } else if (s.closed && cover != null && cover.has(at, to)) {
+                        had += to - at; served += f
                     } else {
-                        val name = "${Store.at(ts, first)}@$tag"
+                        val name = "$at@$tag"
                         val part = File(out, "$name.part")
                         part.writeBytes(Store.oggOpus(run))
                         part.renameTo(File(out, "$name.ogg"))
@@ -330,7 +361,7 @@ class Mirror(private val dir: File) {
     /** Closed files the mirror has whole (as the last LIST says: none cut by noMore() since), all turned into pieces,
      *  the pieces uploaded (gone from `out`): the card may delete them. */
     fun done(out: File): List<Long> = files.filter { (f, s) ->
-        s.closed && s.finished && s.size <= have(f) && !s.unsure && s.pieces.none { File(out, "$it.ogg").exists() || File(out, "$it.part").exists() }
+        s.closed && s.finished && s.size <= have(f) && !s.unsure && !s.foreign && s.pieces.none { File(out, "$it.ogg").exists() || File(out, "$it.part").exists() }
     }.keys.toList()
 
     /** None of the pieces it cut that start before [until] is still in [out] waiting to go up. With [until] where LIVE
