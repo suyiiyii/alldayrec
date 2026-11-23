@@ -339,6 +339,7 @@ final class BeanSync {
     var anchors: [(Int64, Int64)]
     var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
     var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
+    var pausedMs: Int64 = 0  // paused this long while recorded, the anchor not past it yet (edge()); not saved
     init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, wait: Int64 = 0, anchors: [(Int64, Int64)] = []) {
       self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.wait = wait; self.anchors = anchors
     }
@@ -410,6 +411,7 @@ final class BeanSync {
   private var quietUntil: Int64 = 0  // no 1A/07 before: the bean has just ended a transfer (code 4 when asked at once)
   private var busy: Int64 = 0        // code 4s in a row
   private var paused = false  // only the bean's button state can suspend the live silence guard
+  private var pausedAt: Int64 = 0  // when it paused: edge() stays there
   private var liveFile: Int64 = 0
   private var liveSeen: Int64 = 0   // includes waiting for a header and gaps between code-4 retries
   private var liveStalled = false  // one warning until audio resumes, across reconnects
@@ -1045,8 +1047,12 @@ final class BeanSync {
         "xfer_realtime": x.realtime, "watched": io.watched(), "live_behind_s": behind]) { $1 }
   }
 
-  /// The unit the bean is at in the file it records, by the phone's clock (a pause would put it early).
-  private func edge(_ file: Int64) -> Int64 { max(0, (io.now() - (files[file]?.latest ?? file * 1000)) / Bean.frameMs) }
+  /// The unit the bean is at in the file it records, by the phone's clock less its pauses seen (one before the
+  /// connection would put it early).
+  private func edge(_ file: Int64) -> Int64 {
+    let f = files[file]
+    return max(0, ((paused ? pausedAt : io.now()) - (f?.latest ?? file * 1000) - (f?.pausedMs ?? 0)) / Bean.frameMs)
+  }
 
   private func begin(_ x: Xfer) throws {
     xfer = x; x.at = io.now(); x.seen = x.at; marked = false; linkUnits = 0; linkAt = x.at
@@ -1140,14 +1146,18 @@ final class BeanSync {
       switch p.first {
       case 0:
         liveFile = 0; paused = false; recording = false; startDone = true; log("bean_stop", "豆子停止录音")
+        needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
         // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no syncTotal, no
         // log, no stall guard. The file is closed now: the rest as its catch-up on a new connection (backlog()).
         if let x, x.live, !x.realtime, x.first >= 0, x.lag == nil {  // a read from behind: units came, not caught up yet
           complete(x, 0, "；豆子停录时还没追上实时，断开重连，剩下的按补传接着取")
           throw Again(description: "file \(x.file): the bean stopped, the rest as a catch-up")
         }
-      case 1: if !recording { needList = true }; if paused { liveSeen = io.now() }; paused = false; recording = true; log("bean_record", "豆子开始录音")
-      case 2: paused = true; startDone = true; log("bean_pause", "豆子暂停录音")
+      case 1:
+        if !recording { needList = true }
+        if paused { liveSeen = io.now(); files[listing.open]?.pausedMs += io.now() - pausedAt }
+        paused = false; recording = true; log("bean_record", "豆子开始录音")
+      case 2: if !paused { pausedAt = io.now() }; paused = true; startDone = true; log("bean_pause", "豆子暂停录音")
       default: break
       }
     case 0x0103: if p.count >= 2 { var h = hw; h["battery"] = Bean.pct(p[0]); h["case_battery"] = Bean.pct(p[1]); hw = h }
@@ -1330,7 +1340,10 @@ final class BeanSync {
   private func step(_ x: Xfer, _ f: F, _ seq: Int64) {
     guard let t = x.target, seq > f.anchors.last?.0 ?? 0 else { return }
     let d = t - f.latest
-    if abs(d) >= 5 { f.anchors.append((seq, f.latest + (abs(d) >= 200 ? d : max(-9, min(9, d))))) }
+    guard abs(d) >= 5 else { return }
+    let move = abs(d) >= 200 ? d : max(-9, min(9, d))
+    if move > 0 { f.pausedMs = max(0, f.pausedMs - move) }  // the anchor past a pause: edge() goes by it alone
+    f.anchors.append((seq, f.latest + move))
   }
 
   /// A transfer's first unit: establish the file's anchor. Live never holds finals: backlog is read only after stop.

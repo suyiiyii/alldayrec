@@ -1099,6 +1099,45 @@ class BeanTest {
         onlyReads(r.bean)
     }
 
+    /** The bean stops while no read is on (here a refused live read's 30 s wait): the file just closed is listed anew
+     *  and read as a catch-up in this connection, not the next. */
+    @Test fun stopWithNoReadOnCatchesUpAtOnce() {
+        val r = rec(100, listOf(0L to 5000L), watched = false)
+        r.bean.onTransfer = { file, from, _ ->
+            if (file == r.bean.open) r.bean.header(file, 0xFFFFFFFFL, code = 2)  // refused: liveAgain
+            else { r.bean.header(file, 5050L * Bean.UNIT); r.bean.units(file, (from..5049L).toList(), last = 5049); r.bean.complete(file) }
+        }
+        r.bean.script += {}
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(0)); r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 5050L * 20 }
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals("the closed file's tail in the same connection",
+            listOf(Triple(r.id, 5000L, false), Triple(r.id, 4999L, false)), r.bean.transfers)
+        assertEquals(listOf(0L, 5050L), r.f.have.single().toList())
+        assertNull(r.sync.gap(r.f))
+        onlyReads(r.bean)
+    }
+
+    /** The bean paused 3 min in the file it records, then on in it: the edge stays where the pause began (no backlog
+     *  said meanwhile), the read goes on after it in the same transfer (not too_slow, not behind by the pause), each
+     *  unit once. */
+    @Test fun pauseFreezesTheEdge() {
+        val r = rec(100, listOf(0L to 5000L), watched = false, units = 1500)  // fill_tail, caught up: live at unit 6500
+        val during = mutableListOf<Map<String, Any?>>()
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(2)) }
+        repeat(180) { r.bean.script += { during += r.sync.owed } }
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(1)); r.bean.openAt += 180_000; r.bean.more(7500) }
+        r.bean.script += { during += r.sync.owed }
+        assertThrows(IOException::class.java) { r.sync.session(0, "") }
+        assertEquals("no backlog while paused nor after", emptyList<Any?>(), during.mapNotNull { it["backlog_s"] })
+        assertEquals("one read across the pause", listOf(Triple(r.id, 5000L, false)), r.bean.transfers)
+        assertEquals(listOf("fill_tail"), r.reasons)
+        assertEquals(listOf(0L, 14000L), r.f.have.single().toList())
+        assertTrue("units after it dated by the new anchor", (r.f.latest - r.f.anchor) in 179_900L..180_100L)
+        assertEquals("the anchor past the pause: edge() by it alone", 0L, r.f.pausedMs)
+        assertEquals("each unit once", 9000L, piecesIn(r.chunks).sumOf { it.third })
+        onlyReads(r.bean)
+    }
+
     /** The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found
      *  it (FakeBean.answer): `units` of it a 1A/07, then the link goes. */
     private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long, val chunks: File) {
