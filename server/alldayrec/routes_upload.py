@@ -162,6 +162,8 @@ class DeviceEvent(BaseModel):
 async def device_log_upload(device: str, events: list[DeviceEvent]):
     """A batch of a device's events, from the phone that read them; one sent again replaces the one kept."""
     db.put_device_log(device, [{**e.model_dump(), "at": None if e.at is None else iso(dt.datetime.fromtimestamp(e.at / 1000))} for e in events])
+    if any(e.src != "rec" and e.data.get("kind") == "connect" for e in events):
+        db.first_bind(device)  # a phone bound to it: kept from its first one on
     return {"ok": True}
 
 
@@ -171,6 +173,17 @@ async def device_log(device: str, since: str, until: str | None = None):
     ms = lambda t: int(dt.datetime.fromisoformat(t).timestamp() * 1000)
     return {"events": db.device_log(device, since, until), "status": db.device_statuses(device, since, until),
             "audio": audio.minutes(device, ms(since), ms(until) if until else 1 << 62)}
+
+
+@router.get("/api/coverage")
+async def coverage(device: str, since: int, until: int):
+    """What of a device's audio the server has in [since, until) (unix ms, at most 31 days): `spans`, its pieces merged
+    into [from, to) (audio.coverage), and `first_bind` (unix ms, db.first_bind). A phone that binds the recorder later
+    sends only what is missing from first_bind on, whichever phone sent the rest; a phone that never asks works as before."""
+    if not 0 < until - since <= 31 * 86400_000:
+        raise HTTPException(400, "since to until: more than 0, at most 31 days")
+    spans = await anyio.to_thread.run_sync(audio.coverage, device, since, until, limiter=threads.DB)
+    return {"first_bind": db.first_bind(device), "spans": spans}
 
 
 @router.get("/api/quality")

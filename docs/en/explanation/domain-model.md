@@ -47,6 +47,7 @@ The `kv` keys for a device `<d>`:
 | `read_to:<d>`, `read_end:<d>` | Start and end of the last piece the final reader took | `audio.stream` |
 | `hold:<d>` | The phone has older audio still to send; the final layer waits at this time | `audio.hold`, `audio.held` |
 | `end_at:<d>` | When the recorder stopped | `POST /api/chunks/end` |
+| `first_bind:<d>` | When the device was first bound (unix ms): its audio from then on is this account's; binding it to another phone or unbinding it never changes this. Set the first time it is needed: the earlier of the device's first piece and its first app `connect` event, else that moment | `db.first_bind` (`GET /api/coverage`, `POST /api/device-log` with a `connect`) |
 | `standby:<d>` | Which device this device stands by for, and from when (`since`) | `colocate.decide`, `colocate.take` |
 
 ### Text
