@@ -256,7 +256,7 @@ object Bean {
  * One bean, session after session (BeanLink connects, then calls session()): the key exchange, its info and clock, its
  * files, its start when idle (start(), once a connection), then one transfer at a time, as the bean allows no more
  * and cannot be stopped mid-file: the file being recorded, from where the phone lacks it on to live (plan()), else the
- * oldest file this phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units go
+ * oldest file this phone lacks units of (the backlog, files begun since its first bind: `since`, the server's by cover()). Units go
  * into dated Ogg pieces in `chunks` (the Uploader's queue).
  *
  * Per file (`state`, JSON, kept after every piece): when its unit 0 was on the phone's clock (its anchor: the file id,
@@ -306,6 +306,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
          *  then, until wifiLeave() (FINISH, the hotspot left). */
         fun wifiJoin(ssid: String, password: String, endpoint: ByteArray): Unit = throw Exception("no Wi-Fi")
         fun wifiLeave() {}
+        /** GET /api/coverage for this bean over [since, until) (unix ms): its first bind and the spans [from, to) of its
+         *  audio the server has; null without an answer (offline, an older server's 404): nothing is skipped or deleted by it. */
+        fun coverage(since: Long, until: Long): Pair<Long, List<LongArray>>? = null
     }
 
     /** anchors: (seq, anchor), from that unit on the file is dated by that anchor instead (step()), in order. */
@@ -393,6 +396,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var lagging = false  // live audio over a minute behind: one warning until it is back within 10 s
     private var xfer: Xfer? = null
     private var since = 0L
+    private var bind: Long? = null  // the server's first bind of the bean (cover()): `since` once known, the phone's own bind before
+    private var coverAt = 0L
+    private var coverFailed = false
+    private var coverSaid = false
+    private val served = mutableSetOf<Long>()  // files the server's coverage gave units of (cover()), for bean_delete
     private var pendingEnd = 0L  // kept in the state file: a kill before the pieces are up does not lose it (complete()
                                  // is not run again for a file that is whole)
     private var caught = 0L      // backlog units taken since the backlog began
@@ -445,7 +453,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     /** One connection, from the key exchange until the link goes (io.receive throws). `steps`: the link's own, for the log. */
     fun session(since: Long, steps: String) {
-        this.since = since
+        this.since = bind ?: since
         reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now(); liveFile = 0; paused = false
         val t = StringBuilder(steps)
         fun <T> step(code: String, what: String, block: () -> T): T {
@@ -498,6 +506,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (xfer == null && wifiNext) { wifiNext = false; wifi() }
             if (xfer == null && io.now() >= quietUntil) {
                 if (needList || recording && listing.open == 0L && io.now() - listedAt > 10_000) listing = list()
+                if (io.now() - coverAt >= COVER_MS) cover()
                 val open = listing.open
                 val x = when {
                     recording && open != 0L && io.now() >= liveAgain -> plan(open)
@@ -811,6 +820,64 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         return Bean.Listing(all.toList(), open)
     }
 
+    /** What the server has of the bean's closed files (GET /api/coverage; the owner, 11-23: only the first bind starts the
+     *  account's audio, a later one is the bean handed between phones): had here too, so not read, not sent, and a file
+     *  it has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). A
+     *  stretch it lacks of up to MARGIN_UNITS next to one it has counts as had (anchors apart); a longer one is read,
+     *  whatever its cause (a trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped. */
+    private fun cover() {
+        coverAt = io.now()
+        val closed = listing.files.filter { it.first != listing.open }
+        val hi = closed.maxOfOrNull { (id, ms) -> id * 1000 + ms } ?: return
+        val lo = closed.minOf { (id, _) -> files[id]?.at(0) ?: (id * 1000) }
+        val margin = MARGIN_UNITS * Bean.FRAME_MS
+        // shortcut: files begun over 31 days before the newest (the server's limit) are read as before; ask twice if that matters
+        val (b, spans) = io.coverage(maxOf(lo - margin, hi - 31 * 86_400_000L), hi + margin) ?: run {
+            if (!coverFailed) io.log("bean_coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧读、照旧删", "warn")
+            coverFailed = true
+            return
+        }
+        coverFailed = false
+        bind = b; since = b
+        var got = 0L
+        for ((id, ms) in closed) {
+            if (id * 1000 < since) continue
+            val f = files[id] ?: F(id * 1000)
+            val n = if (f.total >= 0) f.total else ms / Bean.FRAME_MS
+            val had = mutableListOf<LongArray>()
+            for (s in spans) for (r in units(f, s[0], s[1], n)) {
+                val l = had.lastOrNull()
+                if (l != null && r[0] - l[1] <= MARGIN_UNITS) l[1] = maxOf(l[1], r[1]) else had += r
+            }
+            if (had.isEmpty()) continue
+            if (had.first()[0] <= MARGIN_UNITS) had.first()[0] = 0
+            if (had.last()[1] >= n - MARGIN_UNITS) had.last()[1] = n
+            val was = covered(f)
+            for (r in had) add(f, r[0], r[1])
+            if (covered(f) > was) { files[id] = f; served += id; got += covered(f) - was }
+        }
+        if (got > 0) save()
+        if (got == 0L && coverSaid) return
+        coverSaid = true
+        val left = lacking(pending())
+        io.log("bean_coverage", "服务端已有 ${spans.size} 段：豆子上 ${closed.size} 个录完的文件里，新算作已有 ${got * Bean.FRAME_MS / 1000} s（不读、不传），" +
+            "还缺 ${left * Bean.FRAME_MS / 1000} s", fields = mapOf("spans" to spans.size, "files" to closed.size,
+            "had_s" to got * Bean.FRAME_MS / 1000, "lacking_s" to left * Bean.FRAME_MS / 1000, "first_bind" to b))
+    }
+
+    /** The units of `f` (of `n`) wholly in [a, b) (unix ms), by the anchors it is dated by: a range per anchor. */
+    private fun units(f: F, a: Long, b: Long, n: Long): List<LongArray> {
+        val by = listOf(longArrayOf(0, f.anchor)) + f.anchors
+        return by.indices.mapNotNull { i ->
+            val t = by[i][1]
+            val s1 = if (i + 1 < by.size) by[i + 1][0] else n
+            // before the anchor: the division rounds toward 0, up for a negative a - t, and lo is at least by[i][0] ≥ 0 anyway
+            val lo = maxOf(by[i][0], (a - t + Bean.FRAME_MS - 1) / Bean.FRAME_MS)
+            val hi = minOf(s1, (b - t) / Bean.FRAME_MS)
+            if (lo < hi) longArrayOf(lo, hi) else null
+        }
+    }
+
     /** The oldest file begun since the bean was added here that this phone lacks units of. */
     private fun pending() = listing.files.filter { (id, _) -> id * 1000 >= since && id != listing.open && files[id]?.let { !done(it) } ?: true }
         .sortedBy { it.first }
@@ -968,8 +1035,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             files.remove(id)
             listing = Bean.Listing(listing.files.filter { it.first != id }, listing.open)
             save()
-            io.log("bean_delete", "豆子上的文件 $id 删了：服务端都有了（${f.total} 个单元，${f.total * Bean.FRAME_MS / 1000} 秒）",
-                fields = mapOf("file" to id, "units" to f.total, "s" to f.total * Bean.FRAME_MS / 1000))
+            val other = id in served  // some of it from the server's coverage: another phone's, or this one's before
+            io.log("bean_delete", "豆子上的文件 $id 删了：服务端都有了${if (other) "（有的是服务端原有的）" else ""}（${f.total} 个单元，${f.total * Bean.FRAME_MS / 1000} 秒）",
+                fields = mapOf("file" to id, "units" to f.total, "s" to f.total * Bean.FRAME_MS / 1000, "coverage" to other))
         }
     }
 
@@ -1324,5 +1392,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val CLOCK_UNITS = 1500L  // half a minute of live units: the fastest of each dates the file (reanchor())
         const val STEP_UNITS = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
+        const val COVER_MS = 300_000L  // the server's coverage asked again after (cover())
+        const val MARGIN_UNITS = 200L  // 4 s: what the server lacks next to what it has, this short, is two phones' anchors apart (1–3 s)
     }
 }

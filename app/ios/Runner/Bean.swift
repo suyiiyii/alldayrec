@@ -293,6 +293,9 @@ protocol BeanIo: AnyObject {
   func wifiLeave()
   /// The socket's and the hotspot's state now, for the log of a Wi-Fi read that stopped (BeanWifi.state()).
   func wifiState() -> [String: Any]
+  /// GET /api/coverage for this bean over [since, until) (unix ms): its first bind and the spans [from, to) of its audio
+  /// the server has; nil without an answer (offline, an older server's 404): nothing is skipped or deleted by it.
+  func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])?
 }
 
 extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say otherwise)
@@ -302,11 +305,12 @@ extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say o
   func wifiState() -> [String: Any] { [:] }
 }
 extension BeanIo { func phoneState() -> [String: Any] { [:] }; func notifications() -> [String: Any] { [:] } }
+extension BeanIo { func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? { nil } }
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
 /// the bean allows no more and cannot be stopped mid-file: the file being recorded, from where the phone lacks it on to
-/// live (plan()), else the oldest file this phone lacks units of (the backlog, files begun after the bean was added here: `since`). Units
+/// live (plan()), else the oldest file this phone lacks units of (the backlog, files begun since its first bind: `since`, the server's by cover()). Units
 /// go into dated Ogg pieces in `chunks` (the Uploader's queue). Per file (`state`, JSON, kept after every piece): when
 /// its unit 0 was on the phone's clock (its anchor), the anchors it was dated by anew while live (reanchor()) and which
 /// units are in pieces already. A file the server has whole
@@ -325,6 +329,8 @@ final class BeanSync {
   static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
   static let clockUnits: Int64 = 1500  // half a minute of live units: the fastest of each dates the file (reanchor())
   static let stepUnits = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
+  static let coverMs: Int64 = 300_000  // the server's coverage asked again after (cover())
+  static let marginUnits: Int64 = 200  // 4 s: what the server lacks next to what it has, this short, is two phones' anchors apart (1–3 s)
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
@@ -411,6 +417,9 @@ final class BeanSync {
   private var linkUnits: Int64 = 0, linkAt: Int64 = 0  // BLE units of the transfer since linkAt (its start or the last status)
   private var xfer: Xfer?
   private var since: Int64 = 0
+  private var bind: Int64?  // the server's first bind of the bean (cover()): `since` once known, the phone's own bind before
+  private var coverAt: Int64 = 0, coverFailed = false, coverSaid = false
+  private var served: Set<Int64> = []  // files the server's coverage gave units of (cover()), for bean_delete
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
   private var caught: Int64 = 0      // backlog units taken since the backlog began
   private var caughtSince: Int64 = 0
@@ -469,7 +478,7 @@ final class BeanSync {
 
   /// One connection, from the key exchange until the link goes (io.receive throws). `steps`: the link's own, for the log.
   func session(since: Int64, steps: String) throws {
-    self.since = since
+    self.since = bind ?? since
     reader = Bean.Reader(); inbox = []; xfer = nil; needList = true; askedAt = io.now(); liveFile = 0; paused = false
     var t = steps
     func step<T>(_ code: String, _ what: String, _ block: () throws -> T) rethrows -> T {
@@ -520,6 +529,7 @@ final class BeanSync {
         if xfer == nil && wifiNext { wifiNext = false; try wifi() }
         if xfer == nil && io.now() >= quietUntil {
           if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
+          if io.now() - coverAt >= BeanSync.coverMs { cover() }
           let open = listing.open
           let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording ? nil : backlog()
           if let x { try begin(x) } else { state = ["code": "beanIdle"] }
@@ -842,6 +852,61 @@ final class BeanSync {
     return Bean.Listing(files: order.map { (id: $0, ms: all[$0]!) }, open: open)
   }
 
+  /// What the server has of the bean's closed files (GET /api/coverage; the owner, 11-23: only the first bind starts the
+  /// account's audio, a later one is the bean handed between phones): had here too, so not read, not sent, and a file it
+  /// has whole goes off the bean (prune()); audio begun before its first bind is not this account's (`since`). A stretch it
+  /// lacks of up to marginUnits next to one it has counts as had (anchors apart); a longer one is read, whatever its
+  /// cause (a trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped.
+  private func cover() {
+    coverAt = io.now()
+    let closed = listing.files.filter { $0.id != listing.open }
+    guard let hi = closed.map({ $0.id * 1000 + $0.ms }).max(), let lo = closed.map({ files[$0.id]?.at(0) ?? $0.id * 1000 }).min() else { return }
+    let margin = BeanSync.marginUnits * Bean.frameMs
+    // shortcut: files begun over 31 days before the newest (the server's limit) are read as before; ask twice if that matters
+    guard let c = io.coverage(max(lo - margin, hi - 31 * 86_400_000), hi + margin) else {
+      if !coverFailed { log("bean_coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧读、照旧删", "warn") }
+      coverFailed = true
+      return
+    }
+    coverFailed = false
+    bind = c.bind; since = c.bind
+    var got: Int64 = 0
+    for e in closed where e.id * 1000 >= since {
+      let f = files[e.id] ?? F(e.id * 1000)
+      let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs
+      var had: [(Int64, Int64)] = []
+      for (a, b) in c.spans {
+        for r in units(f, a, b, n) {
+          if let l = had.last, r.0 - l.1 <= BeanSync.marginUnits { had[had.count - 1].1 = max(l.1, r.1) } else { had.append(r) }
+        }
+      }
+      guard !had.isEmpty else { continue }
+      if had[0].0 <= BeanSync.marginUnits { had[0].0 = 0 }
+      if had[had.count - 1].1 >= n - BeanSync.marginUnits { had[had.count - 1].1 = n }
+      let was = covered(f)
+      for r in had { add(f, r.0, r.1) }
+      if covered(f) > was { files[e.id] = f; served.insert(e.id); got += covered(f) - was }
+    }
+    if got > 0 { save() }
+    guard got > 0 || !coverSaid else { return }
+    coverSaid = true
+    let left = lacking(pending())
+    log("bean_coverage", "服务端已有 \(c.spans.count) 段：豆子上 \(closed.count) 个录完的文件里，新算作已有 \(got * Bean.frameMs / 1000) s（不读、不传），" +
+        "还缺 \(left * Bean.frameMs / 1000) s", fields: ["spans": c.spans.count, "files": closed.count, "had_s": got * Bean.frameMs / 1000,
+        "lacking_s": left * Bean.frameMs / 1000, "first_bind": c.bind])
+  }
+
+  /// The units of `f` (of `n`) wholly in [a, b) (unix ms), by the anchors it is dated by: a range per anchor.
+  private func units(_ f: F, _ a: Int64, _ b: Int64, _ n: Int64) -> [(Int64, Int64)] {
+    let by = [(Int64(0), f.anchor)] + f.anchors
+    return by.indices.compactMap { i in
+      let (s0, t) = by[i], s1 = i + 1 < by.count ? by[i + 1].0 : n
+      // before the anchor: the division rounds toward 0, up for a negative a - t, and lo is at least s0 ≥ 0 anyway
+      let lo = max(s0, (a - t + Bean.frameMs - 1) / Bean.frameMs), hi = min(s1, (b - t) / Bean.frameMs)
+      return lo < hi ? (lo, hi) : nil
+    }
+  }
+
   /// The oldest file begun since the bean was added here that this phone lacks units of.
   private func pending() -> [(id: Int64, ms: Int64)] {
     listing.files.filter { $0.id * 1000 >= since && $0.id != listing.open && (files[$0.id].map { !done($0) } ?? true) }.sorted { $0.id < $1.id }
@@ -1036,8 +1101,9 @@ final class BeanSync {
       files[id] = nil
       listing.files.removeAll { $0.id == id }
       save()
-      log("bean_delete", "豆子上的文件 \(id) 删了：服务端都有了（\(f.total) 个单元，\(f.total * Bean.frameMs / 1000) 秒）",
-          fields: ["file": id, "units": f.total, "s": f.total * Bean.frameMs / 1000])
+      let other = served.contains(id)  // some of it from the server's coverage: another phone's, or this one's before
+      log("bean_delete", "豆子上的文件 \(id) 删了：服务端都有了\(other ? "（有的是服务端原有的）" : "")（\(f.total) 个单元，\(f.total * Bean.frameMs / 1000) 秒）",
+          fields: ["file": id, "units": f.total, "s": f.total * Bean.frameMs / 1000, "coverage": other])
     }
   }
 

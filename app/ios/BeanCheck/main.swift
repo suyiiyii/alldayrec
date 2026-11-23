@@ -212,6 +212,9 @@ final class FakeBean: BeanIo {
   func end(_ at: Int64) { ends.append(at) }
   func piece() {}
   func refused() -> Set<Int64> { refusedStarts }
+  var cover: (Int64, Int64) -> (bind: Int64, spans: [(Int64, Int64)])? = { _, _ in nil }  // GET /api/coverage's answer
+  var coverAsks: [[Int64]] = []
+  func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? { coverAsks.append([since, until]); return cover(since, until) }
   var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0, dropOnList = false
   var onSend: (Int) -> Void = { _ in }  // after the bean's answer to each command
   var hotspot: [UInt8]? = [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]  // 1A/05's answer (nil: none)
@@ -1836,6 +1839,59 @@ do {
   let s = last["backlog_s"] as! Int64, eta = last["backlog_eta_s"] as? Int64 ?? 0
   // 20 s of audio a connection: 10 s of units at twice real time, 2.5 s to connect again
   check((1.4...1.8).contains(Double(s) / Double(max(1, eta))), true, "\(s) s left in \(eta) s")
+}
+
+/// The server's coverage (GET /api/coverage; the owner, 11-23: audio from the first bind on is the account's, whichever
+/// phone sent it). A file the server has whole is not read, only its last unit for its length, and goes off the bean;
+/// one it has half of is read from where it lacks; one begun before the first bind is not read, though after this phone's
+/// own bind; two another phone dated 2 s later and 2 s earlier are had whole, nothing read again for those 2 s.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let n: Int64 = 3000, ms = n * 20
+  let old = (t0 - 3_500_000) / 1000, a = (t0 - 3_000_000) / 1000, b = (t0 - 2_000_000) / 1000
+  let c = (t0 - 1_000_000) / 1000, d = (t0 - 500_000) / 1000
+  for f in [old, a, b, c, d] { bean.list(f, ms) }
+  let bind = a * 1000 - 1000  // after old began; this phone's own bind (since) before it
+  bean.cover = { _, _ in (bind, [(a * 1000, a * 1000 + ms), (b * 1000, b * 1000 + ms / 2), (c * 1000 + 2000, c * 1000 + ms + 2000),
+                                 (d * 1000 - 2000, d * 1000 + ms - 2000)]) }
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  for _ in 0..<3 { _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") } }  // a, c, d: cut at their header
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, n - 1, 0], [b, n / 2 - 1, 0], [c, n - 1, 0], [d, n - 1, 0]], "b's second half (from the unit before: its length); a, c, d their length only")
+  check(bean.coverAsks.count, 1, "once, not each connection")
+  check(bean.coverAsks[0][0] <= old * 1000 && bean.coverAsks[0][1] >= d * 1000 + ms, true, "all the closed files")
+  check(bean.deleted, [a, c, d], "whole on the server: off the bean; b's second half still queued here")
+  check(bean.logFields.filter { $0["coverage"] as? Bool == true }.count, 3)
+  check(bean.logs.filter { $0.0 == "bean_coverage" }.count, 1)
+  check(bean.logFields.first { $0["had_s"] != nil }?["had_s"] as? Int64, (3 * n + n / 2) * 20 / 1000)
+}
+
+/// No coverage (offline, or a server without GET /api/coverage: 404): as before, every file since this phone's bind read
+/// whole, none deleted while its pieces wait to go up; said once.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let n: Int64 = 3000, a = (t0 - 3_000_000) / 1000
+  bean.list(a, n * 20)
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 20)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  bean.t += 300_000; bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.coverAsks.count, 2, "asked again 5 min on")
+  check(bean.transfers, [[a, 0, 0]])
+  check(bean.deleted, [], "nothing deleted by a coverage that did not come")
+  check(bean.logs.filter { $0.0 == "bean_coverage" }.count, 1, "said once")
 }
 
 print("bean check: all passed")

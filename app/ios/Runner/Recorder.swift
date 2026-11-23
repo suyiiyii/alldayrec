@@ -727,6 +727,21 @@ final class Uploader: Thread {
     } catch { note = ["code": "endFailed", "detail": error.localizedDescription]; return false }
   }
 
+  /// GET /api/coverage (BeanSync.cover()): the device's first bind and the spans [from, to) of it the server has; nil
+  /// unless the server answered it (offline, an older server's 404).
+  func coverage(_ device: String, _ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? {
+    guard let u = URL(string: "\(server)/api/coverage?device=\(enc(device))&since=\(since)&until=\(until)") else { return nil }
+    var r = URLRequest(url: u, timeoutInterval: 10)
+    r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    var code = 0, got: Data?
+    let done = DispatchSemaphore(value: 0)
+    Uploader.session.dataTask(with: r) { data, resp, _ in code = (resp as? HTTPURLResponse)?.statusCode ?? 0; got = data; done.signal() }.resume()
+    done.wait()
+    guard code == 200, let o = got.flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+          let bind = (o["first_bind"] as? NSNumber)?.int64Value, let spans = o["spans"] as? [[NSNumber]] else { return nil }
+    return (bind, spans.compactMap { $0.count == 2 ? ($0[0].int64Value, $0[1].int64Value) : nil })
+  }
+
   /// A bean's recording end (`end:<device>`, BeanLink: the bean stopped and all of it is up): told once none of its
   /// pieces is left, again until the server takes it, as on Android (10-25: a bean's end never reached the server).
   private func ends(_ q: [URL]) {

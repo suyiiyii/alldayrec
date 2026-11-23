@@ -297,6 +297,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun held() = prefs.getLong("hold:$name", -1).takeIf { it >= 0 }
         override fun liveFrom(at: Long) = prefs.edit().putLong("live:$name", at).apply()
         override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
+        override fun coverage(since: Long, until: Long) = RecorderService.uploader?.coverage(name, since, until)
         override fun end(at: Long) { prefs.edit().putLong("end:$name", at).commit() }  // Uploader.ends() sends it
         override fun piece() = onPiece(1)
         /** A Bluetooth headset shares the phone's radio (SCO: a headset in call mode), as may a call or a recording
