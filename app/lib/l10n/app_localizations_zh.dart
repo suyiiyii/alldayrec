@@ -1093,6 +1093,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanWifiNoJoin => '上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次';
 
   @override
+  String get beanWifiJoinLate =>
+      '上次 Wi‑Fi 快传没成：豆子的热点开了 30 多秒手机还没加入，之后就加不进去了，重开了 3 次也一样；已回到蓝牙。再点一次，系统问要不要加入时马上点「加入」';
+
+  @override
   String get beanWifiNoSocket =>
       '上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试';
 
@@ -1144,7 +1148,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String wifiStepReopen(Object n, Object total) {
-    return '传输中断，正在让录音豆重开热点（第 $n/$total 次）…';
+    return '正在让录音豆重开热点（第 $n/$total 次）…';
   }
 
   @override

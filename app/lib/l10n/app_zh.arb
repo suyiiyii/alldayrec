@@ -644,6 +644,7 @@
   "beanWifiUnavailable": "上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消，或没找到豆子的热点；已回到蓝牙，可以再点一次",
   "beanWifiBackground": "上次 Wi‑Fi 快传没成：App 不在前台，手机不让加入热点；快传期间留在这个页面",
   "beanWifiNoJoin": "上次 Wi‑Fi 快传没成：手机试了 4 次都没连上豆子的热点，已回到蓝牙，可以再点一次",
+  "beanWifiJoinLate": "上次 Wi‑Fi 快传没成：豆子的热点开了 30 多秒手机还没加入，之后就加不进去了，重开了 3 次也一样；已回到蓝牙。再点一次，系统问要不要加入时马上点「加入」",
   "beanWifiNoSocket": "上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试",
   "beanWifiNoAnswer": "上次 Wi‑Fi 快传没成：豆子没回应传输请求，已回到蓝牙",
   "beanWifiBusy": "上次 Wi‑Fi 快传没成：豆子一直说在忙，没开始传，已回到蓝牙",
@@ -673,7 +674,7 @@
   },
   "wifiStepTransfer": "正在传输",
   "wifiStepBack": "正在连回蓝牙…",
-  "wifiStepReopen": "传输中断，正在让录音豆重开热点（第 {n}/{total} 次）…",
+  "wifiStepReopen": "正在让录音豆重开热点（第 {n}/{total} 次）…",
   "@wifiStepReopen": {
     "placeholders": {
       "n": {},
