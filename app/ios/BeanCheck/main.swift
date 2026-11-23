@@ -794,6 +794,7 @@ do {
     check(again.description.contains("豆子没回音"), true, again.description)
     check(sync.wifiNote?["code"] as? String, "beanWifiNoAnswer")
     check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["back", "fail"])
+    check([sync.sync["phase"] as? String, "\(sync.sync["owed_s"]!)"], ["wifi", "60"], "on the way back: what it lacked kept, not 已同步")
   }
   check(bean.joins.count, 4)
   check(bean.transfers.count, 12, "three asks a tap, all over Wi-Fi")

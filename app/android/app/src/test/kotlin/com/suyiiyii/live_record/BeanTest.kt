@@ -1566,6 +1566,7 @@ class BeanTest {
         assertTrue(again.message, "join: unavailable" in again.message!!)
         assertEquals("the device page says why", "beanWifiUnavailable", sync.wifiNote?.get("code"))
         assertEquals(mapOf("step" to "back", "end" to "fail"), sync.wifiStep?.filterKeys { it in setOf("step", "end") })
+        assertEquals("on the way back: what it lacked kept, not 已同步", listOf("wifi", 60L), listOf(sync.sync["phase"], sync.sync["owed_s"]))
         assertTrue(bean.transfers.isEmpty())
         assertTrue(bean.logs.any { it.first == "bean_wifi_done" })
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }

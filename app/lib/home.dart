@@ -568,7 +568,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           if (away && pauseLeftMin(s) == 0) Text(l.awayHelp, style: small),  // it records to its card meanwhile (not while paused)
           if (ble && y.totalKb > 0) ...[  // LIVE goes on while the backlog is read; before LIVE only the file being recorded
             const SizedBox(height: 8),
-            LinearProgressIndicator(value: connected ? y.doneKb / y.totalKb : null, borderRadius: BorderRadius.circular(2)),
+            LinearProgressIndicator(value: connected || y.phase == 'wifi' ? y.doneKb / y.totalKb : null, borderRadius: BorderRadius.circular(2)),
           ],
           for (final w in warn) Text(w, style: small?.copyWith(color: cs.error), maxLines: 2, overflow: TextOverflow.ellipsis),
         ]),

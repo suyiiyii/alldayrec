@@ -506,7 +506,11 @@ final class BeanSync {
       }
       return try block()
     }
-    defer { flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0; owed = [:]; counted = (0, 0, 0, 0, false, false, nil) }
+    defer {
+      flush(); xfer = nil; syncDoneKb = 0; syncTotalKb = 0; owed = [:]
+      // a fast transfer not over (back to BLE, a new hotspot): what it lacked stays till the next owe(), never 已同步 meanwhile
+      if wifiStep.map({ $0["step"] as? String == "done" }) ?? true { counted = (0, 0, 0, 0, false, false, nil) }
+    }
     do {
       let mine = Bean.keys()
       key = try step("encrypting", "密钥交换") { try Bean.session(mine, try ask(Bean.hello(Bean.pub(mine)), 0x2E01).payload) }

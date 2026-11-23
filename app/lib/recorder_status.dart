@@ -146,9 +146,11 @@ String durationText(AppLocalizations l, num s) {
     return (icon: Icons.pause_rounded, color: cs.outline, battery: null, number: l.minutes(pausedMin), numberColor: cs.onSurfaceVariant,
         spin: false, line: l.statePaused(pausedMin));
   }
-  if (y.phase == 'wifi') {  // from the tap to Bluetooth back (BLE is down meanwhile): the bytes once they come
+  // from the tap to Bluetooth back (BLE is down meanwhile): the bytes once they come, as the device page (the owner,
+  // 11-23: no percentage); on the way back the link's own state (a bean gone meanwhile: 正在找 …, not 快传中 for ever)
+  if (y.phase == 'wifi' && (connected || (s['wifiStep'] as Map?)?['step'] != 'back')) {
     return (icon: Icons.sync_rounded, color: cs.primary, battery: null,
-        number: y.totalKb > 0 ? '${(y.doneKb * 100 / y.totalKb).floor()}%' : null, numberColor: cs.onSurfaceVariant, spin: true,
+        number: y.totalKb > 0 ? progressText(y.doneKb, y.totalKb) : null, numberColor: cs.onSurfaceVariant, spin: true,
         line: l.linkBeanWifi);
   }
   if (y.totalKb > 0) {  // the card's backlog being read; before LIVE is up only the file being recorded: no share yet

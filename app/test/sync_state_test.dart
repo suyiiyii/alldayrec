@@ -50,6 +50,8 @@ void main() {
       }
       final chip = tester.widget<ActionChip>(find.byType(ActionChip)).tooltip!;
       expect(chip.split(' · 电量').first, c['chip']);
+      final bytes = c['phase'] == 'wifi' && ((status['sync'] as Map)['total_kb'] as num) > 0;  // the owner, 11-23: no percentage
+      if (bytes) expect(find.descendant(of: find.byType(ActionChip), matching: find.text(c['page'] as String)), findsOneWidget);
       await tester.tap(find.byType(ActionChip));
       for (var i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 200));  // a spinning icon never settles
@@ -57,6 +59,10 @@ void main() {
       Finder panel(String text) => find.descendant(of: find.byType(BottomSheet), matching: find.text(text));
       expect(panel(c['card'] as String), findsOneWidget, reason: 'the card');
       if ((c['card_sub'] as String).isNotEmpty) expect(panel(c['card_sub'] as String), findsOneWidget, reason: 'the card');
+      if (bytes) {  // the card's bar as far as the chip's bytes, not spinning
+        final bar = find.descendant(of: find.byType(BottomSheet), matching: find.byType(LinearProgressIndicator));
+        expect(tester.widget<LinearProgressIndicator>(bar).value, isNotNull, reason: 'the card');
+      }
       await tester.pumpWidget(const SizedBox());
 
       // the device page

@@ -130,8 +130,11 @@ class RecorderService : Service() {
             fun n(k: String) = (y[k] as Number?)?.toLong() ?: 0L
             val phase = y["phase"]; val done = n("done_kb"); val total = n("total_kb"); val owed = n("owed_s")
             fun time(sec: Long) = ((sec + 30) / 60).let { m -> if (m >= 60) t(R.string.notice_hours_minutes, m / 60, m % 60) else t(R.string.notice_minutes, m) }
+            // on the way back to Bluetooth the link's own state, as the chip (a bean gone meanwhile: 正在找 …)
+            val back = phase == "wifi" && s["connected"] != true && (s["wifiStep"] as Map<*, *>?)?.get("step") == "back"
             val title = when {
                 s["source"] != "ble" -> t(R.string.notice_recording)
+                back -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
                 phase == "wifi" && total == 0L -> t(R.string.link_bean_wifi)  // from the tap to Bluetooth back, before the bytes
                 // LIVE goes on while the backlog is read; before that only the file being recorded is waited for
                 total > 0 -> if (phase == "wifi" || (s["link"] as Map<*, *>?)?.get("code") == "beanIdle")  // a bean's backlog: it is not recording
@@ -145,7 +148,7 @@ class RecorderService : Service() {
                 phase == "stuck" -> t(R.string.notice_bean_behind, time(n("stuck_s"))) + " · " + t(R.string.notice_bean_stuck)
                 else -> said(s["link"] as Map<*, *>?, str) ?: t(R.string.notice_starting)
             }
-            val hw = (s["hw"] as Map<*, *>?).takeIf { s["connected"] == true || phase in setOf("catching", "wifi", "stuck") }
+            val hw = (s["hw"] as Map<*, *>?).takeIf { s["connected"] == true || !back && phase in setOf("catching", "wifi", "stuck") }
             val paused = (s["pausedUntil"] as Long? ?: 0L) - now
             val oldest = s["oldest"] as Long?
             return title to listOfNotNull(

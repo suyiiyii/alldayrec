@@ -500,7 +500,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         } finally {
             flush()
             xfer = null
-            syncDoneKb = 0; syncTotalKb = 0; owed = emptyMap(); counted = Counted()
+            syncDoneKb = 0; syncTotalKb = 0; owed = emptyMap()
+            // a fast transfer not over (back to BLE, a new hotspot): what it lacked stays till the next owe(), never 已同步 meanwhile
+            if ((wifiStep?.get("step") ?: "done") == "done") counted = Counted()
         }
     }
 
