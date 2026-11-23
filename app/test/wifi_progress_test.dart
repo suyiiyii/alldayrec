@@ -193,10 +193,32 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('unbinding is off from the tap to Bluetooth back, each step, said as for the transfer (#405 review)', (tester) async {
+    ListTile unbind() => tester.widget<ListTile>(find.ancestor(of: find.text('解除绑定'), matching: find.byType(ListTile)));
+    await open(tester, at: null, locale: const Locale('zh'));
+    expect(unbind().onTap, isNotNull);
+    for (final w in <Map<String, Object?>>[
+      {'step': 'asked'}, {'step': 'hotspot'}, {'step': 'join', 'try': 1}, {'step': 'socket', 'try': 2}, {'step': 'transfer'},
+      {'step': 'back', 'end': 'fail'},
+    ]) {
+      step = w;
+      await tester.pump(const Duration(seconds: 2));  // the 2 s status says the step
+      await tester.pump();
+      expect(unbind().onTap, isNull, reason: '$w');
+      expect(find.text('正在取回录音豆里的录音，取完再解除'), findsOneWidget, reason: '$w');
+    }
+    step = {'step': 'done', 'end': 'all', 's': 45, 'ms': 2000};
+    await tester.pump(fastEvery);
+    await tester.pump();
+    expect(unbind().onTap, isNotNull);  // over: unbinding again
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('why one failed, said where the tile is: low battery, recording, the join cancelled', (tester) async {
     for (final (code, want) in [
       ({'code': 'beanWifiLowBattery', 'battery': 20}, '上次 Wi‑Fi 快传没开始：豆子电量 20%，低于 30% 时它不开热点；充到 30% 以上再点'),
       ({'code': 'beanWifiRecording'}, '豆子正在录音：先在豆子上停录，再点 Wi‑Fi 快传'),
+      ({'code': 'beanWifiGone'}, '上次 Wi‑Fi 快传没开始：录音豆断开了；连回来后再点一次'),
       ({'code': 'beanWifiUnavailable'}, '上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消，或没找到豆子的热点；已回到蓝牙，可以再点一次'),
     ]) {
       await open(tester, at: {'step': 'done', 'end': 'fail'}, locale: const Locale('zh'));

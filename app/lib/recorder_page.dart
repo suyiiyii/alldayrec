@@ -166,6 +166,7 @@ class _RecorderPageState extends State<RecorderPage> {
     final bean = name?.startsWith('D3200-') == true;  // a Feishu recorder bean: no pause, listening, USB disk or firmware of ours
     final wifiStep = st['wifiStep'] as Map?, wifi = bean ? wifiStepSpec(l, wifiStep, syncDone, syncTotal) : null;
     final wifiNote = st['wifiNote'] == null ? null : nativeText(context, st['wifiNote']);
+    final fetching = syncing || wifi != null;  // from a fast transfer's tap to Bluetooth back too: unbinding then strands the bean's hotspot
 
     // connection chip: what the link is doing, in one colour
     final (String chip, Color chipColor, IconData chipIcon) = !recording
@@ -349,10 +350,10 @@ class _RecorderPageState extends State<RecorderPage> {
           ],
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.link_off_rounded, color: syncing ? cs.outline : cs.error),
-            title: Text(l.unbind, style: TextStyle(color: syncing ? cs.outline : cs.error)),
-            subtitle: Text(bean ? (syncing ? l.beanUnbindAfterSync : l.beanUnbindSub) : syncing ? l.unbindAfterSync : l.unbindSub),
-            onTap: syncing ? null : () => _unbind(name, linked, bean),
+            leading: Icon(Icons.link_off_rounded, color: fetching ? cs.outline : cs.error),
+            title: Text(l.unbind, style: TextStyle(color: fetching ? cs.outline : cs.error)),
+            subtitle: Text(bean ? (fetching ? l.beanUnbindAfterSync : l.beanUnbindSub) : fetching ? l.unbindAfterSync : l.unbindSub),
+            onTap: fetching ? null : () => _unbind(name, linked, bean),
           ),
         ])),
       ]),
