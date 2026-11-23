@@ -639,6 +639,24 @@ def covered(device: str, ms: int) -> float:
                              (device, ms, ms - 3600_000)).fetchone()[0] or 0.0
 
 
+COVERAGE_GAP_MS = 1000  # pieces this close are one span: the apps' back-to-back pieces are a few ms apart either way
+
+
+def coverage(device: str, lo_ms: int, hi_ms: int) -> list[list[int]]:
+    """The device's stored audio in [lo_ms, hi_ms) as spans [from, to) (unix ms), oldest first, clipped to the range:
+    its pieces merged, overlaps once, gaps up to COVERAGE_GAP_MS closed."""
+    out = []
+    # shortcut: a piece that began over a day before lo_ms is not seen (an imported file is hours long, not days)
+    for a, sec in db.conn().execute("SELECT start_ms, seconds FROM pieces WHERE device = ? AND start_ms > ? AND start_ms < ? "
+                                    "AND start_ms + seconds * 1000 > ? ORDER BY start_ms", (device, lo_ms - 86400_000, hi_ms, lo_ms)):
+        b = round(a + sec * 1000)
+        if out and a <= out[-1][1] + COVERAGE_GAP_MS:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [[max(a, lo_ms), min(b, hi_ms)] for a, b in out]
+
+
 def once(rows, end: float) -> tuple[int, float]:
     """Of (start_ms, seconds) rows in start order, how many add audio after `end` (unix ms) and how many seconds they
     add: overlapping pieces counted once, as fresh() hands them out."""

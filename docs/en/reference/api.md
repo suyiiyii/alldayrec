@@ -115,6 +115,12 @@ Parameters: `name?` is optional; the parentheses give where it goes (query, path
 | `POST` | A batch of a device's events, from the phone that read them; one sent again replaces the one kept. | `device` (query, string)<br>body: JSON DeviceEvent[] {`src`, `seq`, `at`, `data`} |
 | `GET` | A device's events, status reports and audio by the minute (audio.minutes) in [since, until). | `device` (query, string)<br>`since` (query, string)<br>`until?` (query, string) |
 
+### `/api/coverage`
+
+| Method | Description | Parameters |
+|---|---|---|
+| `GET` | What of a device's audio the server has in [since, until) (unix ms, at most 31 days): `spans`, its pieces merged into [from, to) (audio.coverage; silence a trim dropped is a gap, so a phone may send it again, harmless: the server goes by time and does not transcribe it twice), and `first_bind` (unix ms, db.first_bind). | `device` (query, string)<br>`since` (query, integer)<br>`until` (query, integer) |
+
 ### `/api/quality`
 
 | Method | Description | Parameters |

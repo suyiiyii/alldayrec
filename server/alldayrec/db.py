@@ -1068,6 +1068,26 @@ def put_device_log(device: str, events: list[dict]):
                       [(device, e["src"], e["seq"], e["at"], json.dumps(e["data"], ensure_ascii=False)) for e in events])
 
 
+def first_bind(device: str) -> int:
+    """When this store first had the device (unix ms): its audio from then on is this person's, whichever of their phones
+    sends it later (GET /api/coverage). Kept as kv first_bind:<d> the first time it is asked (that GET, or a phone's
+    connect event in POST /api/device-log), and never changed after: neither an unbind nor another bind moves it. Then:
+    its first app connect event (the apps log one only for the recorder they are bound to; they send no bind of their
+    own), else its first piece (a device from before the apps logged; a piece's time can be a recorder's unset clock).
+    With neither: now, not kept (a connect sent after this GET, from before it, still sets it)."""
+    if (v := kv(f"first_bind:{device}")) is not None:
+        return v
+    c = conn()
+    at = c.execute("""SELECT at FROM device_log WHERE device = ? AND src != 'rec' AND at IS NOT NULL
+                        AND json_extract(data, '$.kind') = 'connect' ORDER BY at LIMIT 1""", (device,)).fetchone()
+    v = (int(dt.datetime.fromisoformat(at[0]).timestamp() * 1000) if at else
+         c.execute("SELECT min(start_ms) FROM pieces WHERE device = ?", (device,)).fetchone()[0])
+    if v is None:
+        return int(time.time() * 1000)
+    c.execute("INSERT OR IGNORE INTO kv VALUES (?, ?)", (f"first_bind:{device}", json.dumps(v)))  # a racing first one stays
+    return kv(f"first_bind:{device}")
+
+
 def device_log(device: str, lo: str, hi: str | None = None) -> list[dict]:
     """Events at [lo, hi) (no upper bound when hi is None), and the recorder's undated records between its dated ones
     before and after the range (a boot that ended before any phone set its clock), unsorted."""
