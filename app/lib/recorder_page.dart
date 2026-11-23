@@ -67,7 +67,8 @@ class _RecorderPageState extends State<RecorderPage> {
     final p = await Recorder.progress();
     if (!mounted || fast == null) return;
     if (p['wifi'] != true) { _fast(false); _load(); return; }  // over: the status at once, not up to 2 s later
-    setState(() => st = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal']});
+    setState(() => st = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'], 'syncTotal': p['syncTotal'],
+        'sync': p['sync']});
   }
 
   Future<void> _call(Future<void> Function() f) async {
@@ -158,13 +159,13 @@ class _RecorderPageState extends State<RecorderPage> {
     final live = st['connected'] == true;  // the link is up (its text is for showing, not for comparing)
     final store = hw['store'] as int?, free = (hw['free_kb'] as num?) ?? 0, total = (hw['total_kb'] as num?) ?? 0;
     final battery = hw['battery'] as int?;
-    final syncDone = (st['syncDone'] as num?) ?? 0, syncTotal = (st['syncTotal'] as num?) ?? 0, syncLive = (st['syncLive'] as num?) ?? 0;
-    final syncing = recording && catchingUp(st);  // as the top bar's chip
+    final y = syncSpec(st), syncLive = (st['syncLive'] as num?) ?? 0;
+    final syncing = recording && y.reading && y.phase != 'wifi';  // as the top bar's chip
     final lent = store == -16;
     final dfuState = st['dfu'] ?? r['dfu'], dfu = dfuState == null ? null : nativeText(context, dfuState);
     final listen = st['listen'] as List?;  // listening on this phone: its lines
     final bean = name?.startsWith('D3200-') == true;  // a Feishu recorder bean: no pause, listening, USB disk or firmware of ours
-    final wifiStep = st['wifiStep'] as Map?, wifi = bean ? wifiStepSpec(l, wifiStep, syncDone, syncTotal) : null;
+    final wifiStep = st['wifiStep'] as Map?, wifi = bean && y.phase == 'wifi' ? wifiStepSpec(l, wifiStep, y.doneKb, y.totalKb) : null;
     final wifiNote = st['wifiNote'] == null ? null : nativeText(context, st['wifiNote']);
     // how it ended: what the hotspots got first (the last of them may have got nothing, its note), else why it failed
     final wifiEnd = const ['all', 'part'].contains(wifiStep?['end']) ? wifiEndText(l, wifiStep) : wifiNote ?? wifiEndText(l, wifiStep);
@@ -173,7 +174,7 @@ class _RecorderPageState extends State<RecorderPage> {
     // connection chip: what the link is doing, in one colour
     final (String chip, Color chipColor, IconData chipIcon) = !recording
         ? (l.notConnected, cs.outline, Icons.bluetooth_disabled_rounded)
-        : syncing
+        : y.reading
             ? (live ? l.connectedCatchingUp : l.syncing, cs.tertiary, Icons.sync_rounded)
             : live
                 ? (l.connected, Colors.green.shade600, Icons.bluetooth_connected_rounded)
@@ -275,7 +276,7 @@ class _RecorderPageState extends State<RecorderPage> {
             ]),
             const SizedBox(height: 10),
             // how long a step before the transfer takes is not known: no made-up share, only the transfer's bytes
-            LinearProgressIndicator(value: wifi.bytes != null && syncTotal > 0 ? (syncDone / syncTotal).clamp(0, 1).toDouble() : null,
+            LinearProgressIndicator(value: wifi.bytes != null && y.totalKb > 0 ? (y.doneKb / y.totalKb).clamp(0, 1).toDouble() : null,
                 minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
             Text([if (wifi.n != null) l.wifiStepOf(wifi.n!, wifiSteps), wifi.reopen, if (wifiStep?['step'] == 'back') wifiEnd].nonNulls.join(' · '),
@@ -285,16 +286,22 @@ class _RecorderPageState extends State<RecorderPage> {
               Icon(Icons.downloading_rounded, color: cs.tertiary),
               const SizedBox(width: 8),
               Expanded(child: Text(bean ? l.beanFetching : l.fetchingCard, style: t.textTheme.bodyLarge)),
-              if (syncTotal > 0)  // else a bean's file read from behind: its length in time, below
-                Text(progressText(syncDone, syncTotal),  // tabular: the label does not shift as the digits change
+              if (y.totalKb > 0)  // else a bean's file read from behind: its length in time, below
+                Text(progressText(y.doneKb, y.totalKb),  // tabular: the label does not shift as the digits change
                     style: t.textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant, fontFeatures: const [FontFeature.tabularFigures()])),
             ]),
             const SizedBox(height: 10),
-            LinearProgressIndicator(value: syncTotal > 0 ? syncDone / syncTotal : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
+            LinearProgressIndicator(value: y.totalKb > 0 ? y.doneKb / y.totalKb : null, minHeight: 8, borderRadius: BorderRadius.circular(4)),
             const SizedBox(height: 6),
-            Text(syncTotal == 0 ? beanOwed(l, hw) : bean ? l.beanSyncHelp : live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
+            Text(y.totalKb == 0 ? beanOwed(l, y) : bean ? l.beanSyncHelp : live ? l.syncLiveHelp : l.syncFirstHelp(sizeText(syncLive)),
                 style: t.textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-          ] else
+          ] else if (recording && (y.owedS > 0 || y.phase == 'stuck'))  // held back, or what the bean would not give: as the chip
+            Row(children: [
+              Icon(Icons.cloud_sync_rounded, color: Colors.amber.shade700),
+              const SizedBox(width: 8),
+              Expanded(child: Text(beanOwed(l, y))),
+            ])
+          else
             Row(children: [
               Icon(st['lastSync'] != null ? Icons.check_circle_rounded : Icons.cloud_sync_rounded,
                   color: st['lastSync'] != null ? Colors.green.shade600 : cs.outline),

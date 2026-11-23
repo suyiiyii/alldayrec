@@ -99,11 +99,17 @@ void main() {
       if (call.method == 'recorder') return {'name': 'D3200-TEST', 'model': 'bean'};
       final transfer = step?['step'] == 'transfer';
       final link = {'code': transfer ? 'beanWifi' : 'beanIdle'};
+      // the sync summary as BeanSync.ledger() gives it with the bytes
+      Map sync(num d, num t) => {'phase': on() ? 'wifi' : t > 0 ? 'catching' : 'synced', 'done_kb': d, 'total_kb': t};
       if (call.method == 'status') {
+        final t = transfer ? 16794 : left;
         return {'running': true, 'connected': !on(), 'link': link, 'hw': {'battery': 80}, 'wifiStep': step, 'wifiNote': note,
-          'syncDone': done, 'syncTotal': transfer ? 16794 : left};
+          'syncDone': done, 'syncTotal': t, 'sync': sync(done, t)};
       }
-      if (call.method == 'progress') return {'wifi': on(), 'wifiStep': step, 'wifiNote': note, 'syncDone': transfer ? done += 100 : 0, 'syncTotal': transfer ? 16794 : 0};
+      if (call.method == 'progress') {
+        final d = transfer ? done += 100 : 0, t = transfer ? 16794 : 0;
+        return {'wifi': on(), 'wifiStep': step, 'wifiNote': note, 'syncDone': d, 'syncTotal': t, 'sync': sync(d, t)};
+      }
       if (call.method == 'beanWifi') { step = {'step': 'asked'}; return 'ok'; }
       return null;
     });

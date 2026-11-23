@@ -359,8 +359,18 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         }
     @Volatile var syncDoneKb = 0L
     @Volatile var syncTotalKb = 0L
-    /** What of the bean's recording this phone lacks, for the status and its reports (owe()). */
+    /** What of the bean's recording this phone lacks, for the status and its reports (owe()): sync's fields as they were
+     *  before it (backlog_s, backlog_eta_s, backlog_held), read still by the web, the server and phones on older builds. */
     @Volatile var owed: Map<String, Any?> = emptyMap()
+    /** What owe() counted last, ledger()'s facts but the fast transfer's step and the bytes read (as on iOS). */
+    private class Counted(val now: Long = 0, val closed: Long = 0, val idle: Long = 0, val stuck: Long = 0, val watched: Boolean = false,
+                          val live: Boolean = false, val rate: Double? = null)
+    @Volatile private var counted = Counted()
+    /** The sync summary every page reads (the status's `sync`: Flutter's syncSpec(), the notification), afresh. */
+    val sync: Map<String, Any?> get() = counted.let {
+        ledger(it.now, it.closed, it.idle, it.stuck, it.watched, it.live, it.rate, recording, wifiStep?.let { w -> w["step"] != "done" } ?: false,
+            syncDoneKb, syncTotalKb)
+    }
     /** Why the last fast transfer got nothing, for the device page (recorder_status.dart), as on iOS: its end only;
      *  null once one starts. */
     @Volatile var wifiNote: Map<String, Any?>? = null
@@ -491,6 +501,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             flush()
             xfer = null
             syncDoneKb = 0; syncTotalKb = 0; owed = emptyMap()
+            // a fast transfer not over (back to BLE, a new hotspot): what it lacked stays till the next owe(), never 已同步 meanwhile
+            if ((wifiStep?.get("step") ?: "done") == "done") counted = Counted()
         }
     }
 
@@ -899,6 +911,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         var now = if (open != 0L && open * 1000 >= since) maxOf(0L, edge(open) - (files[open]?.let(::covered) ?: 0L)) else 0L
         if (now <= WATCHED_GAP_UNITS) now = 0
         val closed = lacking(pending())
+        // closed files given up for a day (tried()): out of pending(), still lacking (11-19's file said 已同步)
+        val stuck = lacking(listing.files.filter { (id, _) -> id * 1000 >= since && id != listing.open && files[id]?.let { gap(it) != null && io.now() < it.wait } == true })
         // the rate is the backlog's own over 1–3 min, reconnects and units had included (iOS 11-23 11:25: 3.3 times real
         // time, one read's speed said 6–10; after Wi-Fi, Wi-Fi's 116)
         val t = io.now()
@@ -906,8 +920,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         shrunk.addLast(longArrayOf(t, now + closed))
         val (at, was) = shrunk.first()
         val rate = if (t - at >= 60_000) (was - now - closed) * Bean.FRAME_MS.toDouble() / (t - at) else null
-        owed = owedFields(now, if (recording) closed else 0, if (recording) 0 else closed, io.watched(), (fills[open] ?: 0) >= TRIES, rate)
-        if (owed["backlog_held"] != null || owed.isEmpty()) shrunk.clear()  // the next catch-up measured afresh
+        counted = Counted(now, if (recording) closed else 0, if (recording) 0 else closed, stuck, io.watched(), (fills[open] ?: 0) >= TRIES, rate)
+        val l = sync
+        owed = if (l["owed_s"] as Long > 0) mapOf("backlog_s" to l["owed_s"], "backlog_eta_s" to l["eta_s"], "backlog_held" to l["held"]) else emptyMap()
+        if (l["held"] != null || owed.isEmpty()) shrunk.clear()  // the next catch-up measured afresh
     }
 
     private fun backlog(): Xfer? {
@@ -1391,17 +1407,26 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             "豆子一直忙（code 4）" to "beanWifiBusy", "30 s 没收到单元" to "beanWifiNoUnits")
         const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
-        /** owe()'s fields from units lacking: `now` of the file being recorded, `closed` of files that wait for the bean to
-         *  stop, `idle` of files read now (the bean stopped); `live`: the recorded file is read live only (live_fallback);
-         *  `rate`: s of it gone a s lately (owe()). */
-        fun owedFields(now: Long, closed: Long, idle: Long, watched: Boolean, live: Boolean, rate: Double?): Map<String, Any?> {
+        /** The sync summary from the three facts (what the bean has, the phone has, the server has: units lacking,
+         *  owe()), the fast transfer's step and the bytes of closed files read now; the one answer of the top bar's chip,
+         *  the status panel, the device page and the notification (11-23: the chip said 补传中, the device page 已连接).
+         *  As iOS's, same table: fixtures/sync-ledger.json. Units lacking: `now` of the file being recorded, `closed` of
+         *  files that wait for the bean to stop, `idle` of files read now (the bean stopped), `stuck` of files the bean
+         *  would not give (tried again in a day); `live`: the recorded file is read live only (live_fallback); `rate`: s
+         *  of it gone a s lately (owe()); `doneKb` / `totalKb`: closed files read now (the LR recorder's card too),
+         *  `kbEta` its own end. phase: wifi (from the tap to Bluetooth back), catching (lacking: read now, or `held`
+         *  back: live, recording), stuck (lacking only what the bean would not give), live (recording, all here), synced
+         *  (not recording, all here). */
+        fun ledger(now: Long, closed: Long, idle: Long, stuck: Long, watched: Boolean, live: Boolean, rate: Double?, recording: Boolean,
+                   wifi: Boolean, doneKb: Long, totalKb: Long, kbEta: Long? = null): Map<String, Any?> {
             val s = (now + closed + idle) * Bean.FRAME_MS / 1000
-            if (s <= 0) return emptyMap()
             // closed files wait for the stop whatever the page does (11-08: 3.5 h of one said 补传中)
             val held = if (now > 0 && live || closed > 0) "recording" else if (now > 0 && watched) "live" else null
             // held, or under 6 s a minute (live, or a read not gaining on the recording): no end in sight, none said
-            val eta = if (held == null && rate != null && rate >= 0.1) s / rate else null
-            return mapOf("backlog_s" to s, "backlog_eta_s" to eta?.toLong(), "backlog_held" to held)
+            val eta = if (s > 0) (if (held == null && rate != null && rate >= 0.1) (s / rate).toLong() else null) else if (totalKb > 0) kbEta else null
+            val phase = if (wifi) "wifi" else if (s > 0 || totalKb > 0) "catching" else if (stuck > 0) "stuck" else if (recording) "live" else "synced"
+            return mapOf("phase" to phase, "owed_s" to s, "eta_s" to eta, "held" to held, "stuck_s" to stuck * Bean.FRAME_MS / 1000,
+                "done_kb" to doneKb, "total_kb" to totalKb)
         }
         const val WATCHED_GAP_UNITS = 3000L  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
         const val CLOCK_UNITS = 1500L  // half a minute of live units: the fastest of each dates the file (reanchor())

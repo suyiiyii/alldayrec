@@ -122,7 +122,7 @@ class MainActivity : FlutterActivity() {
                 "progress" -> {  // the device page's 0.05 s poll from the tap to the fast transfer's end: status() lists the upload queue
                     val b = RecorderService.bean; val step = b?.wifiStep
                     result.success(mapOf("wifi" to (step != null && step["step"] != "done"), "wifiStep" to step, "wifiNote" to b?.wifiNote,
-                        "syncDone" to (b?.syncDoneKb ?: 0L), "syncTotal" to (b?.syncTotalKb ?: 0L)))
+                        "syncDone" to (b?.syncDoneKb ?: 0L), "syncTotal" to (b?.syncTotalKb ?: 0L), "sync" to b?.ledger))
                 }
                 "version" -> result.success(DeviceLog.version)  // 我的 › 关于
                 "error" -> {  // an error the Flutter side did not catch: its type and first frames, no message

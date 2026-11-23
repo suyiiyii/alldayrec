@@ -2408,6 +2408,12 @@ abstract class AppLocalizations {
   /// **'豆子停录后补'**
   String get beanHeldRecording;
 
+  /// No description provided for @beanStuck.
+  ///
+  /// In zh, this message translates to:
+  /// **'取不到，明天再试'**
+  String get beanStuck;
+
   /// No description provided for @beanEta.
   ///
   /// In zh, this message translates to:

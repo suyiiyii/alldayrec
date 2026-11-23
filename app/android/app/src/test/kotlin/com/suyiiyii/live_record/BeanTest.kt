@@ -1221,25 +1221,21 @@ class BeanTest {
         onlyReads(r.bean)
     }
 
-    /** What is lacking, why it waits and how long it takes (owe()): at the rate the backlog went down lately; none
-     *  measured yet, under 6 s a minute or held back, no estimate. */
-    @Test fun owedFields() {
-        assertEquals(emptyMap<String, Any?>(), BeanSync.owedFields(0, 0, 0, watched = true, live = false, rate = 3.0))
-        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to null, "backlog_held" to "live"),
-            BeanSync.owedFields(126_450, 0, 0, watched = true, live = false, rate = 3.0))
-        assertEquals(mapOf("backlog_s" to 2529L, "backlog_eta_s" to 1264L, "backlog_held" to null),
-            BeanSync.owedFields(126_450, 0, 0, watched = false, live = false, rate = 2.0))
-        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(6000, 0, 0, watched = true, live = true, rate = 3.0))
-        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to null, "backlog_held" to "recording"),
-            BeanSync.owedFields(0, 6000, 0, watched = false, live = false, rate = 3.0))
-        assertEquals(mapOf("backlog_s" to 120L, "backlog_eta_s" to 40L, "backlog_held" to null),
-            BeanSync.owedFields(0, 0, 6000, watched = true, live = false, rate = 3.0))
-        assertNull("none measured yet", BeanSync.owedFields(0, 0, 6000, false, false, null)["backlog_eta_s"])
-        assertNull("not gaining (live): no end in sight", BeanSync.owedFields(6000, 0, 0, false, false, 0.05)["backlog_eta_s"])
-        // closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h said 补传中)
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = false, live = false, rate = 2.0)["backlog_held"])
-        assertEquals("recording", BeanSync.owedFields(6000, 600_000, 0, watched = true, live = false, rate = 2.0)["backlog_held"])
+    /** The sync summary (ledger()) from its facts, the table iOS's BeanCheck reads too (fixtures/sync-ledger.json): what
+     *  is lacking, why it waits and how long it takes, at the rate the backlog went down lately (none measured yet, under
+     *  6 s a minute or held back: no estimate); closed files wait for the stop even while the open file is read or the
+     *  page is open (11-08: 3.5 h said 补传中); a file the bean would not give is not 已同步 (11-19). */
+    @Test fun ledger() {
+        val rows = JSONObject(javaClass.getResource("/sync-ledger.json")!!.readText()).getJSONArray("ledger")
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i); val x = row.getJSONObject("in"); val out = row.getJSONObject("out")
+            fun n(k: String) = x.optLong(k, 0)
+            val got = BeanSync.ledger(n("now"), n("closed"), n("idle"), n("stuck"), x.optBoolean("watched"), x.optBoolean("live"),
+                if (x.isNull("rate")) null else x.getDouble("rate"), x.optBoolean("recording", true), x.optBoolean("wifi"),
+                n("done_kb"), n("total_kb"), if (x.isNull("kb_eta")) null else x.getLong("kb_eta"))
+            val want = out.keys().asSequence().associateWith { k -> if (out.isNull(k)) null else out.get(k).let { if (it is Number) it.toLong() else it } }
+            assertEquals(row.getString("name"), want, got)
+        }
     }
 
     /** A new file (the bean rolled over, the phone back 1.5 s later) is read from unit 0, watched or not, and dated by
@@ -1570,6 +1566,7 @@ class BeanTest {
         assertTrue(again.message, "join: unavailable" in again.message!!)
         assertEquals("the device page says why", "beanWifiUnavailable", sync.wifiNote?.get("code"))
         assertEquals(mapOf("step" to "back", "end" to "fail"), sync.wifiStep?.filterKeys { it in setOf("step", "end") })
+        assertEquals("on the way back: what it lacked kept, not 已同步", listOf("wifi", 60L), listOf(sync.sync["phase"], sync.sync["owed_s"]))
         assertTrue(bean.transfers.isEmpty())
         assertTrue(bean.logs.any { it.first == "bean_wifi_done" })
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
@@ -1857,7 +1854,8 @@ class BeanTest {
     }
 
     /** A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
-     *  tries of the day (code 1: at once), and said so once; the next day it is asked for again. */
+     *  tries of the day (code 1: at once), and said so once, the summary 取不到 meanwhile, not 已同步 (11-19); the next
+     *  day it is asked for again. */
     @Test fun givingUpIsSaid() {
         for ((code, asks) in listOf(2 to BeanSync.DAY_TRIES, 0 to BeanSync.DAY_TRIES, 1 to 1)) {
             val dir = Files.createTempDirectory("bean").toFile()
@@ -1866,8 +1864,12 @@ class BeanTest {
             bean.onTransfer = { file, _, _ -> bean.header(file, 3000L * Bean.UNIT, code = code); if (code == 0) bean.complete(file) }
             repeat(20) { bean.script += {} }
             val sync = wifiSync(bean, dir)
+            var said = emptyMap<String, Any?>()
+            bean.script += { said = sync.sync }
             assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
             assertEquals("code $code", asks, bean.transfers.size)
+            assertEquals("code $code", "stuck", said["phase"])
+            assertEquals("code $code", 60L, said["stuck_s"])
             assertEquals("code $code", 1, bean.logs.count { "取不到，明天再试" in it.second })
             bean.now += 86_400_000
             repeat(20) { bean.script += {} }

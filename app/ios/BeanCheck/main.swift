@@ -794,6 +794,7 @@ do {
     check(again.description.contains("豆子没回音"), true, again.description)
     check(sync.wifiNote?["code"] as? String, "beanWifiNoAnswer")
     check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["back", "fail"])
+    check([sync.sync["phase"] as? String, "\(sync.sync["owed_s"]!)"], ["wifi", "60"], "on the way back: what it lacked kept, not 已同步")
   }
   check(bean.joins.count, 4)
   check(bean.transfers.count, 12, "three asks a tap, all over Wi-Fi")
@@ -805,8 +806,8 @@ do {
 }
 
 /// A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
-/// tries of the day (code 1: at once), and said so (refused or not there, before #262's reviews it was not); the next
-/// day it is asked for again.
+/// tries of the day (code 1: at once), and said so (refused or not there, before #262's reviews it was not), the summary
+/// 取不到 meanwhile, not 已同步 (11-19); the next day it is asked for again.
 for (code, asks) in [(UInt8(2), BeanSync.dayTries), (0, BeanSync.dayTries), (1, 1)] {
   let dir = tmp()
   let bean = FakeBean(t0)
@@ -815,8 +816,12 @@ for (code, asks) in [(UInt8(2), BeanSync.dayTries), (0, BeanSync.dayTries), (1, 
   bean.onTransfer = { file, _, _ in bean.header(file, 3000 * Int64(Bean.unit), code: code); if code == 0 { bean.complete(file) } }
   bean.script = Array(repeating: {}, count: 20)
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  var said: [String: Any] = [:]
+  bean.script.append { said = sync.sync }
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers.count, asks, "code \(code)")
+  check(said["phase"] as? String, "stuck", "code \(code)")
+  check(said["stuck_s"] as? Int64, 60, "code \(code)")
   check(bean.logs.filter { $0.1.contains("取不到，明天再试") }.count, 1, "code \(code)")
   bean.t += 86_400_000
   bean.script = Array(repeating: {}, count: 20)
@@ -1538,18 +1543,22 @@ do {
   check(r.f.have.count, 2, "the hole stays for after the stop")
 }
 
-/// Closed files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h of a closed file
-/// said 补传中); the open file's hole alone says why it waits.
-check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: false, live: false, rate: 2)["backlog_held"] as? String, "recording")
-check(BeanSync.owedFields(now: 6000, closed: 600_000, idle: 0, watched: true, live: false, rate: 2)["backlog_held"] as? String, "recording")
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, rate: 2)["backlog_held"] as? String, "live")
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, rate: 2)["backlog_held"] is NSNull, true)
-// how long, at the rate the backlog went down lately: none measured yet, or under 6 s a minute, none said
-check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: 2)["backlog_eta_s"] as? Int64, 60)
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: false, live: false, rate: 0.5)["backlog_eta_s"] as? Int64, 240)
-check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: nil)["backlog_eta_s"] is NSNull, true)
-check(BeanSync.owedFields(now: 0, closed: 0, idle: 6000, watched: false, live: false, rate: 0.05)["backlog_eta_s"] is NSNull, true)
-check(BeanSync.owedFields(now: 6000, closed: 0, idle: 0, watched: true, live: false, rate: 2)["backlog_eta_s"] is NSNull, true, "held: none")
+/// The sync summary (ledger()) from its facts, the table Android's BeanTest reads too (fixtures/sync-ledger.json): closed
+/// files wait for the stop even while the open file is read or the page is open (11-08: 3.5 h of a closed file said
+/// 补传中); how long, at the rate the backlog went down lately (none measured yet, or under 6 s a minute: none said); a
+/// file the bean would not give is not 已同步 (11-19).
+do {
+  let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("sync-ledger.json")
+  let table = (try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any])["ledger"] as! [[String: Any]]
+  for row in table {
+    let i = row["in"] as! [String: Any]
+    func n(_ k: String) -> Int64 { (i[k] as? NSNumber)?.int64Value ?? 0 }
+    let got = BeanSync.ledger(now: n("now"), closed: n("closed"), idle: n("idle"), stuck: n("stuck"), watched: i["watched"] as? Bool ?? false,
+                              live: i["live"] as? Bool ?? false, rate: (i["rate"] as? NSNumber)?.doubleValue, recording: i["recording"] as? Bool ?? true,
+                              wifi: i["wifi"] as? Bool ?? false, doneKb: n("done_kb"), totalKb: n("total_kb"), kbEta: (i["kb_eta"] as? NSNumber)?.int64Value)
+    check(got as NSDictionary, row["out"] as! NSDictionary, row["name"] as! String)
+  }
+}
 
 /// The open file with its length known and all of it on the phone (a live header that carried a size, or a unit with the
 /// end flag, kept in the state file): nothing older to fill, on from the tail; before, plan() crashed the app here

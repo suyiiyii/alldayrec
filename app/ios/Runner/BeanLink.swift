@@ -66,6 +66,8 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   }
   var syncDoneKb: Int64 { sync.syncDoneKb }
   var syncTotalKb: Int64 { sync.syncTotalKb }
+  /// The sync summary (BeanSync.ledger()): the status's `sync`
+  var ledger: [String: Any] { sync.sync }
 
   init(chunks: URL, state: URL, sliceS: @escaping () -> Int, report: @escaping (String, [String: Any]) -> Void) {
     name = Recorder.defaults.string(forKey: "bleName") ?? ""

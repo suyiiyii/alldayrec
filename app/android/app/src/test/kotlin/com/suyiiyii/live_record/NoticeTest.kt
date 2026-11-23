@@ -1,5 +1,6 @@
 package com.suyiiyii.live_record
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
@@ -22,16 +23,19 @@ class NoticeTest {
     private fun ble(vararg kv: Pair<String, Any?>, str: (Int, Array<out Any?>) -> String = zh) =
         RecorderService.notice(mapOf("running" to true, "source" to "ble", "pending" to 0) + kv, now, str)
     private val live = arrayOf("link" to say("connected"), "connected" to true)
+    /** The sync summary (BeanSync.ledger()) with a read's KB, and the old fields beside it as native sends them. */
+    private fun kb(done: Long, total: Long) =
+        arrayOf("syncDone" to done, "syncTotal" to total, "sync" to mapOf("phase" to "catching", "done_kb" to done, "total_kb" to total))
 
     @Test fun link() {
         assertEquals("正在找 LR-X1-567E" to "", ble("link" to say("scanning", "name" to "LR-X1-567E"), "hw" to hw))  // the battery read before is stale
         assertEquals("已连接 · 实时上传" to "电量 68%", ble(*live, "hw" to hw, "pending" to 1, "oldest" to now - 25_000))
         // at connect only the file being recorded holds back LIVE, not the backlog (old firmware: up to 16 MiB; newer firmware: none)
         assertEquals("接上实时前先取正在录的这段 · 还差 1.2 MB" to "电量 68%",
-            ble("link" to say("joining"), "hw" to hw, "syncDone" to 512L, "syncTotal" to 45568L, "syncLive" to 1228L))
+            ble("link" to say("joining"), "hw" to hw, *kb(512, 45568), "syncLive" to 1228L))
         assertEquals("正在接上实时" to "", ble("link" to say("joining"), "hw" to hw))
         assertEquals("实时上传 · 后台补传 1.5 / 44.5 MB" to "电量 68%",  // a backlog no longer holds back what is said now
-            ble(*live, "hw" to hw, "syncDone" to 1536L, "syncTotal" to 45568L))
+            ble(*live, "hw" to hw, *kb(1536, 45568)))
         assertEquals("已连接 · 实时上传" to "上传失败 HTTP 502 · 已暂停，还剩 15 分钟 · 电量 9% · 存储卡已满 · 待传 40 块",
             ble(*live, "note" to say("uploadFailed", "detail" to "HTTP 502"), "pausedUntil" to now + 14 * 60_000 + 1,
                 "hw" to mapOf("battery" to 9, "store" to -28), "pending" to 40, "oldest" to now - 300_000))
@@ -40,8 +44,22 @@ class NoticeTest {
         assertEquals("正在启动" to "", ble())
         // a bean's backlog: it is not recording, nothing goes up live
         assertEquals("补传录音豆里的录音 1.5 / 44.5 MB" to "电量 68%",
-            ble("link" to say("beanIdle"), "connected" to true, "hw" to hw, "syncDone" to 1536L, "syncTotal" to 45568L))
+            ble("link" to say("beanIdle"), "connected" to true, "hw" to hw, *kb(1536, 45568)))
         assertEquals("录音豆已连上 · 没在录音" to "电量 68%", ble("link" to say("beanIdle"), "connected" to true, "hw" to hw))
+    }
+
+    /** The notification's title says what the app's chip, card and device page say, for each status of the shared table
+     *  (fixtures/sync-ledger.json, flutter test/sync_state_test.dart; 11-23: the chip turned 「⟳ 77 分钟」 while this said
+     *  已连接 · 实时上传). */
+    @Test fun sameAsTheApp() {
+        fun map(o: JSONObject): Map<String, Any?> = o.keys().asSequence().associateWith { k ->
+            o.get(k).let { v -> when (v) { JSONObject.NULL -> null; is JSONObject -> map(v); is Int -> v.toLong(); else -> v } }
+        }
+        val rows = JSONObject(javaClass.getResource("/sync-ledger.json")!!.readText()).getJSONArray("readers")
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            assertEquals(row.getString("name"), row.getString("notice"), RecorderService.notice(map(row.getJSONObject("status")), now, zh).first)
+        }
     }
 
     @Test fun english() {
@@ -49,7 +67,7 @@ class NoticeTest {
             ble(*live, "note" to say("uploadFailed", "detail" to "HTTP 502"), "pausedUntil" to now + 14 * 60_000 + 1,
                 "hw" to mapOf("battery" to 9, "store" to -28), "pending" to 40, "oldest" to now - 300_000, str = en))
         assertEquals("Live upload · catching up 1.5 / 44.5 MB" to "Battery 68% · Charging",
-            ble(*live, "hw" to hw + ("charge" to "charging"), "syncDone" to 1536L, "syncTotal" to 45568L, str = en))
+            ble(*live, "hw" to hw + ("charge" to "charging"), *kb(1536, 45568), str = en))
         assertEquals("Reading the recorder's status" to "", ble("link" to say("status"), str = en))
         assertEquals("AllDayRec is uploading · 7 pieces left" to "The server could not decode a piece: dropped",
             RecorderService.notice(mapOf("running" to false, "pending" to 7, "note" to say("rejected")), now, en))

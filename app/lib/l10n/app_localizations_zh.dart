@@ -1378,6 +1378,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get beanHeldRecording => '豆子停录后补';
 
   @override
+  String get beanStuck => '取不到，明天再试';
+
+  @override
   String beanEta(Object time) {
     return '补完约 $time';
   }

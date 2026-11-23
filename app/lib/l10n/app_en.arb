@@ -387,5 +387,6 @@
   "beanBehind": "{time} still only on the bean",
   "beanHeldLive": "the live page is open; fetched once it closes",
   "beanHeldRecording": "fetched once the bean stops",
+  "beanStuck": "the bean would not give it; tried again tomorrow",
   "beanEta": "about {time} to fetch"
 }

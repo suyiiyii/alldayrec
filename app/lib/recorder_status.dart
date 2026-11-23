@@ -130,7 +130,7 @@ String durationText(AppLocalizations l, num s) {
     BuildContext context, Map s, {required bool ble, bool stopping = false}) {
   final l = AppLocalizations.of(context), cs = Theme.of(context).colorScheme, amber = Colors.amber.shade700;
   final hw = (s['hw'] as Map?) ?? {}, b = hw['battery'] as int?, pct = b == null ? null : '$b%';
-  final connected = s['connected'] == true, syncDone = (s['syncDone'] as num?) ?? 0, syncTotal = (s['syncTotal'] as num?) ?? 0;
+  final connected = s['connected'] == true, y = syncSpec(s);
   final link = s['link'] as Map?, pausedMin = pauseLeftMin(s);
   IconData? glyph() => b == null ? null : hw['charge'] == 'charging' ? Icons.battery_charging_full_rounded : batteryIcon(b);
   final low = b != null && b <= 20 ? cs.error : cs.onSurfaceVariant;  // as batteryColor
@@ -146,10 +146,17 @@ String durationText(AppLocalizations l, num s) {
     return (icon: Icons.pause_rounded, color: cs.outline, battery: null, number: l.minutes(pausedMin), numberColor: cs.onSurfaceVariant,
         spin: false, line: l.statePaused(pausedMin));
   }
-  if (syncTotal > 0) {  // the card's backlog being read; before LIVE is up only the file being recorded: no share yet
-    final eta = hw['backlog_eta_s'] as num?;
+  // from the tap to Bluetooth back (BLE is down meanwhile): the bytes once they come, as the device page (the owner,
+  // 11-23: no percentage); on the way back the link's own state (a bean gone meanwhile: 正在找 …, not 快传中 for ever)
+  if (y.phase == 'wifi' && (connected || (s['wifiStep'] as Map?)?['step'] != 'back')) {
     return (icon: Icons.sync_rounded, color: cs.primary, battery: null,
-        number: connected ? '${(syncDone * 100 / syncTotal).floor()}%' : null, numberColor: cs.onSurfaceVariant, spin: true,
+        number: y.totalKb > 0 ? progressText(y.doneKb, y.totalKb) : null, numberColor: cs.onSurfaceVariant, spin: true,
+        line: l.linkBeanWifi);
+  }
+  if (y.totalKb > 0) {  // the card's backlog being read; before LIVE is up only the file being recorded: no share yet
+    final eta = y.etaS;
+    return (icon: Icons.sync_rounded, color: cs.primary, battery: null,
+        number: connected ? '${(y.doneKb * 100 / y.totalKb).floor()}%' : null, numberColor: cs.onSurfaceVariant, spin: true,
         line: eta == null || eta <= 0 ? l.catchingUp : l.stateCatchingUp(durationText(l, eta)));
   }
   if (!connected) {
@@ -161,35 +168,44 @@ String durationText(AppLocalizations l, num s) {
             : (pausedMin > 0 ? l.statePausedAwaySince : l.stateAwaySince)(
                 TimeOfDay.fromDateTime(DateTime.fromMillisecondsSinceEpoch(lastSeen)).format(context)));
   }
-  final owed = (hw['backlog_s'] as num?) ?? 0;
-  if (owed > 0) {  // a bean's recording not on the phone yet (beanOwed): being read, or held back (never 「Recording」 alone)
-    final held = hw['backlog_held'] != null;
-    return (icon: Icons.sync_rounded, color: held ? amber : cs.primary, battery: null, number: l.minutes((owed / 60).round()),
-        numberColor: cs.onSurfaceVariant, spin: !held, line: beanOwed(l, hw));
+  if (y.owedS > 0 || y.phase == 'stuck') {  // a bean's recording not on the phone yet (beanOwed): being read, or held back
+    final held = !y.reading;  // or only what the bean would not give (never 「Recording」 alone)
+    return (icon: Icons.sync_rounded, color: held ? amber : cs.primary, battery: null,
+        number: l.minutes(((y.owedS > 0 ? y.owedS : y.stuckS) / 60).round()), numberColor: cs.onSurfaceVariant, spin: !held,
+        line: beanOwed(l, y));
   }
-  if (link?['code'] == 'beanIdle') {  // a bean connected, not recording: its button stopped it, or the start did not take
+  if (y.phase == 'synced') {  // a bean connected, not recording: its button stopped it, or the start did not take
     return (icon: Icons.bluetooth_connected_rounded, color: cs.outline, battery: glyph(), number: pct, numberColor: low, spin: false,
         line: l.linkBeanIdle);
   }
   return (icon: Icons.mic_rounded, color: recordingRed, battery: glyph(), number: pct, numberColor: low, spin: false, line: l.recordingNow);
 }
 
-/// Whether a backlog is being read now, the top bar's chip (chipSpec) and the device page alike (11-23: the chip said
-/// 补传中 while the page said 已连接): the card's or a bean's closed files (syncTotal), or a bean's recording the phone
-/// lacks and reads now (beanOwed, not held back).
-bool catchingUp(Map s) {
-  final hw = (s['hw'] as Map?) ?? {};
-  return ((s['syncTotal'] as num?) ?? 0) > 0 ||
-      s['connected'] == true && ((hw['backlog_s'] as num?) ?? 0) > 0 && hw['backlog_held'] == null;
+/// The recorder's sync as native ledger() works it out from what the bean (or the card) has, the phone has and the
+/// server has (the status's `sync`, BeanSync.ledger(), fixtures/sync-ledger.json): the one answer the top bar's chip,
+/// the status panel's card, the device page and Android's notification (RecorderService.notice) all give (11-23: the
+/// chip said 补传中 while the device page said 已连接). phase: live (recording, all here), catching (lacking: `held`
+/// back, live or recording, else read now), wifi (a fast transfer from its tap to Bluetooth back), synced (not
+/// recording, all here), stuck (lacking only what the bean would not give, tried again in a day); none without a
+/// recorder's link. Seconds lacking and when they are all here; seconds the bean would not give; KB of closed files
+/// read now (the LR card's, a bean's stopped). `reading`: being read now, Bluetooth or Wi-Fi.
+typedef SyncSpec = ({String phase, String? held, num owedS, num? etaS, num stuckS, num doneKb, num totalKb, bool reading});
+
+SyncSpec syncSpec(Map s) {
+  final y = (s['sync'] as Map?) ?? {}, phase = y['phase'] as String? ?? 'none', held = y['held'] as String?;
+  return (phase: phase, held: held, owedS: (y['owed_s'] as num?) ?? 0, etaS: y['eta_s'] as num?, stuckS: (y['stuck_s'] as num?) ?? 0,
+      doneKb: (y['done_kb'] as num?) ?? 0, totalKb: (y['total_kb'] as num?) ?? 0,
+      reading: phase == 'wifi' || phase == 'catching' && held == null);
 }
 
-/// What of a bean's recording the phone lacks (BeanSync.owe(): backlog_s, backlog_held, backlog_eta_s): how much, being
-/// read or why it waits, and how long it takes.
-String beanOwed(AppLocalizations l, Map hw) {
-  final eta = hw['backlog_eta_s'] as num?;
+/// What of a bean's recording the phone lacks (syncSpec): how much, being read or why it waits, and how long it takes;
+/// or what the bean would not give.
+String beanOwed(AppLocalizations l, SyncSpec y) {
+  if (y.owedS <= 0) return [l.beanBehind(durationText(l, y.stuckS)), l.beanStuck].join(' · ');
+  final eta = y.etaS;
   return [
-    l.beanBehind(durationText(l, hw['backlog_s'] as num)),
-    switch (hw['backlog_held']) { 'live' => l.beanHeldLive, 'recording' => l.beanHeldRecording, _ => l.catchingUp },
+    l.beanBehind(durationText(l, y.owedS)),
+    switch (y.held) { 'live' => l.beanHeldLive, 'recording' => l.beanHeldRecording, _ => l.catchingUp },
     if (eta != null && eta > 0) l.beanEta(durationText(l, eta)),
   ].join(' · ');
 }

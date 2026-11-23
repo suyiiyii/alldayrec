@@ -36,6 +36,15 @@
     <string name="notice_bean_catching_up">补传录音豆里的录音 %1$.1f / %2$.1f MB</string>
     <string name="notice_fetching_current">接上实时前先取正在录的这段 · 还差 %1$.1f MB</string>
     <string name="notice_starting">正在启动</string>
+    <!-- a bean's recording not on the phone yet: as the app's chip (app_zh.arb beanBehind, beanHeld*, beanStuck, beanEta) -->
+    <string name="notice_bean_behind">豆子上还有 %1$s没传到手机</string>
+    <string name="notice_catching_up">补传中</string>
+    <string name="notice_bean_held_live">实时页开着，关掉后自动补</string>
+    <string name="notice_bean_held_recording">豆子停录后补</string>
+    <string name="notice_bean_stuck">取不到，明天再试</string>
+    <string name="notice_bean_eta">补完约 %1$s</string>
+    <string name="notice_minutes">%1$d 分钟</string>
+    <string name="notice_hours_minutes">%1$d 小时 %2$d 分</string>
     <string name="notice_recording_error">录音错误 %1$s</string>
     <string name="notice_paused">已暂停，还剩 %1$s 分钟</string>
     <string name="notice_battery">电量 %1$s%%</string>
