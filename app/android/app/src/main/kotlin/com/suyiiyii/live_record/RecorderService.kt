@@ -488,6 +488,19 @@ class Uploader(private val prefs: android.content.SharedPreferences, private val
                      "upload_fails" to fails, "upload_ok_s" to okAt.takeIf { it > 0 }?.let { (now - it) / 1000 })
     }
 
+    /** GET /api/coverage (BeanSync.cover()): the device's first bind and the spans [from, to) of it the server has; null
+     *  unless the server answered it (offline, an older server's 404). */
+    fun coverage(d: String, since: Long, until: Long): Pair<Long, List<LongArray>>? = try {
+        val c = URL("$server/api/coverage?device=${enc(d)}&since=$since&until=$until").openConnection() as HttpURLConnection
+        c.connectTimeout = 10_000; c.readTimeout = 10_000
+        c.setRequestProperty("Authorization", "Bearer $token")
+        if (c.responseCode != 200) { c.errorStream?.use { it.readBytes() }; null } else {
+            val o = org.json.JSONObject(c.inputStream.use { String(it.readBytes()) })
+            val s = o.getJSONArray("spans")
+            o.getLong("first_bind") to (0 until s.length()).map { s.getJSONArray(it).let { a -> longArrayOf(a.getLong(0), a.getLong(1)) } }
+        }
+    } catch (e: Exception) { null }
+
     /** Tells the server device `d` stopped at `atMs`; true: it took it. */
     private fun end(atMs: Long, d: String): Boolean {
         val code = try { post("$server/api/chunks/end?device=${enc(d)}&t=$atMs", ByteArray(0), null) }

@@ -1963,6 +1963,91 @@ class BeanTest {
         assertTrue("$s s left in $eta s", s / maxOf(1.0, eta) in 1.4..1.8)
     }
 
+    /** The server's coverage (GET /api/coverage; the owner, 11-23: audio from the first bind on is the account's,
+     *  whichever phone sent it). A file the server has whole is not read, only its last unit for its length, and goes off
+     *  the bean; one it has half of is read from where it lacks; one begun before the first bind is not read, though after
+     *  this phone's own bind; two another phone dated 2 s later and 2 s earlier: only their ends read again, 4 s in from the spans. */
+    @Test fun coverageSkipsAndDeletes() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val n = 3000L; val ms = n * 20
+        val old = (wt0 - 3_500_000) / 1000; val a = (wt0 - 3_000_000) / 1000; val b = (wt0 - 2_000_000) / 1000
+        val c = (wt0 - 1_000_000) / 1000; val d = (wt0 - 500_000) / 1000
+        for (f in listOf(old, a, b, c, d)) bean.listed[f] = ms
+        val bind = a * 1000 - 1000  // after old began; this phone's own bind (since) before it
+        bean.cover = { _, _ -> bind to listOf(longArrayOf(a * 1000 - 5000, a * 1000 + ms + 5000), longArrayOf(b * 1000 - 5000, b * 1000 + ms / 2 + 4000),
+            longArrayOf(c * 1000 + 2000, c * 1000 + ms + 2000), longArrayOf(d * 1000 - 2000, d * 1000 + ms - 2000)) }
+        bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        val sync = wifiSync(bean, dir)
+        repeat(8) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals("a its length only; b's second half (from the unit before: its length); c, d their first 6 s and last 2 s, or first 2 s and last 6 s",
+            listOf(Triple(a, n - 1, false), Triple(b, n / 2 - 1, false), Triple(c, 0L, false), Triple(c, 2900L, false), Triple(d, 0L, false),
+                Triple(d, 2700L, false)), bean.transfers)
+        assertEquals("once, not each connection", 1, bean.coverAsks.size)
+        assertTrue("all the closed files", bean.coverAsks[0].first <= old * 1000 && bean.coverAsks[0].second >= d * 1000 + ms)
+        assertEquals("whole on the server: off the bean; what b, c, d lacked still queued here", listOf(a), bean.deleted)
+        assertEquals(1, bean.logFields.count { it["coverage"] == true })
+        assertEquals(1, bean.logs.count { it.first == "bean_coverage" })
+        assertEquals((n + n / 2 + 2 * (n - 400)) * 20 / 1000, bean.logFields.first { it["had_s"] != null }["had_s"])
+    }
+
+    /** No coverage (offline, or a server without GET /api/coverage: 404): as before, every file since this phone's bind
+     *  read whole, none deleted while its pieces wait to go up; said once. */
+    @Test fun noCoverageAsBefore() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val n = 3000L; val a = (wt0 - 3_000_000) / 1000
+        bean.listed[a] = n * 20
+        bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        repeat(20) { bean.script += {} }
+        val sync = wifiSync(bean, dir)
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        bean.now += 300_000; repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("asked again 5 min on", 2, bean.coverAsks.size)
+        assertEquals(listOf(Triple(a, 0L, false)), bean.transfers)
+        assertEquals("nothing deleted by a coverage that did not come", emptyList<Long>(), bean.deleted)
+        assertEquals("said once", 1, bean.logs.count { it.first == "bean_coverage" })
+    }
+
+    /** What the server lacks is read, however short each stretch (#413's and #414's reviews: these were taken as had and
+     *  the file deleted unread): 3 s missing mid-file, 3.5 s at each end, a 7 s file of which it has 0.2 s (3 %), 3.9 s
+     *  of every 10 s (61 %), 3.9 s of every 5 s (22 %). */
+    @Test fun coverageHolesRead() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0)
+        val f = (0 until 5L).map { (wt0 - 3_000_000 + it * 100_000) / 1000 }
+        val ms = listOf(60_000L, 60_000L, 7000L, 60_000L, 60_000L)
+        for (k in f.indices) bean.listed[f[k]] = ms[k]
+        val at = f.map { it * 1000 }
+        bean.cover = { _, _ -> at[0] - 1000 to listOf(longArrayOf(at[0], at[0] + 28_500), longArrayOf(at[0] + 31_500, at[0] + 60_000),
+            longArrayOf(at[1] + 3500, at[1] + 56_500), longArrayOf(at[2] + 3400, at[2] + 3600)) +
+            (0 until 6L).map { longArrayOf(at[3] + it * 10_000, at[3] + it * 10_000 + 6100) } + (0 until 12L).map { longArrayOf(at[4] + it * 5000, at[4] + it * 5000 + 1100) } }
+        bean.onTransfer = { file, from, _ ->
+            val n = ms[f.indexOf(file)] / 20
+            bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file)
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(8) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals("each read, not its length only", List(5) { true },
+            f.indices.map { k -> bean.transfers.any { it.first == f[k] && it.second < ms[k] / 20 - 1 } })
+        assertEquals("none deleted unread", emptyList<Long>(), bean.deleted)
+    }
+
+    /** Files over 31 days apart: asked in parts of 31 days at most (the server's limit, a 400 past it), both had. */
+    @Test fun coverageOver31Days() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val n = 3000L; val ms = n * 20
+        val a = (wt0 - 40 * 86_400_000L) / 1000; val b = (wt0 - 3_000_000) / 1000
+        for (x in listOf(a, b)) bean.listed[x] = ms
+        bean.cover = { _, _ -> a * 1000 - 10_000 to listOf(longArrayOf(a * 1000 - 5000, a * 1000 + ms + 5000), longArrayOf(b * 1000 - 5000, b * 1000 + ms + 5000)) }
+        bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        val sync = wifiSync(bean, dir)
+        repeat(4) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals("two parts", 2, bean.coverAsks.size)
+        assertTrue("each 31 days at most", bean.coverAsks.all { it.second - it.first <= 31 * 86_400_000L })
+        assertEquals("both had: their length only", listOf(Triple(a, n - 1, false), Triple(b, n - 1, false)), bean.transfers)
+        assertEquals(listOf(a, b), bean.deleted)
+    }
+
     private fun packets(f: File): List<ByteArray> {
         val b = f.readBytes(); val out = mutableListOf<ByteArray>(); var cur = ByteArrayOutputStream(); var p = 0
         while (p < b.size) {
@@ -2100,6 +2185,11 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun end(at: Long) { ends += at }
     override fun piece() {}
     override fun refused() = refused
+    var cover: (Long, Long) -> Pair<Long, List<LongArray>>? = { _, _ -> null }  // GET /api/coverage's answer
+    val coverAsks = mutableListOf<Pair<Long, Long>>()
+    override fun coverage(since: Long, until: Long): Pair<Long, List<LongArray>>? {
+        coverAsks += since to until; return if (until - since <= 31 * 86_400_000L) cover(since, until) else null  // the server: a 400 past 31 days
+    }
 
     fun info() = ByteArray(57).also { b ->
         b[0] = 1; b[1] = battery; b[38] = 5
