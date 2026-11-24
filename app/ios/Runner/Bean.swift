@@ -1265,7 +1265,7 @@ final class BeanSync {
     case 3 where x.live: failed(x, "code 3")  // the file being recorded goes on: never its end
     case 3:  // nothing after `from`: all of it is here
       let f = file(x.file, x.file * 1000)
-      if f.total < 0 { f.total = max(x.from, gap(f) ?? 0) }  // asked from a unit had (backlog()): it ends after that
+      if f.total < 0 { f.total = max(has(f, x.from) ? x.from + 1 : x.from, gap(f) ?? 0) }  // asked from a unit had (backlog()): it ends after that
       xfer = nil; save()
     // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
     case 2 where !x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0:
@@ -1454,7 +1454,8 @@ final class BeanSync {
       if x.last >= 0 { pendingEnd = max(pendingEnd, f.at(x.last + 1)) }
     } else if gap(f) == nil {
       pendingEnd = max(pendingEnd, f.at(f.total))
-    } else if !(x.cut && gap(f)! > x.from) {  // cut with the hole filled: not a try
+    // cut with the hole filled, or over Wi-Fi read whole to its end (holes before it: widest() picks again): not a try
+    } else if !(x.cut && gap(f)! > x.from) && !(overWifi && result == 0 && x.lost == 0 && x.last + 1 == f.total && !writeFailed) {
       if x.units > x.dupes { f.tries = 0 }  // units new to the phone: only reads in a row that bring none count
       tried(x.file, f)
     }

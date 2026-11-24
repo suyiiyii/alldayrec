@@ -772,6 +772,46 @@ do {
   check(bean.transfers, [[b, 500, 0], [a, 0, 0]])
 }
 
+/// Over Wi-Fi holes wider the later in the file (#426 review): each read to its end brings the widest, none is a try, so
+/// all of them come over Wi-Fi, none left to BLE.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":3000,\"r\":0,\"h\":[[100,200],[400,500],[800,900],[1300,1400]],\"p\":[]}}"
+    .write(to: state, atomically: true, encoding: .utf8)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.onTransfer = { file, from, _ in bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+  bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[a, 1400, 0], [a, 900, 0], [a, 500, 0], [a, 200, 0], [a, 0, 0]])
+  check(bean.logs.contains { $0.1.contains("仍不全") }, false, "no read a try")
+}
+
+/// A file of unknown length over Wi-Fi from its widest hole, after a unit the phone has (backlog()), and nothing after
+/// it (code 3, #426 review): as long as that unit and the ones before, not one short.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 1000 * Bean.frameMs); bean.wifiAsk = true
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":-1,\"r\":0,\"h\":[[0,100],[200,300]],\"p\":[]}}".write(to: state, atomically: true, encoding: .utf8)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  var total: Int64 = 0
+  bean.onTransfer = { file, from, _ in
+    if from == 299 { return bean.header(file, 300 * Int64(Bean.unit), code: 3) }
+    total = sync.files[a]!.total
+    bean.header(file, 300 * Int64(Bean.unit)); bean.units(file, Array(from..<300), last: 299, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[a, 299, 0], [a, 100, 0]])
+  check(total, 300, "its length after code 3")
+}
+
 /// BLE not back for `wifiWaitMs` while a fast transfer waits for it (#422 review N1): at back, reopen or asked the step
 /// ends (back: how it ended kept), the page says why, a device_log line; the next session an ordinary one, the hotspot
 /// off (1A/02) and no new one.

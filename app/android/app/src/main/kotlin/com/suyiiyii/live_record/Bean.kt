@@ -1182,7 +1182,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> if (x.live) failed(x, "code 3")  // the file being recorded goes on: never its end
-                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
+                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(if (has(it, x.from)) x.from + 1 else x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
             // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
             2 -> if (!x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0) {
                 io.log("bean_xfer", "补传文件 ${x.file} 从单元 ${x.from} 要被拒（code 2），长度不明：从单元 0 再要一次取长度", fields = mapOf("file" to x.file, "from" to x.from))
@@ -1360,7 +1360,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.at(x.last + 1))
         } else if (gap(f) == null) {
             pendingEnd = maxOf(pendingEnd, f.at(f.total))
-        } else if (!(x.cut && gap(f)!! > x.from)) {  // cut with the hole filled: not a try
+        // cut with the hole filled, or over Wi-Fi read whole to its end (holes before it: widest() picks again): not a try
+        } else if (!(x.cut && gap(f)!! > x.from) && !(overWifi && result == 0 && x.lost == 0L && x.last + 1 == f.total)) {
             if (x.units > x.dupes) f.tries = 0  // units new to the phone: only reads in a row that bring none count
             tried(x.file, f)
         }
