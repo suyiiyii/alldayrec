@@ -4,12 +4,13 @@
 // them one at a time and judges each step from the test server and LR-P1's adverts; a test passing only means the taps
 // went through and the screen said what was expected. Lines "LRUI <what>" in the output are read by uitest.sh.
 // Parameters come from uitest.sh's environment with TEST_RUNNER_ in front: LR_NAME (the recorder), LR_DAILY (the real
-// app's recorder, never forgotten), LR_E2E (testLaunch: the app's settings, Recorder.launch()), LR_E2E_KILL (testLaunch:
-// the app ends itself after that many seconds), LR_PAUSE_S (testPause), LR_WAIT_S (how long to wait for the link).
+// app's recorder, never forgotten), LR_APP (the test app's bundle id), LR_E2E (testLaunch: the app's settings,
+// Recorder.launch()), LR_E2E_KILL (testLaunch: the app ends itself after that many seconds), LR_PAUSE_S (testPause),
+// LR_WAIT_S (how long to wait for the link).
 import XCTest
 
 final class Flow: XCTestCase {
-  let app = XCUIApplication(bundleIdentifier: "com.suyiiyii.liverecord.uitest")
+  let app = XCUIApplication(bundleIdentifier: ProcessInfo.processInfo.environment["LR_APP"] ?? "com.suyiiyii.liverecord.uitest")
   let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
   let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
   let env = ProcessInfo.processInfo.environment
