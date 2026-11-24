@@ -217,6 +217,8 @@ final class FakeBean: BeanIo {
   func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? {
     coverAsks.append([since, until]); return until - since <= 31 * 86_400_000 ? cover(since, until) : nil  // the server: a 400 past 31 days
   }
+  var holdCover = false, coverWork: [() -> Void] = []  // detach()'s work kept until run (a slow server), else run at once
+  func detach(_ work: @escaping () -> Void) { if holdCover { coverWork.append(work) } else { work() } }
   var wifiAsk = false, onWifi = false, dropOnWifi = false, dropOnWifiOff = 0, dropOnList = false
   var onSend: (Int) -> Void = { _ in }  // after the bean's answer to each command
   var hotspot: [UInt8]? = [1, 0x2B, 0xA8, 0xC0, 0xBB, 1]  // 1A/05's answer (nil: none)
@@ -2032,8 +2034,8 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
   bean.confirmed = { sync.deletable }
   for _ in 0..<8 { bean.script = Array(repeating: {}, count: 20); try? sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.transfers, [[a, n - 1, 0], [b, n / 2 - 1, 0], [c, 0, 0], [c, 2900, 0], [d, 0, 0], [d, 2700, 0]],
-        "a its length only; b's second half (from the unit before: its length); c, d their first 6 s and last 2 s, or first 2 s and last 6 s")
+  check(bean.transfers, [[a, n - 1, 0], [b, n / 2 - 1, 0], [c, 0, 0], [d, 2699, 0], [c, 2900, 0], [d, 0, 0]],
+        "a its length only; b's second half (from the unit before: its length); c its first 6 s, d its last 6 s; then the margins left: c's last 2 s, d's first 2 s")
   check(bean.coverAsks.count, 1, "once, not each connection")
   check(bean.coverAsks[0][0] <= old * 1000 && bean.coverAsks[0][1] >= d * 1000 + ms, true, "all the closed files")
   check(bean.deleted, [a], "whole on the server: off the bean; what b, c, d lacked still queued here")
@@ -2108,6 +2110,83 @@ do {
   check(bean.coverAsks.allSatisfy { $0[1] - $0[0] <= 31 * 86_400_000 }, true, "each 31 days at most")
   check(bean.transfers, [[a, n - 1, 0], [b, n - 1, 0]], "both had: their length only")
   check(bean.deleted, [a, b])
+}
+
+/// The coverage asked off the link's thread (11-24: a request held it up to 10 s, twice, iOS then suspended the app):
+/// the file being recorded is read live while it is asked; the backlog waits for its first answer (what the server has
+/// is not read), then the file the server has whole is read for its length only and goes off the bean.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  bean.holdCover = true
+  let n: Int64 = 3000, ms = n * 20, a = (t0 - 3_000_000) / 1000, o = (t0 - 10_000) / 1000
+  bean.list(a, ms); bean.list(o, 0); bean.recording = true; bean.open = o
+  bean.cover = { _, _ in (a * 1000 - 1000, [(a * 1000 - 5000, a * 1000 + ms + 5000)]) }
+  bean.onTransfer = { file, from, _ in
+    if file == o { bean.header(o, 0xFFFF_FFFF); bean.units(o, Array(from..<(from + 50))); bean.script.append { throw BeanSync.Gone("link dropped") }; return }
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers.first?[0], o, "live while the coverage is asked")
+  check(bean.coverAsks.count, 0, "its answer not in yet")
+  bean.recording = false; bean.open = 0; bean.listed.removeAll { $0.0 == o }; bean.transfers = []
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [], "the backlog waits for the first answer")
+  bean.coverWork.forEach { $0() }; bean.coverWork = []
+  for _ in 0..<3 { bean.script = Array(repeating: {}, count: 20); try? sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.coverAsks.count, 1)
+  check(bean.transfers, [[a, n - 1, 0]], "had on the server: its length only")
+  check(bean.deleted, [a])
+}
+
+/// cover()'s margins last (11-24: each old file's first and last 4 s, which the server has, read before hours it
+/// lacked): x lacks only those, y a hole mid-file too. y's hole is read first (x only for its length), then, nothing
+/// else lacking, the margins on BLE; once those pieces are up, both whole: off the bean.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let n: Int64 = 6000, ms = n * 20, x = (t0 - 3_000_000) / 1000, y = (t0 - 2_000_000) / 1000
+  bean.list(x, ms); bean.list(y, ms)
+  bean.cover = { _, _ in (x * 1000 - 1000, [(x * 1000, x * 1000 + ms), (y * 1000, y * 1000 + 20_000), (y * 1000 + 40_000, y * 1000 + ms)]) }
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  bean.confirmed = { sync.deletable }
+  for _ in 0..<8 { bean.script = Array(repeating: {}, count: 20); try? sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[x, n - 201, 0], [y, 799, 0], [x, 0, 0], [y, 0, 0], [y, n - 200, 0]],
+        "x its length (its last 4 s on the way), y's hole with its margins (from the unit before: its length), then each margin left")
+  check(bean.deleted, [], "pieces not up yet")
+  for f in queue(chunks) { try FileManager.default.removeItem(at: f) }
+  bean.script = Array(repeating: {}, count: 20); try? sync.session(since: t0 - 3_600_000, steps: "")
+  check(bean.deleted, [x, y], "margins read: whole, off the bean")
+}
+
+/// Over Wi-Fi cover()'s margins are not read (the bean sends on to the end): a lacks only its first and last 200 units,
+/// which the server has, b a hole of 500 it lacks. b is read, then Wi-Fi ends, a's margins left to BLE.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, b = (t0 - 300_000) / 1000
+  bean.list(a, 60_000); bean.list(b, 60_000)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":3000,\"r\":0,\"h\":[[200,2800]],\"p\":[]},\"\(b)\":{\"a\":\(b * 1000),\"t\":3000,\"r\":0,\"h\":[[500,3000]],\"p\":[]}}"
+    .write(to: state, atomically: true, encoding: .utf8)
+  bean.cover = { _, _ in (a * 1000 - 1000, [(a * 1000, a * 1000 + 60_000)]) }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.onTransfer = { file, from, _ in
+    guard bean.onWifi else { bean.script.insert({ throw BeanSync.Gone("link dropped") }, at: 0); return }  // BLE: the coverage only
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  bean.transfers = []; bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[b, 0, 0]], "a's margins not over Wi-Fi")
 }
 
 print("bean check: all passed")
