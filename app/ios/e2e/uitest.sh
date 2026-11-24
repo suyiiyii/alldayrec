@@ -26,7 +26,7 @@ XCODE_UI=${XCODE_UI:-/Applications/Xcode-27.app/Contents/Developer}
 cd "$(dirname "$0")"
 E=$PWD
 W=${TMPDIR:-/tmp}/lr-uitest; R=$W/$(date +%m%d-%H%M); mkdir -p "$R"
-APP=$(sed -n 's/^ *LR_BUNDLE_ID *= *//p' ../Flutter/Signing.local.xcconfig 2>/dev/null | tail -1 || :); APP=${APP:-com.suyiiyii.liverecord}.uitest  # LR_BUNDLE_ID of Signing.local.xcconfig, if set
+APP=$(sed -n 's,//.*,,; s/^[[:space:]]*LR_BUNDLE_ID[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/=\1/p' ../Flutter/Signing.local.xcconfig 2>/dev/null | tail -1 || :); APP=${APP:-=com.suyiiyii.liverecord}; APP=${APP#=}.uitest  # LR_BUNDLE_ID of Signing.local.xcconfig, if set (even empty)
 DEV=${LR_DEVICE:?the iPhone: its identifier in xcrun devicectl list devices}
 NAME=${LR_NAME:-} FAKE= BUILD=
 while [ "${1:-}" = --build ] || [ "${1:-}" = --fake ]; do

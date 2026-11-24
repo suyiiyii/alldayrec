@@ -19,7 +19,7 @@ set -euo pipefail
 umask 077  # the backup holds the app's token
 cd "$(dirname "$0")"
 W=${TMPDIR:-/tmp}/lr-e2e
-APP=$(sed -n 's/^ *LR_BUNDLE_ID *= *//p' ../Flutter/Signing.local.xcconfig 2>/dev/null | tail -1 || :); APP=${APP:-com.suyiiyii.liverecord}  # LR_BUNDLE_ID of Signing.local.xcconfig, if set
+APP=$(sed -n 's,//.*,,; s/^[[:space:]]*LR_BUNDLE_ID[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/=\1/p' ../Flutter/Signing.local.xcconfig 2>/dev/null | tail -1 || :); APP=${APP:-=com.suyiiyii.liverecord}; APP=${APP#=}  # LR_BUNDLE_ID of Signing.local.xcconfig, if set (even empty)
 NAME=LR-MAC-BEEF
 MINUTES=5 INSTALL= KILL=
 while [ $# -gt 0 ]; do
