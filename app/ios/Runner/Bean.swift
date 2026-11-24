@@ -296,6 +296,8 @@ protocol BeanIo: AnyObject {
   /// GET /api/coverage for this bean over [since, until) (unix ms): its first bind and the spans [from, to) of its audio
   /// the server has; nil without an answer (offline, an older server's 404): nothing is skipped or deleted by it.
   func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])?
+  /// Runs `work` off the session's thread (coverage(): up to 10 s a request, the link's thread not held by it).
+  func detach(_ work: @escaping () -> Void)
 }
 
 extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say otherwise)
@@ -306,6 +308,7 @@ extension BeanIo {  // a link without Wi-Fi (the checks' fakes unless they say o
 }
 extension BeanIo { func phoneState() -> [String: Any] { [:] }; func notifications() -> [String: Any] { [:] } }
 extension BeanIo { func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? { nil } }
+extension BeanIo { func detach(_ work: @escaping () -> Void) { Thread.detachNewThread(work) } }
 
 /// One bean, session after session (BeanLink connects, then calls session()), as BeanSync in Bean.kt: the key exchange,
 /// its info and clock, its files, its start when idle (start(), once a connection), then one transfer at a time, as
@@ -342,6 +345,7 @@ final class BeanSync {
     var anchors: [(Int64, Int64)]
     var wifiTries = 0  // over Wi-Fi in this fast transfer (wifi()), not saved: BLE keeps all of `tries` (tried())
     var fromStart = false  // its length unknown, the unit before the phone's end refused: asked from unit 0 (header())
+    var raw: [(Int64, Int64)] = []  // the units the server's spans hold, their margins too (cover()); not saved
     var pausedMs: Int64 = 0  // paused this long while recorded, the anchor not past it yet (edge()); not saved
     init(_ anchor: Int64, have: [(Int64, Int64)] = [], total: Int64 = -1, tries: Int = 0, wait: Int64 = 0, anchors: [(Int64, Int64)] = []) {
       self.anchor = anchor; self.have = have; self.total = total; self.tries = tries; self.wait = wait; self.anchors = anchors
@@ -437,6 +441,9 @@ final class BeanSync {
   private var since: Int64 = 0
   private var bind: Int64?  // the server's first bind of the bean (cover()): `since` once known, the phone's own bind before
   private var coverAt: Int64 = 0, coverFailed = false, coverSaid = false
+  private var asking = false, heard = false  // a coverage asked for, not taken yet (askCover()); one taken since the app began
+  @Shared private var answer: Answer?  // what askCover()'s thread got, for cover() on the session's
+  private struct Answer { let c: (bind: Int64, spans: [(Int64, Int64)])? }
   private var served: Set<Int64> = []  // files the server's coverage gave units of (cover()), for bean_delete
   private var pendingEnd: Int64 = 0  // kept in the state file: a kill before the pieces are up does not lose it
   private var caught: Int64 = 0      // backlog units taken since the backlog began
@@ -550,12 +557,16 @@ final class BeanSync {
             if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
           }
         }
-        if xfer == nil && wifiNext { wifiNext = false; try wifi() }
+        // nor Wi-Fi before the first coverage: it would send what the server has (the review of #428); a failed one is heard
+        if xfer == nil && wifiNext && !(asking && !heard) { wifiNext = false; try wifi() }
         if xfer == nil && io.now() >= quietUntil {
           if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
-          if io.now() - coverAt >= BeanSync.coverMs { cover() }
+          if !asking && io.now() - coverAt >= BeanSync.coverMs { askCover() }
+          if let a = answer { answer = nil; asking = false; heard = true; cover(a.c) }
           let open = listing.open
-          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording ? nil : backlog()
+          // the backlog waits for the first coverage (what the server has is not read), live does not (11-24: the link's
+          // thread held up to 10 s by it twice, iOS then suspended the app)
+          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording || wifiNext || asking && !heard ? nil : backlog()
           if let x { try begin(x) } else { state = ["code": "beanIdle"] }
         }
         let quiet = quietUntil - io.now()
@@ -902,18 +913,9 @@ final class BeanSync {
   /// the server has, only what lies marginUnits in from both its ends counts as had (two phones' anchors apart): at worst
   /// a few seconds are read again, never one the server lacks taken as had. All it lacks is read, whatever its cause (a
   /// trim's silence too: once read it is had, not read again). No answer: as before, nothing skipped.
-  private func cover() {
-    coverAt = io.now()
+  private func cover(_ c: (bind: Int64, spans: [(Int64, Int64)])?) {
     let closed = listing.files.filter { $0.id != listing.open }
-    guard let hi = closed.map({ $0.id * 1000 + $0.ms }).max(), let lo = closed.map({ files[$0.id]?.at(0) ?? $0.id * 1000 }).min() else { return }
     let margin = BeanSync.marginUnits * Bean.frameMs
-    // shortcut: files begun over a year before the newest (a bean's clock unset) are read as before; ask further if that matters
-    var c: (bind: Int64, spans: [(Int64, Int64)])?, from = max(lo - margin, hi + margin - 12 * 31 * 86_400_000)
-    repeat {  // the server answers 31 days at most at a time
-      let to = min(from + 31 * 86_400_000, hi + margin)
-      guard let p = io.coverage(from, to) else { c = nil; break }
-      c = (p.bind, (c?.spans ?? []) + p.spans); from = to
-    } while from < hi + margin
     guard let c else {
       if !coverFailed { log("bean_coverage", "问不到服务端已有哪些（离线，或服务端没有这个接口），照旧读、照旧删", "warn") }
       coverFailed = true
@@ -926,6 +928,7 @@ final class BeanSync {
       let f = files[e.id] ?? F(e.id * 1000)
       let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs
       let was = covered(f)
+      f.raw = c.spans.flatMap { units(f, $0.0, $0.1, n) }
       for r in c.spans.flatMap({ units(f, $0.0 + margin, $0.1 - margin, n) }) { add(f, r.0, r.1) }
       if covered(f) > was { files[e.id] = f; served.insert(e.id); got += covered(f) - was }
     }
@@ -936,6 +939,26 @@ final class BeanSync {
     log("bean_coverage", "服务端已有 \(c.spans.count) 段：豆子上 \(closed.count) 个录完的文件里，新算作已有 \(got * Bean.frameMs / 1000) s（不读、不传），" +
         "还缺 \(left * Bean.frameMs / 1000) s", fields: ["spans": c.spans.count, "files": closed.count, "had_s": got * Bean.frameMs / 1000,
         "lacking_s": left * Bean.frameMs / 1000, "first_bind": c.bind])
+  }
+
+  /// GET /api/coverage over the closed files, off the session's thread (io.detach()): cover() takes the answer.
+  private func askCover() {
+    coverAt = io.now()
+    let closed = listing.files.filter { $0.id != listing.open }
+    guard let hi = closed.map({ $0.id * 1000 + $0.ms }).max(), let lo = closed.map({ files[$0.id]?.at(0) ?? $0.id * 1000 }).min() else { return }
+    let margin = BeanSync.marginUnits * Bean.frameMs
+    asking = true
+    let io = io  // held while it asks: the link may go meanwhile
+    io.detach { [self] in
+      // shortcut: files begun over a year before the newest (a bean's clock unset) are read as before; ask further if that matters
+      var c: (bind: Int64, spans: [(Int64, Int64)])?, from = max(lo - margin, hi + margin - 12 * 31 * 86_400_000)
+      repeat {  // the server answers 31 days at most at a time
+        let to = min(from + 31 * 86_400_000, hi + margin)
+        guard let p = io.coverage(from, to) else { c = nil; break }
+        c = (p.bind, (c?.spans ?? []) + p.spans); from = to
+      } while from < hi + margin
+      answer = Answer(c: c)
+    }
   }
 
   /// The units of `f` (of `n`) wholly in [a, b) (unix ms), by the anchors it is dated by: a range per anchor.
@@ -971,7 +994,13 @@ final class BeanSync {
     if caught == 0 { caughtSince = io.now() }
     let left = lacking(p)
     syncTotalKb = (caught + left) * Int64(Bean.unit) / 1024; syncDoneKb = caught * Int64(Bean.unit) / 1024
-    let (id, from) = overWifi ? widest(p) : (p[0].id, files[p[0].id].flatMap(gap) ?? 0), f = files[id]
+    // holes first, margins last (hole()): on BLE once no file has a hole, the bean idle; never over Wi-Fi (on to the end)
+    let real = p.first { e in files[e.id].map { hole($0) != nil } ?? true }
+    if overWifi && real == nil { return nil }
+    guard let w = overWifi ? widest(p) : real.map({ ($0.id, files[$0.id].flatMap(hole) ?? 0) }) ?? (p[0].id, files[p[0].id].flatMap(gap) ?? 0)
+    else { return nil }
+    let (id, from) = w
+    let f = files[id]
     // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
     // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
     return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? (f!.fromStart ? 0 : from - 1) : from)
@@ -980,13 +1009,14 @@ final class BeanSync {
   /// Over Wi-Fi the bean sends on to the file's end, units the phone has too (header()): the file and unit the widest hole
   /// of these begins at, the older on a tie (11-24: each hotspot went on an old file's first 4 s, cover()'s margin, then
   /// 6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed.
-  private func widest(_ p: [(id: Int64, ms: Int64)]) -> (Int64, Int64) {
-    var best = (p[0].id, files[p[0].id].flatMap(gap) ?? 0), most: Int64 = 0
+  /// None, no hole but margins (hole() has one in a file of unknown length): those are BLE's (backlog()).
+  private func widest(_ p: [(id: Int64, ms: Int64)]) -> (Int64, Int64)? {
+    var best: (Int64, Int64)?, most: Int64 = 0
     for e in p {
       guard let f = files[e.id] else { if e.ms / Bean.frameMs > most { most = e.ms / Bean.frameMs; best = (e.id, 0) }; continue }
       let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs
       var at: Int64 = 0
-      for r in f.have + [(n, n)] {
+      for r in (f.have + f.raw).sorted(by: { $0.0 < $1.0 }) + [(n, n)] {  // margins are no hole (hole())
         if r.0 - at > most { most = r.0 - at; best = (e.id, at) }
         at = max(at, r.1)
       }
@@ -1455,7 +1485,7 @@ final class BeanSync {
     } else if gap(f) == nil {
       pendingEnd = max(pendingEnd, f.at(f.total))
     // cut with the hole filled, or over Wi-Fi read whole to its end (holes before it: widest() picks again): not a try
-    } else if !(x.cut && gap(f)! > x.from) && !(overWifi && result == 0 && x.lost == 0 && x.last + 1 == f.total && !writeFailed) {
+    } else if !(x.cut && (hole(f) ?? gap(f)!) > x.from) && !(overWifi && result == 0 && x.lost == 0 && x.last + 1 == f.total && !writeFailed) {
       if x.units > x.dupes { f.tries = 0 }  // units new to the phone: only reads in a row that bring none count
       tried(x.file, f)
     }
@@ -1499,6 +1529,16 @@ final class BeanSync {
     var at: Int64 = 0
     for r in f.have { if r.0 > at { break } else { at = max(at, r.1) } }
     return f.total >= 0 && f.total <= at ? nil : at
+  }
+
+  /// Where the phone's first lack holding a unit the server's spans do not starts (its margins with it): cover()'s
+  /// margins alone wait until no file has one (11-24: an old file's first and last 4 s, which the server has, read before
+  /// hours it lacked), still read, so a file the server has whole goes off the bean (prune(), by gap() alone). nil: only
+  /// margins lacking.
+  private func hole(_ f: F) -> Int64? {
+    var at: Int64 = 0
+    for r in (f.have + f.raw).sorted(by: { $0.0 < $1.0 }) { if r.0 > at { break } else { at = max(at, r.1) } }
+    return f.total >= 0 && f.total <= at ? nil : f.have.last { $0.1 <= at }?.1 ?? 0
   }
 
   private func done(_ f: F) -> Bool { gap(f) == nil || io.now() < f.wait || overWifi && f.wifiTries > BeanSync.tries }

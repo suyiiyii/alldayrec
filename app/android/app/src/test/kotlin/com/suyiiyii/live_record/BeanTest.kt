@@ -2131,9 +2131,9 @@ class BeanTest {
         bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
         val sync = wifiSync(bean, dir)
         repeat(8) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
-        assertEquals("a its length only; b's second half (from the unit before: its length); c, d their first 6 s and last 2 s, or first 2 s and last 6 s",
-            listOf(Triple(a, n - 1, false), Triple(b, n / 2 - 1, false), Triple(c, 0L, false), Triple(c, 2900L, false), Triple(d, 0L, false),
-                Triple(d, 2700L, false)), bean.transfers)
+        assertEquals("a its length only; b's second half (from the unit before: its length); c its first 6 s, d its last 6 s; then the margins left: c's last 2 s, d's first 2 s",
+            listOf(Triple(a, n - 1, false), Triple(b, n / 2 - 1, false), Triple(c, 0L, false), Triple(d, 2699L, false), Triple(c, 2900L, false),
+                Triple(d, 0L, false)), bean.transfers)
         assertEquals("once, not each connection", 1, bean.coverAsks.size)
         assertTrue("all the closed files", bean.coverAsks[0].first <= old * 1000 && bean.coverAsks[0].second >= d * 1000 + ms)
         assertEquals("whole on the server: off the bean; what b, c, d lacked still queued here", listOf(a), bean.deleted)
@@ -2198,6 +2198,122 @@ class BeanTest {
         assertTrue("each 31 days at most", bean.coverAsks.all { it.second - it.first <= 31 * 86_400_000L })
         assertEquals("both had: their length only", listOf(Triple(a, n - 1, false), Triple(b, n - 1, false)), bean.transfers)
         assertEquals(listOf(a, b), bean.deleted)
+    }
+
+    /** The coverage asked off the link's thread (11-24: a request held it up to 10 s, twice, iOS then suspended the app):
+     *  the file being recorded is read live while it is asked; the backlog waits for its first answer (what the server
+     *  has is not read), then the file the server has whole is read for its length only and goes off the bean. */
+    @Test fun coverageOffTheLink() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); bean.holdCover = true
+        val n = 3000L; val ms = n * 20; val a = (wt0 - 3_000_000) / 1000; val o = (wt0 - 10_000) / 1000
+        bean.listed[a] = ms; bean.listed[o] = 0; bean.recording = true; bean.open = o
+        bean.cover = { _, _ -> a * 1000 - 1000 to listOf(longArrayOf(a * 1000 - 5000, a * 1000 + ms + 5000)) }
+        bean.onTransfer = { file, from, _ ->
+            if (file == o) { bean.header(o, 0xFFFF_FFFFL); bean.units(o, (from until from + 50).toList()); bean.script += { throw IOException("link dropped") } }
+            else { bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("live while the coverage is asked", o, bean.transfers.firstOrNull()?.first)
+        assertEquals("its answer not in yet", 0, bean.coverAsks.size)
+        bean.recording = false; bean.open = 0; bean.listed.remove(o); bean.transfers.clear()
+        repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("the backlog waits for the first answer", emptyList<Triple<Long, Long, Boolean>>(), bean.transfers)
+        bean.coverWork.forEach { it() }; bean.coverWork.clear()
+        repeat(3) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals(1, bean.coverAsks.size)
+        assertEquals("had on the server: its length only", listOf(Triple(a, n - 1, false)), bean.transfers)
+        assertEquals(listOf(a), bean.deleted)
+    }
+
+    /** cover()'s margins last (11-24: each old file's first and last 4 s, which the server has, read before hours it
+     *  lacked): x lacks only those, y a hole mid-file too. y's hole is read first (x only for its length), then, nothing
+     *  else lacking, the margins on BLE; once those pieces are up, both whole: off the bean. */
+    @Test fun coverageMarginsLast() {
+        val dir = Files.createTempDirectory("bean").toFile(); val chunks = File(dir, "chunks")
+        val bean = FakeBean(wt0); val n = 6000L; val ms = n * 20
+        val x = (wt0 - 3_000_000) / 1000; val y = (wt0 - 2_000_000) / 1000
+        bean.listed[x] = ms; bean.listed[y] = ms
+        bean.cover = { _, _ -> x * 1000 - 1000 to listOf(longArrayOf(x * 1000, x * 1000 + ms), longArrayOf(y * 1000, y * 1000 + 20_000),
+            longArrayOf(y * 1000 + 40_000, y * 1000 + ms)) }
+        bean.onTransfer = { file, from, _ -> bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file) }
+        val sync = wifiSync(bean, dir)
+        repeat(8) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals("x its length (its last 4 s on the way), y's hole with its margins (from the unit before: its length), then each margin left",
+            listOf(Triple(x, n - 201, false), Triple(y, 799L, false), Triple(x, 0L, false), Triple(y, 0L, false), Triple(y, n - 200, false)), bean.transfers)
+        assertEquals("pieces not up yet", emptyList<Long>(), bean.deleted)
+        for (f in Uploader.queue(chunks)) f.delete()
+        repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("margins read: whole, off the bean", listOf(x, y), bean.deleted)
+    }
+
+    /** Over Wi-Fi cover()'s margins are not read (the bean sends on to the end): a lacks only its first and last 200
+     *  units, which the server has, b a hole of 500 it lacks. b is read, then Wi-Fi ends, a's margins left to BLE. */
+    @Test fun wifiSkipsMargins() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val b = wt0 / 1000 - 300
+        bean.listed[a] = 60_000; bean.listed[b] = 60_000
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":3000,"r":0,"h":[[200,2800]]},"$b":{"a":${b * 1000},"t":3000,"r":0,"h":[[500,3000]]}}""")
+        bean.cover = { _, _ -> a * 1000 - 1000 to listOf(longArrayOf(a * 1000, a * 1000 + 60_000)) }
+        bean.onTransfer = { file, from, _ ->
+            if (!bean.onWifi) bean.script.addFirst { throw IOException("link dropped") }  // BLE: the coverage only
+            else { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        bean.transfers.clear(); bean.wifiAsk = true; repeat(40) { bean.script += {} }
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(again.message, "都取到了" in again.message!!)
+        assertEquals("a's margins not over Wi-Fi", listOf(Triple(b, 0L, false)), bean.transfers)
+    }
+
+    /** Wi-Fi waits for the first coverage too (the review of #428: tapped while it was asked, the hotspot went on a file the
+     *  server had whole): nothing read meanwhile; once it is in, nothing over Wi-Fi, then on BLE its length only, off the bean. */
+    @Test fun wifiWaitsForCoverage() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); bean.holdCover = true
+        val n = 3000L; val ms = n * 20; val a = (wt0 - 3_000_000) / 1000
+        bean.listed[a] = ms
+        bean.cover = { _, _ -> a * 1000 - 1000 to listOf(longArrayOf(a * 1000 - 5000, a * 1000 + ms + 5000)) }
+        bean.onTransfer = { file, from, _ ->
+            assertFalse("nothing over Wi-Fi: the server has it", bean.onWifi)
+            bean.header(file, n * Bean.UNIT); bean.units(file, (from until n).toList(), last = n - 1, ms = 1); bean.complete(file)
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        bean.wifiAsk = true; repeat(5) { bean.script += {} }  // tapped while it is asked
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("nothing read while the coverage is asked", emptyList<Triple<Long, Long, Boolean>>(), bean.transfers)
+        bean.coverWork.forEach { it() }; bean.coverWork.clear()
+        repeat(3) { repeat(20) { bean.script += {} }; runCatching { sync.session(wt0 - 3_600_000, "") } }
+        assertEquals("on BLE its length only", listOf(Triple(a, n - 1, false)), bean.transfers)
+        assertEquals(listOf(a), bean.deleted)
+    }
+
+    /** Over Wi-Fi no margins of a file of unknown length either (the review of #428: hole() has one in it always, so Wi-Fi
+     *  went on the oldest file from its start): a and u lack only the margins the server has; nothing over Wi-Fi. */
+    @Test fun wifiSkipsUnknownMargins() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = FakeBean(wt0); val a = wt0 / 1000 - 600; val u = wt0 / 1000 - 300
+        bean.listed[a] = 60_000; bean.listed[u] = 60_000
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":3000,"r":0,"h":[[200,2800]]},"$u":{"a":${u * 1000},"t":-1,"r":0,"h":[[200,2800]]}}""")
+        bean.cover = { _, _ -> a * 1000 - 1000 to listOf(longArrayOf(a * 1000, a * 1000 + 60_000), longArrayOf(u * 1000, u * 1000 + 60_000)) }
+        bean.onTransfer = { file, from, _ ->
+            if (!bean.onWifi) bean.script.addFirst { throw IOException("link dropped") }  // BLE: the coverage only
+            else { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+        }
+        val sync = wifiSync(bean, dir)
+        repeat(5) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        bean.transfers.clear(); bean.wifiAsk = true; repeat(40) { bean.script += {} }
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(again.message, "都取到了" in again.message!!)
+        assertEquals("margins left to BLE", emptyList<Triple<Long, Long, Boolean>>(), bean.transfers)
     }
 
     private fun packets(f: File): List<ByteArray> {
@@ -2343,6 +2459,9 @@ class FakeBean(var now: Long) : BeanSync.Io {
     override fun coverage(since: Long, until: Long): Pair<Long, List<LongArray>>? {
         coverAsks += since to until; return if (until - since <= 31 * 86_400_000L) cover(since, until) else null  // the server: a 400 past 31 days
     }
+    var holdCover = false  // detach()'s work kept in coverWork until run (a slow server), else run at once
+    val coverWork = mutableListOf<() -> Unit>()
+    override fun detach(work: () -> Unit) { if (holdCover) coverWork += work else work() }
 
     fun info() = ByteArray(57).also { b ->
         b[0] = 1; b[1] = battery; b[38] = 5
