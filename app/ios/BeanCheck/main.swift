@@ -807,6 +807,18 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   sync.wifiStep = ["step": "reopen"]; sync.wifiWait()
   check(sync.wifiStep?["step"] as? String, "reopen")
+  // back after a failure (#423 review L2): its note kept under the timeout's, what to do about it not lost
+  bean.list(a + 200, 60_000); bean.wifiAsk = true
+  bean.joinFails = [Bean.Fail("socket: no answer in 15 s", note: "beanWifiNoSocket")]
+  bean.script = Array(repeating: {}, count: 40)
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["back", "fail"])
+  waited(BeanSync.wifiWaitMs)
+  check(sync.wifiNote?["code"] as? String, "beanWifiNoBle")
+  check((sync.wifiNote?["before"] as? [String: Any])?["code"] as? String, "beanWifiNoSocket", "the failure kept")
+  // asked: the note before is the last tap's, not kept
+  sync.wifiStep = ["step": "asked"]; waited(BeanSync.wifiWaitMs)
+  check(sync.wifiNote?["before"] == nil, true, "asked: nothing of the last tap's")
 }
 
 /// BLE gone as the fast transfer lists a file just closed, before the hotspot (#405 review): the device page's step ends

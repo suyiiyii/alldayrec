@@ -1943,7 +1943,7 @@ abstract class AppLocalizations {
   /// No description provided for @beanWifiNoBle.
   ///
   /// In zh, this message translates to:
-  /// **'上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'**
+  /// **'上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着；另一台手机连着它的话，先关掉那台的蓝牙。连回后会接着用蓝牙同步'**
   String get beanWifiNoBle;
 
   /// No description provided for @beanWifiDenied.

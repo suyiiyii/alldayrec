@@ -1592,6 +1592,17 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         sync.wifiStep = mapOf("step" to "reopen"); sync.wifiWait()
         assertEquals("reopen", sync.wifiStep?.get("step"))
+        // back after a failure (#423 review L2): its note kept under the timeout's, what to do about it not lost
+        bean.listed[a + 200] = 60_000; bean.wifiAsk = true; bean.joinFails = Bean.Fail("socket: no answer in 15 s", "beanWifiNoSocket")
+        bean.script.clear(); repeat(40) { bean.script += {} }
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals(listOf("back", "fail"), listOf(sync.wifiStep?.get("step"), sync.wifiStep?.get("end")))
+        waited(BeanSync.WIFI_WAIT_MS)
+        assertEquals("beanWifiNoBle", sync.wifiNote?.get("code"))
+        assertEquals("the failure kept", "beanWifiNoSocket", (sync.wifiNote?.get("before") as? Map<*, *>)?.get("code"))
+        // asked: the note before is the last tap's, not kept
+        sync.wifiStep = mapOf("step" to "asked"); waited(BeanSync.WIFI_WAIT_MS)
+        assertNull("asked: nothing of the last tap's", sync.wifiNote?.get("before"))
     }
 
     /** No fast transfer asked for: no 1A/05 ever, whatever the backlog (the plain BLE read). */

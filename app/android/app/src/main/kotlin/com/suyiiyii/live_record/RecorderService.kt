@@ -27,6 +27,10 @@ import java.util.Locale
  *  nativeText): a link state, a note, a firmware update's step. */
 fun say(code: String, vararg kv: Pair<String, Any?>): Map<String, Any?> = mapOf("code" to code, *kv)
 
+/** Runs each step, one that throws logged and the rest run all the same (the service's 2 s thread: a fast transfer's
+ *  wait for BLE, then the notification). */
+fun eachAlone(vararg steps: () -> Unit) = steps.forEach { try { it() } catch (e: Exception) { Log.w("live-record", "2 s thread: $e") } }
+
 /** Foreground service that owns recording and uploading, so neither needs the Flutter UI alive. Uploading does not
  *  depend on recording: after a stop (or a launch, or a kill, with pieces left) the service stays up as a dataSync
  *  service until the queue is empty, sends the end signal after the last piece and stops itself.
@@ -184,7 +188,7 @@ class RecorderService : Service() {
         Thread {
             while (alive) {
                 // a fast transfer's wait for BLE timed here: the link's own thread waits on a scan up to 10 min
-                try { bean?.wifiWait(); refresh() } catch (e: Exception) { Log.w("live-record", "notification: $e") }
+                eachAlone({ bean?.wifiWait() }, { refresh() })
                 Thread.sleep(2000)
             }
         }.apply { isDaemon = true }.start()

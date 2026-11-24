@@ -1123,7 +1123,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get beanWifiNoBle =>
-      'The last Wi‑Fi fast transfer stopped waiting for Bluetooth: the bean did not come back in 3 minutes. Bring it near the phone and check it is on; once back, Bluetooth sync goes on';
+      'The last Wi‑Fi fast transfer stopped waiting for Bluetooth: the bean did not come back in 3 minutes. Bring it near the phone and check it is on; if another phone holds it, turn that phone\'s Bluetooth off. Once back, Bluetooth sync goes on';
 
   @override
   String get beanWifiDenied =>
