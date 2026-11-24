@@ -781,7 +781,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         waiting = null; wifiNext = false; io.wifiAsked()  // no hotspot asked for when it comes back
         io.log("bean_wifi_fail", "快传停在 $s 等蓝牙 ${WIFI_WAIT_MS / 1000} s 没等到豆子，结束这次快传，之后照常用蓝牙连" +
             (if (wifiOpen) "（连回后先关热点）" else ""), "warn", mapOf("step" to "wait", "at" to s, "ms" to now - w.second, "hotspot" to wifiOpen))
-        wifiNote = say("beanWifiNoBle")
+        wifiNote = say("beanWifiNoBle", "before" to wifiNote.takeIf { s != "asked" })  // this tap's own failure said first, what to do about it kept (asked: the last tap's)
         when (s) {
             "back" -> wifiStep = step + ("step" to "done")  // how it ended kept
             "asked" -> wifiStep = mapOf("step" to "done", "end" to "fail")  // nothing got this tap (wifiGot is the last one's)

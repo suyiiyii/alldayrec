@@ -186,12 +186,17 @@ void main() {
     note = {'code': 'beanWifiNoBle'};
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
-    expect(find.text('传完了：45 秒录音，用时 2 秒 · 上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'),
+    expect(find.text('传完了：45 秒录音，用时 2 秒 · 上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着；另一台手机连着它的话，先关掉那台的蓝牙。连回后会接着用蓝牙同步'),
         findsOneWidget);
     step = {'step': 'done', 'end': 'fail'};
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
-    expect(find.text('上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'), findsOneWidget);
+    expect(find.text('上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着；另一台手机连着它的话，先关掉那台的蓝牙。连回后会接着用蓝牙同步'), findsOneWidget);
+    // back after a failure (#423 review L2): what to do about it first, then Bluetooth not back
+    note = {'code': 'beanWifiNoBle', 'before': {'code': 'beanWifiNoSocket'}};
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试 · 上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着；另一台手机连着它的话，先关掉那台的蓝牙。连回后会接着用蓝牙同步'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 

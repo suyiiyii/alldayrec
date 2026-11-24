@@ -1081,7 +1081,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get beanWifiNoBle =>
-      '上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步';
+      '上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着；另一台手机连着它的话，先关掉那台的蓝牙。连回后会接着用蓝牙同步';
 
   @override
   String get beanWifiDenied => '上次 Wi‑Fi 快传没成：手机问要不要加入豆子的网络时点了取消';
