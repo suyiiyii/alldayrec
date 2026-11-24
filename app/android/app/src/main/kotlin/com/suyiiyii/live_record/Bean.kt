@@ -425,7 +425,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var runFile = -1L
     private var runFrom = 0L
     private var overWifi = false  // wifi(): the transfers go over the hotspot's WebSocket
-    private var wifiNext = false  // asked for: before the next transfer
+    @Volatile private var wifiNext = false  // asked for: before the next transfer (cleared by wifiWait() too)
     private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
     private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at TRIES (wifiOff())
     private var wifiUnits = 0
@@ -433,6 +433,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var wifiGot = 0; private var wifiTook = 0L  // since the last tap, all its hotspots: units over Wi-Fi, ms they took (wifiEnd())
     private var wifiEnded = 0L
     private var wifiBattery: Any? = null  // for the log of the way back (wifiOff())
+    @Volatile private var waiting: Pair<String, Long>? = null  // wifiWait(): the step BLE is waited for at, since when
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                    // pressed): a stop by hand holds until the link goes (an IOException), not across the
                                    // app's own reconnects (a cut re-pull, a stalled transfer)
@@ -467,6 +468,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     fun session(since: Long, steps: String) {
         this.since = bind ?: since
         reader = Bean.Reader(); inbox.clear(); xfer = null; needList = true; askedAt = io.now(); liveFile = 0; paused = false
+        waiting = null
         val t = StringBuilder(steps)
         fun <T> step(code: String, what: String, block: () -> T): T {
             state = say(code)
@@ -765,6 +767,26 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         io.log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields = mapOf("recording" to true, "backlog_s" to (owed["backlog_s"] ?: 0)))
         wifiNote = say("beanWifiRecording")
         wifiEnd("done", "fail")
+    }
+
+    /** Between sessions (RecorderService's 2 s thread, the link not up: BeanLink.wifiWait()): a fast transfer waiting for
+     *  BLE at asked, reopen or back for WIFI_WAIT_MS ends, the page says why; the next session is an ordinary one, its
+     *  wifiOff() turns a hotspot off. */
+    fun wifiWait() {
+        val step = wifiStep; val s = step?.get("step") as? String
+        if (step == null || s !in setOf("asked", "reopen", "back")) { waiting = null; return }
+        val now = io.monotonicNow(); val w = waiting
+        if (w == null || w.first != s) { waiting = s!! to now; return }
+        if (now - w.second < WIFI_WAIT_MS) return
+        waiting = null; wifiNext = false; io.wifiAsked()  // no hotspot asked for when it comes back
+        io.log("bean_wifi_fail", "快传停在 $s 等蓝牙 ${WIFI_WAIT_MS / 1000} s 没等到豆子，结束这次快传，之后照常用蓝牙连" +
+            (if (wifiOpen) "（连回后先关热点）" else ""), "warn", mapOf("step" to "wait", "at" to s, "ms" to now - w.second, "hotspot" to wifiOpen))
+        wifiNote = say("beanWifiNoBle")
+        when (s) {
+            "back" -> wifiStep = step + ("step" to "done")  // how it ended kept
+            "asked" -> wifiStep = mapOf("step" to "done", "end" to "fail")  // nothing got this tap (wifiGot is the last one's)
+            else -> wifiEnd("done", "fail")
+        }
     }
 
     /** The device page's step (wifiStep), with the hotspot anew it is at since the tap (reopen: 0 the tap's own). */
@@ -1434,5 +1456,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         const val HOLD_MARGIN_MS = 60_000L  // the hold a minute before what is said now: the clocks' drift
         const val COVER_MS = 300_000L  // the server's coverage asked again after (cover())
         const val MARGIN_UNITS = 200L  // 4 s in from each end of what the server has: two phones' anchors apart (1–3 s) (cover())
+        /** A fast transfer's wait for BLE (asked, reopen, back) before it ends (wifiWait()): back took 2–92 s in 53 of 53
+         *  (11-08 to 11-23), the bean's own ~90 s after the phone left a stalled read (3 of 3); twice the longest. */
+        const val WIFI_WAIT_MS = 180_000L
     }
 }

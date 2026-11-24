@@ -755,6 +755,60 @@ do {
   check(bean.transfers.count, 1, "all of it here: nothing more over BLE")
 }
 
+/// BLE not back for `wifiWaitMs` while a fast transfer waits for it (#422 review N1): at back, reopen or asked the step
+/// ends (back: how it ended kept), the page says why, a device_log line; the next session an ordinary one, the hotspot
+/// off (1A/02) and no new one.
+do {
+  let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
+  bean.script = Array(repeating: {}, count: 40)
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(sync.wifiStep?["step"] as? String, "back")
+  func waited(_ ms: Int64) { sync.wifiWait(); bean.t += ms; sync.wifiWait() }
+  waited(BeanSync.wifiWaitMs - 1)
+  check(sync.wifiStep?["step"] as? String, "back", "not yet")
+  bean.t += 1; sync.wifiWait()
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "all"], "over, what it got kept")
+  check(sync.wifiNote?["code"] as? String, "beanWifiNoBle")
+  check(bean.logs.last?.0, "bean_wifi_fail"); check(bean.logFields.last?["at"] as? String, "back")
+  check(sync.sync["phase"] as? String == "wifi", false, "the page's fast transfer over")
+  var n = bean.sent.count
+  bean.script = Array(repeating: {}, count: 10)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.sent[n...].contains { $0[5] == 0x1A && $0[6] == 0x02 }, true, "back at last: the hotspot off")
+  // reopen: a late join, then BLE not back for the new hotspot
+  bean.list(a + 100, 60_000); bean.wifiAsk = true
+  bean.joinFails = [Bean.Fail("join: answered 77 s after the hotspot opened", note: "beanWifiJoinLate")]
+  bean.script = Array(repeating: {}, count: 60)
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(sync.wifiStep?["step"] as? String, "reopen")
+  waited(BeanSync.wifiWaitMs)
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String], ["done", "fail"])
+  check(sync.wifiNote?["code"] as? String, "beanWifiNoBle")
+  n = bean.sent.count
+  bean.script = Array(repeating: {}, count: 10)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.sent[n...].contains { $0[5] == 0x1A && $0[6] == 0x02 }, true, "the hotspot off")
+  check(bean.sent[n...].contains { $0[5] == 0x1A && $0[6] == 0x05 }, false, "no new hotspot")
+  // asked with the bean away: the tap dropped
+  sync.wifiStep = ["step": "asked"]; bean.wifiAsk = true
+  waited(BeanSync.wifiWaitMs)
+  check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String, "\(sync.wifiStep?["s"] ?? "-")"], ["done", "fail", "-"])
+  check(bean.wifiAsk, false, "not asked for once it is back")
+  // a session in between: the wait starts anew (a second reopen is not timed from the first)
+  sync.wifiStep = ["step": "reopen"]; sync.wifiWait(); bean.t += BeanSync.wifiWaitMs
+  bean.script = Array(repeating: {}, count: 10)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  sync.wifiStep = ["step": "reopen"]; sync.wifiWait()
+  check(sync.wifiStep?["step"] as? String, "reopen")
+}
+
 /// BLE gone as the fast transfer lists a file just closed, before the hotspot (#405 review): the device page's step ends
 /// with why, not stuck at asked (its button off, read every 0.05 s); no hotspot asked for.
 do {

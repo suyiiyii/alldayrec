@@ -1544,6 +1544,56 @@ class BeanTest {
         assertEquals("all of it here: nothing more over BLE", 1, bean.transfers.size)
     }
 
+    /** BLE not back for WIFI_WAIT_MS while a fast transfer waits for it (#422 review N1): at back, reopen or asked the
+     *  step ends (back: how it ended kept), the page says why, a device_log line; the next session an ordinary one, the
+     *  hotspot off (1A/02) and no new one. */
+    @Test fun wifiWaitEnds() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val a = wt0 / 1000 - 600
+        bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("back", sync.wifiStep?.get("step"))
+        fun waited(ms: Long) { sync.wifiWait(); bean.now += ms; sync.wifiWait() }
+        waited(BeanSync.WIFI_WAIT_MS - 1)
+        assertEquals("not yet", "back", sync.wifiStep?.get("step"))
+        bean.now += 1; sync.wifiWait()
+        assertEquals("over, what it got kept", listOf("done", "all"), listOf(sync.wifiStep?.get("step"), sync.wifiStep?.get("end")))
+        assertEquals("beanWifiNoBle", sync.wifiNote?.get("code"))
+        assertEquals("bean_wifi_fail", bean.logs.last().first); assertEquals("back", bean.logFields.last()["at"])
+        assertNotEquals("the page's fast transfer over", "wifi", sync.sync["phase"])
+        var n = bean.sent.size
+        bean.script.clear(); repeat(10) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue("back at last: the hotspot off", 0x1A02 in bean.sentCmds().drop(n))
+        // reopen: a read stopped mid-file, then BLE not back for the new hotspot
+        bean.listed[a + 100] = 60_000; bean.wifiAsk = true
+        bean.onTransfer = { file, from, _ -> bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until from + 500).toList(), ms = 1) }
+        bean.script.clear(); repeat(60) { bean.script += {} }
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertEquals("reopen", sync.wifiStep?.get("step"))
+        waited(BeanSync.WIFI_WAIT_MS)
+        assertEquals("over: what the first hotspot got (500 units)", listOf("done", "part", 10L),
+            listOf(sync.wifiStep?.get("step"), sync.wifiStep?.get("end"), sync.wifiStep?.get("s")))
+        assertEquals("beanWifiNoBle", sync.wifiNote?.get("code"))
+        n = bean.sent.size
+        bean.script.clear(); repeat(10) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue("the hotspot off", 0x1A02 in bean.sentCmds().drop(n))
+        assertFalse("no new hotspot", 0x1A05 in bean.sentCmds().drop(n))
+        // asked with the bean away: the tap dropped
+        sync.wifiStep = mapOf("step" to "asked"); bean.wifiAsk = true
+        waited(BeanSync.WIFI_WAIT_MS)
+        assertEquals(mapOf("step" to "done", "end" to "fail"), sync.wifiStep)
+        assertFalse("not asked for once it is back", bean.wifiAsk)
+        // a session in between: the wait starts anew (a second reopen is not timed from the first)
+        sync.wifiStep = mapOf("step" to "reopen"); sync.wifiWait(); bean.now += BeanSync.WIFI_WAIT_MS
+        bean.script.clear(); repeat(10) { bean.script += {} }
+        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+        sync.wifiStep = mapOf("step" to "reopen"); sync.wifiWait()
+        assertEquals("reopen", sync.wifiStep?.get("step"))
+    }
+
     /** No fast transfer asked for: no 1A/05 ever, whatever the backlog (the plain BLE read). */
     @Test fun noHotspotUnasked() {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -2213,6 +2263,7 @@ class FakeBean(var now: Long) : BeanSync.Io {
     }
 
     override fun now() = now
+    override fun monotonicNow() = now
     var slice = 50  // live units a piece (the app's slice)
     override fun liveUnits() = slice
     override fun log(kind: String, text: String, level: String?, fields: Map<String, Any?>, at: Long?) { logs += kind to text; logFields += fields }

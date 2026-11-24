@@ -1122,6 +1122,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'The last Wi‑Fi fast transfer failed: the bean\'s hotspot did not come up; Bluetooth goes on';
 
   @override
+  String get beanWifiNoBle =>
+      'The last Wi‑Fi fast transfer stopped waiting for Bluetooth: the bean did not come back in 3 minutes. Bring it near the phone and check it is on; once back, Bluetooth sync goes on';
+
+  @override
   String get beanWifiDenied =>
       'The last Wi‑Fi fast transfer failed: the phone\'s question to join the bean\'s network was cancelled';
 

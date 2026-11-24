@@ -331,6 +331,9 @@ final class BeanSync {
   static let stepUnits = 250  // while a live file is off its target, pieces of 5 s: a step each (step(), ≤ 1800 ppm)
   static let coverMs: Int64 = 300_000  // the server's coverage asked again after (cover())
   static let marginUnits: Int64 = 200  // 4 s in from each end of what the server has: two phones' anchors apart (1–3 s) (cover())
+  /// A fast transfer's wait for BLE (asked, reopen, back) before it ends (wifiWait()): back took 2–92 s in 53 of 53
+  /// (11-08 to 11-23), the bean's own ~90 s after the phone left a stalled read (3 of 3); twice the longest
+  static let wifiWaitMs: Int64 = 180_000
 
   final class F {
     var anchor: Int64, have: [(Int64, Int64)], total: Int64, tries: Int
@@ -453,6 +456,7 @@ final class BeanSync {
   private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file or a late join, since the last tap
   private var wifiGot = 0, wifiTook: Int64 = 0  // since the last tap, all its hotspots: units over Wi-Fi, ms they took (wifiEnd())
   private var wifiEnded: Int64 = 0, wifiBattery: Any = NSNull()  // for the log of the way back (wifiOff())
+  private var waiting: (step: String, since: Int64)?  // wifiWait(): the step BLE is waited for at, since when
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
                                  // reconnects (a cut re-pull, a stalled transfer)
@@ -495,6 +499,7 @@ final class BeanSync {
   func session(since: Int64, steps: String) throws {
     self.since = bind ?? since
     reader = Bean.Reader(); inbox = []; xfer = nil; needList = true; askedAt = io.now(); liveFile = 0; paused = false
+    waiting = nil
     var t = steps
     func step<T>(_ code: String, _ what: String, _ block: () throws -> T) rethrows -> T {
       state = ["code": code]
@@ -796,6 +801,24 @@ final class BeanSync {
     log("bean_wifi_skip", "豆子在录音，Wi-Fi 快传要停录后用；接着用蓝牙", fields: ["recording": true, "backlog_s": owed["backlog_s"] ?? 0])
     wifiNote = ["code": "beanWifiRecording"]
     wifiEnd("done", "fail")
+  }
+
+  /// Between sessions (BeanLink's thread, finding the bean): a fast transfer waiting for BLE at asked, reopen or back
+  /// for `wifiWaitMs` ends, the page says why; the next session is an ordinary one, its wifiOff() turns a hotspot off
+  func wifiWait() {
+    guard var step = wifiStep, let s = step["step"] as? String, ["asked", "reopen", "back"].contains(s) else { waiting = nil; return }
+    let now = io.monotonicNow()
+    guard let w = waiting, w.step == s else { waiting = (s, now); return }
+    guard now - w.since >= BeanSync.wifiWaitMs else { return }
+    waiting = nil; wifiNext = false; _ = io.wifiAsked()  // no hotspot asked for when it comes back
+    log("bean_wifi_fail", "快传停在 \(s) 等蓝牙 \(BeanSync.wifiWaitMs / 1000) s 没等到豆子，结束这次快传，之后照常用蓝牙连" +
+        (wifiOpen ? "（连回后先关热点）" : ""), "warn", ["step": "wait", "at": s, "ms": now - w.since, "hotspot": wifiOpen])
+    wifiNote = ["code": "beanWifiNoBle"]
+    switch s {
+    case "back": step["step"] = "done"; wifiStep = step  // how it ended kept
+    case "asked": wifiStep = ["step": "done", "end": "fail"]  // nothing got this tap (wifiGot is the last one's)
+    default: wifiEnd("done", "fail")
+    }
   }
 
   /// The device page's step (wifiStep), with the hotspot anew it is at since the tap (reopen: 0 the tap's own)
