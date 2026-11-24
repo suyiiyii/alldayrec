@@ -729,7 +729,7 @@ def pending(running: set[str]) -> list[str]:
         if d not in running:
             v = db.kv(f"finalized_to:{d}")
             end = db.conn().execute("SELECT max(start_ms + seconds * 1000) FROM pieces WHERE device = ?", (d,)).fetchone()[0]
-            if end > (int(dt.datetime.fromisoformat(v).timestamp() * 1000) if v else 0):
+            if end > (db.ms(v) if v else 0):
                 out.append(d)
     return out
 
@@ -775,7 +775,7 @@ def held(device: str) -> int | None:
             late_store.release(device)
             return None
         done = db.kv(f"finalized_to:{device}")
-        if done and int(dt.datetime.fromisoformat(done).timestamp() * 1000) >= h["at"]:
+        if done and db.ms(done) >= h["at"]:
             return None  # already passed: late pieces cannot be put back in front of the reader
         if "progress" not in h:
             h["progress"] = time.time()

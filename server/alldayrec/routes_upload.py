@@ -170,9 +170,8 @@ async def device_log_upload(device: str, events: list[DeviceEvent]):
 @router.get("/api/device-log")
 async def device_log(device: str, since: str, until: str | None = None):
     """A device's events, status reports and audio by the minute (audio.minutes) in [since, until)."""
-    ms = lambda t: int(dt.datetime.fromisoformat(t).timestamp() * 1000)
     return {"events": db.device_log(device, since, until), "status": db.device_statuses(device, since, until),
-            "audio": audio.minutes(device, ms(since), ms(until) if until else 1 << 62)}
+            "audio": audio.minutes(device, db.ms(since), db.ms(until) if until else 1 << 62)}
 
 
 @router.get("/api/coverage")

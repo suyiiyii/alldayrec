@@ -390,3 +390,24 @@ def test_purge_after_at_least_a_day(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         purge()
     assert db.conn().execute("SELECT state FROM trims").fetchone()[0] == "trimmed"
+
+
+def test_cli_times(tmp_path, monkeypatch, capsys):
+    """The CLI's ISO times as the instance's wall clock: plan --now says what was trimmable then (the hour, 3 days
+    old, was not yet 2 hours after it began, and was 2.5 days after), purge refuses a backup begun in the future."""
+    t0, _ = hour(tmp_path, monkeypatch)
+    v = tmp_path / "vad.jsonl"
+    v.write_text("".join(json.dumps(x) + "\n" for x in vad().values()))
+    me = T()
+    monkeypatch.setattr(tenant, "load", lambda: [me])
+
+    def cli(*argv):
+        monkeypatch.setattr(sys, "argv", ["trim", *argv, "--tenant", me.id])
+        trim.main()
+        return capsys.readouterr().out
+
+    reasons = lambda then: json.loads(cli("plan", "--vad", str(v), "--now", (t0 + then).isoformat()))["reasons"]
+    assert "trim" not in reasons(dt.timedelta(hours=2)) and "trim" in reasons(dt.timedelta(days=2.5))
+    with pytest.raises(SystemExit) as e:
+        cli("purge", "--confirm-backup", (dt.datetime.now() + dt.timedelta(hours=1)).isoformat())
+    assert e.value.code == 2 and "in the future" in capsys.readouterr().err

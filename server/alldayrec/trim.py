@@ -78,10 +78,6 @@ def copy_of(path: str) -> str:
     return str(p.with_name(f"{p.stem}.trim{p.suffix}"))
 
 
-def ms(iso: str) -> int:
-    return int(dt.datetime.fromisoformat(iso).timestamp() * 1000)
-
-
 @contextlib.contextmanager
 def lock():
     """The tenant's one apply or purge (or seal adopt) at a time (another process's: leftovers() would take the copy
@@ -100,7 +96,7 @@ def candidates(now_ms: int) -> dict[str, dict]:
     for r in c.execute("SELECT device, start_ms, seconds, path, pos, size, n, received_ms FROM pieces ORDER BY path, pos"):
         out.setdefault(r["path"], {"path": r["path"], "rows": []})["rows"].append(r)
     done = {r[0] for r in c.execute("SELECT path FROM trims WHERE state NOT IN ('writing', 'abandoned')")}  # a crash's: done again
-    finalized = {k.removeprefix("finalized_to:"): ms(at) for k, v in c.execute("SELECT key, value FROM kv WHERE key LIKE 'finalized_to:%'")
+    finalized = {k.removeprefix("finalized_to:"): db.ms(at) for k, v in c.execute("SELECT key, value FROM kv WHERE key LIKE 'finalized_to:%'")
                  if (at := json.loads(v))}  # null: not yet
     for path, h in out.items():
         rows = h["rows"]
@@ -141,7 +137,7 @@ def keep(h: dict, vad: dict) -> list:
     was given (one came, or a longer resend replaced one, since: its audio may differ)."""
     pad = TRIM_PAD_S * 1000
     lo, hi = h["lo"] - pad, h["hi"] + pad
-    said = [[ms(a), ms(b)] for a, b in db.conn().execute(
+    said = [[db.ms(a), db.ms(b)] for a, b in db.conn().execute(
         "SELECT start, \"end\" FROM sentences WHERE source = ? AND start < ? AND \"end\" > ?",
         (h["device"], dt.datetime.fromtimestamp(hi / 1000).isoformat(), dt.datetime.fromtimestamp(lo / 1000).isoformat()))]
     near = union([[a - pad, b + pad] for a, b in vad["speech"] + said])
@@ -471,14 +467,14 @@ def main():
         db.init()
     else:
         db.open_db(Path(o.db), Path(o.recordings))
-    now_ms = ms(o.now) if o.now else int(time.time() * 1000)
+    now_ms = db.ms(o.now) if o.now else int(time.time() * 1000)
     if o.cmd == "vad":
         return vad(tuple(map(int, o.shard.split("/"))), now_ms, days=set(o.day) if o.day else None)
     if o.cmd == "plan":
         return print(json.dumps(report(plan(load_vad(o.vad), now_ms, o.allow_unscened)), ensure_ascii=False))
     with lock():
         if o.cmd == "purge":
-            backup = ms(o.confirm_backup)
+            backup = db.ms(o.confirm_backup)
             if backup > time.time() * 1000:
                 a.error("--confirm-backup is in the future")
             return print(json.dumps(purge(int(time.time() * 1000), backup, o.yes)))

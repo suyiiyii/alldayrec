@@ -58,7 +58,7 @@ RETRY_S = (60, 3600)  # a failed part's wait, doubling up to the last
 
 
 def since_ms() -> int:
-    return int(dt.datetime.fromisoformat(os.environ["SOUND_SINCE"]).timestamp() * 1000)
+    return db.ms(os.environ["SOUND_SINCE"])
 
 
 def check():
@@ -393,7 +393,6 @@ def main():
     else:
         from pathlib import Path
         db.open_db(Path(o.db), Path(o.recordings) if o.recordings else None)
-    ms = lambda s: int(dt.datetime.fromisoformat(s).timestamp() * 1000)
     models = o.model or names()
     if not models or any(n not in MODELS for n in models):
         a.error(f"--model or SOUND_MODEL: one or more of {', '.join(MODELS)}")
@@ -409,7 +408,7 @@ def main():
         infer.fetch(infer.DIR, skip)
         infer.check(infer.DIR, skip)
     print(json.dumps({"models": [model_id(n) for n in models],
-                      "done_s": round(backfill(models, ms(o.since), ms(o.until) if o.until else int(time.time() * 1000)))}))
+                      "done_s": round(backfill(models, db.ms(o.since), db.ms(o.until) if o.until else int(time.time() * 1000)))}))
 
 
 if __name__ == "__main__":

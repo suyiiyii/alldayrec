@@ -149,7 +149,7 @@ def put(device: str, since_ms: int, offset: float | None, capture: float | None 
 
 
 def _ms(s: str) -> int:
-    return int(s) if s.lstrip("-").isdigit() else int(dt.datetime.fromisoformat(s).timestamp() * 1000)
+    return int(s) if s.lstrip("-").isdigit() else db.ms(s)
 
 
 def main(argv=None, err=None):

@@ -432,7 +432,7 @@ def replace_sentences(c: sqlite3.Connection, lo: str, hi: str, rows: list[dict],
 
 
 def ms(s: str) -> int:
-    """A row's start or end (iso) as seg_emb holds it, unix ms."""
+    """An ISO time (a row's start or end, a kv value, a CLI argument) as unix ms, truncated: as seg_emb holds it."""
     return int(dt.datetime.fromisoformat(s).timestamp() * 1000)
 
 
@@ -1080,7 +1080,7 @@ def first_bind(device: str) -> int:
     c = conn()
     at = c.execute("""SELECT at FROM device_log WHERE device = ? AND src != 'rec' AND at IS NOT NULL
                         AND json_extract(data, '$.kind') = 'connect' ORDER BY at LIMIT 1""", (device,)).fetchone()
-    v = (int(dt.datetime.fromisoformat(at[0]).timestamp() * 1000) if at else
+    v = (ms(at[0]) if at else
          c.execute("SELECT min(start_ms) FROM pieces WHERE device = ?", (device,)).fetchone()[0])
     if v is None:
         return int(time.time() * 1000)
