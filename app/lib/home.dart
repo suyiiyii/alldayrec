@@ -107,7 +107,13 @@ class Home extends StatefulWidget {
   State<Home> createState() => _HomeState();
 }
 
-class _HomeState extends State<Home> with WidgetsBindingObserver {
+class _HomeState extends State<Home> with WidgetsBindingObserver, FastProgress {
+  @override
+  Map get fastStatus => status;
+  @override
+  set fastStatus(Map s) => status = s;
+  @override
+  void fastOver() => Recorder.status().then((s) => mounted ? setState(() => status = s) : null);
   Settings? settings;
   Map status = fakeStatus.isEmpty ? {} : cannedStatus(fakeStatus);
   String note = '';
@@ -151,7 +157,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       if (s['running'] != true && s['uploading'] != true && (s['pending'] ?? 0) > 0 && settings?.token.isNotEmpty == true) {
         await Recorder.upload();
       }
-      if (mounted) setState(() => status = s);
+      if (mounted) {
+        setState(() => status = s);
+        fastFor(s);  // a fast transfer: the chip and the panel every [fastEvery], as the device page
+      }
       // the BLE recorder records by itself: with it as the source the link just runs, no start/stop (a failed start,
       // e.g. a permission still to grant, is tried again every 30 s)
       if (ble && !Recorder.hold && s['dfuBusy'] != true && s['running'] != true && settings!.token.isNotEmpty &&

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:live_record/home.dart';
 import 'package:live_record/l10n/app_localizations.dart';
 import 'package:live_record/l10n/app_localizations_en.dart';
 import 'package:live_record/l10n/app_localizations_zh.dart';
@@ -88,7 +90,9 @@ void main() {
   double? bar(WidgetTester tester) =>  // the sync section's bar (the stat tiles have theirs)
       tester.widget<LinearProgressIndicator>(find.byWidgetPredicate((w) => w is LinearProgressIndicator && w.minHeight == 8)).value;
   bool on() => step != null && step!['step'] != 'done';
-  Future<void> open(WidgetTester tester, {Map<String, Object?>? at = const {'step': 'transfer'}, Locale locale = const Locale('en')}) async {
+  Future<void> open(WidgetTester tester, {Map<String, Object?>? at = const {'step': 'transfer'}, Locale locale = const Locale('en'),
+      Widget page = const Scaffold(body: RecorderPage(onSource: _noop))}) async {
+    SharedPreferences.setMockInitialValues({'server': 'http://127.0.0.1:1', 'source': 'ble'});
     calls = [];
     step = at;
     note = null;
@@ -111,13 +115,43 @@ void main() {
         return {'wifi': on(), 'wifiStep': step, 'wifiNote': note, 'syncDone': d, 'syncTotal': t, 'sync': sync(d, t)};
       }
       if (call.method == 'beanWifi') { step = {'step': 'asked'}; return 'ok'; }
+      if (call.method == 'version' || call.method == 'deviceName') return 'x';
+      if (call.method == 'permissions') return <String, Object>{};
       return null;
     });
     await tester.pumpWidget(MaterialApp(locale: locale, localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales, home: const Scaffold(body: RecorderPage(onSource: _noop))));
+        supportedLocales: AppLocalizations.supportedLocales, home: page));
     await tester.pump();
     calls.clear();
   }
+
+  // the owner, 11-23: the home page's chip too, not every 2 s; the same reads, and only while the transfer runs
+  testWidgets('the home page\'s chip: 0.05 s while the transfer runs, 2 s before and after', (tester) async {
+    await open(tester, at: null, page: const Home());
+    await tester.pump(const Duration(seconds: 4));
+    expect(count('progress'), 0);  // no transfer: the 2 s status only
+    expect(count('status'), 2);
+    step = {'step': 'transfer'};
+    await tester.pump(const Duration(seconds: 2));  // the status that finds it
+    await tester.pump();
+    calls.clear();
+    for (var i = 0; i < 40; i++) { await tester.pump(fastEvery); }
+    expect(count('progress'), 40);
+    expect(count('status'), 1);
+    expect(find.descendant(of: find.byType(ActionChip), matching: find.text('3.91 MB')), findsOneWidget);  // done 4000 KB after 40 reads
+    await tester.pump(fastEvery);
+    expect(find.descendant(of: find.byType(ActionChip), matching: find.text('4.00 MB')), findsOneWidget);  // 0.05 s later: 4100 KB
+
+    step = {'step': 'done', 'end': 'all', 's': 45, 'ms': 2000};
+    await tester.pump(fastEvery);
+    await tester.pump();
+    calls.clear();
+    await tester.pump(const Duration(seconds: 4));
+    expect(count('progress'), 0);  // over: back to the 2 s status
+    expect(count('status'), 2);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));  // timers gone with the page
+  });
 
   testWidgets('0.05 s while the transfer runs, then 2 s again', (tester) async {
     await open(tester);
