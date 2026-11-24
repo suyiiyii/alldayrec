@@ -1940,6 +1940,12 @@ abstract class AppLocalizations {
   /// **'上次 Wi‑Fi 快传没成：没等到豆子的热点，已接着用蓝牙'**
   String get beanWifiNoHotspot;
 
+  /// No description provided for @beanWifiNoBle.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'**
+  String get beanWifiNoBle;
+
   /// No description provided for @beanWifiDenied.
   ///
   /// In zh, this message translates to:

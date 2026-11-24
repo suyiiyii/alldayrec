@@ -109,6 +109,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   /// A scan and a session, or a wait for Bluetooth. false: unbound, the thread ends.
   private func pass() -> Bool {
+    sync.wifiWait()
     guard Bean.isBean(name), prefs.string(forKey: "bleName") == name else { linkState = ["code": "unbound"]; return false }
     switch radio {
     case .poweredOn: break
@@ -163,7 +164,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
     }
     scanTiming(["phase": id, "event": "registration_returned", "reason": reason, "request": known != nil, "held": held])
     var p: (CBPeripheral, String)?
-    while p == nil && on && poweredOn && prefs.string(forKey: "bleName") == name && mono() - t0 < budget { p = found.poll(1) }
+    while p == nil && on && poweredOn && prefs.string(forKey: "bleName") == name && mono() - t0 < budget { sync.wifiWait(); p = found.poll(1) }
     // time up, or an app suspended past it woken by the request completing: what woke it comes in now
     if p == nil && on && poweredOn && prefs.string(forKey: "bleName") == name { p = found.poll(1) }
     q.sync {

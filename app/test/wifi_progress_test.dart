@@ -90,6 +90,7 @@ void main() {
   double? bar(WidgetTester tester) =>  // the sync section's bar (the stat tiles have theirs)
       tester.widget<LinearProgressIndicator>(find.byWidgetPredicate((w) => w is LinearProgressIndicator && w.minHeight == 8)).value;
   bool on() => step != null && step!['step'] != 'done';
+  bool waits(Map w) => const ['asked', 'reopen', 'back'].contains(w['step']);  // Bluetooth waited for (the fake's is down)
   Future<void> open(WidgetTester tester, {Map<String, Object?>? at = const {'step': 'transfer'}, Locale locale = const Locale('en'),
       Widget page = const Scaffold(body: RecorderPage(onSource: _noop))}) async {
     SharedPreferences.setMockInitialValues({'server': 'http://127.0.0.1:1', 'source': 'ble'});
@@ -151,6 +152,47 @@ void main() {
     expect(count('status'), 2);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 3));  // timers gone with the page
+  });
+
+  // #422 review N1: the bean not back at asked, reopen or back (Bluetooth down, nothing moves): the 2 s status only, the
+  // home page's chip and the device page alike; the transfer again: 0.05 s
+  testWidgets('waiting for Bluetooth: no 0.05 s reads', (tester) async {
+    for (final page in [const Home(), const Scaffold(body: RecorderPage(onSource: _noop))]) {
+      for (final w in <Map<String, Object?>>[{'step': 'asked'}, {'step': 'reopen', 'reopen': 1}, {'step': 'back', 'end': 'all', 's': 45, 'ms': 2000}]) {
+        await open(tester, at: w, page: page);
+        await tester.pump(const Duration(seconds: 4));
+        expect(count('progress'), 0, reason: '$page $w');
+        expect(count('status'), 2, reason: '$page $w');
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 3));
+      }
+    }
+    await open(tester, at: {'step': 'transfer'}, page: const Home());
+    await tester.pump(const Duration(seconds: 2));
+    calls.clear();
+    for (var i = 0; i < 20; i++) { await tester.pump(fastEvery); }
+    expect(count('progress'), 20);
+    step = {'step': 'back', 'end': 'all', 's': 45, 'ms': 2000};  // the transfer over, Bluetooth not back: off at once
+    await tester.pump(fastEvery);
+    calls.clear();
+    await tester.pump(const Duration(seconds: 4));
+    expect(count('progress'), 0);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('Bluetooth not back for 3 minutes: said under the tile, after what it got', (tester) async {
+    await open(tester, at: {'step': 'done', 'end': 'all', 's': 45, 'ms': 2000}, locale: const Locale('zh'));
+    note = {'code': 'beanWifiNoBle'};
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('传完了：45 秒录音，用时 2 秒 · 上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'),
+        findsOneWidget);
+    step = {'step': 'done', 'end': 'fail'};
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.text('上次 Wi‑Fi 快传停在等蓝牙：豆子 3 分钟没连回来。请把豆子放到手机旁并确认它开着，连回后会接着用蓝牙同步'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('0.05 s while the transfer runs, then 2 s again', (tester) async {
@@ -217,7 +259,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('from the tap to Bluetooth back: each step in order, its bar, read at 0.05 s throughout', (tester) async {
+  testWidgets('from the tap to Bluetooth back: each step in order, its bar, 0.05 s while the bean is reached', (tester) async {
     await open(tester, at: null, locale: const Locale('zh'));
     await tester.tap(find.text('Wi‑Fi 快传'));
     await tester.pump();
@@ -233,13 +275,15 @@ void main() {
     ]) {
       step = w;
       calls.clear();
+      await tester.pump(const Duration(seconds: 2));  // the 2 s status finds a step after a wait for Bluetooth
       await tester.pump(fastEvery);
       await tester.pump();
-      expect(count('progress'), 1, reason: '$w');
+      // Bluetooth down at asked and back: the step read once at most (the read that finds it), then the 2 s status only
+      expect(count('progress'), waits(w) ? lessThanOrEqualTo(1) : greaterThan(0), reason: '$w');
       final n = now();
       seen.add(n.text);
       // the steps before the transfer: no made-up share, a moving bar; the transfer: its real bytes
-      expect(n.bar, w['step'] == 'transfer' ? closeTo(100 / 16794, 1e-9) : isNull, reason: '$w');
+      expect(n.bar, w['step'] == 'transfer' ? closeTo(done / 16794, 1e-9) : isNull, reason: '$w');
     }
     expect(seen, [
       '正在准备 Wi‑Fi 快传…', '正在让录音豆开热点…', '正在加入录音豆的 Wi‑Fi（请在系统弹窗点加入）…', '正在加入录音豆的 Wi‑Fi…（第 2 次）',
@@ -247,7 +291,7 @@ void main() {
     ]);
     expect(find.text('第 5/5 步 · 传完了：35 分钟录音，用时 16 秒'), findsOneWidget);
     step = {'step': 'done', 'end': 'all', 's': 2100, 'ms': 16000};
-    await tester.pump(fastEvery);
+    await tester.pump(const Duration(seconds: 2));  // Bluetooth back: the 2 s status
     await tester.pump();
     expect(find.textContaining(RegExp('^正在')), findsNothing);  // no step line
     expect(find.text('传完了：35 分钟录音，用时 16 秒'), findsOneWidget);
@@ -266,9 +310,10 @@ void main() {
     ]) {
       step = w;
       calls.clear();
+      await tester.pump(const Duration(seconds: 2));
       await tester.pump(fastEvery);
       await tester.pump();
-      expect(count('progress'), 1, reason: '$w');  // read at 0.05 s throughout, the reopen too
+      expect(count('progress'), waits(w) ? lessThanOrEqualTo(1) : greaterThan(0), reason: '$w');  // 0.05 s but at reopen and back
       expect(tile('Wi‑Fi 快传').onTap, isNull, reason: '$w');
       expect(tile('解除绑定').onTap, isNull, reason: '$w');
       final all = texts(), at = all.indexWhere((s) => s.startsWith('正在'));
@@ -284,7 +329,7 @@ void main() {
       '正在连回蓝牙… | 第 5/5 步 · 第 1 次重开 · 传完了：35 分钟录音，用时 30 秒',
     ]);
     step = {'step': 'done', 'end': 'all', 's': 2100, 'ms': 30000, 'reopen': 1};
-    await tester.pump(fastEvery);
+    await tester.pump(const Duration(seconds: 2));  // Bluetooth back: the 2 s status
     await tester.pump();
     expect(find.text('传完了：35 分钟录音，用时 30 秒'), findsOneWidget);
     expect(tile('Wi‑Fi 快传').onTap, isNotNull);
@@ -297,7 +342,7 @@ void main() {
     await tester.pump();
     expect(find.text('第 5/5 步 · 第 3 次重开 · 热点重开了 3 次：Wi‑Fi 传了 40 秒录音，用时 41 秒；剩下的改用蓝牙'), findsOneWidget);
     step = {...step!, 'step': 'done'};
-    await tester.pump(fastEvery);
+    await tester.pump(const Duration(seconds: 2));  // Bluetooth back: the 2 s status
     await tester.pump();
     expect(find.text('热点重开了 3 次：Wi‑Fi 传了 40 秒录音，用时 41 秒；剩下的改用蓝牙'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
@@ -318,7 +363,7 @@ void main() {
       expect(find.text('正在取回录音豆里的录音，取完再解除'), findsOneWidget, reason: '$w');
     }
     step = {'step': 'done', 'end': 'all', 's': 45, 'ms': 2000};
-    await tester.pump(fastEvery);
+    await tester.pump(const Duration(seconds: 2));  // Bluetooth back: the 2 s status (no 0.05 s reads while it is waited for)
     await tester.pump();
     expect(unbind().onTap, isNotNull);  // over: unbinding again
     await tester.pumpWidget(const SizedBox());
@@ -339,9 +384,10 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     }
     // failed after the hotspot: said on the way back too
-    await open(tester, at: {'step': 'back', 'end': 'fail'}, locale: const Locale('zh'));
+    await open(tester, locale: const Locale('zh'));
+    step = {'step': 'back', 'end': 'fail'};
     note = {'code': 'beanWifiNoSocket'};
-    await tester.pump(fastEvery);  // with the step, at once
+    await tester.pump(fastEvery);  // with the step, at once: the read that finds it
     await tester.pump();
     expect(find.text('第 5/5 步 · 上次 Wi‑Fi 快传没成：手机连上了豆子的热点，但连不上豆子；开着 VPN 的话先关掉再试'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());

@@ -26,19 +26,20 @@ class RecorderPage extends StatefulWidget {
 /// 11-23: 0.1 or 0.05 s, for it to show it goes on, and fast).
 const fastEvery = Duration(milliseconds: 50);
 
-/// The step and bytes alone from the tap to the fast transfer's end (the owner, 11-23: refresh it faster so it shows
-/// how fast it goes, and say what it is at), merged into the page's status; back to its 2 s status once it is over or
-/// the page is left.
+/// The step and bytes alone while a fast transfer reaches the bean (the owner, 11-23: refresh it faster so it shows
+/// how fast it goes, and say what it is at), merged into the page's status; back to its 2 s status once it is over,
+/// waits for Bluetooth (asked, reopen, back with BLE down: nothing moves, #422 review N1) or the page is left.
 mixin FastProgress<T extends StatefulWidget> on State<T> {
   Timer? fast;
   Map get fastStatus;
   set fastStatus(Map s);
   void fastOver();  // over: the status at once, not up to 2 s later
 
-  /// After each status read: on from the tap (a step) until the step is done.
+  /// After each status or progress read: on while the fast transfer is being read (syncSpec's reading); Bluetooth back
+  /// from a wait, it is on again with the next 2 s status.
   void fastFor(Map status) {
-    final step = (status['wifiStep'] as Map?)?['step'];
-    _fast(step != null && step != 'done');
+    final y = syncSpec(status);
+    _fast(y.phase == 'wifi' && y.reading);
   }
 
   void _fast(bool on) {
@@ -55,6 +56,7 @@ mixin FastProgress<T extends StatefulWidget> on State<T> {
     final st = fastStatus;
     setState(() => fastStatus = {...st, 'wifiStep': p['wifiStep'], 'wifiNote': p['wifiNote'], 'syncDone': p['syncDone'],
         'syncTotal': p['syncTotal'], 'sync': p['sync']});
+    fastFor(fastStatus);  // transfer to back or reopen: off at once
   }
 
   @override
@@ -193,7 +195,10 @@ class _RecorderPageState extends State<RecorderPage> with FastProgress {
     final wifiStep = st['wifiStep'] as Map?, wifi = bean && y.phase == 'wifi' ? wifiStepSpec(l, wifiStep, y.doneKb, y.totalKb) : null;
     final wifiNote = st['wifiNote'] == null ? null : nativeText(context, st['wifiNote']);
     // how it ended: what the hotspots got first (the last of them may have got nothing, its note), else why it failed
-    final wifiEnd = const ['all', 'part'].contains(wifiStep?['end']) ? wifiEndText(l, wifiStep) : wifiNote ?? wifiEndText(l, wifiStep);
+    // Bluetooth not back after it (beanWifiNoBle): what it got, then that
+    final noBle = (st['wifiNote'] as Map?)?['code'] == 'beanWifiNoBle';
+    final wifiEnd = const ['all', 'part'].contains(wifiStep?['end'])
+        ? [wifiEndText(l, wifiStep), if (noBle) wifiNote].join(' · ') : wifiNote ?? wifiEndText(l, wifiStep);
     final fetching = syncing || wifi != null;  // from a fast transfer's tap to Bluetooth back too: unbinding then strands the bean's hotspot
 
     // connection chip: what the link is doing, in one colour

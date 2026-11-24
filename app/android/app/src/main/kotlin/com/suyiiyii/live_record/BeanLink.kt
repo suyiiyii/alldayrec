@@ -349,6 +349,9 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
 
     fun start() = thread.start()
 
+    /** A fast transfer waiting for BLE that has not come back (BeanSync.wifiWait()): checked while no session runs. */
+    fun wifiWait() { if (!inSession) sync.wifiWait() }
+
     fun stop() {
         on = false
         thread.interrupt()

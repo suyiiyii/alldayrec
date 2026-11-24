@@ -183,7 +183,8 @@ class RecorderService : Service() {
         DeviceLog.start(this, "录音服务启动")
         Thread {
             while (alive) {
-                try { refresh() } catch (e: Exception) { Log.w("live-record", "notification: $e") }
+                // a fast transfer's wait for BLE timed here: the link's own thread waits on a scan up to 10 min
+                try { bean?.wifiWait(); refresh() } catch (e: Exception) { Log.w("live-record", "notification: $e") }
                 Thread.sleep(2000)
             }
         }.apply { isDaemon = true }.start()
