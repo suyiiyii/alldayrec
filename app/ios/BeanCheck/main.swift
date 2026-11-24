@@ -755,6 +755,23 @@ do {
   check(bean.transfers.count, 1, "all of it here: nothing more over BLE")
 }
 
+/// Over Wi-Fi the widest hole first (11-24): an older file lacking only its first 200 units, a newer one 2500 units from
+/// 500. The bean sends to the end of each, so the newer one goes first, from 500, and the older from 0 after it.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, b = (t0 - 300_000) / 1000
+  bean.list(a, 60_000); bean.list(b, 60_000); bean.wifiAsk = true
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":3000,\"r\":0,\"h\":[[200,3000]],\"p\":[]},\"\(b)\":{\"a\":\(b * 1000),\"t\":3000,\"r\":0,\"h\":[[0,500]],\"p\":[]}}"
+    .write(to: state, atomically: true, encoding: .utf8)
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.onTransfer = { file, from, _ in bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+  bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [[b, 500, 0], [a, 0, 0]])
+}
+
 /// BLE not back for `wifiWaitMs` while a fast transfer waits for it (#422 review N1): at back, reopen or asked the step
 /// ends (back: how it ended kept), the page says why, a device_log line; the next session an ordinary one, the hotspot
 /// off (1A/02) and no new one.
@@ -1073,7 +1090,8 @@ do {
 
 /// Over Wi-Fi a hole before a long stretch the phone has (11-11 14:01: a 6 h file mostly read live, 589,543 of 677,496
 /// units it sent the phone had): read through, one socket (11-20 10:13: the bean answered nothing on a second one and the
-/// fast transfer ended), each hole written once. What the phone had is counted apart.
+/// fast transfer ended), each hole written once. The widest hole first (11-24: a hotspot sends for seconds only), then the
+/// file again from its first. What the phone had is counted apart.
 do {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -1089,13 +1107,13 @@ do {
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: chunks, io: bean)
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("都取到了"), true, again.description)
-  check(bean.transfers, [[a, 0, 0]], "one read, through 1000..35,000 and 36,000..37,000 (had)")
+  check(bean.transfers, [[a, 37_000, 0], [a, 0, 0]], "the widest hole, then one read through 1000..35,000 and 36,000..40,000 (had)")
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }.map(seqOf)
   check(got.count, 5000, "each hole once")
   check(Set(got), Set(Array(0..<1000) + Array(35_000..<36_000) + Array(37_000..<n)), "the holes")
   let done = bean.logFields[bean.logs.firstIndex { $0.0 == "bean_wifi_done" }!]
   check(done["new_s"] as? Int64, 100, "5,000 units the phone lacked")
-  check(done["dupes"] as? Int, 35_000, "the stretches the phone had")
+  check(done["dupes"] as? Int, 38_000, "the stretches the phone had")
 }
 
 /// The bean goes on with the file before, behind the next file's header (#318 review): those units carry no file and
@@ -1106,7 +1124,7 @@ do {
   let bean = FakeBean(t0)
   let a = (t0 - 1_000_000) / 1000, b = (t0 - 100_000) / 1000, n: Int64 = 40_000
   bean.list(a, n * 20); bean.list(b, 60_000); bean.wifiAsk = true
-  let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[1000, n]], "p": [[Int64]]()] as [String: Any]]
+  let state = ["\(a)": ["a": a * 1000, "t": n, "r": 0, "h": [[4000, n]], "p": [[Int64]]()] as [String: Any]]  // wider than b: first
   try! JSONSerialization.data(withJSONObject: state).write(to: dir.appendingPathComponent("state.json"))
   bean.onTransfer = { file, from, _ in
     let units: Int64 = file == a ? n : 3000
@@ -1122,7 +1140,7 @@ do {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.transfers, [[a, 0, 0], [b, 0, 0], [b, 0, 0]], "a's hole over Wi-Fi, b over Wi-Fi refused, then b over BLE")
   let got = queue(chunks).flatMap { packets($0).dropFirst(2) }
-  check(got.count, 1000 + 3000, "a's hole and b, nothing else")
+  check(got.count, 4000 + 3000, "a's hole and b, nothing else")
   check(got.filter { $0[5] == UInt8(b % 251) }.map(seqOf), Array(0..<3000), "b's own audio, each unit once")
   check(got.allSatisfy { $0[5] == UInt8(a % 251) || $0[5] == UInt8(b % 251) }, true, "no noise")
 }

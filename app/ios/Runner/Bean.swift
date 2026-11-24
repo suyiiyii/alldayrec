@@ -971,10 +971,27 @@ final class BeanSync {
     if caught == 0 { caughtSince = io.now() }
     let left = lacking(p)
     syncTotalKb = (caught + left) * Int64(Bean.unit) / 1024; syncDoneKb = caught * Int64(Bean.unit) / 1024
-    let id = p[0].id, f = files[id], from = f.flatMap(gap) ?? 0
+    let (id, from) = overWifi ? widest(p) : (p[0].id, files[p[0].id].flatMap(gap) ?? 0), f = files[id]
     // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
     // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
     return Xfer(id, false, (f?.total ?? 0) < 0 && from > 0 ? (f!.fromStart ? 0 : from - 1) : from)
+  }
+
+  /// Over Wi-Fi the bean sends on to the file's end, units the phone has too (header()): the file and unit the widest hole
+  /// of these begins at, the older on a tie (11-24: each hotspot went on an old file's first 4 s, cover()'s margin, then
+  /// 6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed.
+  private func widest(_ p: [(id: Int64, ms: Int64)]) -> (Int64, Int64) {
+    var best = (p[0].id, files[p[0].id].flatMap(gap) ?? 0), most: Int64 = 0
+    for e in p {
+      guard let f = files[e.id] else { if e.ms / Bean.frameMs > most { most = e.ms / Bean.frameMs; best = (e.id, 0) }; continue }
+      let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs
+      var at: Int64 = 0
+      for r in f.have + [(n, n)] {
+        if r.0 - at > most { most = r.0 - at; best = (e.id, at) }
+        at = max(at, r.1)
+      }
+    }
+    return best
   }
 
   /// What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
