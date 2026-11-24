@@ -527,7 +527,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                     if (xfer != null) { flush(); xfer = null; throw Again("Wi-Fi asked for: the transfer stops") }
                 }
             }
-            if (xfer == null && wifiNext) { wifiNext = false; wifi() }
+            // nor Wi-Fi before the first coverage: it would send what the server has (the review of #428); a failed one is heard
+            if (xfer == null && wifiNext && !(asking && !heard)) { wifiNext = false; wifi() }
             if (xfer == null && io.now() >= quietUntil) {
                 if (needList || recording && listing.open == 0L && io.now() - listedAt > 10_000) listing = list()
                 if (!asking && io.now() - coverAt >= COVER_MS) askCover()
@@ -537,7 +538,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 // link's thread held up to 10 s by it twice, iOS then suspended the app)
                 val x = when {
                     recording && open != 0L && io.now() >= liveAgain -> plan(open)
-                    recording || asking && !heard -> null
+                    recording || wifiNext || asking && !heard -> null
                     else -> backlog()
                 }
                 if (x != null) begin(x) else state = say("beanIdle")
@@ -946,9 +947,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
 
     /** Over Wi-Fi the bean sends on to the file's end, units the phone has too (header()): the file and unit the widest hole
      *  of these begins at, the older on a tie (11-24: each hotspot went on an old file's first 4 s, cover()'s margin, then
-     *  6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed. */
-    private fun widest(p: List<Pair<Long, Long>>): Pair<Long, Long> {
-        var best = p.first().first to (files[p.first().first]?.let(::gap) ?: 0L)
+     *  6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed.
+     *  None, no hole but margins (hole() has one in a file of unknown length): those are BLE's (backlog()). */
+    private fun widest(p: List<Pair<Long, Long>>): Pair<Long, Long>? {
+        var best: Pair<Long, Long>? = null
         var most = 0L
         for ((id, ms) in p) {
             val f = files[id]
@@ -1002,8 +1004,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         // holes first, margins last (hole()): on BLE once no file has a hole, the bean idle; never over Wi-Fi (on to the end)
         val real = p.firstOrNull { (id, _) -> files[id]?.let { hole(it) != null } ?: true }
         if (overWifi && real == null) return null
-        val (id, from) = if (overWifi) widest(p) else real?.let { (id, _) -> id to (files[id]?.let(::hole) ?: 0L) }
-            ?: (p.first().first to (files[p.first().first]?.let(::gap) ?: 0L))
+        val (id, from) = (if (overWifi) widest(p) else real?.let { (id, _) -> id to (files[id]?.let(::hole) ?: 0L) }
+            ?: (p.first().first to (files[p.first().first]?.let(::gap) ?: 0L))) ?: return null
         val f = files[id]
         // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
         // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)

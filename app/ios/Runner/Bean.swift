@@ -557,7 +557,8 @@ final class BeanSync {
             if xfer != nil { flush(); xfer = nil; throw Again(description: "Wi-Fi asked for: the transfer stops") }
           }
         }
-        if xfer == nil && wifiNext { wifiNext = false; try wifi() }
+        // nor Wi-Fi before the first coverage: it would send what the server has (the review of #428); a failed one is heard
+        if xfer == nil && wifiNext && !(asking && !heard) { wifiNext = false; try wifi() }
         if xfer == nil && io.now() >= quietUntil {
           if needList || recording && listing.open == 0 && io.now() - listedAt > 10_000 { listing = try list() }
           if !asking && io.now() - coverAt >= BeanSync.coverMs { askCover() }
@@ -565,7 +566,7 @@ final class BeanSync {
           let open = listing.open
           // the backlog waits for the first coverage (what the server has is not read), live does not (11-24: the link's
           // thread held up to 10 s by it twice, iOS then suspended the app)
-          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording || asking && !heard ? nil : backlog()
+          let x: Xfer? = recording && open != 0 && io.now() >= liveAgain ? plan(open) : recording || wifiNext || asking && !heard ? nil : backlog()
           if let x { try begin(x) } else { state = ["code": "beanIdle"] }
         }
         let quiet = quietUntil - io.now()
@@ -996,7 +997,9 @@ final class BeanSync {
     // holes first, margins last (hole()): on BLE once no file has a hole, the bean idle; never over Wi-Fi (on to the end)
     let real = p.first { e in files[e.id].map { hole($0) != nil } ?? true }
     if overWifi && real == nil { return nil }
-    let (id, from) = overWifi ? widest(p) : real.map { ($0.id, files[$0.id].flatMap(hole) ?? 0) } ?? (p[0].id, files[p[0].id].flatMap(gap) ?? 0)
+    guard let w = overWifi ? widest(p) : real.map({ ($0.id, files[$0.id].flatMap(hole) ?? 0) }) ?? (p[0].id, files[p[0].id].flatMap(gap) ?? 0)
+    else { return nil }
+    let (id, from) = w
     let f = files[id]
     // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
     // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
@@ -1006,8 +1009,9 @@ final class BeanSync {
   /// Over Wi-Fi the bean sends on to the file's end, units the phone has too (header()): the file and unit the widest hole
   /// of these begins at, the older on a tie (11-24: each hotspot went on an old file's first 4 s, cover()'s margin, then
   /// 6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed.
-  private func widest(_ p: [(id: Int64, ms: Int64)]) -> (Int64, Int64) {
-    var best = (p[0].id, files[p[0].id].flatMap(gap) ?? 0), most: Int64 = 0
+  /// None, no hole but margins (hole() has one in a file of unknown length): those are BLE's (backlog()).
+  private func widest(_ p: [(id: Int64, ms: Int64)]) -> (Int64, Int64)? {
+    var best: (Int64, Int64)?, most: Int64 = 0
     for e in p {
       guard let f = files[e.id] else { if e.ms / Bean.frameMs > most { most = e.ms / Bean.frameMs; best = (e.id, 0) }; continue }
       let n = f.total >= 0 ? f.total : e.ms / Bean.frameMs

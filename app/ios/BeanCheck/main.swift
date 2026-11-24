@@ -2189,4 +2189,53 @@ do {
   check(bean.transfers, [[b, 0, 0]], "a's margins not over Wi-Fi")
 }
 
+/// Wi-Fi waits for the first coverage too (the review of #428: tapped while it was asked, the hotspot went on a file the
+/// server had whole): nothing read meanwhile; once it is in, nothing over Wi-Fi, then on BLE its length only, off the bean.
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  bean.holdCover = true
+  let n: Int64 = 3000, ms = n * 20, a = (t0 - 3_000_000) / 1000
+  bean.list(a, ms)
+  bean.cover = { _, _ in (a * 1000 - 1000, [(a * 1000 - 5000, a * 1000 + ms + 5000)]) }
+  bean.onTransfer = { file, from, _ in
+    check(bean.onWifi, false, "nothing over Wi-Fi: the server has it")
+    bean.header(file, n * Int64(Bean.unit)); bean.units(file, Array(from..<n), last: n - 1, ms: 1); bean.complete(file)
+  }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.confirmed = { sync.deletable }
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 5)  // tapped while it is asked
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [], "nothing read while the coverage is asked")
+  bean.coverWork.forEach { $0() }; bean.coverWork = []
+  for _ in 0..<3 { bean.script = Array(repeating: {}, count: 20); try? sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.transfers, [[a, n - 1, 0]], "on BLE its length only")
+  check(bean.deleted, [a])
+}
+
+/// Over Wi-Fi no margins of a file of unknown length either (the review of #428: hole() has one in it always, so Wi-Fi
+/// went on the oldest file from its start): a and u lack only the margins the server has; nothing over Wi-Fi.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json")
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000, u = (t0 - 300_000) / 1000
+  bean.list(a, 60_000); bean.list(u, 60_000)
+  try! "{\"\(a)\":{\"a\":\(a * 1000),\"t\":3000,\"r\":0,\"h\":[[200,2800]],\"p\":[]},\"\(u)\":{\"a\":\(u * 1000),\"t\":-1,\"r\":0,\"h\":[[200,2800]],\"p\":[]}}"
+    .write(to: state, atomically: true, encoding: .utf8)
+  bean.cover = { _, _ in (a * 1000 - 1000, [(a * 1000, a * 1000 + 60_000), (u * 1000, u * 1000 + 60_000)]) }
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.onTransfer = { file, from, _ in
+    guard bean.onWifi else { bean.script.insert({ throw BeanSync.Gone("link dropped") }, at: 0); return }  // BLE: the coverage only
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 5)
+  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  bean.transfers = []; bean.wifiAsk = true; bean.script = Array(repeating: {}, count: 40)
+  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(again.description.contains("都取到了"), true, again.description)
+  check(bean.transfers, [], "margins left to BLE")
+}
+
 print("bean check: all passed")
