@@ -1544,6 +1544,56 @@ class BeanTest {
         assertEquals("all of it here: nothing more over BLE", 1, bean.transfers.size)
     }
 
+    /** Over Wi-Fi the widest hole first (11-24): an older file lacking only its first 200 units, a newer one 2500 units
+     *  from 500. The bean sends to the end of each, so the newer one goes first, from 500, and the older from 0 after it. */
+    @Test fun wifiWidestHoleFirst() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val a = wt0 / 1000 - 600; val b = wt0 / 1000 - 300
+        bean.listed[b] = 60_000
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":3000,"r":0,"h":[[200,3000]]},"$b":{"a":${b * 1000},"t":3000,"r":0,"h":[[0,500]]}}""")
+        bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(again.message, "都取到了" in again.message!!)
+        assertEquals(listOf(Triple(b, 500L, false), Triple(a, 0L, false)), bean.transfers)
+    }
+
+    /** Over Wi-Fi holes wider the later in the file (#426 review): each read to its end brings the widest, none is a try,
+     *  so all of them come over Wi-Fi, none left to BLE. */
+    @Test fun wifiWiderHolesLaterNoTries() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val a = wt0 / 1000 - 600
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":3000,"r":0,"h":[[100,200],[400,500],[800,900],[1300,1400]]}}""")
+        bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(again.message, "都取到了" in again.message!!)
+        assertEquals(listOf(1400L, 900L, 500L, 200L, 0L).map { Triple(a, it, false) }, bean.transfers)
+        assertFalse("no read a try", bean.logs.any { "仍不全" in it.second })
+    }
+
+    /** A file of unknown length over Wi-Fi from its widest hole, after a unit the phone has (backlog()), and nothing after
+     *  it (code 3, #426 review): as long as that unit and the ones before, not one short. */
+    @Test fun wifiCode3LengthAfterUnitHad() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val a = wt0 / 1000 - 600
+        bean.listed[a] = 1000L * 20
+        File(dir, "state.json").writeText("""{"$a":{"a":${a * 1000},"t":-1,"r":0,"h":[[0,100],[200,300]]}}""")
+        bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        var total = 0L
+        bean.onTransfer = { file, from, _ ->
+            if (from == 299L) bean.header(file, 300L * Bean.UNIT, code = 3) else {
+                total = sync.files[a]!!.total
+                bean.header(file, 300L * Bean.UNIT); bean.units(file, (from until 300L).toList(), last = 299, ms = 1); bean.complete(file)
+            }
+        }
+        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(again.message, "都取到了" in again.message!!)
+        assertEquals(listOf(Triple(a, 299L, false), Triple(a, 100L, false)), bean.transfers)
+        assertEquals("its length after code 3", 300L, total)
+    }
+
     /** BLE not back for WIFI_WAIT_MS while a fast transfer waits for it (#422 review N1): at back, reopen or asked the
      *  step ends (back: how it ended kept), the page says why, a device_log line; the next session an ordinary one, the
      *  hotspot off (1A/02) and no new one. */

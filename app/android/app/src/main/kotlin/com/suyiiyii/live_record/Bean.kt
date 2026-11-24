@@ -922,6 +922,25 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private fun lacking(p: List<Pair<Long, Long>>) =
         p.sumOf { (id, ms) -> files[id]?.let { f -> maxOf(0L, (if (f.total >= 0) f.total else ms / Bean.FRAME_MS) - covered(f)) } ?: (ms / Bean.FRAME_MS) }
 
+    /** Over Wi-Fi the bean sends on to the file's end, units the phone has too (header()): the file and unit the widest hole
+     *  of these begins at, the older on a tie (11-24: each hotspot went on an old file's first 4 s, cover()'s margin, then
+     *  6 h of units had, while 4.5 h lacking waited in the newest two). A file of unknown length is as long as listed. */
+    private fun widest(p: List<Pair<Long, Long>>): Pair<Long, Long> {
+        var best = p.first().first to (files[p.first().first]?.let(::gap) ?: 0L)
+        var most = 0L
+        for ((id, ms) in p) {
+            val f = files[id]
+            if (f == null) { if (ms / Bean.FRAME_MS > most) { most = ms / Bean.FRAME_MS; best = id to 0L }; continue }
+            val n = if (f.total >= 0) f.total else ms / Bean.FRAME_MS
+            var at = 0L
+            for (r in f.have + listOf(longArrayOf(n, n))) {
+                if (r[0] - at > most) { most = r[0] - at; best = id to at }
+                at = maxOf(at, r[1])
+            }
+        }
+        return best
+    }
+
     /** What of the bean's recording this phone lacks (the owner, 11-07: the app said 已同步 with 42 min on the bean, held
      *  back by the live page), in the status and its reports: `backlog_s`, how long until it is all here at the rate it
      *  went down lately (`backlog_eta_s`) and why it waits (`backlog_held`: `live`, the live
@@ -958,9 +977,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         if (caught == 0L) caughtSince = io.now()
         val left = lacking(p)
         syncTotalKb = (caught + left) * Bean.UNIT / 1024; syncDoneKb = caught * Bean.UNIT / 1024
-        val id = p.first().first
+        val (id, from) = if (overWifi) widest(p) else p.first().first to (files[p.first().first]?.let(::gap) ?: 0L)
         val f = files[id]
-        val from = f?.let(::gap) ?: 0
         // read live only, its length never came (11-19: code 2 four times, asked where the phone's units end; the review:
         // past its end): from the phone's last unit, so the header says it, and one the phone has whole is so (deleted then)
         return Xfer(id, false, if ((f?.total ?: 0) < 0 && from > 0) (if (f!!.fromStart) 0 else from - 1) else from)
@@ -1164,7 +1182,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 io.trace("file", mapOf("file" to x.file, "key" to Bean.hex(h.key!!), "nonce" to Bean.hex(h.nonce), "size" to h.size))
             }
             3 -> if (x.live) failed(x, "code 3")  // the file being recorded goes on: never its end
-                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
+                else { file(x.file, x.file * 1000).let { if (it.total < 0) it.total = maxOf(if (has(it, x.from)) x.from + 1 else x.from, gap(it) ?: 0) }; xfer = null; save() }  // nothing after `from`: all of it is here
             // 11-08: live had 14,340 units, the bean's file 12,000, refused past its end: its length from unit 0, not a try
             2 -> if (!x.live && x.from > 0 && file(x.file, x.file * 1000).total < 0) {
                 io.log("bean_xfer", "补传文件 ${x.file} 从单元 ${x.from} 要被拒（code 2），长度不明：从单元 0 再要一次取长度", fields = mapOf("file" to x.file, "from" to x.from))
@@ -1342,7 +1360,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             if (x.last >= 0) pendingEnd = maxOf(pendingEnd, f.at(x.last + 1))
         } else if (gap(f) == null) {
             pendingEnd = maxOf(pendingEnd, f.at(f.total))
-        } else if (!(x.cut && gap(f)!! > x.from)) {  // cut with the hole filled: not a try
+        // cut with the hole filled, or over Wi-Fi read whole to its end (holes before it: widest() picks again): not a try
+        } else if (!(x.cut && gap(f)!! > x.from) && !(overWifi && result == 0 && x.lost == 0L && x.last + 1 == f.total)) {
             if (x.units > x.dupes) f.tries = 0  // units new to the phone: only reads in a row that bring none count
             tried(x.file, f)
         }
