@@ -26,7 +26,7 @@ XCODE_UI=${XCODE_UI:-/Applications/Xcode-27.app/Contents/Developer}
 cd "$(dirname "$0")"
 E=$PWD
 W=${TMPDIR:-/tmp}/lr-uitest; R=$W/$(date +%m%d-%H%M); mkdir -p "$R"
-APP=com.suyiiyii.liverecord.uitest
+APP=$(sed -n 's/^ *LR_BUNDLE_ID *= *//p' ../Flutter/Signing.local.xcconfig 2>/dev/null | tail -1 || :); APP=${APP:-com.suyiiyii.liverecord}.uitest  # LR_BUNDLE_ID of Signing.local.xcconfig, if set
 DEV=${LR_DEVICE:?the iPhone: its identifier in xcrun devicectl list devices}
 NAME=${LR_NAME:-} FAKE= BUILD=
 while [ "${1:-}" = --build ] || [ "${1:-}" = --fake ]; do
@@ -50,7 +50,7 @@ unlocked() {
 N=0
 ui() {  # one test of RunnerUITests (testLaunch: ui Launch), VAR=value for it; its LRUI lines into run.log
   local t=$1; shift; local vars=(TEST_RUNNER_LR_NAME="$NAME" TEST_RUNNER_LR_REAL="$([ -z "$FAKE" ] && echo 1)"
-    TEST_RUNNER_LR_DAILY="${LR_DAILY:-}")
+    TEST_RUNNER_LR_DAILY="${LR_DAILY:-}" TEST_RUNNER_LR_APP="$APP")
   for v in "$@"; do vars+=("TEST_RUNNER_$v"); done
   local try rc
   for try in 1 2 3; do
