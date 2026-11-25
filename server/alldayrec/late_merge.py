@@ -354,15 +354,10 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
             s = db.summary(c["id"]) or {"conversation": c["id"]}
             # its place was made from fewer rows: not shown again if the new summary fails and the old one stays
             db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None}, t)
-            key = f"conversation_revision:{c['id']}"
-            db.put_kv(key, (db.kv(key) or 0) + 1, t)
+            db.bump_kv(f"conversation_revision:{c['id']}", t)
             db.put_kv(f"late_summary:{c['id']}", True, t)
             # Preserve the cached recap and references; regenerate once its new summaries have finished.
-            days = {c["start"][:10], c["end"][:10]} | {r["start"][:10] for r in kept}
-            for day in days:
-                if recap := db.kv(f"recap:{day}"):
-                    db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
-                    db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
+            db.stale_recaps({c["start"][:10], c["end"][:10]} | {r["start"][:10] for r in kept}, t)
         db.record_processed(t, device, subtract(remaining, bad), "late")
         if not undecodable(t, current, remaining, bad):
             t.execute("UPDATE late_spans SET status = 'done', done_ms = ?, note = NULL WHERE id = ?",

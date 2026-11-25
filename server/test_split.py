@@ -126,6 +126,8 @@ def test_split_moves_every_reference(long_conv):
     assert db.profile("Named")["src"] == [{"conv": P2, "at": iso(630)}, {"conv": A}]
     recap = db.kv("recap:2026-10-20")
     assert recap["todos"] == [{"id": moved, "conv": P2}] and recap["highlights"] == [{"conv": A}] and recap["stale"]
+    assert db.kv("recap_revision:2026-10-20") == 1
+    assert [db.kv(f"conversation_revision:{cid}") for cid in (A, P2)] == [1, 1]
     assert dict(db.conn().execute("SELECT id, conv FROM stars").fetchall()) == {"r30": A, "r630": P2}, "by its sentence's time"
     assert db.timeline(A) and not db.timeline(P2)
     assert [tuple(r) for r in db.conn().execute("SELECT device, at FROM walls")] == [(D, iso(600))]

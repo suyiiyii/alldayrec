@@ -278,17 +278,12 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
         for key, body in t.execute("SELECT key, value FROM kv WHERE key LIKE 'recap:%' OR key LIKE 'live:%'").fetchall():
             if body is not None and (new := relink(json.loads(body), cid, where, owner)) != json.loads(body):
                 db.put_kv(key, new, t)
-        for day in {c["start"][:10], c["end"][:10]}:  # a cached recap is redone once the parts' summaries are in
-            if recap := db.kv(f"recap:{day}"):
-                db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
-                db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
+        db.stale_recaps({c["start"][:10], c["end"][:10]}, t)  # a cached recap is redone once the parts' summaries are in
 
         for cut in cuts:
             t.execute("INSERT OR IGNORE INTO walls VALUES (?, ?)", (device, cut))
         for pid in ids:
-            rev = (db.kv(f"conversation_revision:{pid}") or 0) + 1
-            db.put_kv(f"conversation_revision:{pid}", rev, t)
-            db.put_kv(f"split_checked:{pid}", rev, t)
+            db.put_kv(f"split_checked:{pid}", db.bump_kv(f"conversation_revision:{pid}", t), t)
         late_store.summary_done(cid, t)  # the parts are queued here, not as late work
     for key, bs in list(T().undo.items()):  # an undo from before would restore the whole conversation's voices
         if any(b.get("conv") == cid for b in bs):
@@ -357,12 +352,8 @@ def unsplit(parts: list[dict], walls: list[str], undone: list[str], revisions: l
             # its place was the early part's (late_merge.merge kept it): not shown again if the new summary fails
             s = db.summary(c["id"]) or {"conversation": c["id"]}
             db.put_summary({**{k: v for k, v in s.items() if k != "place"}, "status": "pending", "error": None}, t)
-            rev = (db.kv(f"conversation_revision:{c['id']}") or 0) + 1
-            db.put_kv(f"conversation_revision:{c['id']}", rev, t)
-            for day in {c["start"][:10], c["end"][:10]}:
-                if recap := db.kv(f"recap:{day}"):
-                    db.put_kv(f"recap:{day}", {**recap, "stale": True}, t)
-                    db.put_kv(f"recap_revision:{day}", (db.kv(f"recap_revision:{day}") or 0) + 1, t)
+            db.bump_kv(f"conversation_revision:{c['id']}", t)
+            db.stale_recaps({c["start"][:10], c["end"][:10]}, t)
     for key, bs in list(T().undo.items()):  # an undo on either side would restore voices from before the merge
         if any(b.get("conv") in gone or b.get("conv") in grown for b in bs):
             del T().undo[key]

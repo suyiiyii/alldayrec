@@ -1058,6 +1058,21 @@ def put_kv(key: str, value, c: sqlite3.Connection | None = None):
     (c or conn()).execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (key, json.dumps(value, ensure_ascii=False)))
 
 
+def bump_kv(key: str, c: sqlite3.Connection | None = None) -> int:
+    """Add one to a counter in kv (absent counts as 0) and return it."""
+    n = (kv(key) or 0) + 1
+    put_kv(key, n, c)
+    return n
+
+
+def stale_recaps(days, c: sqlite3.Connection | None = None):
+    """Mark each day's cached recap stale (it is redone once its summaries are in) and bump its revision."""
+    for day in days:
+        if recap := kv(f"recap:{day}"):
+            put_kv(f"recap:{day}", {**recap, "stale": True}, c)
+            bump_kv(f"recap_revision:{day}", c)
+
+
 # device log and status history
 
 def put_device_log(device: str, events: list[dict]):
