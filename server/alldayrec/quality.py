@@ -47,7 +47,7 @@ def since_ms() -> int:
     """QUALITY_SINCE, or the midnight before the loop first ran (kept as quality_since: a device's backlog of yesterday
     is still scored today), on an hour."""
     if s := os.environ.get("QUALITY_SINCE"):
-        return int(dt.datetime.fromisoformat(s).timestamp() * 1000) // H * H
+        return db.ms(s) // H * H
     if (v := db.kv("quality_since")) is None:
         db.put_kv("quality_since", v := int(dt.datetime.combine(dt.date.today(), dt.time()).timestamp() * 1000))
     return v
