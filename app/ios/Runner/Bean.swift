@@ -70,11 +70,15 @@ enum Bean {
 
   /// A frame on its way to the radio is one of `sends`, the delete of a file in `confirmed`, or the start: checked again
   /// right before the write (BeanSync.send, BeanLink.write).
-  static func allowed(_ f: [UInt8], _ confirmed: Set<Int64> = []) -> Bool {
+  /// `wifi`: over the hotspot's WebSocket, where Feishu's SDK also sends a file's 1A/0A answered (01) and ends a 1A/07
+  /// with 0x1B, no sum (wifiTransfer, wifiDone): those two there only, never over BLE.
+  static func allowed(_ f: [UInt8], _ confirmed: Set<Int64> = [], wifi: Bool = false) -> Bool {
     guard f.count >= 10, f[0] == 0x08, f[1] == 0xEE else { return false }
     let c = Int(f[5]) << 8 | Int(f[6])
     let ok = sends.contains(c) || c == deleteCmd && f.count == 14 && confirmed.contains(u32(f, 9)) || c == startCmd && f.count == 11 && f[9] == 1
-    return ok && u16(f, 7) == f.count && f[f.count - 1] == sum(f, 0, f.count - 1)
+      || wifi && c == 0x1A0A && f.count == 11 && f[9] == 1
+    let tail = f[f.count - 1] == sum(f, 0, f.count - 1) || wifi && c == 0x1A07 && f.count == 18 && f[17] == 0x1B
+    return ok && u16(f, 7) == f.count && tail
   }
 
   private static func sum(_ b: [UInt8], _ from: Int, _ to: Int) -> UInt8 { b[from..<to].reduce(0, &+) }
@@ -88,8 +92,15 @@ enum Bean {
   static func transfer(_ file: Int64, _ offset: Int64, _ realtime: Bool) -> [UInt8] {
     build(0x1A, 0x07, le32(offset) + le32(file) + [realtime ? 1 : 0])
   }
-  /// Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag.
-  static func wifiTransfer(_ file: Int64, _ offset: Int64) -> [UInt8] { build(0x1A, 0x07, le32(offset) + le32(file)) }
+  /// Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag, its
+  /// last byte 0x1B where the sum would be (Feishu's SDK, ws/soundcore's wifi_file_header, Eliqi797).
+  static func wifiTransfer(_ file: Int64, _ offset: Int64) -> [UInt8] {
+    var b = build(0x1A, 0x07, le32(offset) + le32(file))
+    b[b.count - 1] = 0x1B
+    return b
+  }
+  /// A file's 1A/0A answered, over the hotspot's WebSocket only (Feishu's SDK: on a file read whole, 600 ms before the next).
+  static func wifiDone() -> [UInt8] { build(0x1A, 0x0A, [1]) }
   /// The hotspot on, by a name it has not had (a repeated one gets an empty answer and no hotspot): its answer is its
   /// address, IPv4 reversed and the port LE; off.
   static func wifiOn(_ ssid: String, _ password: String) -> [UInt8] {
@@ -109,6 +120,17 @@ enum Bean {
   static func joinMissed(_ n: Int, applied: Int64, answered: Int64) -> String? {
     if applied < 1000 { return "beanWifiNoAsk" }
     return n == 0 && answered >= 30_000 ? "beanWifiJoinLate" : nil
+  }
+  /// The bean's BLE while a fast transfer is on (BeanLink: from the hotspot asked for to the transfer's end, `step`
+  /// BeanSync.wifiStep's; nil: none on): a disconnect, an advertisement seen, a connect. What to log of it (bean_wifi_ble),
+  /// at once, as it comes; nil off Wi-Fi, where BLE's own logs say it.
+  static func wifiBle(_ event: String, _ error: Error?, step: String?) -> (String, [String: Any])? {
+    guard let step else { return nil }
+    let e = error as NSError?
+    let what = ["disconnect": "快传期间豆子的蓝牙断开", "discover": "快传期间扫到了豆子的广播", "connect": "快传期间豆子的蓝牙又连上"][event] ?? event
+    let why = e.map { "：\($0.localizedDescription)（\($0.domain) \($0.code)）" } ?? (event == "disconnect" ? "（没有错误码：手机这边断开）" : "")
+    return (what + why + "（快传在 \(step)）", ["event": event, "step": step, "domain": e?.domain ?? NSNull(), "code": e?.code ?? NSNull(),
+                                           "error": e?.localizedDescription ?? NSNull()])
   }
   /// Deletes a file on the bean: only one in `confirmed`, the files the server has whole (BeanSync.deletable).
   static func delete(_ file: Int64, _ confirmed: Set<Int64>) throws -> [UInt8] {
@@ -327,6 +349,7 @@ final class BeanSync {
   static let tries = 3
   static let dayTries = 10  // reads of a closed file that left it short before it waits a day (tried())
   static let paceMs: Int64 = 200  // between transfers (ws/soundcore: the SDK's 200 ms)
+  static let wifiDoneMs: Int64 = 600  // over Wi-Fi after a file's 1A/0A answered, before the next 1A/07 (Feishu's SDK)
   static let restUnits: Int64 = 1500  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
   static let holdMarginMs: Int64 = 60_000  // the hold a minute before what is said now: the clocks' drift
   static let watchedGapUnits: Int64 = 3000  // the owner, 10-27: a hole of up to a minute is read first even while /live watches
@@ -1217,7 +1240,12 @@ final class BeanSync {
     switch f.cmd {
     case 0x1A07: if let x, x.key == nil { try header(x, f) }
     case 0x1A08, 0x1A12: if let x, x.key != nil { for s in try Bean.slices(p) { try unit(x, s) } }
-    case 0x1A0A: if let x, p.count < 9 || Bean.u32(p, 5) == 0 || Bean.u32(p, 5) == x.file { complete(x, p.first.map(Int.init) ?? 0) }
+    case 0x1A0A:
+      guard let x, p.count < 9 || Bean.u32(p, 5) == 0 || Bean.u32(p, 5) == x.file else { break }
+      let result = p.first.map(Int.init) ?? 0
+      complete(x, result)
+      // over Wi-Fi, a file read whole: answered, and the next asked for 600 ms on (Feishu's SDK)
+      if overWifi && result == 0 { try send(Bean.wifiDone()); quietUntil = max(quietUntil, io.now() + BeanSync.wifiDoneMs) }
     case 0x1A06:  // a new file: recording began, or the bean went on in the next file
       guard p.count >= 4 else { break }
       let open = Bean.u32(p, 0)
@@ -1548,7 +1576,7 @@ final class BeanSync {
   private func rest(_ f: F, _ from: Int64) -> Int64 { f.have.first { $0.0 > from && $0.1 - $0.0 >= BeanSync.restUnits }?.0 ?? -1 }
 
   private func send(_ frame: [UInt8]) throws {
-    guard Bean.allowed(frame, deletable) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }  // the last check before the radio
+    guard Bean.allowed(frame, deletable, wifi: overWifi) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }  // the last check before the radio
     try io.send(frame)
   }
 

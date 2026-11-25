@@ -35,14 +35,16 @@ class BeanWifiTest {
     private class Net(val joined: Boolean?, val port: Int = 0, val pin: String? = null, var udpFails: Int = 0,
                       val sendBuffer: Int? = null) : BeanWifi.Net {
         var joins = 0; var connects = 0; var leaves = 0
-        override fun join(ssid: String, password: String, ms: Long): Boolean? { joins++; return joined }
+        val calls = mutableListOf<String>()  // join, udp, connect, in order
+        override fun join(ssid: String, password: String, ms: Long): Boolean? { joins++; calls += "join"; return joined }
         override fun address() = "192.168.43.7"
         override fun connect(host: String, port: Int, ms: Int): Socket {
-            connects++
+            connects++; calls += "connect"
             pin?.let { throw BeanWifi.Pin(it) }
             return Socket().apply { sendBuffer?.let { sendBufferSize = it }; connect(InetSocketAddress(InetAddress.getLoopbackAddress(), this@Net.port)) }
         }
         override fun udp(): DatagramSocket {
+            calls += "udp"
             if (udpFails > 0) { udpFails--; throw IOException("bindSocket refused") }  // a VPN's
             return DatagramSocket().apply { close() }  // no keep-alive goes anywhere from a test
         }
@@ -64,6 +66,14 @@ class BeanWifiTest {
         assertEquals("beanWifiUnavailable", assertThrows(Bean.Fail::class.java) { wifi(net).open(endpoint) }.note)
         assertEquals(1, net.joins)
         assertTrue(logs.any { it.first == "bean_wifi_fail" && "取消" in it.second })
+    }
+
+    /** The keep-alive from the join on, before any socket (ws/soundcore, Eliqi797), once: not again for the socket. */
+    @Test fun keepAliveFromTheJoin() {
+        val net = Net(true, pin = "00")
+        assertThrows(Bean.Fail::class.java) { wifi(net).open(endpoint) }
+        assertEquals(listOf("join", "udp", "connect"), net.calls)
+        assertTrue(logs.any { it.first == "bean_wifi_join" && "UDP" in it.second })
     }
 
     @Test fun anotherCertificateEndsAtOnce() {
@@ -159,17 +169,19 @@ class BeanWifiTest {
         w.close(); bean.join(5000)
     }
 
-    /** udp() failing (bindSocket refused): the socket of that try closed, nothing kept, said once in 10 s; then the next. */
+    /** udp() failing (bindSocket refused) at the join, then for each socket's try: the socket of that try closed, nothing
+     *  kept, said once in 10 s; then the next. */
     @Test fun udpFailureClosesTheSocket() {
         val first = mutableListOf<Int>()
         val bean = thread {
             repeat(3) { serve(server) { i, _ -> first += i.read() } }  // -1: closed by the phone
             serve(server) { _, _ -> Thread.sleep(300) }
         }
-        val net = Net(true, server.localPort, udpFails = 3)
+        val net = Net(true, server.localPort, udpFails = 4)
         val w = wifi(net)
         w.open(endpoint)
         bean.join(5000)
+        assertEquals("the join's said", 1, logs.count { it.first == "bean_wifi_keepalive" && "bindSocket" in it.second })
         assertEquals("each failed try's socket closed", listOf(-1, -1, -1), first)
         assertEquals(4, net.connects)
         assertEquals("the same failure said once", 1, logs.count { it.first == "bean_wifi_socket" && "bindSocket" in it.second })

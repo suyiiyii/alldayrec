@@ -1478,8 +1478,23 @@ class BeanTest {
         assertEquals("08ee0000001a052700" + "0b" + Bean.hex("LR-1a2b3c4d".toByteArray()) + "10" + Bean.hex("0123456789abcdef".toByteArray()) + "d8",
             Bean.hex(Bean.wifiOn("LR-1a2b3c4d", "0123456789abcdef")))
         assertEquals("08ee0000001a020a001c", Bean.hex(Bean.wifiOff()))
-        assertEquals("08ee0000001a07120000000000" + "1434f06a" + "cb", Bean.hex(Bean.wifiTransfer(1_794_126_868, 0)))  // Eliqi797's request
-        assertTrue(Bean.allowed(Bean.wifiTransfer(1, 166)))
+        // Eliqi797's request, its last byte 0x1B as Feishu's SDK and ws/soundcore send it, not the sum (cb)
+        assertEquals("08ee0000001a07120000000000" + "1434f06a" + "1b", Bean.hex(Bean.wifiTransfer(1_794_126_868, 0)))
+        assertEquals("08ee0000001a0a0b0001" + "26", Bean.hex(Bean.wifiDone()))  // a file's 1A/0A answered (Feishu's SDK)
+        // over Wi-Fi only (the hotspot's WebSocket): the request ending 0x1B and the 1A/0A answer; never over BLE
+        for (f in listOf(Bean.wifiTransfer(1, 166), Bean.wifiDone())) {
+            assertFalse(Bean.allowed(f)); assertFalse(Bean.allowed(f, hotspot = true)); assertTrue(Bean.allowed(f, wifi = true))
+        }
+        val sumTail = Bean.wifiTransfer(1, 166).also { it[17] = it.copyOf(17).sum().toByte() }
+        assertTrue("the request with its sum still one of the five", Bean.allowed(sumTail) && Bean.allowed(sumTail, wifi = true))
+        val bleTail = Bean.transfer(1, 0, false).also { it[18] = 0x1B }
+        assertFalse("0x1B in place of the sum: the Wi-Fi request's 18 bytes only", Bean.allowed(bleTail, wifi = true))
+        fun made(type: Int, id: Int, vararg p: Byte) = byteArrayOf(0x08, 0xEE.toByte(), 0, 0, 0, type.toByte(), id.toByte(), (10 + p.size).toByte(), 0)
+            .plus(p).let { it + it.sum().toByte() }
+        for (p in listOf(byteArrayOf(0), byteArrayOf(2), byteArrayOf(1, 0), byteArrayOf()))
+            assertFalse("1A/0A: its 01 alone", Bean.allowed(made(0x1A, 0x0A, *p), wifi = true))
+        assertFalse("1A/0A's sum still checked", Bean.allowed(Bean.wifiDone().also { it[10] = 0x1B }, wifi = true))
+        for (cmd in listOf(0x0B87, 0x0B01, 0x1A10, 0x1A0F, 0xFF20, 0x1A05, 0x1A02)) assertFalse("$cmd over Wi-Fi", Bean.allowed(made(cmd shr 8, cmd and 255), wifi = true))
         for (f in listOf(Bean.wifiOn("x", "password1"), Bean.wifiOff())) {
             assertFalse("the hotspot only while the fast transfer asks for it", Bean.allowed(f))
             assertTrue(Bean.allowed(f, hotspot = true))
@@ -1556,6 +1571,27 @@ class BeanTest {
         val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertTrue(again.message, "都取到了" in again.message!!)
         assertEquals(listOf(Triple(b, 500L, false), Triple(a, 0L, false)), bean.transfers)
+        // each file read whole answered (1A/0A 01), the next asked for 600 ms after it (Feishu's SDK)
+        val cmd = { f: ByteArray -> (f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255) }
+        assertEquals(listOf(0x1A07, 0x1A0A, 0x1A07, 0x1A0A), bean.sent.map(cmd).filter { it == 0x1A07 || it == 0x1A0A })
+        val ack = bean.sent.indexOfFirst { cmd(it) == 0x1A0A }; val next = bean.sent.indexOfLast { cmd(it) == 0x1A07 }
+        assertArrayEquals(Bean.wifiDone(), bean.sent[ack])
+        assertTrue("${bean.sentAt[next] - bean.sentAt[ack]} ms between", bean.sentAt[next] - bean.sentAt[ack] >= BeanSync.WIFI_DONE_MS)
+        assertEquals(0x1B.toByte(), bean.sent[next].last())
+    }
+
+    /** A file's 1A/0A with a failure code over Wi-Fi: not answered (Feishu answers only a file read whole). */
+    @Test fun wifiFailedFileNotAnswered() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        bean.onTransfer = { file, from, _ ->
+            bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000).toList(), last = 2999, ms = 1)
+            bean.push(0x1A0A, byteArrayOf(2) + Bean.le32(0) + Bean.le32(file))
+        }
+        assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+        assertTrue(bean.transfers.isNotEmpty())
+        assertFalse("no answer to a failed file", bean.sent.any { it[5] == 0x1A.toByte() && it[6] == 0x0A.toByte() })
     }
 
     /** Over Wi-Fi holes wider the later in the file (#426 review): each read to its end brings the widest, none is a try,
@@ -2390,7 +2426,8 @@ class FakeBean(var now: Long) : BeanSync.Io {
 
     override fun send(frame: ByteArray) {
         assertTrue("only the five commands, a delete of a confirmed file, the start and the hotspot while asked for reach the bean",
-            Bean.allowed(frame, confirmed(), hotspot()))
+            Bean.allowed(frame, confirmed(), hotspot(), onWifi))
+        if (frame[5] == 0x1A.toByte() && frame[6] == 0x0A.toByte()) assertTrue("1A/0A answered over Wi-Fi only", onWifi)
         sent += frame; sentAt += now
         val p = frame.copyOfRange(9, frame.size - 1)
         when ((frame[5].toInt() and 255) shl 8 or (frame[6].toInt() and 255)) {

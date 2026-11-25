@@ -273,7 +273,7 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
 
     private val io = object : BeanSync.Io {
         override fun send(frame: ByteArray) {
-            wifi?.let { check(Bean.allowed(frame, sync.deletable)) { "not sent: ${Bean.hex(frame)}" }; return it.send(frame) }
+            wifi?.let { check(Bean.allowed(frame, sync.deletable, wifi = true)) { "not sent: ${Bean.hex(frame)}" }; return it.send(frame) }
             write(gatt ?: throw Gone(), frame)
         }
         override fun receive(ms: Long): ByteArray? {

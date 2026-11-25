@@ -53,6 +53,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   /// Wi-Fi fast transfer asked for (Recorder's beanWifi, the device page): BeanSync's next pass takes it
   @Shared var wifiWanted = false
   @Shared private var wifi: BeanWifi?  // while there is one, BeanSync's bytes go over it
+  private var wifiHeard = false  // on q: an advertisement of the bean logged in this fast transfer (bean_wifi_ble)
 
   /// What the link does, as a code the app words (recorder_status.dart): the session's while one runs.
   var state: [String: Any] { inSession ? sync.state : linkState }
@@ -277,7 +278,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
 
   /// To the bean's command characteristic only (never the OTA service), and only what BeanSync lets through.
   func send(_ frame: [UInt8]) throws {
-    if let w = wifi { guard Bean.allowed(frame, sync.deletable) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }; return try w.send(frame) }
+    if let w = wifi { guard Bean.allowed(frame, sync.deletable, wifi: true) else { throw Bean.Fail("not sent: \(Bean.hex(frame))") }; return try w.send(frame) }
     guard Bean.allowed(frame, sync.deletable), frame.count <= mtu - 3 else { throw Bean.Fail("not sent: \(frame.count) B") }
     guard let p = peripheral, let ch = cmd else { throw BeanSync.Gone() }
     _ = try op("write") { p.writeValue(Data(frame), for: ch, type: .withResponse) }
@@ -311,13 +312,29 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func piece() { files += 1 }
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
+    q.sync { wifiHeard = false }
     let w = BeanWifi(device: name, ssid: ssid, password: password)
     w.onStep = { [weak self] step, n in self?.sync.wifiAt(["step": step, "try": n]) }
     wifi = w  // the BLE link goes meanwhile (the bean drops it): its end must not end the session
     do { try w.open(endpoint) } catch { wifiLeave(); throw error }
   }
   func wifiLeave() { wifi?.close(); wifi = nil }
-  func wifiState() -> [String: Any] { wifi?.state() ?? [:] }
+  /// With the bean's BLE as iOS has it now: a link to it held (this app's or another's, a reconnect), its peripheral's state.
+  func wifiState() -> [String: Any] {
+    let ble = q.sync { () -> [String: Any] in
+      let known = prefs.string(forKey: "bleId").flatMap(UUID.init(uuidString:))
+      let held = central.flatMap { c in c.state != .poweredOn ? nil : known.map { id in c.retrieveConnectedPeripherals(withServices: [BeanLink.service]).contains { $0.identifier == id } } }
+      return ["ble_held": held ?? NSNull(), "ble_state": peripheral.map { $0.state.rawValue } ?? NSNull()]
+    }
+    return (wifi?.state() ?? [:]).merging(ble) { $1 }
+  }
+
+  /// BLE of the bean while a fast transfer is on, logged as it comes (Bean.wifiBle): nothing done about it.
+  private func wifiBle(_ event: String, _ error: Error? = nil) {
+    let step = sync.wifiStep?["step"] as? String
+    guard let (text, fields) = Bean.wifiBle(event, error, step: wifi != nil || ["hotspot", "join", "socket", "transfer"].contains(step ?? "") ? step ?? "?" : nil) else { return }
+    log("bean_wifi_ble", text, "warn", fields, nil)
+  }
   func refused() -> Set<Int64> { Set((prefs.stringArray(forKey: "refused:\(name)") ?? []).compactMap { Int64($0) }) }
   func coverage(_ since: Int64, _ until: Int64) -> (bind: Int64, spans: [(Int64, Int64)])? { Recorder.uploader?.coverage(name, since, until) }
   /// A Bluetooth headset shares the phone's radio (BluetoothHFP: AirPods in call mode), as may a call or a recording
@@ -379,10 +396,12 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
                                              flags >= 0 && flags & 0x80 != 0 ? "已绑定飞书" : "未绑定飞书", connectable ? "可连接" : "不可连接", dbm.intValue),
                     fields: ["flags": flags, "connectable": connectable, "rssi": dbm.intValue])
     }
+    if !wifiHeard && (wifi != nil) { wifiHeard = true; wifiBle("discover") }
     if connectable { found.put((p, "scan")) }
   }
 
   func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
+    if wifi != nil { wifiBle("connect") }
     if p === peripheral { done(nil) } else if p === waitFor { found.put((p, "request")) }
   }
 
@@ -393,6 +412,7 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
     Ble.log("bean disconnected: \(error.map { "\($0)" } ?? "-")")
     guard p === peripheral else { return }
+    wifiBle("disconnect", error)
     downWhy = error?.localizedDescription
     abort()
     notes.put(nil)
