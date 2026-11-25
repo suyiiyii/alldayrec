@@ -456,7 +456,7 @@ def rows_final_pieces(case: Case, dia, embed, utts=None, window=None) -> list[di
         E = [embed(x_of(a, g)) if g["end_ms"] - g["start_ms"] >= 300 else None for a, g in flat]
         groups = [(a, g["engine_speaker"]) if g.get("engine_speaker") else ("alone", i) for i, (a, g) in enumerate(flat)] if mode in ("engine", "guarded") else None
         guard = GUARD if mode == "guarded" else None
-        for (_, g), l in zip(flat, relabel(E, [(g["end_ms"] - g["start_ms"]) / 1000 for _, g in flat], dia.bank_raw, groups, guard=guard)):
+        for (_, g), l in zip(flat, relabel(E, [(g["end_ms"] - g["start_ms"]) / 1000 for _, g in flat], dia.bank_raw, groups, guard=guard, agree=0)):
             g["speaker"] = l
     for a, e, segs in pieces:
         rows += final_rows(segs, {g["speaker"]: g["speaker"] for g in segs}, EPOCH + dt.timedelta(seconds=a), e - a, since=0.0, edge=0.0)[2]
