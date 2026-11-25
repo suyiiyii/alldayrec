@@ -62,7 +62,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
     private var socket: Socket? = null
     private var out: OutputStream? = null
     private var udp: DatagramSocket? = null
-    private var threads = listOf<Thread>()
+    private val threads = mutableListOf<Thread>()
     private val inbox = LinkedBlockingQueue<ByteArray>()
     @Volatile private var bytes = 0L
     /** The step open() is at, for the device page (BeanSync.wifiStep): join or socket, and its try. */
@@ -102,7 +102,7 @@ class BeanWifi(private val ssid: String, private val password: String, private v
             }
             val mine = onHotspot()
             if (mine != null) {
-                log("bean_wifi_join", "加入了豆子的热点（第 ${n + 1} 次，${mono() - t1} ms，手机拿到了热点的地址 $mine）", null,
+                log("bean_wifi_join", "加入了豆子的热点（第 ${n + 1} 次，${mono() - t1} ms，手机拿到了热点的地址 $mine），开始发 UDP 保活", null,
                     mapOf("ms" to mono() - t1, "try" to n + 1, "ip" to mine) + net.context())
                 joined = true
                 break
@@ -116,6 +116,9 @@ class BeanWifi(private val ssid: String, private val password: String, private v
             throw Bean.Fail("join: not on the hotspot after 4 tries", "beanWifiNoJoin")
         }
         val joinedAt = mono()
+        try { keep() } catch (e: Exception) {  // bindSocket refused (a VPN): each socket's try asks for it again (connect())
+            log("bean_wifi_keepalive", "加入热点后 UDP 保活没开起来：$e", "warn", mapOf("error" to "$e") + net.context())
+        }
         var tries = 0
         var why = ""
         val said = mutableMapOf<String, Long>()  // each failure logged once in 10 s: a refused connect comes back at once
@@ -153,24 +156,30 @@ class BeanWifi(private val ssid: String, private val password: String, private v
         return null
     }
 
-    /** The socket, its handshake and the keep-alive's: kept (socket set) only once all are up and its threads run. */
-    private fun connect() {
-        val s = net.connect(HOST, PORT, 15_000)
-        val u = try {
-            s.soTimeout = 15_000
-            handshake(s.getInputStream(), s.getOutputStream())
-            s.soTimeout = readMs
-            net.udp()
-        } catch (e: Exception) { s.close(); throw e }
-        out = s.getOutputStream(); udp = u
-        val reader = Thread({ pump(s) }, "bean-wifi-ws")
-        val keep = Thread({  // ws/soundcore's 100 ms (1 s till 45)
+    /** The keep-alive, every 100 ms from the join on, the socket not waited for (ws/soundcore, Eliqi797: before the
+     *  WebSocket), until close(). */
+    private fun keep() {
+        val u = net.udp()
+        udp = u
+        threads += Thread({  // ws/soundcore's 100 ms (1 s till 45)
             val p = "soundcore-keep-alive-unicast".toByteArray()
             val to = InetSocketAddress(HOST, 32003)
             try { while (!u.isClosed) { u.send(DatagramPacket(p, p.size, to)); Thread.sleep(100) } } catch (_: Exception) {}
-        }, "bean-wifi-keepalive")
-        threads = listOf(reader, keep)
-        threads.forEach { it.isDaemon = true; it.start() }
+        }, "bean-wifi-keepalive").apply { isDaemon = true; start() }
+    }
+
+    /** The socket and its handshake, and the keep-alive if the join's did not start: kept (socket set) only once all are
+     *  up and its threads run. */
+    private fun connect() {
+        val s = net.connect(HOST, PORT, 15_000)
+        try {
+            s.soTimeout = 15_000
+            handshake(s.getInputStream(), s.getOutputStream())
+            s.soTimeout = readMs
+            if (udp == null) keep()
+        } catch (e: Exception) { s.close(); throw e }
+        out = s.getOutputStream()
+        threads += Thread({ pump(s) }, "bean-wifi-ws").apply { isDaemon = true; start() }
         socket = s
     }
 

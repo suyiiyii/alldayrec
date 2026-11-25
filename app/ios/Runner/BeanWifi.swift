@@ -94,7 +94,7 @@ final class BeanWifi {
         continue
       }
       if let mine = onHotspot() {
-        log("bean_wifi_join", "加入了豆子的热点（第 \(n + 1) 次，iOS 答复 \(applied) ms\(failure != nil ? "，本来就连着" : "")，再 \(BeanWifi.mono() - t1 - applied) ms 手机拿到了热点的地址 \(mine)）", nil,
+        log("bean_wifi_join", "加入了豆子的热点（第 \(n + 1) 次，iOS 答复 \(applied) ms\(failure != nil ? "，本来就连着" : "")，再 \(BeanWifi.mono() - t1 - applied) ms 手机拿到了热点的地址 \(mine)），开始发 UDP 保活", nil,
             ["ms": BeanWifi.mono() - t1, "apply_ms": applied, "try": n + 1, "ip": mine].merging(BeanWifi.context()) { $1 })
         joinedOnce = true
         break
@@ -120,6 +120,7 @@ final class BeanWifi {
       throw Bean.Fail("join: not on the hotspot after 4 tries", note: "beanWifiNoJoin")
     }
     let joined = BeanWifi.mono() - t0
+    keep()
     var tries = 0, why = ""
     // up to 90 s: the hotspot's address coming up, and the first time iOS's local network question (21:25 11-08: three
     // tries of 15 s went while it was unanswered, most likely)
@@ -196,6 +197,11 @@ final class BeanWifi {
     }
     ws = c
     pump(c)
+  }
+
+  /// The keep-alive, every 100 ms from the join on, the socket not waited for (ws/soundcore, Eliqi797: before the
+  /// WebSocket; 11-24 a hotspot joined and never up had none at all), until close().
+  private func keep() {
     let u = NWConnection(host: .init(BeanWifi.host), port: 32003, using: {
       let p = NWParameters.udp
       p.requiredInterfaceType = .wifi

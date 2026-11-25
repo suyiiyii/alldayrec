@@ -31,6 +31,11 @@ func tmp() -> URL {
   return d
 }
 func sum(_ b: [UInt8]) -> UInt8 { b.reduce(0, &+) }
+func made(_ type: UInt8, _ id: UInt8, _ p: [UInt8] = []) -> [UInt8] {
+  let head: [UInt8] = [0x08, 0xEE, 0, 0, 0, type, id, UInt8(10 + p.count), 0]
+  let b = head + p
+  return b + [sum(b)]
+}
 
 // commands: ws/soundcore's vectors
 check(Bean.hex(Bean.info()), "08ee0000000101" + "0a0002")
@@ -44,16 +49,23 @@ check(Bean.sends, [0x0101, 0x01A6, 0x2E01, 0x1A0E, 0x1A07, 0x1A05, 0x1A02])
 check(Bean.hex(Bean.wifiOn("LR-1a2b3c4d", "0123456789abcdef")), "08ee0000001a052700" + "0b" + Bean.hex(Array("LR-1a2b3c4d".utf8)) + "10" +
       Bean.hex(Array("0123456789abcdef".utf8)) + "d8")
 check(Bean.hex(Bean.wifiOff()), "08ee0000001a020a001c")
-check(Bean.hex(Bean.wifiTransfer(1_794_126_868, 0)), "08ee0000001a07120000000000" + "1434f06a" + "cb")  // Eliqi797's WebSocket request
-for f in [Bean.wifiOn("x", "password1"), Bean.wifiOff(), Bean.wifiTransfer(1, 166)] { check(Bean.allowed(f), true) }
+// Eliqi797's WebSocket request, its last byte 0x1B as Feishu's SDK and ws/soundcore send it, not the sum (cb)
+check(Bean.hex(Bean.wifiTransfer(1_794_126_868, 0)), "08ee0000001a07120000000000" + "1434f06a" + "1b")
+check(Bean.hex(Bean.wifiDone()), "08ee0000001a0a0b0001" + "26")  // a file's 1A/0A answered (Feishu's SDK)
+for f in [Bean.wifiOn("x", "password1"), Bean.wifiOff()] { check(Bean.allowed(f), true) }
+// over Wi-Fi only (the hotspot's WebSocket): the request ending 0x1B and the 1A/0A answer; never over BLE
+for f in [Bean.wifiTransfer(1, 166), Bean.wifiDone()] { check([Bean.allowed(f), Bean.allowed(f, wifi: true)], [false, true]) }
+var sumTail = Bean.wifiTransfer(1, 166); sumTail[17] = sum(Array(sumTail.dropLast()))
+check([Bean.allowed(sumTail), Bean.allowed(sumTail, wifi: true)], [true, true], "the request with its sum still one of the five")
+var bleTail = Bean.transfer(1, 0, false); bleTail[18] = 0x1B
+check(Bean.allowed(bleTail, wifi: true), false, "0x1B in place of the sum: the Wi-Fi request's 18 bytes only")
+for p: [UInt8] in [[0], [2], [1, 0], []] { check(Bean.allowed(made(0x1A, 0x0A, p), wifi: true), false, "1A/0A: its 01 alone") }
+var ackSum = Bean.wifiDone(); ackSum[10] = 0x1B
+check(Bean.allowed(ackSum, wifi: true), false, "1A/0A's sum still checked")
+for cmd in [0x0B87, 0x0B01, 0x1A10, 0x1A0F, 0xFF20] { check(Bean.allowed(made(UInt8(cmd >> 8), UInt8(cmd & 255)), wifi: true), false, "\(cmd) over Wi-Fi") }
 // bind, auth, unbind, the record button, delete, completion ack, SPP reads, factory reset and OTA, a log read
 for cmd in [0x0B87, 0x0B8B, 0x0B01, 0x01B8, 0x1882, 0x1A10, 0x1A0A, 0x1A0F, 0x1A11, 0xFF20, 0xFF01, 0x1B0E] {
   throwsError("\(cmd)") { _ = try Bean.frame(cmd >> 8, cmd & 255) }
-}
-func made(_ type: UInt8, _ id: UInt8, _ p: [UInt8] = []) -> [UInt8] {
-  let head: [UInt8] = [0x08, 0xEE, 0, 0, 0, type, id, UInt8(10 + p.count), 0]
-  let b = head + p
-  return b + [sum(b)]
 }
 check(Bean.allowed(made(0x0B, 0x87)), false)  // a frame made some other way: well formed, and still not sent
 // the record button: its start alone (the frame sent to the owner's bean, 10-25), never a stop (00) or pause (02)
@@ -121,6 +133,7 @@ final class FakeBean: BeanIo {
   var open: Int64 = 0
   var listed: [(Int64, Int64)] = []  // in order, as the bean lists them
   var sent: [[UInt8]] = []
+  var sentAt: [Int64] = []  // when each of `sent` went
   var transfers: [[Int64]] = []  // file, from unit, live
   var onTransfer: (Int64, Int64, Bool) -> Void = { _, _, _ in }
   var script: [() throws -> Void] = []
@@ -144,8 +157,8 @@ final class FakeBean: BeanIo {
   func sentOf(_ cmd: Int) -> [UInt8] { Array(sent.last { Int($0[5]) << 8 | Int($0[6]) == cmd }!.dropFirst(9).dropLast()) }
 
   func send(_ frame: [UInt8]) throws {
-    check(Bean.allowed(frame, confirmed()), true, "only the five commands, a delete of a confirmed file and the start reach the bean")
-    sent.append(frame)
+    check(Bean.allowed(frame, confirmed(), wifi: onWifi), true, "only the five commands, a delete of a confirmed file and the start reach the bean")
+    sent.append(frame); sentAt.append(t)
     let p = Array(frame[9..<(frame.count - 1)])
     switch Int(frame[5]) << 8 | Int(frame[6]) {
     case 0x2E01:  // a new connection: nothing of the one before is on its way
@@ -161,6 +174,7 @@ final class FakeBean: BeanIo {
     case 0x1A02:  // dropOnWifiOff: BLE goes before the answer, so many times
       if dropOnWifiOff > 0 { dropOnWifiOff -= 1; script.insert({ throw BeanSync.Gone("gone before 1A/02's answer") }, at: 0) } else { push(0x1A02, []) }
     case 0x01A6: push(0x01A6, [])
+    case 0x1A0A: check(onWifi, true, "1A/0A answered over Wi-Fi only")
     case 0x1A0E:
       if dropOnList { script.insert({ throw BeanSync.Gone("gone while listing") }, at: 0); break }  // BLE goes before the answer
       let page: [UInt8] = Bean.u16(p, 0) > 0 ? Bean.u16le(0) : listed.reduce(Bean.u16le(listed.count)) { $0 + Bean.le32($1.0) + Bean.le32($1.1) }
@@ -772,7 +786,40 @@ do {
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("都取到了"), true, again.description)
   check(bean.transfers, [[b, 500, 0], [a, 0, 0]])
+  // each file read whole answered (1A/0A 01), the next asked for 600 ms after it (Feishu's SDK)
+  let cmds = bean.sent.map { Int($0[5]) << 8 | Int($0[6]) }.filter { $0 == 0x1A07 || $0 == 0x1A0A }
+  check(cmds, [0x1A07, 0x1A0A, 0x1A07, 0x1A0A])
+  let ack = bean.sent.firstIndex { $0[5] == 0x1A && $0[6] == 0x0A }!, next = bean.sent.lastIndex { $0[5] == 0x1A && $0[6] == 0x07 }!
+  check(bean.sent[ack], Bean.wifiDone())
+  check(bean.sentAt[next] - bean.sentAt[ack] >= BeanSync.wifiDoneMs, true, "\(bean.sentAt[next] - bean.sentAt[ack]) ms between")
+  check(bean.sent[next].last, 0x1B)
 }
+
+/// A file's 1A/0A with a failure code over Wi-Fi: not answered (Feishu answers only a file read whole).
+do {
+  let dir = tmp()
+  let bean = FakeBean(t0)
+  let a = (t0 - 600_000) / 1000
+  bean.list(a, 60_000); bean.wifiAsk = true
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1)
+    bean.push(0x1A0A, [[2], Bean.le32(0), Bean.le32(file)].flatMap { $0 })
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x0A }, false, "no answer to a failed file")
+}
+
+// the bean's BLE during a fast transfer (BeanLink): logged at once with its reason; nothing off Wi-Fi
+check(Bean.wifiBle("disconnect", NSError(domain: "CBErrorDomain", code: 6), step: nil) == nil, true)
+if let (text, f) = Bean.wifiBle("disconnect", NSError(domain: "CBErrorDomain", code: 6, userInfo: [NSLocalizedDescriptionKey: "timed out"]), step: "transfer") {
+  check(text.contains("蓝牙断开") && text.contains("timed out") && text.contains("transfer"), true, text)
+  check([f["event"] as? String, f["step"] as? String, f["domain"] as? String], ["disconnect", "transfer", "CBErrorDomain"])
+  check(f["code"] as? Int, 6)
+} else { check(false, true, "a disconnect on Wi-Fi logged") }
+check(Bean.wifiBle("discover", nil, step: "join")?.1["event"] as? String, "discover")
+check(Bean.wifiBle("connect", nil, step: "socket")?.0.contains("又连上"), true)
 
 /// Over Wi-Fi holes wider the later in the file (#426 review): each read to its end brings the widest, none is a try, so
 /// all of them come over Wi-Fi, none left to BLE.

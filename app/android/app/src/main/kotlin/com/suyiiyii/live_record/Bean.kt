@@ -93,11 +93,17 @@ object Bean {
     }
 
     /** A frame on its way to the radio is one of SENDS, the delete of a file in `confirmed`, or the start: checked again
-     *  right before the write (BeanSync.send, BeanLink.write). */
-    fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet(), hotspot: Boolean = false) = f.size >= 10 && f[0] == 0x08.toByte() && f[1] == 0xEE.toByte() &&
-        ((f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)).let { it in SENDS || hotspot && it in HOTSPOT || it == DELETE && f.size == 14 && u32(f, 9) in confirmed ||
-            it == START && f.size == 11 && f[9] == 1.toByte() } &&
-        u16(f, 7) == f.size && f.last() == sum(f, 0, f.size - 1)
+     *  right before the write (BeanSync.send, BeanLink.write). `wifi`: over the hotspot's WebSocket, where Feishu's SDK
+     *  also sends a file's 1A/0A answered (01) and ends a 1A/07 with 0x1B, no sum (wifiTransfer, wifiDone): those two
+     *  there only, never over BLE. */
+    fun allowed(f: ByteArray, confirmed: Set<Long> = emptySet(), hotspot: Boolean = false, wifi: Boolean = false): Boolean {
+        if (f.size < 10 || f[0] != 0x08.toByte() || f[1] != 0xEE.toByte()) return false
+        val c = (f[5].toInt() and 255) shl 8 or (f[6].toInt() and 255)
+        val ok = c in SENDS || hotspot && c in HOTSPOT || c == DELETE && f.size == 14 && u32(f, 9) in confirmed ||
+            c == START && f.size == 11 && f[9] == 1.toByte() || wifi && c == 0x1A0A && f.size == 11 && f[9] == 1.toByte()
+        val tail = f.last() == sum(f, 0, f.size - 1) || wifi && c == 0x1A07 && f.size == 18 && f[17] == 0x1B.toByte()
+        return ok && u16(f, 7) == f.size && tail
+    }
 
     private fun sum(b: ByteArray, from: Int, to: Int): Byte {
         var s = 0
@@ -112,8 +118,11 @@ object Bean {
     fun list(page: Int) = frame(0x1A, 0x0E, u16le(page))
     /** A file's audio from `offset` bytes on (whole units); realtime: the file being recorded, as it is. */
     fun transfer(file: Long, offset: Long, realtime: Boolean) = frame(0x1A, 0x07, le32(offset) + le32(file) + (if (realtime) 1 else 0).toByte())
-    /** Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag. */
-    fun wifiTransfer(file: Long, offset: Long) = frame(0x1A, 0x07, le32(offset) + le32(file))
+    /** Over the hotspot's WebSocket (ws/soundcore wifi.rs): a file's audio from `offset` bytes on, no realtime flag, its
+     *  last byte 0x1B where the sum would be (Feishu's SDK, ws/soundcore's wifi_file_header, Eliqi797). */
+    fun wifiTransfer(file: Long, offset: Long) = frame(0x1A, 0x07, le32(offset) + le32(file)).also { it[it.size - 1] = 0x1B }
+    /** A file's 1A/0A answered, over the hotspot's WebSocket only (Feishu's SDK: on a file read whole, 600 ms before the next). */
+    fun wifiDone() = build(0x1A, 0x0A, byteArrayOf(1))
     /** The hotspot on, by a name it has not had (a repeated one gets an empty answer and no hotspot): its answer is its
      *  address, IPv4 reversed and the port LE; off. Sent only while BeanSync.hotspot (allowed()). */
     fun wifiOn(ssid: String, password: String): ByteArray {
@@ -1138,7 +1147,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         when (f.cmd) {
             0x1A07 -> if (x != null && x.key == null) header(x, f)
             0x1A08, 0x1A12 -> if (x?.key != null) Bean.slices(p).forEach { unit(x, it) }
-            0x1A0A -> if (x != null && (p.size < 9 || Bean.u32(p, 5).let { it == 0L || it == x.file })) complete(x, p.getOrNull(0)?.toInt()?.and(255) ?: 0)
+            0x1A0A -> if (x != null && (p.size < 9 || Bean.u32(p, 5).let { it == 0L || it == x.file })) {
+                val result = p.getOrNull(0)?.toInt()?.and(255) ?: 0
+                complete(x, result)
+                // over Wi-Fi, a file read whole: answered, and the next asked for 600 ms on (Feishu's SDK)
+                if (overWifi && result == 0) { send(Bean.wifiDone()); quietUntil = maxOf(quietUntil, io.now() + WIFI_DONE_MS) }
+            }
             0x1A06 -> if (p.size >= 4) {  // a new file: recording began, or the bean went on in the next file
                 val open = Bean.u32(p, 0)
                 val naturalRollover = x != null && liveFile == x.file && recording && !paused
@@ -1449,7 +1463,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     class Again(why: String, val naturalRollover: Boolean = false) : Exception(why)
 
     private fun send(frame: ByteArray) {
-        check(Bean.allowed(frame, deletable, hotspot)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
+        check(Bean.allowed(frame, deletable, hotspot, overWifi)) { "not sent: ${Bean.hex(frame)}" }  // the last check before the radio
         io.trace("tx", mapOf("hex" to Bean.hex(frame)))
         io.send(frame)
     }
@@ -1485,6 +1499,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val WIFI_ENDS = mapOf("豆子没回音" to "beanWifiNoAnswer", "豆子开始录音，回蓝牙" to "beanWifiRecording",
             "豆子一直忙（code 4）" to "beanWifiBusy", "30 s 没收到单元" to "beanWifiNoUnits")
         const val PACE_MS = 200L  // between transfers (ws/soundcore: the SDK's 200 ms)
+        const val WIFI_DONE_MS = 600L  // over Wi-Fi after a file's 1A/0A answered, before the next 1A/07 (Feishu's SDK)
         const val REST_UNITS = 1500L  // 30 s of audio, 5 s to send (about 300 units/s): about what a new connection costs
         /** The sync summary from the three facts (what the bean has, the phone has, the server has: units lacking,
          *  owe()), the fast transfer's step and the bytes of closed files read now; the one answer of the top bar's chip,
