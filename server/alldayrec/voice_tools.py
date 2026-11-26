@@ -60,10 +60,6 @@ def unit(v) -> np.ndarray:
     return v / (np.linalg.norm(v) or 1)
 
 
-def seconds(r: dict) -> float:
-    return (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-
-
 def sentence(ref: str) -> dict:
     """The row a reference names, with its rowid and its conversation (conv, None: in none closed): a sentence id
     (grep's: of one device only), or "<conversation id>@HH:MM:SS", a transcript line's time (its device's row starting
@@ -135,7 +131,7 @@ def voiceprint(ref: str, frm: float | None = None, to: float | None = None) -> d
     """The sentence's voiceprint: the kept ones' mean weighted by their length (each in parts when more than one),
     else made from its first MAX_S s; with frm / to (s into it), of that stretch, from the audio."""
     r = sentence(ref)
-    long, parts = seconds(r), []
+    long, parts = db.seconds(r), []
     if frm is None and to is None and (parts := kept(r)):
         e, source = unit(sum((max(p["to"] - p["from"], 0.01)) * p["e"] for p in parts)), "seg_emb"
         span = [min(p["from"] for p in parts), max(p["to"] for p in parts)]

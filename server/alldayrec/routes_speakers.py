@@ -169,7 +169,7 @@ def learnable(conv_id: str, to: str, hit: list[dict]) -> list[dict]:
     if to == "我" or re.fullmatch(r"S\d+", to) or not state.get("embed"):
         return []
     away = summary.not_live(db.summary(conv_id)) if T().media_view else []
-    return sorted(({**r, "conv": conv_id} for r in hit if not summary.in_media(r, away) and (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds() >= bank.LEARN_MIN_S),
+    return sorted(({**r, "conv": conv_id} for r in hit if not summary.in_media(r, away) and db.seconds(r) >= bank.LEARN_MIN_S),
                   key=lambda r: r["start"])[:ENROLL]
 
 
@@ -182,8 +182,7 @@ async def label_voice(c: dict, label: str, rs: list[dict]) -> dict | None:
     """A label's voices row in conversation c (voices_loop's), from its sentences rs: the mean voiceprint of up to 4 of
     >= 1.5 s, the longest, each capped at 15 s; one with music under it (BG_GATE) is not one of the 4, n and speech_s
     count it still. used: those it is made of. None: no sentence of it to hear here."""
-    dur = lambda r: (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-    long = list(itertools.islice((r for r in sorted((r for r in rs if dur(r) >= 1.5), key=dur, reverse=True) if not sounds.under_music(r, "voices")), 4))
+    long = list(itertools.islice((r for r in sorted((r for r in rs if db.seconds(r) >= 1.5), key=db.seconds, reverse=True) if not sounds.under_music(r, "voices")), 4))
     es, ls, used = [], [], []
     for r in long:
         try:
@@ -197,8 +196,8 @@ async def label_voice(c: dict, label: str, rs: list[dict]) -> dict | None:
     if not es:
         return None
     e = np.mean(es, 0)
-    best = min(used, key=lambda r: abs(dur(r) - 6))
-    return {"conv": c["id"], "label": label, "device": c.get("device"), "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
+    best = min(used, key=lambda r: abs(db.seconds(r) - 6))
+    return {"conv": c["id"], "label": label, "device": c.get("device"), "n": len(rs), "speech_s": round(sum(db.seconds(r) for r in rs), 1),
             "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
             "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
             "clip_text": best.get("text"), "used": [(r["start"], r["end"], r.get("source")) for r in used]}

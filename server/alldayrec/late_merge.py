@@ -87,9 +87,9 @@ def put_voice(t, v: dict):
 
 def voice_record(cid: str, label: str, e, rows: list[dict], device: str) -> dict:
     rs = [r for r in rows if r.get("speaker") == label and not r.get("music")]
-    best = max(rs, key=lambda r: (P(r["end"]) - P(r["start"])).total_seconds(), default=None)
+    best = max(rs, key=db.seconds, default=None)
     return {"conv": cid, "label": label, "device": device, "e": db.blob(e), "k": 1, "n": len(rs),
-            "speech_s": sum((P(r["end"]) - P(r["start"])).total_seconds() for r in rs),
+            "speech_s": sum(db.seconds(r) for r in rs),
             **({"clip_start": best["start"], "clip_end": min(best["end"], (P(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
                 "clip_text": best.get("text")} if best else {})}
 
@@ -341,14 +341,14 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                 early["start"] = min([early["start"]] + [c["start"] for c in later] + [r["start"] for r in rs])
                 early["end"] = max([early["end"]] + [c["end"] for c in later] + [r["end"] for r in rs])
                 all_rows = db.sentences(early["start"], early["end"], True, device)
-                early.update(sentences=len(all_rows), speech_s=round(sum((P(r["end"]) - P(r["start"])).total_seconds()
+                early.update(sentences=len(all_rows), speech_s=round(sum(db.seconds(r)
                              for r in all_rows if r.get("speaker") not in IGNORE), 1),
                              participants=sorted({r["speaker"] for r in all_rows if r.get("speaker") and r["speaker"] not in IGNORE}))
                 db.insert_conversation(t, early)
                 for label in early["participants"]:
                     labeled = [r for r in all_rows if r.get("speaker") == label and not r.get("music")]
                     t.execute("UPDATE voices SET n = ?, speech_s = ? WHERE conv = ? AND label = ?",
-                              (len(labeled), sum((P(r["end"]) - P(r["start"])).total_seconds() for r in labeled), early["id"], label))
+                              (len(labeled), sum(db.seconds(r) for r in labeled), early["id"], label))
                 changed.append(early)
         for c in changed:
             s = db.summary(c["id"]) or {"conversation": c["id"]}

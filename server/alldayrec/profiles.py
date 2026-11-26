@@ -8,6 +8,7 @@ import datetime as dt
 import hashlib
 import json
 
+from alldayrec import db
 from alldayrec import summary
 
 SYSTEM = """你在为录音者（「我」）整理一个人的档案。输入是关于这个人的证据，每条以 [E编号] 开头：
@@ -103,10 +104,6 @@ CONVS = 40          # conversations giving evidence, the newest
 TRAIT_DAYS = 5      # fewer days of evidence: no traits (1-4 days give who and what's new, not character)
 
 
-def _s(r: dict) -> float:
-    return (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-
-
 def looked(s: dict | None) -> bool:
     """The summary looked for AI and media in its conversation."""
     return bool(s) and s.get("status") == "done" and bool(s.get("model")) and "ai_spans" in s and "media_spans" in s
@@ -128,16 +125,16 @@ def heard(r: dict, s: dict) -> bool:
 
 def segment(name: str, rows: list[dict], s: dict) -> tuple[list[dict], str | None]:
     """The name's rows of one conversation that can be evidence, or why none can: fragment, crowd, short."""
-    ok = [r for r in rows if heard(r, s) and r.get("text") and _s(r) >= MIN_ROW_S]
+    ok = [r for r in rows if heard(r, s) and r.get("text") and db.seconds(r) >= MIN_ROW_S]
     own = [r for r in ok if r.get("speaker") == name]
-    if sum(map(_s, own)) < MIN_SPEECH_S:
+    if sum(map(db.seconds, own)) < MIN_SPEECH_S:
         return [], "fragment"
     if name != "我":  # the wearer is near the mic: theirs is most of the speech, rightly
         labels = {r.get("speaker") for r in rows if r.get("speaker") and heard(r, s)}  # not a TV's: their share is of ok
-        if len(labels) >= CROWD and sum(map(_s, own)) / sum(map(_s, ok)) >= CROWD_SHARE:
+        if len(labels) >= CROWD and sum(map(db.seconds, own)) / sum(map(db.seconds, ok)) >= CROWD_SHARE:
             return [], "crowd"
         mine = [r for r in rows if r.get("speaker") == name]
-        if len(mine) >= 5 and sum(_s(r) < MIN_ROW_S for r in mine) / len(mine) >= SHORT_SHARE:
+        if len(mine) >= 5 and sum(db.seconds(r) < MIN_ROW_S for r in mine) / len(mine) >= SHORT_SHARE:
             return [], "short"
     return own, None
 
@@ -167,7 +164,7 @@ def evidence_v2(name: str, convs: list[dict], mentions: list[dict], rows=lambda 
             continue
         at = {t.get("at") for t in s.get("todos") or [] if t.get("at") and not t.get("unsupported")
               and (t.get("owner") == name or t.get("owner") == "我" and t.get("to") == name)}
-        keep = sorted(own, key=lambda r: (r["start"] not in at, -_s(r)))[:QUOTES]
+        keep = sorted(own, key=lambda r: (r["start"] not in at, -db.seconds(r)))[:QUOTES]
         mine = [r for r in rs if r["start"] in at and r.get("speaker") == "我" != name and r.get("text") and heard(r, s)]
         title = s.get("title")
         for r in sorted(keep + mine, key=lambda r: r["start"]):
@@ -183,7 +180,7 @@ def evidence_v2(name: str, convs: list[dict], mentions: list[dict], rows=lambda 
             continue
         theirs = {r["start"] for r in segment(name, m["conv_rows"], s)[0]}  # none where that conversation is skipped
         here = {r["start"] for r in m["conv_rows"]}  # its spans tell nothing of the next conversation's rows
-        rs = [r for r in m["rows"] if r["start"] in here and heard(r, s) and _s(r) >= MIN_ROW_S
+        rs = [r for r in m["rows"] if r["start"] in here and heard(r, s) and db.seconds(r) >= MIN_ROW_S
               and (r.get("speaker") != name or r["start"] in theirs)]
         if m["at"] not in {r["start"] for r in rs}:
             continue

@@ -155,8 +155,7 @@ async def pipeline(device: str):
             o = None  # the drafts begin after the open conversation's gap: a new one
         if not o and not ds:
             return None
-        speech = sum((dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-                     for r in ds if r.get("speaker") not in IGNORE)
+        speech = sum(db.seconds(r) for r in ds if r.get("speaker") not in IGNORE)
         rows = (o["sentences"] if o else []) + ds
         return {"start": o["start"] if o else ds[0]["start"], "end": max(r["end"] for r in rows),
                 "sentences": rows, "speech_s": (o["speech_s"] if o else 0.0) + speech}
