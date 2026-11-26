@@ -1303,7 +1303,7 @@ final class BeanSync {
     case 0x1882:  // the bean's button: 0 stopped, 1 recording, 2 paused
       switch p.first {
       case 0:
-        if paused { x?.seen += io.now() - pausedAt }  // stopped from a pause: the pause is no silence of the read's 30 s
+        if paused, let x { x.seen += io.now() - max(pausedAt, x.seen) }  // stopped from a pause: the pause is no silence of the read's 30 s
         liveFile = 0; paused = false; recording = false; startDone = true; log("bean_stop", "豆子停止录音")
         needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
         // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no syncTotal, no

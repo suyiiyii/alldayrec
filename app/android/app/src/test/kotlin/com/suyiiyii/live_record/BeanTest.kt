@@ -1165,6 +1165,21 @@ class BeanTest {
         assertTrue("ended ${r.bean.now - stopped} ms after the stop", r.bean.now - stopped in 25_000..31_000)
     }
 
+    /** The same with a unit 20 s into the pause (a read from behind still bringing stored units): only the silence since
+     *  that unit is the pause's, the end still 30 s after the stop (the second review: 51 s, the whole pause added). */
+    @Test fun unitInPauseThenStopEndsTheRead30sLater() {
+        val r = rec(100, listOf(0L to 5000L), watched = false, units = 1500)
+        var stopped = 0L
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(2)) }
+        repeat(20) { r.bean.script += {} }
+        r.bean.script += { r.bean.units(r.id, listOf(6500L)) }
+        repeat(40) { r.bean.script += {} }
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(0)); r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 6501L * 20; stopped = r.bean.now }
+        repeat(60) { r.bean.script += {} }
+        assertEquals("file ${r.id}: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message)
+        assertTrue("ended ${r.bean.now - stopped} ms after the stop", r.bean.now - stopped in 25_000..31_000)
+    }
+
     /** The chip while read live only goes by the count, not fallback()'s 10 min: 11 min into one live read it still
      *  says 等停录后补 (held: recording), not 补传中 with no ETA (the review: held null after 10 min, till the next reconnect). */
     @Test fun liveOnlyChipHeldPast10Min() {

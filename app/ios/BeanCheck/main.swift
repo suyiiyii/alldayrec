@@ -2314,6 +2314,19 @@ do {
   check((25_000...31_000).contains(r.bean.t - stopped), true, "ended \(r.bean.t - stopped) ms after the stop")
 }
 
+/// The same with a unit 20 s into the pause (a read from behind still bringing stored units): only the silence since
+/// that unit is the pause's, the end still 30 s after the stop (the second review: 51 s, the whole pause added).
+do {
+  let r = rec(100, [(0, 5000)], watched: false, units: 1500)
+  var stopped: Int64 = 0
+  r.bean.script = [{ r.bean.push(0x1882, [2]) }] + Array(repeating: {}, count: 20) + [{ r.bean.units(r.id, [6500]) }]
+    + Array(repeating: {}, count: 40)
+    + [{ r.bean.push(0x1882, [0]); r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 6501 * 20); stopped = r.bean.t }]
+    + Array(repeating: {}, count: 60)
+  check(session(r, BeanSync.Again.self).description, "file \(r.id): no audio for 30 s")
+  check((25_000...31_000).contains(r.bean.t - stopped), true, "ended \(r.bean.t - stopped) ms after the stop")
+}
+
 /// The review's D: a file read live only after `tries` realtime=0 misses (here refusals) is read at realtime=0 again
 /// once 10 min have gone since the last; before, never again until the app restarted.
 do {

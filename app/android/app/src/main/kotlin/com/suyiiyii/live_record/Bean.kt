@@ -1206,7 +1206,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
                 0 -> {
-                    if (paused) x?.let { it.seen += io.now() - pausedAt }  // stopped from a pause: the pause is no silence of the read's 30 s
+                    if (paused) x?.let { it.seen += io.now() - maxOf(pausedAt, it.seen) }  // stopped from a pause: the pause is no silence of the read's 30 s
                     liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音")
                     needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
                     // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no
