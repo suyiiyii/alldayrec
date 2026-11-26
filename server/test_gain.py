@@ -513,9 +513,7 @@ def test_infer_service_float(monkeypatch, caplog):
 def test_replay_case_offset(tmp_path, monkeypatch):
     """replay_case: meta.json's offset_db on the case's audio, float32, its results in their own work@<dB>/; none: as
     decoded, work/."""
-    import sys
     from alldayrec import replay_case
-    sys.modules.pop("alldayrec.replay_case")  # an offline tool, not a module the server runs: not left for test_isolation
     monkeypatch.setenv("STEPFUN_API_KEY", "made-up")
     y = speech(1, 8)
     for g in (None, DB2):

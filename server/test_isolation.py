@@ -465,6 +465,7 @@ def test_nothing_per_person_in_a_module():
                "transcript": {"@cache _seg"},  # the speaker-turn model, the same
                "speaker_eval": {"BASELINE", "SLACK"},  # the nightly eval's fixed rates, read only (no server path uses it)
                "place": {"LABELS", "SOUNDS"},  # the prompt's categories and sound events, read only
+               "replay_case": {"DEVICE_PARAMS"},  # an offline tool's per-microphone settings, read only (no server path uses it)
                "compute": {"CALLS"}, "infer_server": {"state"}}  # calls to the inference service by op and result; its model and token
     # asr's: the engines that refused the hotwords and how often (an engine's, at its endpoint, for everyone)
     here = Path(server.__file__).parent

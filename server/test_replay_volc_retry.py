@@ -1,7 +1,6 @@
 """replay_case's two volc calls retry 3 times, 5 s apart, then give up; a success is cached."""
 import importlib
 import json
-import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -24,8 +23,7 @@ def flaky(fails: int, utts: list[dict]):
 
 @pytest.fixture
 def rc():
-    yield importlib.import_module("alldayrec.replay_case")
-    sys.modules.pop("alldayrec.replay_case")  # an offline tool: keep it out of test_isolation's scan of the server's modules
+    return importlib.import_module("alldayrec.replay_case")
 
 
 @pytest.fixture
