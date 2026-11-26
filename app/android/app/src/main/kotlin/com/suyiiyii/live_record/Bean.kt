@@ -465,6 +465,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                    // pressed): a stop by hand holds until the link goes (an IOException), not across the
                                    // app's own reconnects (a cut re-pull, a stalled transfer)
+    private var killedAt = 0L  // the fast transfer the app was killed in began then (init), 0: none; the next start only
 
     init {
         chunks.mkdirs()
@@ -482,12 +483,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         // the report's 6 (11-19 23:53): killed with a hotspot on, the app never closed it; killed in a fast transfer, the
         // bean was started on the next connection. Now 1A/02 first, and that start held as on the app's own reconnect (Q4)
         val (open, at) = io.wifiKept()
-        wifiOpen = open
-        if (at > 0 && io.now() - at < FAST_MS) {
-            startDone = true
-            io.log("bean_start", "App 在 Wi-Fi 快传途中被关掉后重新拉起：这次连上不自动开始录音", fields = mapOf("since_ms" to io.now() - at))
-        }
-        // once: the connections after it start the bean as ever (wifiOpen's setter has kept fastAt 0)
+        wifiOpen = open  // its setter keeps fastAt 0: once, a relaunch after this one starts the bean as ever
+        killedAt = at
     }
 
     private fun keep() = io.wifiKeep(wifiOpen, fastAt)
@@ -533,7 +530,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 fields = hw + mapOf("files" to listing.files.size, "open" to listing.open))
             owe()
             io.report(hw + owed)
-            if (!startDone) { startDone = true; if (!recording) start() }
+            // killed in a fast transfer under 30 min before this connection (not the relaunch: the bean may come hours
+            // later): this one start skipped, the next connection's as ever (more recorded rather than less)
+            val ago = io.now() - killedAt
+            val skip = killedAt > 0 && ago in 0 until FAST_MS
+            if (skip) io.log("bean_start", "App 在 Wi-Fi 快传途中被关掉后重新拉起：这次连上不自动开始录音", fields = mapOf("since_ms" to ago))
+            killedAt = 0
+            if (!startDone && !skip) { startDone = true; if (!recording) start() }
             loop()
         } catch (e: IOException) {
             startDone = false  // the link went: the next connection starts the bean again
@@ -1017,7 +1020,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         shrunk.addLast(longArrayOf(t, now + closed))
         val (at, was) = shrunk.first()
         val rate = if (t - at >= 60_000) (was - now - closed) * Bean.FRAME_MS.toDouble() / (t - at) else null
-        counted = Counted(now, if (recording) closed else 0, if (recording) 0 else closed, stuck, io.watched(), fallback(open), rate)
+        // the count alone (not fallback()'s 10 min): the chip says 等停录后补 while read live only, its realtime=0 retry is plan()'s
+        counted = Counted(now, if (recording) closed else 0, if (recording) 0 else closed, stuck, io.watched(), (fills[open]?.first ?: 0) >= TRIES, rate)
         val l = sync
         owed = if (l["owed_s"] as Long > 0) mapOf("backlog_s" to l["owed_s"], "backlog_eta_s" to l["eta_s"], "backlog_held" to l["held"]) else emptyMap()
         if (l["held"] != null || owed.isEmpty()) shrunk.clear()  // the next catch-up measured afresh
@@ -1202,6 +1206,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
                 0 -> {
+                    if (paused) x?.let { it.seen += io.now() - pausedAt }  // stopped from a pause: the pause is no silence of the read's 30 s
                     liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音")
                     needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
                     // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no

@@ -503,6 +503,7 @@ final class BeanSync {
   private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                  // pressed): a stop by hand holds until the link goes (Gone), not across the app's own
                                  // reconnects (a cut re-pull, a stalled transfer)
+  private var killedAt: Int64 = 0  // the fast transfer the app was killed in began then (init), 0: none; the next start only
 
   init(tag: String, stateFile: URL, chunks: URL, io: BeanIo) {
     self.tag = tag; self.stateFile = stateFile; self.chunks = chunks; self.io = io
@@ -510,11 +511,8 @@ final class BeanSync {
     // was started on the next connection. Now 1A/02 first, and that start held as on the app's own reconnect (Q4)
     let k = io.wifiKept()
     wifiOpen = k.open
-    if k.fastAt > 0 && io.now() - k.fastAt < BeanSync.fastMs {
-      startDone = true
-      log("bean_start", "App 在 Wi-Fi 快传途中被关掉后重新拉起：这次连上不自动开始录音", fields: ["since_ms": io.now() - k.fastAt])
-    }
-    if k.fastAt > 0 { io.wifiKeep(wifiOpen, 0) }  // once: the connections after it start the bean as ever
+    killedAt = k.fastAt
+    if k.fastAt > 0 { io.wifiKeep(wifiOpen, 0) }  // once: a relaunch after this one starts the bean as ever
     try? FileManager.default.createDirectory(at: chunks, withIntermediateDirectories: true)
     guard FileManager.default.fileExists(atPath: stateFile.path) else { return }
     do {
@@ -583,7 +581,12 @@ final class BeanSync {
           fields: hw.merging(["files": listing.files.count, "open": listing.open]) { $1 })
       owe()
       io.report(hw.merging(owed) { $1 })
-      if !startDone { startDone = true; if !recording { try start() } }
+      // killed in a fast transfer under 30 min before this connection (not the relaunch: the bean may come hours later):
+      // this one start skipped, the next connection's as ever (more recorded rather than less)
+      let ago = io.now() - killedAt, skip = killedAt > 0 && (0..<BeanSync.fastMs).contains(ago)
+      if skip { log("bean_start", "App 在 Wi-Fi 快传途中被关掉后重新拉起：这次连上不自动开始录音", fields: ["since_ms": ago]) }
+      killedAt = 0
+      if !startDone && !skip { startDone = true; if !recording { try start() } }
       try loop()
     } catch let e as Gone {
       startDone = false  // the link went: the next connection starts the bean again
@@ -1092,7 +1095,8 @@ final class BeanSync {
     shrunk = shrunk.filter { t - $0.0 <= 180_000 } + [(t, now + closed)]
     let (at, was) = shrunk[0]
     let rate = t - at >= 60_000 ? Double((was - now - closed) * Bean.frameMs) / Double(t - at) : nil
-    counted = (now, recording ? closed : 0, recording ? 0 : closed, stuck, io.watched(), fallback(open), rate)
+    // the count alone (not fallback()'s 10 min): the chip says 等停录后补 while read live only, its realtime=0 retry is plan()'s
+    counted = (now, recording ? closed : 0, recording ? 0 : closed, stuck, io.watched(), (fills[open]?.n ?? 0) >= BeanSync.tries, rate)
     let l = sync
     owed = l["owed_s"] as! Int64 > 0 ? ["backlog_s": l["owed_s"]!, "backlog_eta_s": l["eta_s"]!, "backlog_held": l["held"]!] : [:]
     if !(l["held"] is NSNull) || owed.isEmpty { shrunk = [] }  // the next catch-up measured afresh
@@ -1299,6 +1303,7 @@ final class BeanSync {
     case 0x1882:  // the bean's button: 0 stopped, 1 recording, 2 paused
       switch p.first {
       case 0:
+        if paused { x?.seen += io.now() - pausedAt }  // stopped from a pause: the pause is no silence of the read's 30 s
         liveFile = 0; paused = false; recording = false; startDone = true; log("bean_stop", "豆子停止录音")
         needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
         // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no syncTotal, no
