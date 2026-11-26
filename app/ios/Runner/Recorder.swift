@@ -100,7 +100,9 @@ enum Recorder {
           let name = defaults.string(forKey: "bleName")
           // first: the link must not reconnect when the recorder drops it
           for k in ["bleName", "bleId", "bleModel", "bleFw", "bindPending", "bindForce", "bleKicked"] { defaults.removeObject(forKey: k) }
-          if let name { defaults.removeObject(forKey: "hold:\(Ble.tag(name))") }  // its backlog no longer comes from here
+          if let name {  // its backlog no longer comes from here, nor a fast transfer it was in
+            for k in ["hold", "wifiAt"] { defaults.removeObject(forKey: "\(k):\(Ble.tag(name))") }
+          }
           let forgot = link?.forgetAll() ?? false  // a bean is told nothing: only this phone forgets it
           if let name {
             DeviceLog.app(Ble.tag(name), "unbind", forgot ? "解除绑定：录音设备忘掉了所有手机"

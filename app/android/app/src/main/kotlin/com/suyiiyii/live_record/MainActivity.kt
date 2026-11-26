@@ -200,7 +200,7 @@ class MainActivity : FlutterActivity() {
                     // first: the link must not reconnect when the recorder drops it
                     val e = p.edit().remove("bleName").remove("bleAddress").remove("bleModel").remove("bleFw").remove("bindPending")
                         .remove("bindForce").remove("bleKicked")
-                    name?.let { e.remove("hold:${Ble.tag(it)}") }  // its backlog no longer comes from here
+                    name?.let { e.remove("hold:${Ble.tag(it)}").remove("wifiAt:${Ble.tag(it)}") }  // its backlog no longer comes from here, nor a fast transfer it was in
                     e.commit()
                     val forgot = RecorderService.link?.forgetAll() ?: false
                     name?.let { DeviceLog.app(Ble.tag(it), "unbind", if (forgot) "解除绑定：录音设备忘掉了所有手机"
