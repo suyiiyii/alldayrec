@@ -1603,8 +1603,9 @@ class BeanTest {
         var killed: Pair<Boolean, Long>? = null
         bean.onJoin = { killed = bean.kept }  // the app killed here, joining the hotspot
         assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }
-        assertTrue("the hotspot asked for: kept", killed!!.first)
-        assertTrue("the fast transfer under way: kept with when it began", killed!!.second in wt0..wt0 + 10_000)
+        val k = killed!!
+        assertTrue("the hotspot asked for: kept", k.first)
+        assertTrue("the fast transfer under way: kept with when it began", k.second in wt0..wt0 + 10_000)
         assertThrows(IOException::class.java) { sync.session(since, "") }  // Bluetooth back: 1A/02, done
         assertEquals("done: nothing kept", false to 0L, bean.kept)
 
@@ -1613,7 +1614,7 @@ class BeanTest {
             bean.script.clear(); bean.script += {}
             return wifiSync(bean, dir)
         }
-        var again = relaunch(killed!!)
+        var again = relaunch(k)
         assertThrows(IOException::class.java) { again.session(since, "") }
         assertEquals("the hotspot off first", listOf(0x2E01, 0x0101, 0x01A6, 0x1A02), bean.sentCmds().take(4))
         assertEquals("killed in a fast transfer: no start on the first connection", 0, bean.starts)
