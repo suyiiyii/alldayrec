@@ -309,6 +309,13 @@ final class BeanLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, 
   func held() -> Int64? { Recorder.hold(name) }
   func liveFrom(_ at: Int64) { prefs.set(at, forKey: "live:\(name)") }
   func end(_ at: Int64) { prefs.set(at, forKey: "end:\(name)") }  // Uploader.ends() sends it
+  func wifiKeep(_ open: Bool, _ fastAt: Int64) {
+    if open { prefs.set(true, forKey: "wifiOpen:\(name)") } else { prefs.removeObject(forKey: "wifiOpen:\(name)") }
+    if fastAt > 0 { prefs.set(fastAt, forKey: "wifiAt:\(name)") } else { prefs.removeObject(forKey: "wifiAt:\(name)") }
+  }
+  func wifiKept() -> (open: Bool, fastAt: Int64) {
+    (prefs.bool(forKey: "wifiOpen:\(name)"), (prefs.object(forKey: "wifiAt:\(name)") as? NSNumber)?.int64Value ?? 0)
+  }
   func piece() { files += 1 }
   func wifiAsked() -> Bool { defer { wifiWanted = false }; return wifiWanted }
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {

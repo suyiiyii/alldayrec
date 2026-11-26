@@ -1138,6 +1138,85 @@ class BeanTest {
         onlyReads(r.bean)
     }
 
+    /** Any read ends 30 s after its last unit: here a live read caught up when the bean stops, which then sends nothing
+     *  more (no 1A/0A). The live guard is off once stopped (liveFile 0) and #408's end is for a read still behind;
+     *  before, the session waited on with no end. */
+    @Test fun stopThenSilenceEndsTheRead() {
+        val r = rec(100, listOf(0L to 5000L), watched = false, units = 1500)  // fill_tail, caught up: live at unit 6500
+        var stopped = 0L
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(0)); r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 6500L * 20; stopped = r.bean.now }
+        repeat(60) { r.bean.script += {} }
+        assertEquals("file ${r.id}: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message)
+        assertTrue("ended ${r.bean.now - stopped} ms after the stop", r.bean.now - stopped <= 31_000)
+        assertEquals(listOf(0L, 6500L), r.f.have.single().toList())
+        onlyReads(r.bean)
+    }
+
+    /** Paused over 30 s, then stopped: the pause is no silence of the read's 30 s, the end comes 30 s after the stop less
+     *  the silence before the pause (the review: at once before). */
+    @Test fun pauseThenStopEndsTheRead30sLater() {
+        val r = rec(100, listOf(0L to 5000L), watched = false, units = 1500)
+        var stopped = 0L
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(2)) }
+        repeat(45) { r.bean.script += {} }
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(0)); r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 6500L * 20; stopped = r.bean.now }
+        repeat(60) { r.bean.script += {} }
+        assertEquals("file ${r.id}: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message)
+        assertTrue("ended ${r.bean.now - stopped} ms after the stop", r.bean.now - stopped in 25_000..31_000)
+    }
+
+    /** The same with a unit 20 s into the pause (a read from behind still bringing stored units): only the silence since
+     *  that unit is the pause's, the end still 30 s after the stop (the second review: 51 s, the whole pause added). */
+    @Test fun unitInPauseThenStopEndsTheRead30sLater() {
+        val r = rec(100, listOf(0L to 5000L), watched = false, units = 1500)
+        var stopped = 0L
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(2)) }
+        repeat(20) { r.bean.script += {} }
+        r.bean.script += { r.bean.units(r.id, listOf(6500L)) }
+        repeat(40) { r.bean.script += {} }
+        r.bean.script += { r.bean.push(0x1882, byteArrayOf(0)); r.bean.recording = false; r.bean.open = 0; r.bean.listed[r.id] = 6501L * 20; stopped = r.bean.now }
+        repeat(60) { r.bean.script += {} }
+        assertEquals("file ${r.id}: no audio for 30 s", assertThrows(BeanSync.Again::class.java) { r.sync.session(0, "") }.message)
+        assertTrue("ended ${r.bean.now - stopped} ms after the stop", r.bean.now - stopped in 25_000..31_000)
+    }
+
+    /** The chip while read live only goes by the count, not fallback()'s 10 min: 11 min into one live read it still
+     *  says 等停录后补 (held: recording), not 补传中 with no ETA (the review: held null after 10 min, till the next reconnect). */
+    @Test fun liveOnlyChipHeldPast10Min() {
+        val r = rec(100, listOf(0L to 5000L), watched = false)
+        r.bean.onTransfer = { file, from, realtime ->
+            if (!realtime) r.bean.header(file, 0xFFFFFFFFL, code = 2)  // refused
+            else { r.bean.answer(file, from, realtime); r.bean.more(50) }
+        }
+        repeat(10) {
+            if (r.bean.transfers.none { it.third }) { repeat(40) { r.bean.script += {} }; try { r.sync.session(0, "") } catch (_: Exception) {}; r.bean.script.clear() }
+        }
+        val held = mutableListOf<Any?>()
+        repeat(700) { i -> r.bean.script += { r.bean.more(50); if (i % 100 == 99) held += r.sync.sync["held"] } }
+        try { r.sync.session(0, "") } catch (_: Exception) {}
+        assertTrue("one live read", r.bean.transfers.last().third)
+        assertEquals(List(7) { "recording" }, held)
+    }
+
+    /** The review's D: a file read live only after TRIES realtime=0 misses (here refusals) is read at realtime=0 again
+     *  once 10 min have gone since the last; before, never again until the app restarted. */
+    @Test fun liveOnlyTriesRealtime0AgainAfter10Min() {
+        val r = rec(100, listOf(0L to 5000L), watched = false)
+        r.bean.onTransfer = { file, from, realtime ->
+            if (!realtime) r.bean.header(file, 0xFFFFFFFFL, code = 2)  // refused
+            else { r.bean.answer(file, from, realtime); r.bean.more(50) }
+        }
+        fun once() { repeat(40) { r.bean.script += {} }; try { r.sync.session(0, "") } catch (_: Exception) {}; r.bean.script.clear() }
+        repeat(10) { if (r.bean.transfers.none { it.third }) once() }
+        assertEquals("three refused, then live only", listOf(false, false, false, true), r.bean.transfers.map { it.third })
+        once()
+        assertTrue("within 10 min: live only still", r.bean.transfers.last().third)
+        r.bean.now += BeanSync.FILL_MS
+        once()
+        assertEquals("10 min on: realtime=0 once, refused, then live only again", listOf(false, true), r.bean.transfers.takeLast(2).map { it.third })
+        assertEquals(listOf("fill_hole", "live_fallback"), r.reasons.takeLast(2))
+    }
+
     /** The file being recorded, begun `s` seconds ago, of which the phone has `have`; the bean as the 10-27 probe found
      *  it (FakeBean.answer): `units` of it a 1A/07, then the link goes. */
     private class Rec(val bean: FakeBean, val sync: BeanSync, val id: Long, val chunks: File) {
@@ -1557,6 +1636,59 @@ class BeanTest {
         assertEquals("the tap during it dropped", 1, bean.sentCmds().count { it == 0x1A05 })
         assertTrue(bean.logs.any { it.first == "bean_wifi_ask" })
         assertEquals("all of it here: nothing more over BLE", 1, bean.transfers.size)
+    }
+
+    /** The report's 6 (11-19 23:53): the app killed in a fast transfer, then relaunched (a new BeanSync, the prefs kept).
+     *  Its first connection turns the hotspot off (1A/02) and does not start the bean; the next one does, a link lost or
+     *  not. A fast transfer that ends keeps nothing; one begun 30 min or more before the connection holds no start. */
+    @Test fun wifiKilledMidTransferRelaunch() {
+        val dir = Files.createTempDirectory("bean").toFile()
+        val bean = wifiBean(); val since = wt0 - 3_600_000
+        bean.wifiAsk = true
+        val sync = wifiSync(bean, dir)
+        var killed: Pair<Boolean, Long>? = null
+        bean.onJoin = { killed = bean.kept }  // the app killed here, joining the hotspot
+        assertThrows(BeanSync.Again::class.java) { sync.session(since, "") }
+        val k = killed!!
+        assertTrue("the hotspot asked for: kept", k.first)
+        assertTrue("the fast transfer under way: kept with when it began", k.second in wt0..wt0 + 10_000)
+        assertThrows(IOException::class.java) { sync.session(since, "") }  // Bluetooth back: 1A/02, done
+        assertEquals("done: nothing kept", false to 0L, bean.kept)
+
+        fun relaunch(k: Pair<Boolean, Long>): BeanSync {
+            bean.kept = k; bean.sent.clear(); bean.starts = 0; bean.startable = true; bean.recording = false; bean.open = 0
+            bean.script.clear(); bean.script += {}
+            return wifiSync(bean, dir)
+        }
+        var again = relaunch(k)
+        bean.script += { throw BeanSync.Again("a stalled read") }  // the app's own reconnect
+        assertThrows(BeanSync.Again::class.java) { again.session(since, "") }
+        assertEquals("the hotspot off first", listOf(0x2E01, 0x0101, 0x01A6, 0x1A02), bean.sentCmds().take(4))
+        assertEquals("killed in a fast transfer: no start on the first connection", 0, bean.starts)
+        assertTrue(bean.logs.any { it.first == "bean_start" && "快传途中被关掉" in it.second })
+        assertEquals(false to 0L, bean.kept)
+        bean.script += {}
+        assertThrows(IOException::class.java) { again.session(since, "") }  // a new connection, the link not lost before
+        assertEquals("the first connection only: the next records as ever", 1, bean.starts)
+        assertEquals(1, bean.sentCmds().count { it == 0x1A02 })
+
+        again = relaunch(false to bean.now - 60_000)  // killed at the tap (no hotspot yet)
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals(0, bean.starts)
+        again = relaunch(bean.kept)  // relaunched again, the prefs as left: the mark was used once
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals("the mark used once", 1, bean.starts)
+        again = relaunch(false to bean.now - 60_000)
+        bean.now += BeanSync.FAST_MS  // the bean first comes 30 min after the relaunch (out of range meanwhile)
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals("30 min from the fast transfer at the connection, not the relaunch: started", 1, bean.starts)
+
+        again = relaunch(false to 0L)  // a plain relaunch, nothing kept: the start as ever
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals(1, bean.starts); assertFalse(0x1A02 in bean.sentCmds())
+        again = relaunch(true to bean.now - BeanSync.FAST_MS - 1)  // one begun over 30 min ago
+        assertThrows(IOException::class.java) { again.session(since, "") }
+        assertEquals("over 30 min: started", 1, bean.starts); assertTrue("the hotspot still off first", 0x1A02 in bean.sentCmds())
     }
 
     /** Over Wi-Fi the widest hole first (11-24): an older file lacking only its first 200 units, a newer one 2500 units
@@ -2414,6 +2546,9 @@ class FakeBean(var now: Long) : BeanSync.Io {
     var joinFails: Exception? = null  // what wifiJoin throws: the person cancelling the system's dialog, no answer
     val joins = mutableListOf<Triple<String, String, ByteArray>>()
     override fun wifiAsked() = wifiAsk.also { wifiAsk = false }
+    var kept = false to 0L  // the prefs (wifiOpen:, wifiAt:): kept across a BeanSync made anew
+    override fun wifiKeep(open: Boolean, fastAt: Long) { kept = open to fastAt }
+    override fun wifiKept() = kept
     override fun wifiJoin(ssid: String, password: String, endpoint: ByteArray) {
         joins += Triple(ssid, password, endpoint)
         onJoin()

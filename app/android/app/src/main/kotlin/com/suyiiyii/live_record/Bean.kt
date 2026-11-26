@@ -312,6 +312,10 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         fun phoneState(): Map<String, Any?> = emptyMap()
         /** The fast transfer was asked for (once: reading it clears it). */
         fun wifiAsked(): Boolean = false
+        /** prefs wifiOpen:<tag>, a hotspot asked for (the next session sends 1A/02), and wifiAt:<tag>, when the fast
+         *  transfer under way began (0: none): across the app being killed; unbinding forgets the second. */
+        fun wifiKeep(open: Boolean, fastAt: Long) {}
+        fun wifiKept(): Pair<Boolean, Long> = false to 0L
         /** Joins the bean's hotspot and opens its WebSocket (`endpoint`: the 1A/05 answer); send and receive go over it
          *  then, until wifiLeave() (FINISH, the hotspot left). */
         fun wifiJoin(ssid: String, password: String, endpoint: ByteArray): Unit = throw Exception("no Wi-Fi")
@@ -392,6 +396,12 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
      *  way back to BLE) and done, with how it ended (end: all, part, none, fail; s of audio it got, ms it took, all the
      *  tap's hotspots); each with the hotspot anew it is at (reopen: 0 the tap's own, wifiAt()); null before the first. */
     @Volatile var wifiStep: Map<String, Any?>? = null
+        set(value) {  // under way from the tap to done, kept in the prefs (io.wifiKeep) with when it began: a kill meanwhile is seen (init)
+            field = value
+            val on = value != null && value["step"] != "done"
+            if (on != (fastAt > 0)) { fastAt = if (on) io.now() else 0; keep() }
+        }
+    private var fastAt = 0L  // when the fast transfer under way began (wifiStep), 0: none
     var recording: Boolean
         get() = hw["recording"] == true
         private set(value) { hw = hw + ("recording" to value) }
@@ -438,12 +448,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var marked = false
     private val unknown = mutableSetOf<Int>()
     private val run = mutableListOf<ByteArray>()
-    private val fills = mutableMapOf<Long, Int>()  // realtime=0 reads of the open file that came to nothing (missed())
+    private val fills = mutableMapOf<Long, Pair<Int, Long>>()  // realtime=0 reads of the open file that came to nothing, the last when (missed())
     private var runFile = -1L
     private var runFrom = 0L
     private var overWifi = false  // wifi(): the transfers go over the hotspot's WebSocket
     @Volatile private var wifiNext = false  // asked for: before the next transfer (cleared by wifiWait() too)
-    private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02)
+    private var wifiOpen = false  // a hotspot was asked for: the next session closes it (1A/02), the app killed too
+        set(value) { field = value; keep() }
     private var wifiOffs = 0  // 1A/02s BLE went before the answer of, in a row: given up at TRIES (wifiOff())
     private var wifiUnits = 0
     private var wifiReopens = 0  // hotspots opened anew after a read stopped mid-file, since the last tap (wifiLoop())
@@ -454,6 +465,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     private var startDone = false  // this connection's start is settled (sent, the bean was recording, or its button was
                                    // pressed): a stop by hand holds until the link goes (an IOException), not across the
                                    // app's own reconnects (a cut re-pull, a stalled transfer)
+    private var killedAt = 0L  // the fast transfer the app was killed in began then (init), 0: none; the next start only
 
     init {
         chunks.mkdirs()
@@ -468,7 +480,14 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                     pairs(f.optJSONArray("p") ?: JSONArray()))
             }
         } catch (e: Exception) { io.log("bean_state", "手机上的录音豆文件记录读不了（$e），从头记", "warn") }
+        // the report's 6 (11-19 23:53): killed with a hotspot on, the app never closed it; killed in a fast transfer, the
+        // bean was started on the next connection. Now 1A/02 first, and that start held as on the app's own reconnect (Q4)
+        val (open, at) = io.wifiKept()
+        wifiOpen = open  // its setter keeps fastAt 0: once, a relaunch after this one starts the bean as ever
+        killedAt = at
     }
+
+    private fun keep() = io.wifiKeep(wifiOpen, fastAt)
 
     private fun save() {
         val o = JSONObject()
@@ -511,7 +530,13 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
                 fields = hw + mapOf("files" to listing.files.size, "open" to listing.open))
             owe()
             io.report(hw + owed)
-            if (!startDone) { startDone = true; if (!recording) start() }
+            // killed in a fast transfer under 30 min before this connection (not the relaunch: the bean may come hours
+            // later): this one start skipped, the next connection's as ever (more recorded rather than less)
+            val ago = io.now() - killedAt
+            val skip = killedAt > 0 && ago in 0 until FAST_MS
+            if (skip) io.log("bean_start", "App 在 Wi-Fi 快传途中被关掉后重新拉起：这次连上不自动开始录音", fields = mapOf("since_ms" to ago))
+            killedAt = 0
+            if (!startDone && !skip) { startDone = true; if (!recording) start() }
             loop()
         } catch (e: IOException) {
             startDone = false  // the link went: the next connection starts the bean again
@@ -583,7 +608,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             xfer?.let { x ->
                 val (behind, pace) = slow(x) ?: return@let
                 flush()
-                fills[x.file] = TRIES
+                fills[x.file] = TRIES to io.now()
                 io.log("bean_xfer", "实时文件 ${x.file} 补读 1 分钟没追近：读到单元 ${x.last}，离实时还差 ${behind * Bean.FRAME_MS / 1000} s，" +
                     "读速 ${"%.2f".format(Locale.US, pace)} 倍：这个文件改实时读，缺的停录后补", "warn",
                     mapOf("file" to x.file, "realtime" to false, "reason" to "too_slow", "from" to x.last + 1, "hole_units" to behind,
@@ -603,8 +628,9 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             xfer?.let { x ->  // the bean did not answer, or a transfer stopped: on with the next
                 if (x.key == null && now - x.at > 15_000) failed(x, "no answer")
                 // the bean cannot be stopped mid-file: a new connection starts it afresh, no stray units of this file
-                // then go to the next one's
-                else if (!x.live && now - x.seen > 30_000) {
+                // then go to the next one's. Any read: a live one too once the bean stopped (liveFile 0, the guard above
+                // off: the review's window, a read from behind not yet within 10 s of live at the stop)
+                else if ((!x.live || liveFile == 0L) && now - x.seen > 30_000) {
                     complete(x, -1, "；30 s 没收到单元，断开重连")
                     throw Again("file ${x.file}: no audio for 30 s")
                 }
@@ -994,7 +1020,8 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         shrunk.addLast(longArrayOf(t, now + closed))
         val (at, was) = shrunk.first()
         val rate = if (t - at >= 60_000) (was - now - closed) * Bean.FRAME_MS.toDouble() / (t - at) else null
-        counted = Counted(now, if (recording) closed else 0, if (recording) 0 else closed, stuck, io.watched(), (fills[open] ?: 0) >= TRIES, rate)
+        // the count alone (not fallback()'s 10 min): the chip says 等停录后补 while read live only, its realtime=0 retry is plan()'s
+        counted = Counted(now, if (recording) closed else 0, if (recording) 0 else closed, stuck, io.watched(), (fills[open]?.first ?: 0) >= TRIES, rate)
         val l = sync
         owed = if (l["owed_s"] as Long > 0) mapOf("backlog_s" to l["owed_s"], "backlog_eta_s" to l["eta_s"], "backlog_held" to l["held"]) else emptyMap()
         if (l["held"] != null || owed.isEmpty()) shrunk.clear()  // the next catch-up measured afresh
@@ -1033,7 +1060,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val watched = io.watched()
         val edge = edge(open)
         val mine = open * 1000 >= since  // a file begun before the bean was added here: live only, its start is not this phone's
-        val fallback = (fills[open] ?: 0) >= TRIES  // realtime=0 came to nothing TRIES times: live, the holes after stop
+        val fallback = fallback(open)  // realtime=0 came to nothing TRIES times: live, the holes after stop
         val x = when {
             !mine || fallback -> Xfer(open, true, tail, realtime = true)  // not for the page: the page closing never ends it
             watched -> Xfer(open, true, tail, realtime = edge - tail > WATCHED_GAP_UNITS, watched = true)
@@ -1179,6 +1206,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
             }
             0x1882 -> when (p.getOrNull(0)?.toInt()) {  // the bean's button: 0 stopped, 1 recording, 2 paused
                 0 -> {
+                    if (paused) x?.let { it.seen += io.now() - maxOf(pausedAt, it.seen) }  // stopped from a pause: the pause is no silence of the read's 30 s
                     liveFile = 0; paused = false; recording = false; startDone = true; io.log("bean_stop", "豆子停止录音")
                     needList = true  // the file just closed: a catch-up now, though no read is on (a refused live read's wait)
                     // 11-23: a live read still behind (realtime=0 from unit 0, 3.6 h) went on after the stop unseen: no
@@ -1266,7 +1294,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
     /** A realtime=0 read of the open file came to nothing: refused, no answer, no unit in 30 s, or cut with its hole
      *  where it was (the bean did not honour the offset). After TRIES in a row (a read from its offset clears them:
      *  first()) that file is read realtime=1, as before (plan()). */
-    private fun missed(x: Xfer) { if (x.live && !x.realtime) fills[x.file] = (fills[x.file] ?: 0) + 1 }
+    private fun missed(x: Xfer) { if (x.live && !x.realtime) fills[x.file] = ((fills[x.file]?.first ?: 0) + 1) to io.now() }
+
+    /** The file being recorded is read live only (plan()): TRIES misses, the last under FILL_MS ago. After that one
+     *  realtime=0 read again (the review's D: one too_slow held a file live only for hours, till the app restarted). */
+    private fun fallback(open: Long) = fills[open]?.let { (n, at) -> n >= TRIES && io.now() - at < FILL_MS } ?: false
 
     private fun file(id: Long, anchor: Long) = files.getOrPut(id) { F(anchor) }
 
@@ -1531,5 +1563,7 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         /** A fast transfer's wait for BLE (asked, reopen, back) before it ends (wifiWait()): back took 2–92 s in 53 of 53
          *  (11-08 to 11-23), the bean's own ~90 s after the phone left a stalled read (3 of 3); twice the longest. */
         const val WIFI_WAIT_MS = 180_000L
+        const val FILL_MS = 600_000L  // a file read live only after TRIES misses is tried at realtime=0 again after (fallback())
+        const val FAST_MS = 1_800_000L  // a fast transfer the app was killed in holds the start this long at most (init)
     }
 }

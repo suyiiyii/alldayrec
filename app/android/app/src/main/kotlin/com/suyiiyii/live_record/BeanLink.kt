@@ -296,6 +296,11 @@ class BeanLink(private val ctx: Context, private val prefs: SharedPreferences, c
         override fun hold(at: Long?) = prefs.edit().apply { if (at == null) remove("hold:$name") else putLong("hold:$name", at) }.apply()
         override fun held() = prefs.getLong("hold:$name", -1).takeIf { it >= 0 }
         override fun liveFrom(at: Long) = prefs.edit().putLong("live:$name", at).apply()
+        override fun wifiKeep(open: Boolean, fastAt: Long) = prefs.edit().apply {
+            if (open) putBoolean("wifiOpen:$name", true) else remove("wifiOpen:$name")
+            if (fastAt > 0) putLong("wifiAt:$name", fastAt) else remove("wifiAt:$name")
+        }.apply()
+        override fun wifiKept() = prefs.getBoolean("wifiOpen:$name", false) to prefs.getLong("wifiAt:$name", 0)
         override fun refused() = prefs.getStringSet("refused:$name", null).orEmpty().map(String::toLong).toSet()
         override fun coverage(since: Long, until: Long) = RecorderService.uploader?.coverage(name, since, until)
         override fun end(at: Long) { prefs.edit().putLong("end:$name", at).commit() }  // Uploader.ends() sends it

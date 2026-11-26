@@ -241,6 +241,9 @@ final class FakeBean: BeanIo {
   var wifiIgnore: [Int64: Int] = [:]  // 1A/07s over Wi-Fi left unanswered: so many
   var joins: [(String, String, [UInt8])] = []
   func wifiAsked() -> Bool { defer { wifiAsk = false }; return wifiAsk }
+  var kept: (open: Bool, fastAt: Int64) = (false, 0)  // the prefs (wifiOpen:, wifiAt:): kept across a BeanSync made anew
+  func wifiKeep(_ open: Bool, _ fastAt: Int64) { kept = (open, fastAt) }
+  func wifiKept() -> (open: Bool, fastAt: Int64) { kept }
   var onJoin: () -> Void = {}
   var joinFails: [Error] = []  // the next joins' ends, one each (BeanWifi.open's, its own tries all done)
   func wifiJoin(_ ssid: String, _ password: String, _ endpoint: [UInt8]) throws {
@@ -2283,6 +2286,140 @@ do {
   let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(again.description.contains("都取到了"), true, again.description)
   check(bean.transfers, [], "margins left to BLE")
+}
+
+/// Any read ends 30 s after its last unit: here a live read caught up when the bean stops, which then sends nothing more
+/// (no 1A/0A). The live guard is off once stopped (liveFile 0) and #408's end is for a read still behind; before, the
+/// session waited on with no end.
+do {
+  let r = rec(100, [(0, 5000)], watched: false, units: 1500)  // fill_tail, caught up: live at unit 6500
+  var stopped: Int64 = 0
+  r.bean.script = [{ r.bean.push(0x1882, [0]); r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 6500 * 20); stopped = r.bean.t }]
+    + Array(repeating: {}, count: 60)
+  check(session(r, BeanSync.Again.self).description, "file \(r.id): no audio for 30 s")
+  check(r.bean.t - stopped <= 31_000, true, "ended \(r.bean.t - stopped) ms after the stop")
+  check(r.have, [[0, 6500]])
+  onlyReads(r.bean)
+}
+
+/// Paused over 30 s, then stopped: the pause is no silence of the read's 30 s, the end comes 30 s after the stop less
+/// the silence before the pause (the review: at once before).
+do {
+  let r = rec(100, [(0, 5000)], watched: false, units: 1500)
+  var stopped: Int64 = 0
+  r.bean.script = [{ r.bean.push(0x1882, [2]) }] + Array(repeating: {}, count: 45)
+    + [{ r.bean.push(0x1882, [0]); r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 6500 * 20); stopped = r.bean.t }]
+    + Array(repeating: {}, count: 60)
+  check(session(r, BeanSync.Again.self).description, "file \(r.id): no audio for 30 s")
+  check((25_000...31_000).contains(r.bean.t - stopped), true, "ended \(r.bean.t - stopped) ms after the stop")
+}
+
+/// The same with a unit 20 s into the pause (a read from behind still bringing stored units): only the silence since
+/// that unit is the pause's, the end still 30 s after the stop (the second review: 51 s, the whole pause added).
+do {
+  let r = rec(100, [(0, 5000)], watched: false, units: 1500)
+  var stopped: Int64 = 0
+  r.bean.script = [{ r.bean.push(0x1882, [2]) }] + Array(repeating: {}, count: 20) + [{ r.bean.units(r.id, [6500]) }]
+    + Array(repeating: {}, count: 40)
+    + [{ r.bean.push(0x1882, [0]); r.bean.recording = false; r.bean.open = 0; r.bean.list(r.id, 6501 * 20); stopped = r.bean.t }]
+    + Array(repeating: {}, count: 60)
+  check(session(r, BeanSync.Again.self).description, "file \(r.id): no audio for 30 s")
+  check((25_000...31_000).contains(r.bean.t - stopped), true, "ended \(r.bean.t - stopped) ms after the stop")
+}
+
+/// The review's D: a file read live only after `tries` realtime=0 misses (here refusals) is read at realtime=0 again
+/// once 10 min have gone since the last; before, never again until the app restarted.
+do {
+  let r = rec(100, [(0, 5000)], watched: false)
+  r.bean.onTransfer = { file, from, realtime in
+    if !realtime { r.bean.header(file, 0xFFFF_FFFF, code: 2); return }  // refused
+    r.bean.answer(file, from, realtime); r.bean.more(50)
+  }
+  for _ in 0..<10 where !r.bean.transfers.contains(where: { $0[2] == 1 }) {
+    r.bean.script = Array(repeating: {}, count: 40); _ = try? r.sync.session(since: 0, steps: "")
+  }
+  check(r.bean.transfers.map { $0[2] }, [0, 0, 0, 1], "three refused, then live only")
+  r.bean.script = Array(repeating: {}, count: 40); _ = try? r.sync.session(since: 0, steps: "")
+  check(r.bean.transfers.last![2], 1, "within 10 min: live only still")
+  r.bean.t += BeanSync.fillMs
+  r.bean.script = Array(repeating: {}, count: 40); _ = try? r.sync.session(since: 0, steps: "")
+  check(r.bean.transfers.suffix(2).map { $0[2] }, [0, 1], "10 min on: realtime=0 once, refused, then live only again")
+  check(Array(r.reasons.suffix(2)), ["fill_hole", "live_fallback"])
+}
+
+/// The chip while read live only goes by the count, not fallback()'s 10 min: 11 min into one live read it still says
+/// 等停录后补 (held: recording), not 补传中 with no ETA (the review: held null after 10 min, till the next reconnect).
+do {
+  let r = rec(100, [(0, 5000)], watched: false)
+  r.bean.onTransfer = { file, from, realtime in
+    if !realtime { r.bean.header(file, 0xFFFF_FFFF, code: 2); return }  // refused
+    r.bean.answer(file, from, realtime); r.bean.more(50)
+  }
+  for _ in 0..<10 where !r.bean.transfers.contains(where: { $0[2] == 1 }) {
+    r.bean.script = Array(repeating: {}, count: 40); _ = try? r.sync.session(since: 0, steps: "")
+  }
+  var held: [String] = []
+  r.bean.script = (0..<700).map { i in { r.bean.more(50); if i % 100 == 99 { held.append("\(r.sync.sync["held"]!)") } } }
+  _ = try? r.sync.session(since: 0, steps: "")
+  check(r.bean.transfers.last![2], 1, "one live read")
+  check(held, Array(repeating: "recording", count: 7))
+}
+
+/// The report's 6 (11-19 23:53): the app killed in a fast transfer, then relaunched (a new BeanSync, the prefs kept). Its
+/// first connection turns the hotspot off (1A/02) and does not start the bean; the next one does, a link lost or not. A
+/// fast transfer that ends keeps nothing; one begun 30 min or more before the connection holds no start.
+do {
+  let dir = tmp(), state = dir.appendingPathComponent("state.json"), chunks = dir.appendingPathComponent("chunks")
+  let since = t0 - 3_600_000, a = (t0 - 600_000) / 1000
+  let bean = FakeBean(t0)
+  bean.list(a, 60_000); bean.wifiAsk = true
+  let sync = BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
+  var killed: (open: Bool, fastAt: Int64)?
+  bean.onJoin = { killed = bean.kept }  // the app killed here, joining the hotspot
+  bean.onTransfer = { file, from, _ in
+    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+  }
+  bean.script = Array(repeating: {}, count: 40)
+  _ = error(BeanSync.Again.self) { try sync.session(since: since, steps: "") }
+  check(killed!.open, true, "the hotspot asked for: kept")
+  check((t0...t0 + 10_000).contains(killed!.fastAt), true, "the fast transfer under way: kept with when it began")
+  _ = error(BeanSync.Gone.self) { try sync.session(since: since, steps: "") }  // Bluetooth back: 1A/02, done
+  check(bean.kept.open, false); check(bean.kept.fastAt, 0, "done: nothing kept")
+
+  func relaunch(_ k: (open: Bool, fastAt: Int64)) -> BeanSync {
+    bean.kept = k; bean.sent = []; bean.starts = 0; bean.startable = true; bean.recording = false; bean.open = 0
+    return BeanSync(tag: "D3200-0A0B", stateFile: state, chunks: chunks, io: bean)
+  }
+  let cmds = { bean.sent.map { Int($0[5]) << 8 | Int($0[6]) } }
+  var again = relaunch(killed!)
+  bean.script = [{}, { throw BeanSync.Again(description: "a stalled read") }]  // the app's own reconnect
+  _ = error(BeanSync.Again.self) { try again.session(since: since, steps: "") }
+  check(cmds().prefix(4), [0x2E01, 0x0101, 0x01A6, 0x1A02], "the hotspot off first")
+  check(bean.starts, 0, "killed in a fast transfer: no start on the first connection")
+  check(bean.logs.contains { $0.0 == "bean_start" && $0.1.contains("快传途中被关掉") }, true)
+  check(bean.kept.open, false); check(bean.kept.fastAt, 0)
+  bean.script = [{}]
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }  // a new connection, the link not lost before
+  check(bean.starts, 1, "the first connection only: the next records as ever")
+  check(cmds().filter { $0 == 0x1A02 }.count, 1)
+
+  again = relaunch((false, bean.t - 60_000)); bean.script = [{}]  // killed at the tap (no hotspot yet)
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.starts, 0)
+  again = relaunch(bean.kept); bean.script = [{}]  // relaunched again, the prefs as left: the mark was used once
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.starts, 1, "the mark used once")
+  again = relaunch((false, bean.t - 60_000)); bean.script = [{}]
+  bean.t += BeanSync.fastMs  // the bean first comes 30 min after the relaunch (out of range meanwhile)
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.starts, 1, "30 min from the fast transfer at the connection, not the relaunch: started")
+
+  again = relaunch((false, 0)); bean.script = [{}]  // a plain relaunch, nothing kept: the start as ever
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.starts, 1); check(cmds().contains(0x1A02), false)
+  again = relaunch((true, bean.t - BeanSync.fastMs - 1)); bean.script = [{}]  // one begun over 30 min ago
+  _ = error(BeanSync.Gone.self) { try again.session(since: since, steps: "") }
+  check(bean.starts, 1, "over 30 min: started"); check(cmds().contains(0x1A02), true, "the hotspot still off first")
 }
 
 print("bean check: all passed")
