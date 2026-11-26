@@ -198,7 +198,7 @@ async def label_voice(c: dict, label: str, rs: list[dict]) -> dict | None:
         return None
     e = np.mean(es, 0)
     best = min(used, key=lambda r: abs(dur(r) - 6))
-    return {"conv": c["id"], "label": label, "device": "live", "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
+    return {"conv": c["id"], "label": label, "device": c.get("device"), "n": len(rs), "speech_s": round(sum(dur(r) for r in rs), 1),
             "k": len(es), "e": e / np.linalg.norm(e), "level": round(float(np.median(ls)), 2) if ls else None,
             "clip_start": best["start"], "clip_end": min(best["end"], (dt.datetime.fromisoformat(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
             "clip_text": best.get("text"), "used": [(r["start"], r["end"], r.get("source")) for r in used]}
@@ -445,7 +445,7 @@ def describe(members: list[dict], convs: dict, called: dict[str, set[str]]) -> d
         c = convs.get(v["conv"]) or {}
         s = (c.get("summary") or {})
         pts = next((p.get("points") or [] for p in s.get("people") or [] if p.get("who") == v["label"]), [])
-        ms.append({"conv": v["conv"], "label": v["label"], "device": v.get("device"), "start": conv_start(v["conv"]), "n": v["n"], "speech_s": v["speech_s"],
+        ms.append({"conv": v["conv"], "label": v["label"], "device": v.get("device"), "live": v.get("live"), "start": conv_start(v["conv"]), "n": v["n"], "speech_s": v["speech_s"],
                    "clip": v.get("clip"), "clip_start": v.get("clip_start"), "clip_end": v.get("clip_end"), "clip_text": v.get("clip_text"),
                    "title": s.get("title"), "points": pts[:2],
                    "with": [p for p in c.get("participants") or [] if p != v["label"]]})

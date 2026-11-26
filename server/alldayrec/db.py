@@ -275,6 +275,10 @@ def init():
         bank.fill(name)
     if "used" not in {r[1] for r in conn().execute("PRAGMA table_info(voices)")}:  # 11-17: voices made before BG_GATE: not known
         conn().execute("ALTER TABLE voices ADD COLUMN used TEXT")
+    # 11-27 (#355): a live voice was written as device 'live'; now its conversation's recorder. Those before 10-02 (no
+    # conversations.device) stay 'live'; LIVE_VOICE takes both
+    conn().execute("UPDATE voices SET device = (SELECT c.device FROM conversations c WHERE c.id = voices.conv) "
+                   "WHERE device = 'live' AND (SELECT c.device FROM conversations c WHERE c.id = voices.conv) IS NOT NULL")
     if "env" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-05: colocate.py; older pieces have none
         conn().execute("ALTER TABLE pieces ADD COLUMN env BLOB")
     if "samples" not in {r[1] for r in conn().execute("PRAGMA table_info(pieces)")}:  # 11-16: sounds.py's exact coverage; older pieces have none
@@ -952,11 +956,14 @@ def auto_closed_on(day: str) -> int:
 
 # not used: a row written through these (a merge, a split, late) is not known to be free of music (sounds.verified)
 V_COLS = ("conv", "label", "device", "n", "speech_s", "k", "e", "clip", "clip_start", "clip_end", "clip_text", "level")
+# a voice of the live pipeline (a recorder's or an import's conversation), not a history one (device: its microphone)
+LIVE_VOICE = "(voices.device = 'live' OR voices.device = (SELECT c.device FROM conversations c WHERE c.id = voices.conv))"
 
 
 def voices() -> list[dict]:
-    return [{k: r[k] for k in V_COLS if r[k] is not None} | {"e": vec(r["e"])}
-            for r in conn().execute("SELECT * FROM voices WHERE e IS NOT NULL")]
+    """Every voice with a voiceprint; live: LIVE_VOICE."""
+    return [{k: r[k] for k in V_COLS if r[k] is not None} | {"e": vec(r["e"]), "live": bool(r["live"])}
+            for r in conn().execute(f"SELECT *, {LIVE_VOICE} AS live FROM voices WHERE e IS NOT NULL")]
 
 
 def voiced_conversations() -> set[str]:

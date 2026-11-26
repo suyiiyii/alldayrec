@@ -264,7 +264,7 @@ def apply(c: dict, cuts: list[str], revision) -> list[dict] | None:
                 if v["label"] is None:
                     db.insert_voices(t, [{"conv": pid}])
                 elif v["label"] in ls and v["e"] is not None:
-                    r = late_merge.voice_record(pid, v["label"], db.vec(v["e"]), p["sentences"])
+                    r = late_merge.voice_record(pid, v["label"], db.vec(v["e"]), p["sentences"], v["device"])
                     late_merge.put_voice(t, {**v, **{k: r.get(k) for k in ("conv", "n", "speech_s", "clip_start", "clip_end", "clip_text")}})
         for voice, grp in t.execute("SELECT voice, grp FROM apart").fetchall():
             for pid, ls in zip(ids[1:], labels[1:]):
