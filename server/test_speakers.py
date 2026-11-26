@@ -55,3 +55,54 @@ def test_minor_voices_fold(tmp_path):
     others = anyio.run(routes_speakers.speaker_list, True)
     assert sorted((g["count"], g["speech_s"]) for g in others["cards"]) == [(1, 300.0), (2, 120.0)] and others["others"] == 2
     assert anyio.run(routes_speakers.speaker_one, others["cards"][0]["id"])["minor"], "a folded card is still a group to name"
+
+
+def test_live_voices_keep_their_recorder(tmp_path):
+    """#355: the 'live' voices take their conversation's recorder at the start (one with none stays 'live'); centring,
+    the halves' pools and the voices relearn learns from (db.LIVE_VOICE) stay what they were, bit for bit."""
+    db.open_db(tmp_path / "t.db")
+    convs = [("c20261005100000", "rec-a"), ("c20261005100001", "rec-b"), ("c20260930100000", None)]  # None: before 10-02
+    with db.tx() as t:
+        for cid, dev in convs:
+            db.insert_conversation(t, {"id": cid, "start": routes_speakers.conv_start(cid), "end": routes_speakers.conv_start(cid),
+                                       "participants": ["S1", "张三"], "sentences": 2, "speech_s": 9.0, "device": dev})
+        vs = [v | {"device": "live"} for cid, _ in convs for v in (voice(cid, "S1", A), voice(cid, "张三", B))]
+        vs += [voice("h1", "张三", B) | {"device": "mic-x"}, voice("h2", "S1", C) | {"device": "mic-y"}]  # history: no conversation
+        db.insert_voices(t, [{**v, "e": np.array(v["e"])} for v in vs])
+    was = [{k: x for k, x in v.items() if k != "live"} for v in db.voices()]  # as before: pooled by device
+    picked = lambda where: {tuple(r) for r in db.conn().execute(f"SELECT conv, label FROM voices WHERE {where}")}
+    learnt = picked("device = 'live'")
+    db.init()
+    now = db.voices()
+    assert [v["device"] for v in now] == ["rec-a"] * 2 + ["rec-b"] * 2 + ["live"] * 2 + ["mic-x", "mic-y"]
+    old, new = speakers.centered(was), speakers.centered(now)
+    assert old.keys() == new.keys() and all(np.array_equal(old[k], new[k]) for k in old)
+    assert [speakers.pool(v) for v in now] == [v["device"] for v in was]
+    assert picked(db.LIVE_VOICE) == learnt and len(learnt) == 6
+
+
+def test_live_writers_take_the_recorder(monkeypatch):
+    """#355: both writers of a live voice (voices_loop's label_voice, late_merge's voice_record) store the
+    conversation's recorder, not 'live'."""
+    from alldayrec import core, late_merge
+
+    async def cut(a, b, fmt, device=None):
+        return np.zeros(16000, np.int16)
+    monkeypatch.setattr(routes_speakers.routes_audio, "cut", cut)
+    monkeypatch.setitem(core.state, "embed", lambda x: np.ones(4) / 2)
+    rs = [{"start": "2026-10-05T10:00:00", "end": "2026-10-05T10:00:03", "speaker": "S1", "text": "x"}]
+    v = anyio.run(routes_speakers.label_voice, {"id": "c20261005100000", "device": "rec-a"}, "S1", rs)
+    assert v["device"] == "rec-a"
+    assert late_merge.voice_record("c20261005100000", "S1", np.ones(4) / 2, rs, "rec-b")["device"] == "rec-b"
+
+
+def test_halves_one_live_pool():
+    """bank.halves splits a card within speakers.pool: live voices on three recorders (7 each, under CLASS_MIN apiece)
+    are one pool, so two people in it are found; grouped by recorder (device) none of them could be split."""
+    from alldayrec import bank
+    ms = [{"conv": f"c{i}", "label": "张三", "device": f"rec-{i % 3}", "live": True, "speech_s": 1.0} for i in range(21)]
+    rng = np.random.default_rng(1)
+    vec = {f"c{i}|张三": (lambda x: x / np.linalg.norm(x))((A if i % 2 else -A) + rng.normal(scale=0.1, size=16)) for i in range(21)}
+    got = bank.halves(ms, vec)
+    assert got and sorted(len(h) for h in got) == [10, 11]
+    assert bank.halves([m | {"live": False} for m in ms], vec) is None  # each recorder its own pool: too few to split

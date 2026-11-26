@@ -13,15 +13,21 @@ def key(v: dict) -> str:
     return f"{v['conv']}|{v['label']}"
 
 
+def pool(v: dict) -> str | None:
+    """What a voice is centred against: every live voice one pool (db.LIVE_VOICE), a history one its microphone's. One
+    pool per recorder was measured worse on 11-27 (#355: same-name pairs over SPEAKER_LINK 52% -> 48%)."""
+    return "live" if v.get("live") else v.get("device")
+
+
 def centered(voices: list[dict]) -> dict[str, np.ndarray]:
-    """Each voiceprint minus its device's mean: without it one microphone's own sound pulls strangers together."""
+    """Each voiceprint minus its pool's mean: without it the microphones' own sound pulls strangers together."""
     by_dev = {}
     for v in voices:
-        by_dev.setdefault(v["device"], []).append(np.array(v["e"]))
+        by_dev.setdefault(pool(v), []).append(np.array(v["e"]))
     mean = {d: np.mean(es, 0) for d, es in by_dev.items()}
     out = {}
     for v in voices:
-        x = np.array(v["e"]) - mean[v["device"]]
+        x = np.array(v["e"]) - mean[pool(v)]
         out[key(v)] = x / (np.linalg.norm(x) or 1)
     return out
 

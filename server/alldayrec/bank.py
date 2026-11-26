@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from alldayrec import db, sounds, tenant
+from alldayrec import db, sounds, speakers, tenant
 from alldayrec.diarist import OWNER_MIN, _rows
 from alldayrec.tenant import T
 
@@ -160,7 +160,7 @@ def relearn(t) -> list[dict]:
     shown free of music under them (sounds.verified), those held back counted (unverified). Per name what it did."""
     out, g = [], sounds.gating()
     for name, n in t.execute("SELECT name, n FROM enrolled WHERE row IS NULL AND name != '我'").fetchall():
-        rs = t.execute(f"SELECT k, e{', used' if g else ''} FROM voices WHERE label = ? AND device = 'live' AND e IS NOT NULL AND conv NOT IN "
+        rs = t.execute(f"SELECT k, e{', used' if g else ''} FROM voices WHERE label = ? AND {db.LIVE_VOICE} AND e IS NOT NULL AND conv NOT IN "
                        "(SELECT conv FROM enrolled WHERE name = ? AND row IS NOT NULL AND conv IS NOT NULL)", (name, name)).fetchall()
         vs = [(r[0] or 1, db.vec(r[1])) for r in rs if not g or sounds.verified(r[2])]
         r = {"name": name, "old_n": n, "voices": len(vs), **({"unverified": len(rs) - len(vs)} if g else {})}
@@ -191,13 +191,13 @@ def sync(*names: str) -> None:
 MIXED_MIN = 20     # voices a card needs before naming it checks for two people in it
 MIXED_BELOW = 0.5  # two halves this little alike (cosine of their centroids) are two people: the one mixed named
                    # card 0.29 and 0.34 on its two recorders; 69 card x recorder splits median 0.72, p10 0.52
-CLASS_MIN = 10     # voices of one recorder (device) a split needs: the halves are compared within one recorder
+CLASS_MIN = 10     # voices of one pool (speakers.pool) a split needs: the halves are compared within one pool
 HALF_MIN = 3       # a smaller half is an odd voice or two (不是 on the card), not a second person
 
 
 def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] | None:
-    """The two-half test of a card: its voices of each recorder split in two (k-means, device-centred
-    voiceprints, vec by conv|label); the recorder whose halves are least alike decides. Two people: the card's voices
+    """The two-half test of a card: its voices of each pool (speakers.pool) split in two (k-means, centred
+    voiceprints, vec by conv|label); the pool whose halves are least alike decides. Two people: the card's voices
     in two, each with the nearer of that split's centroids, the bigger half first. None: one person, or too few voices."""
     from sklearn.cluster import KMeans
     if len(members) < MIXED_MIN:
@@ -206,7 +206,7 @@ def halves(members: list[dict], vec: dict[str, np.ndarray]) -> list[list[dict]] 
     by = {}
     for m in members:
         if key(m) in vec:
-            by.setdefault(m.get("device"), []).append(vec[key(m)])
+            by.setdefault(speakers.pool(m), []).append(vec[key(m)])
     worst = None
     for xs in by.values():
         if len(xs) < CLASS_MIN:

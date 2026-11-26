@@ -85,10 +85,10 @@ def put_voice(t, v: dict):
               tuple(v.get(k) for k in db.V_COLS))
 
 
-def voice_record(cid: str, label: str, e, rows: list[dict]) -> dict:
+def voice_record(cid: str, label: str, e, rows: list[dict], device: str) -> dict:
     rs = [r for r in rows if r.get("speaker") == label and not r.get("music")]
     best = max(rs, key=lambda r: (P(r["end"]) - P(r["start"])).total_seconds(), default=None)
-    return {"conv": cid, "label": label, "device": "live", "e": db.blob(e), "k": 1, "n": len(rs),
+    return {"conv": cid, "label": label, "device": device, "e": db.blob(e), "k": 1, "n": len(rs),
             "speech_s": sum((P(r["end"]) - P(r["start"])).total_seconds() for r in rs),
             **({"clip_start": best["start"], "clip_end": min(best["end"], (P(best["start"]) + dt.timedelta(seconds=10)).isoformat()),
                 "clip_text": best.get("text")} if best else {})}
@@ -312,7 +312,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                         db.insert_conversation(t, rec)
                         for label in rec["participants"]:
                             if label in vectors:
-                                put_voice(t, voice_record(rec["id"], label, vectors[label], group["sentences"]))
+                                put_voice(t, voice_record(rec["id"], label, vectors[label], group["sentences"], device))
                         changed.append(rec)
                     continue
                 early, *later = cs
@@ -321,7 +321,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                     for label, e in existing_vectors.get(c["id"], {}).items():
                         if label in c["participants"] and not t.execute("SELECT 1 FROM voices WHERE conv = ? AND label = ? AND e IS NOT NULL", (c["id"], label)).fetchone():
                             prior = [r for r in db.sentences(c["start"], c["end"], True, device) if r["id"] not in new_ids]
-                            put_voice(t, voice_record(c["id"], label, e, prior))
+                            put_voice(t, voice_record(c["id"], label, e, prior, device))
                 target = {k: v for k, v in existing_vectors.get(early["id"], {}).items() if k in early["participants"]}
                 used = set(early["participants"]) | set(target)
                 for c in later:
@@ -337,7 +337,7 @@ def attach(span: dict, rows: list[dict], vectors: dict, existing_vectors: dict, 
                 for lab in {r.get("speaker") for r in rs}:
                     es = [v for k, v in vectors.items() if lm.get(k, k) == lab]
                     if es:
-                        put_voice(t, voice_record(early["id"], lab, unit(np.mean(es, 0)), rs))
+                        put_voice(t, voice_record(early["id"], lab, unit(np.mean(es, 0)), rs, device))
                 early["start"] = min([early["start"]] + [c["start"] for c in later] + [r["start"] for r in rs])
                 early["end"] = max([early["end"]] + [c["end"] for c in later] + [r["end"] for r in rs])
                 all_rows = db.sentences(early["start"], early["end"], True, device)
