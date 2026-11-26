@@ -308,7 +308,8 @@ def test_bridge_moves_every_reference_and_alias_api(store):
     assert db.kv("me_centroids")["me-test"] == [A+"|我"]
     assert db.kv(f"live:{D}")["conversation"] == A
     assert db.kv("selfvoice")["card"]["candidates"][0]["members"][0] == {"conv": A, "label": "S2"}
-    assert db.kv("recap:2026-10-20")["stale"]
+    assert db.kv("recap:2026-10-20")["stale"] and db.kv("recap_revision:2026-10-20") == 1
+    assert db.kv(f"conversation_revision:{A}") == 1
     assert db.kv("recap:2026-10-20")["todos"][0]["id"] == nid
     assert "old" not in T().undo
     got = anyio.run(routes_api.conversation, B)
