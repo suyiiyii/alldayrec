@@ -231,7 +231,7 @@ def check_v2(res: dict, ev: dict[str, dict], days: int) -> dict:
 
 def key(text: str, ev: dict[str, dict]) -> str:
     """What the model is asked: the same again gets no call (an automatic refresh after a conversation that gave nothing)."""
-    return hashlib.sha256(json.dumps([SYSTEM_V2, summary.lang_line(), text, ev], ensure_ascii=False).encode()).hexdigest()[:16]
+    return hashlib.sha256(json.dumps([PROMPT_VERSION_V2, SYSTEM_V2, summary.lang_line(), text, ev], ensure_ascii=False).encode()).hexdigest()[:16]
 
 
 async def profile_v2(name: str, text: str, ev: dict[str, dict], made: dict, upto: str | None) -> dict:
