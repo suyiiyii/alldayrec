@@ -250,6 +250,12 @@ def test_v2_refresh_asks_nothing_twice(monkeypatch):
     assert len(asked) == 3, "evidence changed: asked again"
 
 
+def test_v2_key_has_the_prompt_version(monkeypatch):
+    before = profiles.key("t", {})
+    monkeypatch.setattr(profiles, "PROMPT_VERSION_V2", profiles.PROMPT_VERSION_V2 + 1)
+    assert profiles.key("t", {}) != before, "a version bump alone is asked again"
+
+
 def test_v2_mention_rows_stay_in_their_conversation():
     d = "2026-10-03T10:00:00.000"
     rs = [row(d, 0, 3, "李四", "张三下周搬家"), row(d, 4, 3, "我", "是吗")]
