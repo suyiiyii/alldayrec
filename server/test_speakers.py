@@ -79,3 +79,30 @@ def test_live_voices_keep_their_recorder(tmp_path):
     assert old.keys() == new.keys() and all(np.array_equal(old[k], new[k]) for k in old)
     assert [speakers.pool(v) for v in now] == [v["device"] for v in was]
     assert picked(db.LIVE_VOICE) == learnt and len(learnt) == 6
+
+
+def test_live_writers_take_the_recorder(monkeypatch):
+    """#355: both writers of a live voice (voices_loop's label_voice, late_merge's voice_record) store the
+    conversation's recorder, not 'live'."""
+    from alldayrec import core, late_merge
+
+    async def cut(a, b, fmt, device=None):
+        return np.zeros(16000, np.int16)
+    monkeypatch.setattr(routes_speakers.routes_audio, "cut", cut)
+    monkeypatch.setitem(core.state, "embed", lambda x: np.ones(4) / 2)
+    rs = [{"start": "2026-10-05T10:00:00", "end": "2026-10-05T10:00:03", "speaker": "S1", "text": "x"}]
+    v = anyio.run(routes_speakers.label_voice, {"id": "c20261005100000", "device": "rec-a"}, "S1", rs)
+    assert v["device"] == "rec-a"
+    assert late_merge.voice_record("c20261005100000", "S1", np.ones(4) / 2, rs, "rec-b")["device"] == "rec-b"
+
+
+def test_halves_one_live_pool():
+    """bank.halves splits a card within speakers.pool: live voices on three recorders (7 each, under CLASS_MIN apiece)
+    are one pool, so two people in it are found; grouped by recorder (device) none of them could be split."""
+    from alldayrec import bank
+    ms = [{"conv": f"c{i}", "label": "张三", "device": f"rec-{i % 3}", "live": True, "speech_s": 1.0} for i in range(21)]
+    rng = np.random.default_rng(1)
+    vec = {f"c{i}|张三": (lambda x: x / np.linalg.norm(x))((A if i % 2 else -A) + rng.normal(scale=0.1, size=16)) for i in range(21)}
+    got = bank.halves(ms, vec)
+    assert got and sorted(len(h) for h in got) == [10, 11]
+    assert bank.halves([m | {"live": False} for m in ms], vec) is None  # each recorder its own pool: too few to split
