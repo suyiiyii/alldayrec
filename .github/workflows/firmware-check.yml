@@ -3,6 +3,9 @@ on:
   pull_request:  # only on PRs: main gets what a green PR ran
     paths: ['firmware/devkit/**', 'firmware/selftest/**', 'fixtures/**', '.github/workflows/firmware-check.yml', '.github/scripts/firmware-setup-ncs.sh']
 
+permissions:
+  contents: read
+
 concurrency:  # a new push to a PR cancels its run still going
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
