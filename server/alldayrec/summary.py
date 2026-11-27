@@ -506,10 +506,6 @@ def lists() -> tuple[str, ...]:
     return LISTS + ("broadcast_spans",) if T().media_view else LISTS
 
 
-def _speech(r: dict) -> float:
-    return (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
-
-
 def in_media(r: dict, spans: list[dict]) -> bool:
     """Spans name rows by their start, both ends included."""
     return any(x["from"] <= r["start"] <= x["to"] for x in spans)
@@ -522,8 +518,8 @@ def not_live(s: dict | None) -> list[dict]:
 
 def media_share(rows: list[dict], spans: list[dict]) -> float:
     """Of the speech, the part played aloud by media; the page greys a conversation that is mostly media."""
-    total = sum(map(_speech, rows))
-    return round(sum(_speech(r) for r in rows if in_media(r, spans)) / total, 2) if total and spans else 0.0
+    total = sum(map(db.seconds, rows))
+    return round(sum(db.seconds(r) for r in rows if in_media(r, spans)) / total, 2) if total and spans else 0.0
 
 
 def keep_live(s: dict, live: list[dict], rows: list[dict]) -> dict:
@@ -553,8 +549,8 @@ def media_labels(rows: list[dict], spans: list[dict]) -> set[str]:
     for r in rows:
         if r.get("speaker"):
             x = by.setdefault(r["speaker"], [0.0, 0.0])
-            x[0] += _speech(r)
-            x[1] += _speech(r) if in_media(r, spans) else 0
+            x[0] += db.seconds(r)
+            x[1] += db.seconds(r) if in_media(r, spans) else 0
     return {k for k, (t, m) in by.items() if t and m / t >= 0.5}
 
 

@@ -85,7 +85,7 @@ kind 看这一整段主要是什么，从这五个里选一个：交谈（「我
 def due(c: dict) -> bool:
     """Long enough to check, with speech for two parts; a conversation from before per-device pipelines (no device) never is."""
     return (SPLIT_MIN_S > 0 and bool(c.get("device")) and (c.get("speech_s") or 0) >= 2 * PART_S
-            and (P(c["end"]) - P(c["start"])).total_seconds() >= SPLIT_MIN_S)
+            and db.seconds(c) >= SPLIT_MIN_S)
 
 
 def merged(parts: list[dict]) -> list[dict]:
@@ -145,7 +145,7 @@ def snap(rows: list[dict], cuts: list[dict]) -> list[dict]:
 
 
 def speech(rows: list[dict]) -> float:
-    return sum((P(r["end"]) - P(r["start"])).total_seconds() for r in rows if r.get("speaker") not in IGNORE)
+    return sum(db.seconds(r) for r in rows if r.get("speaker") not in IGNORE)
 
 
 def keep(rows: list[dict], cuts: list[dict]) -> list[dict]:

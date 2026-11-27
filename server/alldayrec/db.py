@@ -440,6 +440,11 @@ def ms(s: str) -> int:
     return int(dt.datetime.fromisoformat(s).timestamp() * 1000)
 
 
+def seconds(r: dict) -> float:
+    """How long a row (or anything with ISO start and end) lasts, in seconds."""
+    return (dt.datetime.fromisoformat(r["end"]) - dt.datetime.fromisoformat(r["start"])).total_seconds()
+
+
 def put_seg_embs(c: sqlite3.Connection, source: str, rows: list[dict], ids: list[int | None], embs: list[tuple]) -> bool:
     """A pass's voiceprints (device_pipeline.seg_embs: each with its row's place in the pass's rows) beside the rows
     replace_sentences put in (ids: what it returned), none for a row it did not. False: none written (logged, a key

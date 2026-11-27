@@ -1,6 +1,7 @@
 """Splitting a long conversation: the pure cut rules, the transaction with every moved reference, the walls late audio
 never merges across, and the summary worker's hook; the model is faked."""
 import contextlib
+import datetime as dt
 import json
 import os
 import sqlite3
@@ -157,6 +158,8 @@ def test_no_split_on_error_or_one_part(long_conv):
     assert anyio.run(split.check, c, None) == [] and split.checked(c, None)
     assert db.summary(A)["status"] == "done" and len(db.conversations()) == 1
     assert not split.due({**c, "speech_s": 2 * split.PART_S - 1}), "no speech for two parts: no call"
+    short = (dt.datetime.fromisoformat(c["start"]) + dt.timedelta(seconds=split.SPLIT_MIN_S - 1)).isoformat()
+    assert split.due(c) and not split.due({**c, "end": short}), "shorter than SPLIT_MIN_S: no call"
     long_conv["mp"].setattr(split, "SPLIT_MIN_S", 0)
     assert not split.due(c)
 
