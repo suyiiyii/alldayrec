@@ -729,6 +729,7 @@ final class BeanSync {
     if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
       log("bean_wifi_skip", "没有积压，不开热点", fields: ["battery": battery ?? NSNull(), "recording": recording])
       wifiEnd("done", "none")
+      if !recording { try start() }  // the owner, 11-27: nothing to fetch ends the stop the tap needed, as one that got all
       return
     }
     if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
@@ -879,7 +880,9 @@ final class BeanSync {
     if s != "asked" { note["before"] = wifiNote }  // this tap's own failure said first, what to do about it kept (asked: the last tap's)
     wifiNote = note
     switch s {
-    case "back": step["step"] = "done"; wifiStep = step  // how it ended kept
+    case "back":  // how it ended kept; one that got all ends the stop it needed, BLE just came back late (wifiOff())
+      step["step"] = "done"; wifiStep = step
+      if step["end"] as? String == "all" { startDone = false }
     case "asked": wifiStep = ["step": "done", "end": "fail"]  // nothing got this tap (wifiGot is the last one's)
     default: wifiEnd("done", "fail")
     }

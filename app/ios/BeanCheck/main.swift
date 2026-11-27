@@ -1406,33 +1406,62 @@ do {
 }
 
 /// A stop by hand holds across the fast transfer's reconnect (#324: a new connection starts the bean, the app's own
-/// reconnects do not) when the transfer failed (BLE gone before the 1A/05 answer); one that got all ends it (the owner,
-/// 11-27): the bean stopped by its button, the transfer reads the closed file over Wi-Fi, the next session starts it.
-for dropFirst in [false, true] {
+/// reconnects do not) when the transfer failed (BLE gone before the 1A/05 answer) or got part; one that got all ends it
+/// (the owner, 11-27), also when BLE is back only after `wifiWaitMs`, and so does a tap with nothing to fetch: the bean
+/// stopped by its button, the transfer reads the closed file over Wi-Fi, the next session starts it.
+for kind in ["all", "fail", "late", "part", "none"] {
   let dir = tmp()
   let bean = FakeBean(t0)
   let a = (t0 - 60_000) / 1000
   bean.recording = true; bean.open = a; bean.list(a, 0); bean.startable = true
+  var heard = Set<Int>()  // part: each hotspot sends 500 units once, then silent
   bean.onTransfer = { file, from, _ in
-    // live over BLE: nothing until the stop; then busy (code 4), the file left for Wi-Fi
-    if !bean.onWifi { bean.header(file, 0xFFFF_FFFF, code: bean.recording ? 0 : 4); return }
-    bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
+    if !bean.onWifi {
+      // none: BLE gets the closed file itself; else live over BLE, nothing until the stop, then busy (code 4)
+      if kind == "none" && !bean.recording { bean.header(file, 3000 * Int64(Bean.unit)); bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file) }
+      else { bean.header(file, 0xFFFF_FFFF, code: bean.recording ? 0 : 4) }
+      return
+    }
+    bean.header(file, 3000 * Int64(Bean.unit))
+    if kind == "part" {
+      if heard.insert(bean.joins.count).inserted { bean.units(file, Array(from..<(from + 500)), ms: 1) }
+      return
+    }
+    bean.units(file, Array(from..<3000), last: 2999, ms: 1); bean.complete(file)
   }
+  if kind == "none" { bean.confirmed = { [a] } }
   bean.script = [
     { bean.push(0x1882, [0]); bean.complete(a); bean.recording = false; bean.open = 0; bean.list(a, 60_000) },
     { bean.wifiAsk = true },
-  ]
+  ] + Array(repeating: {}, count: kind == "part" ? 60 : 0)  // part: 10 s with no unit
   let sync = BeanSync(tag: "D3200-0A0B", stateFile: dir.appendingPathComponent("state.json"), chunks: dir.appendingPathComponent("chunks"), io: bean)
-  bean.dropOnWifi = dropFirst
-  let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(again.description.contains(dropFirst ? "BLE went" : "都取到了"), true, again.description)
-  check(sync.wifiNote?["code"] as? String, dropFirst ? "beanWifiNoHotspot" : nil)
-  check(bean.starts, 0, "it was recording: no start")
+  bean.dropOnWifi = kind == "fail"
+  if kind == "none" {
+    do { try sync.session(since: t0 - 3_600_000, steps: "") } catch {}
+    check(bean.logs.contains { $0.0 == "bean_wifi_skip" && $0.1.contains("没有积压") }, true)
+    check(sync.wifiStep?["end"] as? String, "none")
+    check(bean.starts, 1, "nothing to fetch: started again")
+  } else {
+    let again = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(again.description.contains(["fail": "BLE went", "part": "10 s 没收到单元"][kind] ?? "都取到了"), true, again.description)
+    check(sync.wifiNote?["code"] as? String, kind == "fail" ? "beanWifiNoHotspot" : nil)
+    check(bean.starts, 0, "it was recording: no start")
+    while kind == "part" && sync.wifiStep?["step"] as? String == "reopen" {  // a new hotspot, `tries` in all, then back
+      bean.script = Array(repeating: {}, count: 60)
+      _ = error(BeanSync.Again.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    }
+    if kind == "late" { sync.wifiWait(); bean.t += BeanSync.wifiWaitMs; sync.wifiWait() }
+    check([sync.wifiStep?["step"] as? String, sync.wifiStep?["end"] as? String],
+          [kind == "late" ? "done" : "back", ["fail": "fail", "part": "part"][kind] ?? "all"], kind)
+    check(bean.starts, 0, "\(kind): no start before BLE is back")
+    bean.script = []
+    _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
+    check(bean.starts, ["fail", "part"].contains(kind) ? 0 : 1, "\(kind): the reconnect after Wi-Fi " + (["fail", "part"].contains(kind) ? "starts nothing" : "starts it"))
+    check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x02 }, true)
+  }
+  bean.script = []
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.starts, dropFirst ? 0 : 1, dropFirst ? "failed: the reconnect after Wi-Fi starts nothing" : "got all: started again")
-  check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x02 }, true)
-  _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.starts, 1, "a link lost (Gone): the next connection starts it again, once")
+  check(bean.starts, 1, "\(kind): a link lost (Gone): the next connection starts it again, once")
 }
 
 /// A live read (realtime=1) the bean takes back to unit 0 (11-08 16:42: 20704→0 in one transfer), sends all again fast,
