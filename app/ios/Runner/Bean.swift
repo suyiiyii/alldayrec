@@ -729,6 +729,7 @@ final class BeanSync {
     if owed.isEmpty {  // nothing lacking (a minute or less behind live is none: owe()): 11-08 a second tap did one for nothing
       log("bean_wifi_skip", "没有积压，不开热点", fields: ["battery": battery ?? NSNull(), "recording": recording])
       wifiEnd("done", "none")
+      if !recording { try start() }  // the owner, 11-27: nothing to fetch ends the stop the tap needed, as one that got all
       return
     }
     if let battery, battery < 30 {  // the bean opens no hotspot below 30% (Feishu's manual), and it costs power
@@ -879,7 +880,9 @@ final class BeanSync {
     if s != "asked" { note["before"] = wifiNote }  // this tap's own failure said first, what to do about it kept (asked: the last tap's)
     wifiNote = note
     switch s {
-    case "back": step["step"] = "done"; wifiStep = step  // how it ended kept
+    case "back":  // how it ended kept; one that got all ends the stop it needed, BLE just came back late (wifiOff())
+      step["step"] = "done"; wifiStep = step
+      if step["end"] as? String == "all" { startDone = false }
     case "asked": wifiStep = ["step": "done", "end": "fail"]  // nothing got this tap (wifiGot is the last one's)
     default: wifiEnd("done", "fail")
     }
@@ -900,7 +903,11 @@ final class BeanSync {
     let back = wifiEnded > 0 ? io.monotonicNow() - wifiEnded : -1
     log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 \(back / 1000) s；电量 \(wifiBattery) → \(hw["battery"] ?? "?")%",
         fields: ["ms": back, "battery_before": wifiBattery, "battery": hw["battery"] ?? NSNull(), "recording": recording])
-    if var w = wifiStep, w["step"] as? String == "back" { w["step"] = "done"; wifiStep = w }
+    if var w = wifiStep, w["step"] as? String == "back" {
+      w["step"] = "done"; wifiStep = w
+      // the owner, 11-27: one that got all ends the stop it needed, the bean records again; failed or part: held (tap again)
+      if w["end"] as? String == "all" { startDone = false }
+    }
     do {
       let f = try ask(Bean.wifiOff(), 0x1A02, 5000)
       log("bean_wifi_off", "关了热点（1A/02，状态 \(f.status)，" + (f.payload.isEmpty ? "回复不带数据）" : "回复 \(Bean.hex(f.payload))）"),

@@ -2083,7 +2083,8 @@ class BeanTest {
     }
 
     /** BLE gone before the bean answered 1A/02 (iOS #262 reviews): the next session sends it again, TRIES in all, then
-     *  gives that up, said so, and BLE goes on; none of it a link lost (no start after it). */
+     *  gives that up, said so, and BLE goes on; none of it a link lost (one start after it: the transfer got all,
+     *  the owner 11-27). */
     @Test fun wifiOffRetried() { for (drops in listOf(1, BeanSync.TRIES)) wifiOff(drops) }
     private fun wifiOff(drops: Int) {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -2102,34 +2103,63 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertEquals("1A/02 again after BLE went, $drops drops", if (drops == 1) 2 else drops, bean.sentCmds().count { it == 0x1A02 })
         assertEquals(drops == BeanSync.TRIES, bean.logs.any { it.first == "bean_wifi_off" && "不再发" in it.second })
-        assertEquals("no start for it", starts, bean.starts)
+        assertEquals("one start, once 1A/02 is settled", starts + 1, bean.starts)
         assertEquals("then BLE as before", Triple(b, 0L, false), bean.transfers.last())
     }
 
     /** A stop by hand holds across the fast transfer's reconnect (a new connection starts the bean, the app's own
-     *  reconnects do not), also when BLE goes before the 1A/05 answer. */
-    @Test fun wifiKeepsAStopByHand() { for (dropFirst in listOf(false, true)) stopByHand(dropFirst) }
-    private fun stopByHand(dropFirst: Boolean) {
+     *  reconnects do not) when the transfer failed (BLE gone before the 1A/05 answer) or got part; one that got all
+     *  ends it (the owner, 11-27), also when BLE is back only after WIFI_WAIT_MS, and so does a tap with nothing to
+     *  fetch. */
+    @Test fun wifiKeepsAStopByHand() { for (kind in listOf("all", "fail", "late", "part", "none")) stopByHand(kind) }
+    private fun stopByHand(kind: String) {
         val dir = Files.createTempDirectory("bean").toFile()
         val bean = FakeBean(wt0); val a = wt0 / 1000 - 60
         bean.recording = true; bean.open = a; bean.listed[a] = 0; bean.startable = true
+        val heard = mutableSetOf<Int>()  // part: each hotspot sends 500 units once, then silent
         bean.onTransfer = { file, from, _ ->
-            // live over BLE: nothing until the stop; then busy (code 4), the file left for Wi-Fi
-            if (!bean.onWifi) bean.header(file, 0xFFFFFFFFL, code = if (bean.recording) 0 else 4)
-            else { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+            if (!bean.onWifi) {
+                // none: BLE gets the closed file itself; else live over BLE, nothing until the stop, then busy (code 4)
+                if (kind == "none" && !bean.recording) { bean.header(file, 3000L * Bean.UNIT); bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+                else bean.header(file, 0xFFFFFFFFL, code = if (bean.recording) 0 else 4)
+            } else {
+                bean.header(file, 3000L * Bean.UNIT)
+                if (kind != "part") { bean.units(file, (from until 3000L).toList(), last = 2999, ms = 1); bean.complete(file) }
+                else if (heard.add(bean.joins.size)) bean.units(file, (from until from + 500).toList(), ms = 1)
+            }
         }
+        if (kind == "none") bean.confirmed = { setOf(a) }
         bean.script += { bean.push(0x1882, byteArrayOf(0)); bean.complete(a); bean.recording = false; bean.open = 0; bean.listed[a] = 60_000 }
         bean.script += { bean.wifiAsk = true }
+        if (kind == "part") repeat(60) { bean.script += {} }  // 10 s with no unit
         val sync = wifiSync(bean, dir)
-        bean.dropOnWifi = dropFirst
-        val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertTrue(again.message, (if (dropFirst) "BLE went" else "都取到了") in again.message!!)
-        assertEquals("it was recording: no start", 0, bean.starts)
+        bean.dropOnWifi = kind == "fail"
+        if (kind == "none") {
+            runCatching { sync.session(wt0 - 3_600_000, "") }
+            assertTrue(bean.logs.any { it.first == "bean_wifi_skip" && "没有积压" in it.second })
+            assertEquals("none", sync.wifiStep?.get("end"))
+            assertEquals("nothing to fetch: started again", 1, bean.starts)
+        } else {
+            val again = assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+            assertTrue(again.message, (mapOf("fail" to "BLE went", "part" to "10 s 没收到单元")[kind] ?: "都取到了") in again.message!!)
+            assertEquals("it was recording: no start", 0, bean.starts)
+            while (kind == "part" && sync.wifiStep?.get("step") == "reopen") {  // a new hotspot, TRIES in all, then back
+                bean.script.clear(); repeat(60) { bean.script += {} }
+                assertThrows(BeanSync.Again::class.java) { sync.session(wt0 - 3_600_000, "") }
+            }
+            if (kind == "late") { sync.wifiWait(); bean.now += BeanSync.WIFI_WAIT_MS; sync.wifiWait() }
+            assertEquals(kind, listOf(if (kind == "late") "done" else "back", mapOf("fail" to "fail", "part" to "part")[kind] ?: "all"),
+                listOf(sync.wifiStep?.get("step"), sync.wifiStep?.get("end")))
+            assertEquals("$kind: no start before BLE is back", 0, bean.starts)
+            bean.script.clear()
+            assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
+            val held = kind == "fail" || kind == "part"
+            assertEquals("$kind: the reconnect after Wi-Fi " + (if (held) "starts nothing" else "starts it"), if (held) 0 else 1, bean.starts)
+            assertTrue(0x1A02 in bean.sentCmds())
+        }
+        bean.script.clear()
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertEquals("stopped by hand: the reconnect after Wi-Fi starts nothing", 0, bean.starts)
-        assertTrue(0x1A02 in bean.sentCmds())
-        assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertEquals("a link lost: the next connection starts it again", 1, bean.starts)
+        assertEquals("$kind: a link lost: the next connection starts it again, once", 1, bean.starts)
     }
 
     /** A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
