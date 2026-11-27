@@ -849,7 +849,11 @@ class BeanSync(private val tag: String, private val stateFile: File, private val
         val back = if (wifiEnded > 0) io.monotonicNow() - wifiEnded else -1
         io.log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 ${back / 1000} s；电量 ${wifiBattery ?: "?"} → ${hw["battery"] ?: "?"}%",
             fields = mapOf("ms" to back, "battery_before" to wifiBattery, "battery" to hw["battery"], "recording" to recording))
-        wifiStep?.takeIf { it["step"] == "back" }?.let { wifiStep = it + ("step" to "done") }
+        wifiStep?.takeIf { it["step"] == "back" }?.let {
+            wifiStep = it + ("step" to "done")
+            // the owner, 11-27: one that got all ends the stop it needed, the bean records again; failed or part: held (tap again)
+            if (it["end"] == "all") startDone = false
+        }
         try {
             val f = try { hotspot = true; ask(Bean.wifiOff(), 0x1A02, 5000) } finally { hotspot = false }
             io.log("bean_wifi_off", "关了热点（1A/02，状态 ${f.status}，" + (if (f.payload.isEmpty()) "回复不带数据）" else "回复 ${Bean.hex(f.payload)}）"),

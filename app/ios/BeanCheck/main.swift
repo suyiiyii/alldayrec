@@ -1005,7 +1005,8 @@ for (code, asks) in [(UInt8(2), BeanSync.dayTries), (0, BeanSync.dayTries), (1, 
 }
 
 /// BLE gone before the bean answered 1A/02 after a fast transfer (#262 reviews P3-2, P3-3): the next session sends it
-/// again, `tries` in all, then gives that up, said so, and BLE goes on; none of it a link lost (no start after it).
+/// again, `tries` in all, then gives that up, said so, and BLE goes on; none of it a link lost (one start after it: the
+/// transfer got all, the owner 11-27).
 for drops in [1, BeanSync.tries] {
   let dir = tmp(), chunks = dir.appendingPathComponent("chunks")
   let bean = FakeBean(t0)
@@ -1028,7 +1029,7 @@ for drops in [1, BeanSync.tries] {
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
   check(bean.sent.filter { $0[5] == 0x1A && $0[6] == 0x02 }.count, drops == 1 ? 2 : drops, "1A/02 again after BLE went, \(drops) drops")
   check(bean.logs.contains { $0.0 == "bean_wifi_off" && $0.1.contains("不再发") }, drops == BeanSync.tries)
-  check(bean.starts, starts, "no start for it")
+  check(bean.starts, starts + 1, "one start, once 1A/02 is settled")
   check(bean.transfers.last!, [b, 0, 0], "then BLE as before")
 }
 
@@ -1405,8 +1406,8 @@ do {
 }
 
 /// A stop by hand holds across the fast transfer's reconnect (#324: a new connection starts the bean, the app's own
-/// reconnects do not): the bean stopped by its button, then the transfer reads the closed file over Wi-Fi; the next
-/// session sends no 18/82, also when BLE goes before the 1A/05 answer.
+/// reconnects do not) when the transfer failed (BLE gone before the 1A/05 answer); one that got all ends it (the owner,
+/// 11-27): the bean stopped by its button, the transfer reads the closed file over Wi-Fi, the next session starts it.
 for dropFirst in [false, true] {
   let dir = tmp()
   let bean = FakeBean(t0)
@@ -1428,10 +1429,10 @@ for dropFirst in [false, true] {
   check(sync.wifiNote?["code"] as? String, dropFirst ? "beanWifiNoHotspot" : nil)
   check(bean.starts, 0, "it was recording: no start")
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.starts, 0, "stopped by hand: the reconnect after Wi-Fi starts nothing")
+  check(bean.starts, dropFirst ? 0 : 1, dropFirst ? "failed: the reconnect after Wi-Fi starts nothing" : "got all: started again")
   check(bean.sent.contains { $0[5] == 0x1A && $0[6] == 0x02 }, true)
   _ = error(BeanSync.Gone.self) { try sync.session(since: t0 - 3_600_000, steps: "") }
-  check(bean.starts, 1, "a link lost (Gone): the next connection starts it again")
+  check(bean.starts, 1, "a link lost (Gone): the next connection starts it again, once")
 }
 
 /// A live read (realtime=1) the bean takes back to unit 0 (11-08 16:42: 20704→0 in one transfer), sends all again fast,

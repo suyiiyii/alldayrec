@@ -900,7 +900,11 @@ final class BeanSync {
     let back = wifiEnded > 0 ? io.monotonicNow() - wifiEnded : -1
     log("bean_wifi_back", "快传后蓝牙连回来了：离开热点后 \(back / 1000) s；电量 \(wifiBattery) → \(hw["battery"] ?? "?")%",
         fields: ["ms": back, "battery_before": wifiBattery, "battery": hw["battery"] ?? NSNull(), "recording": recording])
-    if var w = wifiStep, w["step"] as? String == "back" { w["step"] = "done"; wifiStep = w }
+    if var w = wifiStep, w["step"] as? String == "back" {
+      w["step"] = "done"; wifiStep = w
+      // the owner, 11-27: one that got all ends the stop it needed, the bean records again; failed or part: held (tap again)
+      if w["end"] as? String == "all" { startDone = false }
+    }
     do {
       let f = try ask(Bean.wifiOff(), 0x1A02, 5000)
       log("bean_wifi_off", "关了热点（1A/02，状态 \(f.status)，" + (f.payload.isEmpty ? "回复不带数据）" : "回复 \(Bean.hex(f.payload))）"),

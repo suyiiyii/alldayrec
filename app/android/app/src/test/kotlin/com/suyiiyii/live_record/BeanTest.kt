@@ -2083,7 +2083,8 @@ class BeanTest {
     }
 
     /** BLE gone before the bean answered 1A/02 (iOS #262 reviews): the next session sends it again, TRIES in all, then
-     *  gives that up, said so, and BLE goes on; none of it a link lost (no start after it). */
+     *  gives that up, said so, and BLE goes on; none of it a link lost (one start after it: the transfer got all,
+     *  the owner 11-27). */
     @Test fun wifiOffRetried() { for (drops in listOf(1, BeanSync.TRIES)) wifiOff(drops) }
     private fun wifiOff(drops: Int) {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -2102,12 +2103,13 @@ class BeanTest {
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
         assertEquals("1A/02 again after BLE went, $drops drops", if (drops == 1) 2 else drops, bean.sentCmds().count { it == 0x1A02 })
         assertEquals(drops == BeanSync.TRIES, bean.logs.any { it.first == "bean_wifi_off" && "不再发" in it.second })
-        assertEquals("no start for it", starts, bean.starts)
+        assertEquals("one start, once 1A/02 is settled", starts + 1, bean.starts)
         assertEquals("then BLE as before", Triple(b, 0L, false), bean.transfers.last())
     }
 
     /** A stop by hand holds across the fast transfer's reconnect (a new connection starts the bean, the app's own
-     *  reconnects do not), also when BLE goes before the 1A/05 answer. */
+     *  reconnects do not) when the transfer failed (BLE gone before the 1A/05 answer); one that got all ends it (the
+     *  owner, 11-27). */
     @Test fun wifiKeepsAStopByHand() { for (dropFirst in listOf(false, true)) stopByHand(dropFirst) }
     private fun stopByHand(dropFirst: Boolean) {
         val dir = Files.createTempDirectory("bean").toFile()
@@ -2126,10 +2128,11 @@ class BeanTest {
         assertTrue(again.message, (if (dropFirst) "BLE went" else "都取到了") in again.message!!)
         assertEquals("it was recording: no start", 0, bean.starts)
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertEquals("stopped by hand: the reconnect after Wi-Fi starts nothing", 0, bean.starts)
+        assertEquals(if (dropFirst) "failed: the reconnect after Wi-Fi starts nothing" else "got all: started again",
+            if (dropFirst) 0 else 1, bean.starts)
         assertTrue(0x1A02 in bean.sentCmds())
         assertThrows(IOException::class.java) { sync.session(wt0 - 3_600_000, "") }
-        assertEquals("a link lost: the next connection starts it again", 1, bean.starts)
+        assertEquals("a link lost: the next connection starts it again, once", 1, bean.starts)
     }
 
     /** A closed file BLE cannot get whole, refused (code 2), ended short (0) or not on the bean (1): given up after its
